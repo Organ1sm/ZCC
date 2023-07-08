@@ -1,6 +1,6 @@
 const std = @import("std");
-const Token = @import("Token.zig");
-const TokenType = @import("TokenType.zig");
+const Token = @import("Token.zig").Token;
+const TokenType = @import("TokenType.zig").TokenType;
 const Compilation = @import("Compilation.zig");
 const Source = @import("Source.zig");
 const Lexer = @import("Lexer.zig");
@@ -11,6 +11,8 @@ const assert = std.debug.assert;
 const Preprocessor = @This();
 const DefineMap = std.StringHashMap(Marco);
 const TokenList = std.ArrayList(Token);
+
+const Error = Allocator.Error || error{PreProcessorFailed};
 
 const Marco = union(enum) {
     empty,
@@ -33,7 +35,7 @@ tokens: TokenList,
 
 pub fn init(comp: *Compilation) Preprocessor {
     return .{
-        .comp = comp,
+        .compilation = comp,
         .arena = std.heap.ArenaAllocator.init(comp.gpa),
         .defines = DefineMap.init(comp.gpa),
         .tokens = TokenList.init(comp.gpa),
@@ -45,8 +47,6 @@ pub fn deinit(pp: *Preprocessor) void {
     pp.tokens.deinit();
     pp.arena.deinit();
 }
-
-const Error = Allocator.Error || error{PreProcessorFailed};
 
 pub fn preprocess(pp: *Preprocessor, source: Source) !void {
     var lexer = Lexer{
@@ -69,7 +69,7 @@ fn preprocessInternal(pp: *Preprocessor, lexer: *Lexer, cont: enum { untilEof, u
         switch (token.id) {
             .Hash => if (startOfLine) {
                 const directive = lexer.next();
-                switch (directive.id) {
+                try switch (directive.id) {
                     .KeywordError => {
                         const start = lexer.index;
                         while (lexer.index < lexer.buffer.len) : (lexer.index += 1) {
@@ -118,22 +118,24 @@ fn preprocessInternal(pp: *Preprocessor, lexer: *Lexer, cont: enum { untilEof, u
                     .KeywordElse => {
                         if (cont == .untilEof) return pp.fail(lexer.source, "#else without #if", directive.loc);
                         if (cont == .untilEndIf) return pp.fail(lexer.source, "#else after #else", directive.loc);
+                        try pp.expectNewLine(lexer, false);
                         return directive.id;
                     },
 
-                    .KeywordEndif => {
+                    .KeywordEndIf => {
                         if (cont == .untilEof) return pp.fail(lexer.source, "#endif without #if", directive.loc);
+                        try pp.expectNewLine(lexer, true);
                         return directive.id;
                     },
 
                     .NewLine => {},
                     .Eof => {
                         if (cont != .untilEof) return pp.fail(lexer.source, "unterminated conditional directive", directive.loc);
-                        try pp.tokens.append(token);
+                        try pp.tokens.append(directive);
                         return directive.id;
                     },
                     else => return pp.fail(lexer.source, "invalid preprocessing directive", directive.loc),
-                }
+                };
             },
 
             .NewLine => startOfLine = true,
@@ -147,18 +149,19 @@ fn preprocessInternal(pp: *Preprocessor, lexer: *Lexer, cont: enum { untilEof, u
                 startOfLine = false;
                 if (token.id.isMacroIdentifier()) {
                     try pp.expandMacro(lexer, token, &pp.tokens);
-                    token.id = .Identifier;
+                } else {
+                    try pp.tokens.append(token);
                 }
-                try pp.tokens.append(token);
             },
         }
     }
 }
 
-pub fn fail(pp: *Preprocessor, source: Source, msg: []const u8, token: Token) Error {
-    const line_col = source.lineCol(token.loc);
+pub fn fail(pp: *Preprocessor, source: Source, msg: []const u8, loc: Source.SourceLocation) Error {
+    _ = pp;
+    const line_col = source.lineCol(loc);
     std.debug.print("{s}:{d}:{d}: error: {s}\n", .{ source.path, line_col.line, line_col.col, msg });
-    return error.PreProcessingFailed;
+    return error.PreProcessorFailed;
 }
 
 fn expectMacroName(pp: *Preprocessor, lexer: *Lexer) Error![]const u8 {
@@ -173,7 +176,7 @@ fn expectNewLine(pp: *Preprocessor, lexer: *Lexer, allowEof: bool) Error!void {
     const token = lexer.next();
 
     if (token.id == .Eof) {
-        if (!allowEof) return pp.fail(lexer.source, "unterminated conditional directive", lexer.loc);
+        if (!allowEof) return pp.fail(lexer.source, "unterminated conditional directive", token.loc);
         return;
     }
 
@@ -193,52 +196,71 @@ fn expandConditional(pp: *Preprocessor, lexer: *Lexer, firstCond: bool) Error!vo
         if (cond) {
             const directive = try pp.preprocessInternal(lexer, .untilElse);
             switch (directive) {
-                .KeywordEndif => return pp.expectNewLine(lexer, true),
-                .KeywordElse => {},
-                .KeywordElIf => {
-                    cond = try pp.expandBoolExpr(lexer);
-                    continue;
+                .KeywordEndIf => return,
+                .KeywordElse => {
+                    const last = try pp.skip(lexer, .untilEndIf);
+                    assert(last == .KeywordEndIf);
+                    return;
                 },
-
+                .KeywordElIf => cond = try pp.expandBoolExpr(lexer),
                 else => unreachable,
             }
-        }
-
-        const directive = try pp.skip(lexer);
-        switch (directive) {
-            .KeywordEndif => return pp.expectNewLine(lexer, true),
-            .KeywordElse => {
-                _ = try pp.preprocessInternal(lexer, .untilEndIf);
-                return;
-            },
-            .KeywordElIf => {
-                cond = try pp.expandBoolExpr(lexer);
-            },
-            else => unreachable,
+        } else {
+            const directive = try pp.skip(lexer, .untilElse);
+            switch (directive) {
+                .KeywordEndIf => return,
+                .KeywordElse => {
+                    const last = try pp.preprocessInternal(lexer, .untilEndIf);
+                    assert(last == .KeywordEndIf);
+                    return;
+                },
+                .KeywordElIf => cond = try pp.expandBoolExpr(lexer),
+                else => unreachable,
+            }
         }
     }
 }
 
-fn skip(pp: *Preprocessor, lexer: *Lexer) Error!TokenType {
+fn skip(pp: *Preprocessor, lexer: *Lexer, cont: enum { untilElse, untilEndIf }) Error!TokenType {
     var ifsSeen: u32 = 0;
     var lineStart = true;
 
-    while (lexer.index < lexer.buffer.len) : (lexer.index += 1) {
+    while (lexer.index < lexer.buffer.len) {
         if (lineStart) {
             lineStart = false;
 
-            var hash = lexer.next();
-            while (hash.id == .NewLine)
-                hash = lexer.next();
-
+            const hash = lexer.next();
             if (hash.id != .Hash)
                 continue;
 
             const directive = lexer.next();
             switch (directive.id) {
-                .KeywordElse, .KeywordElIf => return directive.id,
-                .KeywordEndif => {
-                    if (ifsSeen == 0) return directive.id;
+                .KeywordElse => {
+                    if (ifsSeen != 0)
+                        continue;
+
+                    if (cont == .untilEndIf)
+                        return pp.fail(lexer.source, "#else after #else", directive.loc);
+
+                    try pp.expectNewLine(lexer, false);
+                    return directive.id;
+                },
+
+                .KeywordElIf => {
+                    if (ifsSeen != 0)
+                        continue;
+
+                    if (cont == .untilEndIf)
+                        return pp.fail(lexer.source, "#elif after #else", directive.loc);
+
+                    return directive.id;
+                },
+
+                .KeywordEndIf => {
+                    if (ifsSeen == 0) {
+                        try pp.expectNewLine(lexer, true);
+                        return directive.id;
+                    }
                     ifsSeen -= 1;
                 },
                 .KeywordIf, .KeywordIfdef, .KeywordIfndef => ifsSeen += 1,
@@ -246,8 +268,10 @@ fn skip(pp: *Preprocessor, lexer: *Lexer) Error!TokenType {
             }
         } else if (lexer.buffer[lexer.index] == '\n') {
             lineStart = true;
+            lexer.index += 1;
         } else {
             lineStart = false;
+            lexer.index += 1;
         }
     } else {
         return pp.fail(lexer.source, "unterminated conditional directive", .{ .start = lexer.index - 1, .end = lexer.index });
@@ -282,7 +306,7 @@ fn define(pp: *Preprocessor, lexer: *Lexer) Error!void {
 
         return pp.fail(lexer.source, "ISO C99 requires whitespace after the macro name", first.loc);
     } else if (first.id == .HashHash) {
-        return pp.fail(lexer.sourc, "'##' cannot appear at start of macro expansion", first.loc);
+        return pp.fail(lexer.source, "'##' cannot appear at start of macro expansion", first.loc);
     }
 }
 
@@ -312,8 +336,58 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: Token) Error!void {
         }
     }
 
-    const paramList = try pp.arena.allocator.dupe([]const u8, params.items);
-    const tokenList = try pp.arena.allocator.dupe(Token, tokens.items);
+    const paramList = try pp.arena.allocator().dupe([]const u8, params.items);
+    const tokenList = try pp.arena.allocator().dupe(Token, tokens.items);
     const nameStr = lexer.source.slice(macroName.loc);
     _ = try pp.defines.put(nameStr, .{ .func = .{ .params = paramList, .tokens = tokenList } });
+}
+
+fn expectTokens(source: []const u8, expected_tokens: []const TokenType) void {
+    var comp = Compilation.init(std.testing.allocator);
+    defer comp.deinit();
+
+    var pp = Preprocessor.init(&comp);
+    defer pp.deinit();
+
+    pp.preprocess(.{
+        .buffer = source,
+        .id = 0,
+        .path = "<test-buf>",
+    }) catch unreachable;
+
+    for (expected_tokens, 0..) |expected_token_id, i| {
+        const token = pp.tokens.items[i];
+        if (!std.meta.eql(token.id, expected_token_id)) {
+            std.debug.panic("expected {s}, found {s}\n", .{ @tagName(expected_token_id), @tagName(token.id) });
+        }
+    }
+    const last_token = pp.tokens.items[expected_tokens.len];
+    std.testing.expect(last_token.id == .Eof) catch std.debug.print("", .{});
+}
+
+test "ifdef" {
+    expectTokens(
+        \\#define FOO
+        \\#ifdef FOO
+        \\long
+        \\#else
+        \\int
+        \\#endif
+    , &.{.KeywordLong});
+
+    expectTokens(
+        \\#define BAR
+        \\#ifdef FOO
+        \\long
+        \\#else
+        \\int
+        \\#endif
+    , &.{.KeywordInt});
+}
+
+test "define undefine" {
+    expectTokens(
+        \\#define FOO 1
+        \\#undef FOO
+    , &.{});
 }

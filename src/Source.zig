@@ -29,7 +29,7 @@ pub fn lineCol(source: Source, loc: SourceLocation) struct { line: u32, col: u32
 
     while (i > 0) {
         i -= 1;
-        if (Source.buffer[i] == '\n') line += 1;
+        if (source.buffer[i] == '\n') line += 1;
     }
 
     return .{ .line = line, .col = col };

@@ -68,7 +68,7 @@ pub const Token = struct {
         .{ "ifdef", .KeywordIfdef },
         .{ "ifndef", .KeywordIfndef },
         .{ "elif", .KeywordElIf },
-        .{ "endif", .KeywordEndif },
+        .{ "endif", .KeywordEndIf },
         .{ "error", .KeywordError },
         .{ "pragma", .KeywordPragma },
     });

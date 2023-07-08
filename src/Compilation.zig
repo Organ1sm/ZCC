@@ -5,21 +5,21 @@ const Allocator = std.mem.Allocator;
 
 const Compilation = @This();
 
-gpa: *Allocator,
+gpa: Allocator,
 sources: std.StringHashMap(Source),
 
-pub fn init(gpa: *Allocator) Compilation {
+pub fn init(gpa: Allocator) Compilation {
     return .{
         .gpa = gpa,
-        .source = std.StringHashMap(Source).init(gpa),
+        .sources = std.StringHashMap(Source).init(gpa),
     };
 }
 
 pub fn deinit(compilation: *Compilation) void {
     var it = compilation.sources.iterator();
     while (it.next()) |source| {
-        compilation.gpa.free(source.value.path);
-        compilation.gpa.free(source.value.buffer);
+        compilation.gpa.free(source.value_ptr.path);
+        compilation.gpa.free(source.value_ptr.buffer);
     }
 
     compilation.sources.deinit();
