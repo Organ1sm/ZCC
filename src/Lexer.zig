@@ -1,11 +1,12 @@
 const std = @import("std");
 const TokenType = @import("TokenType.zig").TokenType;
 const Token = @import("Token.zig").Token;
+const Source = @import("Source.zig");
 const Lexer = @This();
 
 buffer: []const u8 = undefined,
 index: u32 = 0,
-source: u16,
+source: Source,
 
 const State = enum {
     start,
@@ -870,13 +871,14 @@ pub fn next(self: *Lexer) Token {
             .start = start,
             .end = self.index,
         },
+        .source = self.source.id,
     };
 }
 
 fn expectTokens(source: []const u8, expected: []const TokenType) void {
     var lexer = Lexer{
         .buffer = source,
-        .source = 0,
+        .source = undefined,
     };
 
     for (expected) |expectedTokenId| {

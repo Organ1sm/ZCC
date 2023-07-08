@@ -145,8 +145,28 @@ pub const TokenType = enum(u8) {
     // Preprocessor directives
     KeywordInclude,
     KeywordDefine,
+    KeywordUndef,
     KeywordIfdef,
     KeywordIfndef,
+    KeywordElIf,
+    KeywordEndif,
     KeywordError,
     KeywordPragma,
+
+    pub fn isIdentifier(id: TokenType) bool {
+        return switch (id) {
+            .KeywordInclude,
+            .KeywordDefine,
+            .KeywordIfdef,
+            .KeywordUndef,
+            .KeywordIfndef,
+            .KeywordElIf,
+            .KeywordEndif,
+            .KeywordError,
+            .KeywordPragma,
+            .Identifier,
+            => true,
+            else => false,
+        };
+    }
 };

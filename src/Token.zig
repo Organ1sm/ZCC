@@ -1,10 +1,11 @@
 const std = @import("std");
 const TokenType = @import("TokenType.zig").TokenType;
-const SourceLocation = @import("SourceLocation.zig").SourceLocation;
+const Source = @import("Source.zig");
 
 pub const Token = struct {
     id: TokenType,
-    loc: SourceLocation,
+    source : u16,
+    loc: Source.SourceLocation,
 
     pub const keywords = std.ComptimeStringMap(TokenType, .{
         .{ "enum", .KeywordEnum },
@@ -63,8 +64,11 @@ pub const Token = struct {
         // Preprocessor directives
         .{ "include", .KeywordInclude },
         .{ "define", .KeywordDefine },
+        .{ "undef", .KeywordUndef },
         .{ "ifdef", .KeywordIfdef },
         .{ "ifndef", .KeywordIfndef },
+        .{ "elif", .KeywordElIf },
+        .{ "endif", .KeywordEndif },
         .{ "error", .KeywordError },
         .{ "pragma", .KeywordPragma },
     });
