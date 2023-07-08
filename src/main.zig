@@ -1,6 +1,10 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
+const Compilation = @import("Compilation.zig");
+const Source = @import("Source.zig");
+const Preprocessor = @import("Preprocessor.zig");
+
 var GeneralPurposeAllocator = std.heap.GeneralPurposeAllocator(.{}){};
 
 pub fn main() !void {
@@ -40,7 +44,10 @@ fn fail(comptime msg: []const u8, args: anytype) void {
 }
 
 fn handleArgs(gpa: std.mem.Allocator, args: [][]const u8) !void {
-    var sourceFiles = std.ArrayList([]const u8).init(gpa);
+    var comp = Compilation.init(gpa);
+    defer comp.deinit();
+
+    var sourceFiles = std.ArrayList(Source).init(gpa);
     defer sourceFiles.deinit();
 
     const stdOut = std.io.getStdOut().writer();
@@ -55,12 +62,23 @@ fn handleArgs(gpa: std.mem.Allocator, args: [][]const u8) !void {
                 return std.debug.print("unknown command: {s}", .{arg});
             }
         } else {
-            try sourceFiles.append(arg);
+            try sourceFiles.append(try comp.addSource(arg));
         }
     }
 
     if (sourceFiles.items.len == 0) {
         return fail("no input files", .{});
+    }
+
+    for (sourceFiles.items) |source| {
+        var pp = Preprocessor.init(&comp);
+        defer pp.deinit();
+
+        try pp.preprocess(source);
+
+        for (pp.tokens.items) |token| {
+            std.debug.print("id: {s} source: {d} loc: {d}:{d}\n", .{ @tagName(token.id), token.source, token.loc.start, token.loc.end });
+        }
     }
 }
 
