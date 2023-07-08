@@ -153,8 +153,8 @@ pub const TokenType = enum(u8) {
     KeywordError,
     KeywordPragma,
 
-    pub fn isIdentifier(id: TokenType) bool {
-        return switch (id) {
+    pub fn isMacroIdentifier(id: *TokenType) bool {
+        return switch (id.*) {
             .KeywordInclude,
             .KeywordDefine,
             .KeywordIfdef,
@@ -165,7 +165,56 @@ pub const TokenType = enum(u8) {
             .KeywordError,
             .KeywordPragma,
             .Identifier,
-            => true,
+            => {
+                id.* = .Identifier;
+                return true;
+            },
+
+            .KeywordAuto,
+            .KeywordBreak,
+            .KeywordCase,
+            .KeywordChar,
+            .KeywordConst,
+            .KeywordContinue,
+            .KeywordDefault,
+            .KeywordDo,
+            .KeywordDouble,
+            .KeywordElse,
+            .KeywordEnum,
+            .KeywordExtern,
+            .KeywordFloat,
+            .KeywordFor,
+            .KeywordGoto,
+            .KeywordIf,
+            .KeywordInt,
+            .KeywordLong,
+            .KeywordRegister,
+            .KeywordReturn,
+            .KeywordShort,
+            .KeywordSigned,
+            .KeywordSizeof,
+            .KeywordStatic,
+            .KeywordStruct,
+            .KeywordSwitch,
+            .KeywordTypedef,
+            .KeywordUnion,
+            .KeywordUnsigned,
+            .KeywordVoid,
+            .KeywordVolatile,
+            .KeywordWhile,
+            .KeywordBool,
+            .KeywordComplex,
+            .KeywordImaginary,
+            .KeywordInline,
+            .KeywordRestrict,
+            .KeywordAlignas,
+            .KeywordAlignof,
+            .KeywordAtomic,
+            .KeywordGeneric,
+            .KeywordNoreturn,
+            .KeywordStaticAssert,
+            .KeywordThreadLocal,
+            => return true,
             else => false,
         };
     }
