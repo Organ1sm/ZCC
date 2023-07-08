@@ -149,7 +149,7 @@ pub const TokenType = enum(u8) {
     KeywordIfdef,
     KeywordIfndef,
     KeywordElIf,
-    KeywordEndif,
+    KeywordEndIf,
     KeywordError,
     KeywordPragma,
 
@@ -161,7 +161,7 @@ pub const TokenType = enum(u8) {
             .KeywordUndef,
             .KeywordIfndef,
             .KeywordElIf,
-            .KeywordEndif,
+            .KeywordEndIf,
             .KeywordError,
             .KeywordPragma,
             .Identifier,

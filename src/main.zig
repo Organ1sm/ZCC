@@ -84,4 +84,5 @@ fn handleArgs(gpa: std.mem.Allocator, args: [][]const u8) !void {
 
 test "simple test" {
     _ = @import("Lexer.zig");
+    _ = @import("Preprocessor.zig");
 }
