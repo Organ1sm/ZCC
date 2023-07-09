@@ -38,7 +38,7 @@ pub fn addSource(compilation: *Compilation, path: []const u8) !Source {
     errdefer compilation.gpa.free(contents);
 
     const source = Source{
-        .id = @intCast(Source.id),
+        .id = @intCast(compilation.sources.count()),
         .path = dupedPath,
         .buffer = contents,
     };
