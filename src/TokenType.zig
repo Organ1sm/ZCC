@@ -145,6 +145,7 @@ pub const TokenType = enum(u8) {
     // Preprocessor directives
     KeywordInclude,
     KeywordDefine,
+    KeywordDefined,
     KeywordUndef,
     KeywordIfdef,
     KeywordIfndef,
@@ -152,11 +153,13 @@ pub const TokenType = enum(u8) {
     KeywordEndIf,
     KeywordError,
     KeywordPragma,
+    KeywordLine,
 
     pub fn isMacroIdentifier(id: *TokenType) bool {
         return switch (id.*) {
             .KeywordInclude,
             .KeywordDefine,
+            .KeywordDefined,
             .KeywordIfdef,
             .KeywordUndef,
             .KeywordIfndef,
@@ -164,6 +167,7 @@ pub const TokenType = enum(u8) {
             .KeywordEndIf,
             .KeywordError,
             .KeywordPragma,
+            .KeywordLine,
             .Identifier,
             => {
                 id.* = .Identifier;

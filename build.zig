@@ -60,7 +60,6 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-
     const run_unit_tests = b.addRunArtifact(unit_tests);
 
     // Similar to creating the run step earlier, this exposes a `test` step to

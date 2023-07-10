@@ -23,6 +23,8 @@ const Marco = union(enum) {
 
         /// Token constituting the macro body
         tokens: []const Token,
+
+        varArgs: bool,
     },
 
     simple: []const Token,
@@ -126,6 +128,21 @@ fn preprocessInternal(pp: *Preprocessor, lexer: *Lexer, cont: enum { untilEof, u
                         if (cont == .untilEof) return pp.fail(lexer.source, "#endif without #if", directive.loc);
                         try pp.expectNewLine(lexer, true);
                         return directive.id;
+                    },
+
+                    .KeywordLine => {
+                        const digits = lexer.next();
+                        if (digits.id != .IntegerLiteral)
+                            return pp.fail(lexer.source, "#line directive requires a simple digit sequence", digits.loc);
+
+                        const name = lexer.next();
+                        if (name.id == .Eof or name.id == .NewLine)
+                            continue;
+
+                        if (name.id != .StringLiteral)
+                            return pp.fail(lexer.source, "invalid filename for #line directive", name.loc);
+
+                        try pp.expectNewLine(lexer, true);
                     },
 
                     .NewLine => {},
@@ -291,6 +308,9 @@ fn expandMacro(pp: *Preprocessor, lexer: *Lexer, name: Token, tokens: *TokenList
 /// Handle #define directive
 fn define(pp: *Preprocessor, lexer: *Lexer) Error!void {
     var macroName = lexer.next();
+    if (macroName.id == .KeywordDefined)
+        return pp.fail(lexer.source, "'defined' cannot be used as macro name", macroName.loc);
+
     if (!macroName.id.isMacroIdentifier())
         return pp.fail(lexer.source, "macro name must be an identifier", macroName.loc);
 
@@ -325,6 +345,7 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: Token) Error!void {
             return pp.fail(lexer.source, "invaild token in macro parameter list", token.loc);
     }
 
+    var varArgs = false;
     var tokens = TokenList.init(pp.compilation.gpa);
     defer tokens.deinit();
 
@@ -332,6 +353,14 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: Token) Error!void {
         var token = lexer.next();
         switch (token.id) {
             .NewLine, .Eof => break,
+            .Ellipsis => {
+                varArgs = true;
+                const rParen = lexer.next();
+                if (rParen.id != .RParen)
+                    return pp.fail(lexer.source, "missing ')' in macro parameter list", rParen.loc);
+
+                break;
+            },
             else => try tokens.append(token),
         }
     }
@@ -339,10 +368,10 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: Token) Error!void {
     const paramList = try pp.arena.allocator().dupe([]const u8, params.items);
     const tokenList = try pp.arena.allocator().dupe(Token, tokens.items);
     const nameStr = lexer.source.slice(macroName.loc);
-    _ = try pp.defines.put(nameStr, .{ .func = .{ .params = paramList, .tokens = tokenList } });
+    _ = try pp.defines.put(nameStr, .{ .func = .{ .params = paramList, .varArgs = varArgs, .tokens = tokenList } });
 }
 
-fn expectTokens(source: []const u8, expected_tokens: []const TokenType) void {
+fn expectTokens(source: []const u8, expectedTokens: []const TokenType) void {
     var comp = Compilation.init(std.testing.allocator);
     defer comp.deinit();
 
@@ -355,14 +384,14 @@ fn expectTokens(source: []const u8, expected_tokens: []const TokenType) void {
         .path = "<test-buf>",
     }) catch unreachable;
 
-    for (expected_tokens, 0..) |expected_token_id, i| {
+    for (expectedTokens, 0..) |expectedTokenId, i| {
         const token = pp.tokens.items[i];
-        if (!std.meta.eql(token.id, expected_token_id)) {
-            std.debug.panic("expected {s}, found {s}\n", .{ @tagName(expected_token_id), @tagName(token.id) });
+        if (!std.meta.eql(token.id, expectedTokenId)) {
+            std.debug.panic("expected {s}, found {s}\n", .{ @tagName(expectedTokenId), @tagName(token.id) });
         }
     }
-    const last_token = pp.tokens.items[expected_tokens.len];
-    std.testing.expect(last_token.id == .Eof) catch std.debug.print("", .{});
+    const lastToken = pp.tokens.items[expectedTokens.len];
+    std.testing.expect(lastToken.id == .Eof) catch std.debug.print("", .{});
 }
 
 test "ifdef" {

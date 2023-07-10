@@ -4,7 +4,7 @@ const Source = @import("Source.zig");
 
 pub const Token = struct {
     id: TokenType,
-    source : u16,
+    source: u16,
     loc: Source.SourceLocation,
 
     pub const keywords = std.ComptimeStringMap(TokenType, .{
@@ -64,6 +64,7 @@ pub const Token = struct {
         // Preprocessor directives
         .{ "include", .KeywordInclude },
         .{ "define", .KeywordDefine },
+        .{ "defined", .KeywordDefined },
         .{ "undef", .KeywordUndef },
         .{ "ifdef", .KeywordIfdef },
         .{ "ifndef", .KeywordIfndef },
@@ -71,5 +72,6 @@ pub const Token = struct {
         .{ "endif", .KeywordEndIf },
         .{ "error", .KeywordError },
         .{ "pragma", .KeywordPragma },
+        .{ "line", .KeywordLine },
     });
 };
