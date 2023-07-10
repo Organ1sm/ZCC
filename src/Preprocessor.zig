@@ -86,7 +86,7 @@ fn preprocessInternal(pp: *Preprocessor, lexer: *Lexer, cont: enum { untilEof, u
                         var slice = lexer.source.slice(loc);
                         slice = std.mem.trim(u8, slice, "\t\x0B\x0C");
 
-                        return pp.fail(lexer.source, slice, loc);
+                        return pp.fail(lexer.source, slice, directive.loc);
                     },
 
                     .KeywordIf => try pp.expandConditional(lexer, try pp.expandBoolExpr(lexer)),
@@ -175,9 +175,8 @@ fn preprocessInternal(pp: *Preprocessor, lexer: *Lexer, cont: enum { untilEof, u
 }
 
 pub fn fail(pp: *Preprocessor, source: Source, msg: []const u8, loc: Source.SourceLocation) Error {
-    _ = pp;
-    const line_col = source.lineCol(loc);
-    std.debug.print("{s}:{d}:{d}: error: {s}\n", .{ source.path, line_col.line, line_col.col, msg });
+    const lcs = source.lineColString(loc);
+    pp.compilation.printErr(source.path, lcs, msg);
     return error.PreProcessorFailed;
 }
 
