@@ -32,9 +32,13 @@ pub fn main() !void {
 const usage =
     \\Usage {s}: [options] file..
     \\
-    \\Options:
+    \\General Options:
     \\  -h, --help      Print this message.
     \\  -v, --version   Print ZCC version.
+    \\ 
+    \\Feature Options:
+    \\  -fcolor-diagnostics     Enable colors in diagnostics
+    \\  -fno-color-diagnostics  Disable colors in diagnostics
     \\
     \\
 ;
@@ -57,6 +61,10 @@ fn handleArgs(gpa: std.mem.Allocator, args: [][]const u8) !void {
                 return stdOut.print(usage, .{args[0]});
             } else if (std.mem.eql(u8, arg, "-v") or std.mem.eql(u8, arg, "--version")) {
                 return stdOut.writeAll(@import("Info.zig").VersionStr ++ "\n");
+            } else if (std.mem.eql(u8, arg, "-fcolor-diagnostics")) {
+                comp.color = true;
+            } else if (std.mem.eql(u8, arg, "-fno-color-diagnostics")) {
+                comp.color = false;
             } else {
                 try stdOut.print(usage, .{args[0]});
                 return std.debug.print("unknown command: {s}", .{arg});

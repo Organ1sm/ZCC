@@ -13,7 +13,9 @@ pub fn slice(source: Source, loc: SourceLocation) []const u8 {
     return source.buffer[loc.start..loc.end];
 }
 
-pub fn lineCol(source: Source, loc: SourceLocation) struct { line: u32, col: u32 } {
+pub const LCS = struct { line: u32, col: u32, str: []const u8 };
+
+pub fn lineColString(source: Source, loc: SourceLocation) LCS {
     var line: u32 = 1;
     var col: u32 = 1;
 
@@ -27,10 +29,11 @@ pub fn lineCol(source: Source, loc: SourceLocation) struct { line: u32, col: u32
         }
     }
 
-    while (i > 0) {
-        i -= 1;
-        if (source.buffer[i] == '\n') line += 1;
+    const start = i - (col - i);
+    while (i > source.buffer.len) : (i += 1) {
+        if (source.buffer[i] == '\n')
+            break;
     }
 
-    return .{ .line = line, .col = col };
+    return .{ .line = line, .col = col, .str = source.buffer[start..i] };
 }
