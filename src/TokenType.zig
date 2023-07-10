@@ -93,6 +93,9 @@ pub const TokenType = enum(u8) {
     AngleBracketAngleBracketRight,
     AngleBracketAngleBracketRightEqual,
 
+    MacroParam,
+    StringifyParam,
+
     KeywordAuto,
     KeywordBreak,
     KeywordCase,
@@ -155,8 +158,8 @@ pub const TokenType = enum(u8) {
     KeywordPragma,
     KeywordLine,
 
-    pub fn isMacroIdentifier(id: *TokenType) bool {
-        return switch (id.*) {
+    pub fn isMacroIdentifier(id: TokenType) bool {
+        return switch (id) {
             .KeywordInclude,
             .KeywordDefine,
             .KeywordDefined,
@@ -168,12 +171,6 @@ pub const TokenType = enum(u8) {
             .KeywordError,
             .KeywordPragma,
             .KeywordLine,
-            .Identifier,
-            => {
-                id.* = .Identifier;
-                return true;
-            },
-
             .KeywordAuto,
             .KeywordBreak,
             .KeywordCase,
@@ -218,8 +215,27 @@ pub const TokenType = enum(u8) {
             .KeywordNoreturn,
             .KeywordStaticAssert,
             .KeywordThreadLocal,
+            .Identifier,
             => return true,
             else => false,
         };
+    }
+
+    pub fn simplifyMacroKeyword(id: *TokenType) void {
+        switch (id.*) {
+            .KeywordInclude,
+            .KeywordDefine,
+            .KeywordDefined,
+            .KeywordUndef,
+            .KeywordIfdef,
+            .KeywordIfndef,
+            .KeywordElIf,
+            .KeywordEndIf,
+            .KeywordError,
+            .KeywordPragma,
+            .KeywordLine,
+            => id.* = .Identifier,
+            else => {},
+        }
     }
 };
