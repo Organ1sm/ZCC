@@ -165,6 +165,7 @@ fn preprocessInternal(pp: *Preprocessor, lexer: *Lexer, cont: enum { untilEof, u
             else => {
                 startOfLine = false;
                 if (token.id.isMacroIdentifier()) {
+                    token.id.simplifyMacroKeyword();
                     try pp.expandMacro(lexer, token, &pp.tokens);
                 } else {
                     try pp.tokens.append(token);
@@ -181,7 +182,7 @@ pub fn fail(pp: *Preprocessor, source: Source, msg: []const u8, loc: Source.Sour
 }
 
 fn expectMacroName(pp: *Preprocessor, lexer: *Lexer) Error![]const u8 {
-    var macroName = lexer.next();
+    const macroName = lexer.next();
     if (!macroName.id.isMacroIdentifier())
         return pp.fail(lexer.source, "macro name missing", macroName.loc);
 
@@ -294,19 +295,32 @@ fn skip(pp: *Preprocessor, lexer: *Lexer, cont: enum { untilElse, untilEndIf }) 
     }
 }
 
-fn expandMacro(pp: *Preprocessor, lexer: *Lexer, name: Token, tokens: *TokenList) Error!void {
-    if (pp.defines.get(lexer.source.slice(name.loc))) |some| switch (some) {
+fn expandMacro(pp: *Preprocessor, lexer: *Lexer, token: Token, tokens: *TokenList) Error!void {
+    const name = lexer.source.slice(token.loc);
+    return pp.expandExtra(lexer, name, token, tokens);
+}
+
+fn expandExtra(pp: *Preprocessor, lexer: *Lexer, origName: []const u8, arg: Token, tokens: *TokenList) Error!void {
+    if (pp.defines.get(lexer.source.slice(arg.loc))) |some| switch (some) {
         .empty => {},
-        .simple => |macroTokens| try tokens.appendSlice(macroTokens),
-        .func => return pp.fail(lexer.source, "TODO func macro expansion", name.loc),
+        .simple => |macroTokens| {
+            for (macroTokens) |token| {
+                if (token.id.isMacroIdentifier() and !std.mem.eql(u8, lexer.source.slice(token.loc), origName))
+                    try pp.expandExtra(lexer, origName, token, tokens)
+                else
+                    try tokens.append(token);
+            }
+        },
+
+        .func => return pp.fail(lexer.source, "TODO func macro expansion", arg.loc),
     } else {
-        try tokens.append(name);
+        try tokens.append(arg);
     }
 }
 
 /// Handle #define directive
 fn define(pp: *Preprocessor, lexer: *Lexer) Error!void {
-    var macroName = lexer.next();
+    const macroName = lexer.next();
     if (macroName.id == .KeywordDefined)
         return pp.fail(lexer.source, "'defined' cannot be used as macro name", macroName.loc);
 
@@ -314,7 +328,8 @@ fn define(pp: *Preprocessor, lexer: *Lexer) Error!void {
         return pp.fail(lexer.source, "macro name must be an identifier", macroName.loc);
 
     const nameStr = lexer.source.slice(macroName.loc);
-    const first = lexer.next();
+    var first = lexer.next();
+    first.id.simplifyMacroKeyword();
 
     if (first.id == .NewLine or first.id == .Eof) {
         _ = try pp.defines.put(nameStr, .empty);
@@ -327,6 +342,23 @@ fn define(pp: *Preprocessor, lexer: *Lexer) Error!void {
     } else if (first.id == .HashHash) {
         return pp.fail(lexer.source, "'##' cannot appear at start of macro expansion", first.loc);
     }
+
+    var tokens = TokenList.init(pp.compilation.gpa);
+    defer tokens.deinit();
+    try tokens.append(first);
+
+    while (true) {
+        var token = lexer.next();
+        token.id.simplifyMacroKeyword();
+        switch (token.id) {
+            .HashHash => return pp.fail(lexer.source, "TODO token pasting", token.loc),
+            .NewLine, .Eof => break,
+            else => try tokens.append(token),
+        }
+    }
+
+    const list = try pp.arena.allocator().dupe(Token, tokens.items);
+    _ = try pp.defines.put(nameStr, .{ .simple = list });
 }
 
 /// Handle a function like #define directive
@@ -335,7 +367,7 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: Token) Error!void {
     defer params.deinit();
 
     while (true) {
-        var token = lexer.next();
+        const token = lexer.next();
 
         if (token.id == .RParen) break;
         if (token.id.isMacroIdentifier())
@@ -348,8 +380,9 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: Token) Error!void {
     var tokens = TokenList.init(pp.compilation.gpa);
     defer tokens.deinit();
 
-    while (true) {
+    tokenLoop: while (true) {
         var token = lexer.next();
+        token.id.simplifyMacroKeyword();
         switch (token.id) {
             .NewLine, .Eof => break,
             .Ellipsis => {
@@ -360,7 +393,38 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: Token) Error!void {
 
                 break;
             },
-            else => try tokens.append(token),
+            .Hash => {
+                const param = lexer.next();
+                blk: {
+                    if (!param.id.isMacroIdentifier())
+                        break :blk;
+
+                    const s = lexer.source.slice(param.loc);
+                    for (params.items, 0..) |p, i| {
+                        if (std.mem.eql(u8, p, s)) {
+                            token.id = .StringifyParam;
+                            token.loc.end = @intCast(i);
+                            try tokens.append(token);
+
+                            continue :tokenLoop;
+                        }
+                    }
+                }
+
+                return pp.fail(lexer.source, "'#' is not followed by a macro parameter", param.loc);
+            },
+            else => {
+                if (token.id.isMacroIdentifier()) {
+                    const s = lexer.source.slice(token.loc);
+                    for (params.items, 0..) |param, i| {
+                        if (std.mem.eql(u8, param, s)) {
+                            token.id = .MacroParam;
+                            token.loc.end = @intCast(i);
+                            break;
+                        }
+                    }
+                }
+            },
         }
     }
 
@@ -418,4 +482,29 @@ test "define undefine" {
         \\#define FOO 1
         \\#undef FOO
     , &.{});
+}
+
+test "recursive object macro" {
+    expectTokens(
+        \\#define y x
+        \\#define x y
+        \\x
+    , &.{.Identifier});
+    expectTokens(
+        \\#define x x
+        \\x
+    , &.{.Identifier});
+}
+
+test "object macro expansion" {
+    expectTokens(
+        \\#define x a
+        \\x
+        \\#define a 1
+        \\x
+    , &.{ .Identifier, .IntegerLiteral });
+    expectTokens(
+        \\#define x define
+        \\x
+    , &.{.Identifier});
 }
