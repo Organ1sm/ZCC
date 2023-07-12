@@ -67,7 +67,7 @@ pub fn preprocess(pp: *Preprocessor, source: Source) !void {
     try pp.tokens.ensureTotalCapacity(pp.tokens.items.len + estimatedTokenCount);
 
     var ifLevel: u8 = 0;
-    var ifKind = std.mem.zeroes(std.packed_int_array.PackedIntArray(u2, 256));
+    var ifKind = std.packed_int_array.PackedIntArray(u2, 256).init([1]u2{0} ** 256);
     var seenPragmaOnce = false;
     const untilElse = 0;
     const untilEndIf = 1;
