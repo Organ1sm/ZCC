@@ -85,7 +85,7 @@ fn handleArgs(gpa: std.mem.Allocator, args: [][]const u8) !void {
         try pp.preprocess(source);
 
         for (pp.tokens.items) |token| {
-            std.debug.print("id: {s} source: {d} loc: {d}:{d}\n", .{ @tagName(token.id), token.source, token.loc.start, token.loc.end });
+            std.debug.print("id: {s} |{s}|\n", .{ @tagName(token.id), pp.tokSlice(token) });
         }
     }
 }
