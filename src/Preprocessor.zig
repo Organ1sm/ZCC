@@ -35,6 +35,7 @@ arena: std.heap.ArenaAllocator,
 defines: DefineMap,
 tokens: TokenList,
 generated: std.ArrayList(u8),
+pragmaOnce: std.AutoHashMap(Source.ID, void),
 
 pub fn init(comp: *Compilation) Preprocessor {
     return .{
@@ -43,6 +44,7 @@ pub fn init(comp: *Compilation) Preprocessor {
         .defines = DefineMap.init(comp.gpa),
         .tokens = TokenList.init(comp.gpa),
         .generated = std.ArrayList(u8).init(comp.gpa),
+        .pragmaOnce = std.AutoHashMap(Source.ID, void).init(comp.gpa),
     };
 }
 
@@ -51,6 +53,7 @@ pub fn deinit(pp: *Preprocessor) void {
     pp.tokens.deinit();
     pp.arena.deinit();
     pp.generated.deinit();
+    pp.pragmaOnce.deinit();
 }
 
 pub fn preprocess(pp: *Preprocessor, source: Source) !void {
@@ -65,6 +68,7 @@ pub fn preprocess(pp: *Preprocessor, source: Source) !void {
 
     var ifLevel: u8 = 0;
     var ifKind = std.mem.zeroes(std.packed_int_array.PackedIntArray(u2, 256));
+    var seenPragmaOnce = false;
     const untilElse = 0;
     const untilEndIf = 1;
     const untilEndIfSeenElse = 2;
@@ -82,12 +86,7 @@ pub fn preprocess(pp: *Preprocessor, source: Source) !void {
                             if (lexer.buffer[lexer.index] == '\n') break;
                         }
 
-                        const loc: Source.SourceLocation = .{
-                            .start = start,
-                            .end = lexer.index,
-                        };
-
-                        var slice = lexer.source.buffer[loc.start..loc.end];
+                        var slice = lexer.source.buffer[start..lexer.index];
                         slice = std.mem.trim(u8, slice, "\t\x0B\x0C");
 
                         return pp.fail(lexer.source, slice, directive);
@@ -145,7 +144,27 @@ pub fn preprocess(pp: *Preprocessor, source: Source) !void {
 
                     .KeywordDefine => pp.define(&lexer),
                     .KeywordInclude => return pp.fail(lexer.source, "TODO include directive", directive),
-                    .KeywordPragma => return pp.fail(lexer.source, "TODO pragma directive", directive),
+                    .KeywordPragma => {
+                        const start = lexer.index;
+                        while (lexer.index < lexer.buffer.len) : (lexer.index += 1) {
+                            if (lexer.buffer[lexer.index] == '\n')
+                                break;
+                        }
+
+                        var slice = lexer.source.buffer[start..lexer.index];
+                        slice = std.mem.trim(u8, slice, "\t\x0B\x0C");
+
+                        if (std.mem.eql(u8, slice, "once")) {
+                            const prev = try pp.pragmaOnce.fetchPut(lexer.source.id, {});
+                            if (prev != null and !seenPragmaOnce) {
+                                return;
+                            } else {
+                                seenPragmaOnce = true;
+                            }
+                        } else {
+                            // todo:
+                        }
+                    },
                     .KeywordUndef => {
                         const macro_name = try pp.expectMacroName(&lexer);
                         _ = pp.defines.remove(macro_name);
@@ -307,8 +326,19 @@ fn expandBoolExpr(pp: *Preprocessor, lexer: *Lexer) Error!bool {
                 return pp.fail(lexer.source, "expected value in expression", token);
             break;
         } else if (token.id == .KeywordDefined) {
-            const macroName = try pp.expectMacroName(lexer);
-            if (pp.defines.get(macroName)) |_| {
+            const first = lexer.next();
+            const macroToken = if (first.id == .LParen) lexer.next() else first;
+
+            if (!macroToken.id.isMacroIdentifier())
+                return pp.fail(lexer.source, "macro name missing", macroToken);
+
+            if (first.id == .LParen) {
+                const rParen = lexer.next();
+                if (rParen.id != .RParen)
+                    return pp.fail(lexer.source, "expected closing ')'", rParen);
+            }
+
+            if (pp.defines.get(pp.tokSliceSafe(macroToken))) |_| {
                 token.id = .One;
             } else {
                 token.id = .Zero;
