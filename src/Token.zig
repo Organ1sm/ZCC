@@ -4,7 +4,7 @@ const Source = @import("Source.zig");
 
 pub const Token = struct {
     id: TokenType,
-    source: u16,
+    source: Source.ID,
     loc: Source.SourceLocation,
 
     pub const keywords = std.ComptimeStringMap(TokenType, .{

@@ -5,13 +5,28 @@ pub const SourceLocation = struct {
     end: u32,
 };
 
+pub const ID = enum(u16) {
+    _,
+
+    const generatedBit: u16 = 1 << 15;
+    const generatedMask: u16 = generatedBit - 1;
+
+    pub fn index(id: ID) u16 {
+        return @intFromEnum(id) & generatedMask;
+    }
+
+    pub fn isGenerated(id: ID) bool {
+        return (@intFromEnum(id) & generatedBit != 0);
+    }
+
+    pub fn markGenerated(id: *ID) void {
+        id.* = @as(ID, @enumFromInt((@intFromEnum(id.*) | ID.generatedBit)));
+    }
+};
+
 path: []const u8,
 buffer: []const u8,
-id: u16,
-
-pub fn slice(source: Source, loc: SourceLocation) []const u8 {
-    return source.buffer[loc.start..loc.end];
-}
+id: ID,
 
 pub const LCS = struct { line: u32, col: u32, str: []const u8 };
 
