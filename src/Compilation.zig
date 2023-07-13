@@ -29,30 +29,50 @@ pub fn deinit(compilation: *Compilation) void {
 
 pub fn printErrStart(comp: *Compilation, path: []const u8, lcs: Source.LCS) void {
     if (builtin.os.tag == .windows or !comp.color) {
-        std.debug.print("{s}:{d}:{d}: error: ", .{ path, lcs.line, lcs.col });
+        if (lcs.col == 0)
+            std.debug.print("{s}:??:??: error: ", .{path})
+        else
+            std.debug.print("{s}:{d}:{d}: error: ", .{ path, lcs.line, lcs.col });
     } else {
         const RED = "\x1b[31;1m";
         const WHITE = "\x1b[37;1m";
 
-        std.debug.print(WHITE ++ "{s}:{d}:{d}: " ++ RED ++ "error: " ++ WHITE, .{
-            path,
-            lcs.line,
-            lcs.col,
-        });
+        if (lcs.col == 0)
+            std.debug.print("{s}:??:??: " ++ RED ++ "error: " ++ WHITE, .{path})
+        else
+            std.debug.print(WHITE ++ "{s}:{d}:{d}: " ++ RED ++ "error: " ++ WHITE, .{
+                path,
+                lcs.line,
+                lcs.col,
+            });
     }
 }
 
-pub fn PrintErrEnd(comp: *Compilation, lcs: Source.LCS) void {
+pub fn printErrEnd(comp: *Compilation, lcs: Source.LCS) void {
     if (builtin.os.tag == .windows or !comp.color) {
+        if (lcs.col == 0)
+            return;
         std.debug.print("\n{s}\n", .{lcs.str});
         std.debug.print("{s: >[1]}^\n", .{ "", lcs.col - 1 });
     } else {
         const GREEN = "\x1b[32;1m";
         const RESET = "\x1b[0m";
+        if (lcs.col == 0) {
+            std.debug.print("\n" ++ RESET, .{});
+            return;
+        }
 
         std.debug.print("\n" ++ RESET ++ "{s}\n", .{lcs.str});
         std.debug.print("{s: >[1]}" ++ GREEN ++ "^" ++ RESET ++ "\n", .{ "", lcs.col - 1 });
     }
+}
+
+pub fn getSource(comp: *Compilation, id: Source.ID) Source {
+    var src = comp.sources.values()[id.index()];
+    if (id.isGenerated())
+        src.id.markGenerated();
+
+    return src;
 }
 
 pub fn addSource(compilation: *Compilation, path: []const u8) !Source {

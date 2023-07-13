@@ -4,6 +4,7 @@ const TokenType = @import("TokenType.zig").TokenType;
 const Compilation = @import("Compilation.zig");
 const Source = @import("Source.zig");
 const Lexer = @import("Lexer.zig");
+const Parser = @import("Parser.zig");
 
 const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
@@ -12,7 +13,7 @@ const Preprocessor = @This();
 const DefineMap = std.StringHashMap(Marco);
 const TokenList = std.ArrayList(Token);
 
-const Error = Allocator.Error || error{PreProcessorFailed};
+const Error = Allocator.Error || error{PreprocessingFailed};
 
 const Marco = union(enum) {
     empty,
@@ -278,8 +279,8 @@ pub fn tokSlice(pp: *Preprocessor, token: Token) []const u8 {
     if (token.source.isGenerated()) {
         return pp.generated.items[token.loc.start..token.loc.end];
     } else {
-        const sourceBuf = pp.compilation.sources.values()[token.source.index()].buffer;
-        return sourceBuf[token.loc.start..token.loc.end];
+        const source = pp.compilation.getSource(token.source);
+        return source.buffer[token.loc.start..token.loc.end];
     }
 }
 
@@ -289,9 +290,9 @@ fn failFmt(pp: *Preprocessor, source: Source, token: Token, comptime fmt: []cons
 
     pp.compilation.printErrStart(source.path, lcs);
     std.debug.print(fmt, args);
-    pp.compilation.PrintErrEnd(lcs);
+    pp.compilation.printErrEnd(lcs);
 
-    return error.PreProcessorFailed;
+    return error.PreprocessingFailed;
 }
 
 fn fail(pp: *Preprocessor, source: Source, msg: []const u8, token: Token) Error {
@@ -319,14 +320,17 @@ fn expectNewLine(pp: *Preprocessor, lexer: *Lexer, allowEof: bool) Error!void {
 }
 
 fn expandBoolExpr(pp: *Preprocessor, lexer: *Lexer) Error!bool {
-    var tokens = TokenList.init(pp.compilation.gpa);
-    defer tokens.deinit();
+    pp.includeTokenBuffer.items.len = 0;
 
     while (true) {
         var token = lexer.next();
         if (token.id == .NewLine or token.id == .Eof) {
-            if (tokens.items.len == 0)
+            if (pp.includeTokenBuffer.items.len == 0)
                 return pp.fail(lexer.source, "expected value in expression", token);
+
+            token.id = .Eof;
+            try pp.includeTokenBuffer.append(token);
+
             break;
         } else if (token.id == .KeywordDefined) {
             const first = lexer.next();
@@ -346,13 +350,39 @@ fn expandBoolExpr(pp: *Preprocessor, lexer: *Lexer) Error!bool {
             } else {
                 token.id = .Zero;
             }
+        } else if (token.id.isMacroIdentifier()) {
+            try pp.expandMacro(lexer, token, &pp.includeTokenBuffer);
         }
 
         token.id.simplifyMacroKeyword();
-        try tokens.append(token);
+        try pp.includeTokenBuffer.append(token);
+    }
+    for (pp.includeTokenBuffer.items) |tok| {
+        switch (tok.id) {
+            .StringLiteral,
+            .StringLiteralUTF_8,
+            .StringLiteralUTF_16,
+            .StringLiteralUTF_32,
+            .StringLiteralWide,
+            => return pp.fail(lexer.source, "string literal in preprocessor expression", tok),
+
+            .FloatLiteral,
+            .FloatLiteral_F,
+            .FloatLiteral_L,
+            => return pp.fail(lexer.source, "floating point literal in preprocessor expression", tok),
+            else => {},
+        }
     }
 
-    return pp.fail(lexer.source, "TODO macro bool condition", tokens.items[0]);
+    var parser = Parser{
+        .pp = pp,
+        .tokens = pp.includeTokenBuffer.items,
+    };
+    const res = parser.constExpr() catch |err| switch (err) {
+        error.OutOfMemory => unreachable, // TODO verify this
+        error.ParsingFailed => return error.PreprocessingFailed,
+    };
+    return res.getBool();
 }
 
 fn skip(pp: *Preprocessor, lexer: *Lexer, cont: enum { untilElse, untilEndIf, untilEndIfSeenElse }) Error!void {
@@ -756,4 +786,14 @@ test "object macro token pasting" {
         \\#define a 1
         \\x
     , "a1 a1");
+}
+
+test "#if constant expression" {
+    expectStr(
+        \\#if defined FOO
+        \\void
+        \\#elif !defined(BAR)
+        \\long
+        \\#endif
+    , "long");
 }
