@@ -16,8 +16,16 @@ const TokenList = std.ArrayList(Token);
 const Error = Allocator.Error || error{PreprocessingFailed};
 
 const Marco = union(enum) {
+    /// #define Foo
     empty,
 
+    /// #define Foo Foo
+    self,
+
+    /// #define Add a + b
+    simple: []const Token,
+
+    /// #define Add(a, b) ((a)+(b))
     func: struct {
         /// Parameters of the function type macro
         params: []const []const u8,
@@ -27,8 +35,6 @@ const Marco = union(enum) {
 
         varArgs: bool,
     },
-
-    simple: []const Token,
 };
 
 compilation: *Compilation,
@@ -37,7 +43,7 @@ defines: DefineMap,
 tokens: TokenList,
 generated: std.ArrayList(u8),
 pragmaOnce: std.AutoHashMap(Source.ID, void),
-includeTokenBuffer: TokenList,
+tokenBuffer: TokenList,
 
 pub fn init(comp: *Compilation) Preprocessor {
     return .{
@@ -47,7 +53,7 @@ pub fn init(comp: *Compilation) Preprocessor {
         .tokens = TokenList.init(comp.gpa),
         .generated = std.ArrayList(u8).init(comp.gpa),
         .pragmaOnce = std.AutoHashMap(Source.ID, void).init(comp.gpa),
-        .includeTokenBuffer = TokenList.init(comp.gpa),
+        .tokenBuffer = TokenList.init(comp.gpa),
     };
 }
 
@@ -57,13 +63,13 @@ pub fn deinit(pp: *Preprocessor) void {
     pp.arena.deinit();
     pp.generated.deinit();
     pp.pragmaOnce.deinit();
-    pp.includeTokenBuffer.deinit();
+    pp.tokenBuffer.deinit();
 }
 
 pub fn preprocess(pp: *Preprocessor, source: Source) !void {
     var lexer = Lexer{
         .buffer = source.buffer,
-        .source = source,
+        .source = source.id,
     };
 
     // Estimate how many new tokens this source will contain.
@@ -90,19 +96,19 @@ pub fn preprocess(pp: *Preprocessor, source: Source) !void {
                             if (lexer.buffer[lexer.index] == '\n') break;
                         }
 
-                        var slice = lexer.source.buffer[start..lexer.index];
+                        var slice = lexer.buffer[start..lexer.index];
                         slice = std.mem.trim(u8, slice, "\t\x0B\x0C");
 
-                        return pp.fail(lexer.source, slice, directive);
+                        return pp.fail(slice, directive);
                     },
 
                     .KeywordIf => {
                         const ov = @addWithOverflow(ifLevel, 1);
                         if (ov[1] != 0)
-                            return pp.fail(lexer.source, "too many #if nestings", directive);
+                            return pp.fail("too many #if nestings", directive);
 
                         ifLevel = ov[0];
-                        if (try pp.expandBoolExpr(&lexer)) {
+                        if (try pp.expr(&lexer)) {
                             ifKind.set(ifLevel, untilEndIf);
                         } else {
                             ifKind.set(ifLevel, untilElse);
@@ -113,7 +119,7 @@ pub fn preprocess(pp: *Preprocessor, source: Source) !void {
                     .KeywordIfdef => {
                         const ov = @addWithOverflow(ifLevel, 1);
                         if (ov[1] != 0)
-                            return pp.fail(lexer.source, "too many #ifdef nestings", directive);
+                            return pp.fail("too many #ifdef nestings", directive);
 
                         ifLevel = ov[0];
 
@@ -131,7 +137,7 @@ pub fn preprocess(pp: *Preprocessor, source: Source) !void {
                     .KeywordIfndef => {
                         const ov = @addWithOverflow(ifLevel, 1);
                         if (ov[1] != 0)
-                            return pp.fail(lexer.source, "too many #ifndef nestings", directive);
+                            return pp.fail("too many #ifndef nestings", directive);
 
                         ifLevel = ov[0];
 
@@ -155,11 +161,11 @@ pub fn preprocess(pp: *Preprocessor, source: Source) !void {
                                 break;
                         }
 
-                        var slice = lexer.source.buffer[start..lexer.index];
+                        var slice = lexer.buffer[start..lexer.index];
                         slice = std.mem.trim(u8, slice, "\t\x0B\x0C");
 
                         if (std.mem.eql(u8, slice, "once")) {
-                            const prev = try pp.pragmaOnce.fetchPut(lexer.source.id, {});
+                            const prev = try pp.pragmaOnce.fetchPut(lexer.source, {});
                             if (prev != null and !seenPragmaOnce) {
                                 return;
                             } else {
@@ -177,38 +183,38 @@ pub fn preprocess(pp: *Preprocessor, source: Source) !void {
 
                     .KeywordElIf => {
                         if (ifLevel == 0)
-                            return pp.fail(lexer.source, "#elif without #if", directive);
+                            return pp.fail("#elif without #if", directive);
 
                         switch (ifKind.get(ifLevel)) {
-                            untilElse => if (try pp.expandBoolExpr(&lexer)) {
+                            untilElse => if (try pp.expr(&lexer)) {
                                 ifKind.set(ifLevel, untilEndIf);
                             } else {
                                 try pp.skip(&lexer, .untilElse);
                             },
 
                             untilEndIf => try pp.skip(&lexer, .untilEndIf),
-                            untilEndIfSeenElse => return pp.fail(lexer.source, "#elif after #else", directive),
+                            untilEndIfSeenElse => return pp.fail("#elif after #else", directive),
                             else => unreachable,
                         }
                     },
 
                     .KeywordElse => {
                         if (ifLevel == 0)
-                            return pp.fail(lexer.source, "#else without #if", directive);
+                            return pp.fail("#else without #if", directive);
 
                         try pp.expectNewLine(&lexer, false);
 
                         switch (ifKind.get(ifLevel)) {
                             untilElse => ifKind.set(ifLevel, untilEndIfSeenElse),
                             untilEndIf => try pp.skip(&lexer, .untilEndIfSeenElse),
-                            untilEndIfSeenElse => return pp.fail(lexer.source, "#else after #else", directive),
+                            untilEndIfSeenElse => return pp.fail("#else after #else", directive),
                             else => unreachable,
                         }
                     },
 
                     .KeywordEndIf => {
                         if (ifLevel == 0)
-                            return pp.fail(lexer.source, "#else without #if", directive);
+                            return pp.fail("#else without #if", directive);
 
                         try pp.expectNewLine(&lexer, true);
                         ifLevel -= 1;
@@ -217,14 +223,14 @@ pub fn preprocess(pp: *Preprocessor, source: Source) !void {
                     .KeywordLine => {
                         const digits = lexer.next();
                         if (digits.id != .IntegerLiteral)
-                            return pp.fail(lexer.source, "#line directive requires a simple digit sequence", digits);
+                            return pp.fail("#line directive requires a simple digit sequence", digits);
 
                         const name = lexer.next();
                         if (name.id == .Eof or name.id == .NewLine)
                             continue;
 
                         if (name.id != .StringLiteral)
-                            return pp.fail(lexer.source, "invalid filename for #line directive", name);
+                            return pp.fail("invalid filename for #line directive", name);
 
                         try pp.expectNewLine(&lexer, true);
                     },
@@ -232,19 +238,19 @@ pub fn preprocess(pp: *Preprocessor, source: Source) !void {
                     .NewLine => {},
                     .Eof => {
                         if (ifLevel != 0)
-                            return pp.fail(lexer.source, "unterminated conditional directive", directive);
+                            return pp.fail("unterminated conditional directive", directive);
 
                         try pp.tokens.append(directive);
                         return;
                     },
-                    else => return pp.fail(lexer.source, "invalid preprocessing directive", directive),
+                    else => return pp.fail("invalid preprocessing directive", directive),
                 }
             },
 
             .NewLine => startOfLine = true,
             .Eof => {
                 if (ifLevel != 0)
-                    return pp.fail(lexer.source, "unterminated conditional directive", token);
+                    return pp.fail("unterminated conditional directive", token);
 
                 try pp.tokens.append(token);
                 return;
@@ -269,7 +275,6 @@ fn tokSliceSafe(pp: *Preprocessor, token: Token) []const u8 {
     assert(!token.source.isGenerated());
 
     const sourceBuf = pp.compilation.sources.values()[token.source.index()].buffer;
-
     return sourceBuf[token.loc.start..token.loc.end];
 }
 
@@ -284,8 +289,8 @@ pub fn tokSlice(pp: *Preprocessor, token: Token) []const u8 {
     }
 }
 
-fn failFmt(pp: *Preprocessor, source: Source, token: Token, comptime fmt: []const u8, args: anytype) Error {
-    assert(source.id == token.source);
+fn failFmt(pp: *Preprocessor, token: Token, comptime fmt: []const u8, args: anytype) Error {
+    const source = pp.compilation.getSource(token.source);
     const lcs = source.lineColString(token.loc);
 
     pp.compilation.printErrStart(source.path, lcs);
@@ -295,14 +300,14 @@ fn failFmt(pp: *Preprocessor, source: Source, token: Token, comptime fmt: []cons
     return error.PreprocessingFailed;
 }
 
-fn fail(pp: *Preprocessor, source: Source, msg: []const u8, token: Token) Error {
-    return pp.failFmt(source, token, "{s}", .{msg});
+fn fail(pp: *Preprocessor, msg: []const u8, token: Token) Error {
+    return pp.failFmt(token, "{s}", .{msg});
 }
 
 fn expectMacroName(pp: *Preprocessor, lexer: *Lexer) Error![]const u8 {
     const macroName = lexer.next();
     if (!macroName.id.isMacroIdentifier())
-        return pp.fail(lexer.source, "macro name missing", macroName);
+        return pp.fail("macro name missing", macroName);
 
     return pp.tokSliceSafe(macroName);
 }
@@ -311,25 +316,27 @@ fn expectNewLine(pp: *Preprocessor, lexer: *Lexer, allowEof: bool) Error!void {
     const token = lexer.next();
 
     if (token.id == .Eof) {
-        if (!allowEof) return pp.fail(lexer.source, "unterminated conditional directive", token);
+        if (!allowEof)
+            return pp.fail("unterminated conditional directive", token);
+
         return;
     }
 
     if (token.id != .NewLine)
-        return pp.fail(lexer.source, "extra tokens at end of macro directive", token);
+        return pp.fail("extra tokens at end of macro directive", token);
 }
 
-fn expandBoolExpr(pp: *Preprocessor, lexer: *Lexer) Error!bool {
-    pp.includeTokenBuffer.items.len = 0;
+fn expr(pp: *Preprocessor, lexer: *Lexer) Error!bool {
+    pp.tokenBuffer.items.len = 0;
 
     while (true) {
         var token = lexer.next();
         if (token.id == .NewLine or token.id == .Eof) {
-            if (pp.includeTokenBuffer.items.len == 0)
-                return pp.fail(lexer.source, "expected value in expression", token);
+            if (pp.tokenBuffer.items.len == 0)
+                return pp.fail("expected value in expression", token);
 
             token.id = .Eof;
-            try pp.includeTokenBuffer.append(token);
+            try pp.tokenBuffer.append(token);
 
             break;
         } else if (token.id == .KeywordDefined) {
@@ -337,12 +344,12 @@ fn expandBoolExpr(pp: *Preprocessor, lexer: *Lexer) Error!bool {
             const macroToken = if (first.id == .LParen) lexer.next() else first;
 
             if (!macroToken.id.isMacroIdentifier())
-                return pp.fail(lexer.source, "macro name missing", macroToken);
+                return pp.fail("macro name missing", macroToken);
 
             if (first.id == .LParen) {
                 const rParen = lexer.next();
                 if (rParen.id != .RParen)
-                    return pp.fail(lexer.source, "expected closing ')'", rParen);
+                    return pp.fail("expected closing ')'", rParen);
             }
 
             if (pp.defines.get(pp.tokSliceSafe(macroToken))) |_| {
@@ -351,37 +358,42 @@ fn expandBoolExpr(pp: *Preprocessor, lexer: *Lexer) Error!bool {
                 token.id = .Zero;
             }
         } else if (token.id.isMacroIdentifier()) {
-            try pp.expandMacro(lexer, token, &pp.includeTokenBuffer);
+            try pp.expandMacro(lexer, token, &pp.tokenBuffer);
+            continue;
         }
 
-        token.id.simplifyMacroKeyword();
-        try pp.includeTokenBuffer.append(token);
+        try pp.tokenBuffer.append(token);
     }
-    for (pp.includeTokenBuffer.items) |tok| {
+
+    for (pp.tokenBuffer.items) |*tok| {
         switch (tok.id) {
             .StringLiteral,
             .StringLiteralUTF_8,
             .StringLiteralUTF_16,
             .StringLiteralUTF_32,
             .StringLiteralWide,
-            => return pp.fail(lexer.source, "string literal in preprocessor expression", tok),
+            => return pp.fail("string literal in preprocessor expression", tok.*),
 
             .FloatLiteral,
             .FloatLiteral_F,
             .FloatLiteral_L,
-            => return pp.fail(lexer.source, "floating point literal in preprocessor expression", tok),
-            else => {},
+            => return pp.fail("floating point literal in preprocessor expression", tok.*),
+            else => if (tok.id.isMacroIdentifier()) {
+                tok.id = .Zero;
+            },
         }
     }
 
     var parser = Parser{
         .pp = pp,
-        .tokens = pp.includeTokenBuffer.items,
+        .tokens = pp.tokenBuffer.items,
     };
+
     const res = parser.constExpr() catch |err| switch (err) {
         error.OutOfMemory => unreachable, // TODO verify this
         error.ParsingFailed => return error.PreprocessingFailed,
     };
+
     return res.getBool();
 }
 
@@ -395,9 +407,9 @@ fn skip(pp: *Preprocessor, lexer: *Lexer, cont: enum { untilElse, untilEndIf, un
             const hash = lexer.next();
 
             if (hash.id == .NewLine) continue;
+            lineStart = false;
             if (hash.id != .Hash) continue;
 
-            lineStart = false;
             const directive = lexer.next();
             switch (directive.id) {
                 .KeywordElse => {
@@ -405,7 +417,7 @@ fn skip(pp: *Preprocessor, lexer: *Lexer, cont: enum { untilElse, untilEndIf, un
                         continue;
 
                     if (cont == .untilEndIfSeenElse)
-                        return pp.fail(lexer.source, "#else after #else", directive);
+                        return pp.fail("#else after #else", directive);
 
                     lexer.index = dirStart;
                     return;
@@ -416,7 +428,7 @@ fn skip(pp: *Preprocessor, lexer: *Lexer, cont: enum { untilElse, untilEndIf, un
                         continue;
 
                     if (cont == .untilEndIfSeenElse)
-                        return pp.fail(lexer.source, "#elif after #else", directive);
+                        return pp.fail("#elif after #else", directive);
 
                     lexer.index = dirStart;
                     return;
@@ -441,7 +453,7 @@ fn skip(pp: *Preprocessor, lexer: *Lexer, cont: enum { untilElse, untilEndIf, un
         }
     } else {
         const eof = lexer.next();
-        return pp.fail(lexer.source, "unterminated conditional directive", eof);
+        return pp.fail("unterminated conditional directive", eof);
     }
 }
 
@@ -453,6 +465,7 @@ fn expandMacro(pp: *Preprocessor, lexer: *Lexer, token: Token, tokens: *TokenLis
 fn expandExtra(pp: *Preprocessor, lexer: *Lexer, origName: []const u8, arg: Token, tokens: *TokenList) Error!void {
     if (pp.defines.get(pp.tokSlice(arg))) |some| switch (some) {
         .empty => {},
+        .self => try tokens.append(arg),
         .simple => |macroTokens| {
             for (macroTokens) |token| {
                 if (token.id.isMacroIdentifier() and !std.mem.eql(u8, pp.tokSlice(token), origName))
@@ -462,7 +475,7 @@ fn expandExtra(pp: *Preprocessor, lexer: *Lexer, origName: []const u8, arg: Toke
             }
         },
 
-        .func => return pp.fail(lexer.source, "TODO func macro expansion", arg),
+        .func => return pp.fail("TODO func macro expansion", arg),
     } else {
         try tokens.append(arg);
     }
@@ -472,10 +485,10 @@ fn expandExtra(pp: *Preprocessor, lexer: *Lexer, origName: []const u8, arg: Toke
 fn define(pp: *Preprocessor, lexer: *Lexer) Error!void {
     const macroName = lexer.next();
     if (macroName.id == .KeywordDefined)
-        return pp.fail(lexer.source, "'defined' cannot be used as macro name", macroName);
+        return pp.fail("'defined' cannot be used as macro name", macroName);
 
     if (!macroName.id.isMacroIdentifier())
-        return pp.fail(lexer.source, "macro name must be an identifier", macroName);
+        return pp.fail("macro name must be an identifier", macroName);
 
     const nameStr = pp.tokSliceSafe(macroName);
     var first = lexer.next();
@@ -488,24 +501,36 @@ fn define(pp: *Preprocessor, lexer: *Lexer) Error!void {
         if (first.id == .LParen)
             return pp.defineFunc(lexer, macroName);
 
-        return pp.fail(lexer.source, "ISO C99 requires whitespace after the macro name", first);
+        return pp.fail("ISO C99 requires whitespace after the macro name", first);
     } else if (first.id == .HashHash) {
-        return pp.fail(lexer.source, "'##' cannot appear at start of macro expansion", first);
+        return pp.fail("'##' cannot appear at start of macro expansion", first);
     }
 
-    var tokens = TokenList.init(pp.compilation.gpa);
-    defer tokens.deinit();
-    try tokens.append(first);
+    {
+        const start = lexer.index;
+        const second = lexer.next();
+        if (second.id == .NewLine or second.id == .Eof) {
+            if (std.mem.eql(u8, pp.tokSlice(first), nameStr)) {
+                _ = try pp.defines.put(nameStr, .self);
+                return;
+            }
+        }
+
+        lexer.index = start;
+    }
+
+    pp.tokenBuffer.items.len = 0;
+    try pp.tokenBuffer.append(first);
 
     while (true) {
         var token = lexer.next();
         token.id.simplifyMacroKeyword();
         switch (token.id) {
             .HashHash => {
-                const prev = tokens.pop();
+                const prev = pp.tokenBuffer.pop();
                 const next = lexer.next();
                 if (next.id == .NewLine or next.id == .Eof)
-                    return pp.fail(lexer.source, "'##' cannot appear at end of macro expansion", next);
+                    return pp.fail("'##' cannot appear at end of macro expansion", next);
 
                 const nextSlice = pp.tokSliceSafe(next);
 
@@ -517,22 +542,22 @@ fn define(pp: *Preprocessor, lexer: *Lexer) Error!void {
                 pp.generated.appendSliceAssumeCapacity(nextSlice);
 
                 var tempSource = lexer.source;
-                tempSource.id.markGenerated();
+                tempSource.markGenerated();
                 var tempLexer = Lexer{ .buffer = pp.generated.items, .index = @as(u32, @intCast(start)), .source = tempSource };
                 const pastedToken = tempLexer.next();
 
                 if (tempLexer.next().id != .Eof) {
-                    return pp.failFmt(lexer.source, token, "pasting formed '{s}, an invalid preprocessing token'", .{pp.generated.items[start..end]});
+                    return pp.failFmt(token, "pasting formed '{s}, an invalid preprocessing token'", .{pp.generated.items[start..end]});
                 }
 
-                try tokens.append(pastedToken);
+                try pp.tokenBuffer.append(pastedToken);
             },
             .NewLine, .Eof => break,
-            else => try tokens.append(token),
+            else => try pp.tokenBuffer.append(token),
         }
     }
 
-    const list = try pp.arena.allocator().dupe(Token, tokens.items);
+    const list = try pp.arena.allocator().dupe(Token, pp.tokenBuffer.items);
     _ = try pp.defines.put(nameStr, .{ .simple = list });
 }
 
@@ -541,12 +566,22 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: Token) Error!void {
     var params = std.ArrayList([]const u8).init(pp.compilation.gpa);
     defer params.deinit();
 
+    var varArgs = false;
     while (true) {
         const token = lexer.next();
 
         if (token.id == .RParen) break;
+        if (token.id == .Ellipsis) {
+            varArgs = true;
+            const rParen = lexer.next();
+            if (rParen.id != .RParen)
+                return pp.fail("missing ')' in macro parameter list", rParen);
+
+            break;
+        }
+
         if (!token.id.isMacroIdentifier())
-            return pp.fail(lexer.source, "invaild token in macro parameter list", token);
+            return pp.fail("invaild token in macro parameter list", token);
 
         try params.append(pp.tokSliceSafe(token));
 
@@ -554,27 +589,15 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: Token) Error!void {
         if (next.id == .RParen)
             break;
 
-        if (next.id != .Comma)
-            return pp.fail(lexer.source, "invaild token in macro parameter list", next);
+        if (next.id != .Comma) // TODO should not allow name (a,)
+            return pp.fail("invaild token in macro parameter list", next);
     }
 
-    var varArgs = false;
-    var tokens = TokenList.init(pp.compilation.gpa);
-    defer tokens.deinit();
-
+    pp.tokenBuffer.items.len = 0;
     tokenLoop: while (true) {
         var token = lexer.next();
-        token.id.simplifyMacroKeyword();
         switch (token.id) {
             .NewLine, .Eof => break,
-            .Ellipsis => {
-                varArgs = true;
-                const rParen = lexer.next();
-                if (rParen.id != .RParen)
-                    return pp.fail(lexer.source, "missing ')' in macro parameter list", rParen);
-
-                break;
-            },
             .Hash => {
                 const param = lexer.next();
                 blk: {
@@ -586,17 +609,28 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: Token) Error!void {
                         if (std.mem.eql(u8, p, s)) {
                             token.id = .StringifyParam;
                             token.loc.end = @intCast(i);
-                            try tokens.append(token);
+                            try pp.tokenBuffer.append(token);
 
                             continue :tokenLoop;
                         }
                     }
                 }
 
-                return pp.fail(lexer.source, "'#' is not followed by a macro parameter", param);
+                return pp.fail("'#' is not followed by a macro parameter", param);
+            },
+            .HashHash => {
+                const start = lexer.index;
+                const next = lexer.next();
+
+                if (next.id == .NewLine or next.id != .Eof)
+                    return pp.fail("## cannot appear at start of macro expansion", token);
+
+                lexer.index = start;
+                try pp.tokenBuffer.append(token);
             },
             else => {
                 if (token.id.isMacroIdentifier()) {
+                    token.id.simplifyMacroKeyword();
                     const s = pp.tokSliceSafe(token);
                     for (params.items, 0..) |param, i| {
                         if (std.mem.eql(u8, param, s)) {
@@ -606,24 +640,22 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: Token) Error!void {
                         }
                     }
                 }
+
+                try pp.tokenBuffer.append(token);
             },
         }
     }
 
     const paramList = try pp.arena.allocator().dupe([]const u8, params.items);
-    const tokenList = try pp.arena.allocator().dupe(Token, tokens.items);
+    const tokenList = try pp.arena.allocator().dupe(Token, pp.tokenBuffer.items);
     const nameStr = pp.tokSliceSafe(macroName);
     _ = try pp.defines.put(nameStr, .{ .func = .{ .params = paramList, .varArgs = varArgs, .tokens = tokenList } });
 }
 
-fn include(
-    pp: *Preprocessor,
-    lexer: *Lexer,
-) Error!void {
-    pp.includeTokenBuffer.items.len = 0;
+fn include(pp: *Preprocessor, lexer: *Lexer) Error!void {
+    pp.tokenBuffer.items.len = 0;
 
     var first = lexer.next();
-
     if (first.id == .AngleBracketLeft) to_end: {
         while (lexer.index < lexer.buffer.len) : (lexer.index += 1) {
             switch (lexer.buffer[lexer.index]) {
@@ -638,29 +670,29 @@ fn include(
             }
         }
 
-        return pp.fail(lexer.source, "expected '>'", first);
+        return pp.fail("expected '>'", first);
     }
 
-    try pp.expandMacro(lexer, first, &pp.includeTokenBuffer);
+    try pp.expandMacro(lexer, first, &pp.tokenBuffer);
 
-    const fileNameTK = if (pp.includeTokenBuffer.items.len == 0) first else pp.includeTokenBuffer.items[0];
+    const fileNameTK = if (pp.tokenBuffer.items.len == 0) first else pp.tokenBuffer.items[0];
     switch (fileNameTK.id) {
         .StringLiteral, .MacroString => {},
-        else => return pp.fail(lexer.source, "expected \"FILENAME\" or <FILENAME>", first),
+        else => return pp.fail("expected \"FILENAME\" or <FILENAME>", first),
     }
 
     const newLine = lexer.next();
-    if ((newLine.id != .NewLine and newLine.id != .Eof) or pp.includeTokenBuffer.items.len > 1)
-        return pp.fail(lexer.source, "extra tokens at end of macro directive", first);
+    if ((newLine.id != .NewLine and newLine.id != .Eof) or pp.tokenBuffer.items.len > 1)
+        return pp.fail("extra tokens at end of macro directive", first);
 
     const tokenSlice = pp.tokSlice(fileNameTK);
     if (tokenSlice.len < 3)
-        return pp.fail(lexer.source, "empty  filename", first);
+        return pp.fail("empty  filename", first);
 
     const filename = tokenSlice[1 .. tokenSlice.len - 1];
     const newSource = pp.compilation.findInclude(filename, fileNameTK.id == .StringLiteral) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
-        else => return pp.failFmt(lexer.source, first, "'{s}' not found", .{filename}),
+        else => return pp.failFmt(first, "'{s}' not found", .{filename}),
     };
 
     return pp.preprocess(newSource);

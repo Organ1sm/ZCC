@@ -366,13 +366,7 @@ fn primaryExpr(p: *Parser) Error!Result {
         return e;
     }
     switch (p.tokens[p.index].id) {
-        .Identifier => {
-            if (p.wantConst) {
-                // TODO Clang seems to do this??
-                return Result{ .bool = false };
-            }
-            return p.fail("TODO ast");
-        },
+        .Identifier => return p.fail("TODO ast"),
 
         .StringLiteral,
         .StringLiteralUTF_8,
