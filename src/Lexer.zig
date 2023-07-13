@@ -6,7 +6,7 @@ const Lexer = @This();
 
 buffer: []const u8 = undefined,
 index: u32 = 0,
-source: Source,
+source: Source.ID,
 
 const State = enum {
     start,
@@ -871,7 +871,7 @@ pub fn next(self: *Lexer) Token {
             .start = start,
             .end = self.index,
         },
-        .source = self.source.id,
+        .source = self.source,
     };
 }
 
