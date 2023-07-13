@@ -31,6 +31,9 @@ id: ID,
 pub const LCS = struct { line: u32, col: u32, str: []const u8 };
 
 pub fn lineColString(source: Source, loc: SourceLocation) LCS {
+    if (source.id.isGenerated())
+        return .{ .line = 0, .col = 0, .str = "" };
+
     var line: u32 = 1;
     var col: u32 = 1;
 
