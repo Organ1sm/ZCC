@@ -36,6 +36,7 @@ defines: DefineMap,
 tokens: TokenList,
 generated: std.ArrayList(u8),
 pragmaOnce: std.AutoHashMap(Source.ID, void),
+includeTokenBuffer: TokenList,
 
 pub fn init(comp: *Compilation) Preprocessor {
     return .{
@@ -45,6 +46,7 @@ pub fn init(comp: *Compilation) Preprocessor {
         .tokens = TokenList.init(comp.gpa),
         .generated = std.ArrayList(u8).init(comp.gpa),
         .pragmaOnce = std.AutoHashMap(Source.ID, void).init(comp.gpa),
+        .includeTokenBuffer = TokenList.init(comp.gpa),
     };
 }
 
@@ -54,6 +56,7 @@ pub fn deinit(pp: *Preprocessor) void {
     pp.arena.deinit();
     pp.generated.deinit();
     pp.pragmaOnce.deinit();
+    pp.includeTokenBuffer.deinit();
 }
 
 pub fn preprocess(pp: *Preprocessor, source: Source) !void {
@@ -79,7 +82,7 @@ pub fn preprocess(pp: *Preprocessor, source: Source) !void {
         switch (token.id) {
             .Hash => if (startOfLine) {
                 const directive = lexer.next();
-                try switch (directive.id) {
+                switch (directive.id) {
                     .KeywordError => {
                         const start = lexer.index;
                         while (lexer.index < lexer.buffer.len) : (lexer.index += 1) {
@@ -142,8 +145,8 @@ pub fn preprocess(pp: *Preprocessor, source: Source) !void {
                         }
                     },
 
-                    .KeywordDefine => pp.define(&lexer),
-                    .KeywordInclude => return pp.fail(lexer.source, "TODO include directive", directive),
+                    .KeywordDefine => try pp.define(&lexer),
+                    .KeywordInclude => try pp.include(&lexer),
                     .KeywordPragma => {
                         const start = lexer.index;
                         while (lexer.index < lexer.buffer.len) : (lexer.index += 1) {
@@ -234,7 +237,7 @@ pub fn preprocess(pp: *Preprocessor, source: Source) !void {
                         return;
                     },
                     else => return pp.fail(lexer.source, "invalid preprocessing directive", directive),
-                };
+                }
             },
 
             .NewLine => startOfLine = true,
@@ -581,6 +584,56 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: Token) Error!void {
     const tokenList = try pp.arena.allocator().dupe(Token, tokens.items);
     const nameStr = pp.tokSliceSafe(macroName);
     _ = try pp.defines.put(nameStr, .{ .func = .{ .params = paramList, .varArgs = varArgs, .tokens = tokenList } });
+}
+
+fn include(
+    pp: *Preprocessor,
+    lexer: *Lexer,
+) Error!void {
+    pp.includeTokenBuffer.items.len = 0;
+
+    var first = lexer.next();
+
+    if (first.id == .AngleBracketLeft) to_end: {
+        while (lexer.index < lexer.buffer.len) : (lexer.index += 1) {
+            switch (lexer.buffer[lexer.index]) {
+                '>' => {
+                    lexer.index += 1;
+                    first.loc.end = lexer.index;
+                    first.id = .MacroString;
+                    break :to_end;
+                },
+                '\n' => break,
+                else => {},
+            }
+        }
+
+        return pp.fail(lexer.source, "expected '>'", first);
+    }
+
+    try pp.expandMacro(lexer, first, &pp.includeTokenBuffer);
+
+    const fileNameTK = if (pp.includeTokenBuffer.items.len == 0) first else pp.includeTokenBuffer.items[0];
+    switch (fileNameTK.id) {
+        .StringLiteral, .MacroString => {},
+        else => return pp.fail(lexer.source, "expected \"FILENAME\" or <FILENAME>", first),
+    }
+
+    const newLine = lexer.next();
+    if ((newLine.id != .NewLine and newLine.id != .Eof) or pp.includeTokenBuffer.items.len > 1)
+        return pp.fail(lexer.source, "extra tokens at end of macro directive", first);
+
+    const tokenSlice = pp.tokSlice(fileNameTK);
+    if (tokenSlice.len < 3)
+        return pp.fail(lexer.source, "empty  filename", first);
+
+    const filename = tokenSlice[1 .. tokenSlice.len - 1];
+    const newSource = pp.compilation.findInclude(filename, fileNameTK.id == .StringLiteral) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return pp.failFmt(lexer.source, first, "'{s}' not found", .{filename}),
+    };
+
+    return pp.preprocess(newSource);
 }
 
 fn expectTokens(buffer: []const u8, expectedTokens: []const TokenType) void {

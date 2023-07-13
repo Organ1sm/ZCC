@@ -77,3 +77,8 @@ pub fn addSource(compilation: *Compilation, path: []const u8) !Source {
 
     return source;
 }
+
+pub fn findInclude(comp: *Compilation, path: []const u8, searchWord: bool) !Source {
+    _ = searchWord;
+    return comp.addSource(path);
+}
