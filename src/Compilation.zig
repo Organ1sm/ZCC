@@ -1,20 +1,27 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const Source = @import("Source.zig");
+const Diagnostics = @import("Diagnostics.zig");
+const Token = @import("Token.zig").Token;
 
 const Allocator = std.mem.Allocator;
 
 const Compilation = @This();
+pub const Error = error{
+    /// A fatal error has ocurred and compilation has stopped.
+    FatalError,
+} || Allocator.Error;
 
 gpa: Allocator,
 sources: std.StringArrayHashMap(Source),
-color: bool,
+diag: Diagnostics,
+
 
 pub fn init(gpa: Allocator) Compilation {
     return .{
         .gpa = gpa,
         .sources = std.StringArrayHashMap(Source).init(gpa),
-        .color = std.io.getStdErr().supportsAnsiEscapeCodes(),
+        .diag = Diagnostics.init(gpa),
     };
 }
 
@@ -25,46 +32,7 @@ pub fn deinit(compilation: *Compilation) void {
     }
 
     compilation.sources.deinit();
-}
-
-pub fn printErrStart(comp: *Compilation, path: []const u8, lcs: Source.LCS) void {
-    if (builtin.os.tag == .windows or !comp.color) {
-        if (lcs.col == 0)
-            std.debug.print("{s}:??:??: error: ", .{path})
-        else
-            std.debug.print("{s}:{d}:{d}: error: ", .{ path, lcs.line, lcs.col });
-    } else {
-        const RED = "\x1b[31;1m";
-        const WHITE = "\x1b[37;1m";
-
-        if (lcs.col == 0)
-            std.debug.print("{s}:??:??: " ++ RED ++ "error: " ++ WHITE, .{path})
-        else
-            std.debug.print(WHITE ++ "{s}:{d}:{d}: " ++ RED ++ "error: " ++ WHITE, .{
-                path,
-                lcs.line,
-                lcs.col,
-            });
-    }
-}
-
-pub fn printErrEnd(comp: *Compilation, lcs: Source.LCS) void {
-    if (builtin.os.tag == .windows or !comp.color) {
-        if (lcs.col == 0)
-            return;
-        std.debug.print("\n{s}\n", .{lcs.str});
-        std.debug.print("{s: >[1]}^\n", .{ "", lcs.col - 1 });
-    } else {
-        const GREEN = "\x1b[32;1m";
-        const RESET = "\x1b[0m";
-        if (lcs.col == 0) {
-            std.debug.print("\n" ++ RESET, .{});
-            return;
-        }
-
-        std.debug.print("\n" ++ RESET ++ "{s}\n", .{lcs.str});
-        std.debug.print("{s: >[1]}" ++ GREEN ++ "^" ++ RESET ++ "\n", .{ "", lcs.col - 1 });
-    }
+    compilation.diag.deinit();
 }
 
 pub fn getSource(comp: *Compilation, id: Source.ID) Source {
@@ -98,7 +66,17 @@ pub fn addSource(compilation: *Compilation, path: []const u8) !Source {
     return source;
 }
 
-pub fn findInclude(comp: *Compilation, path: []const u8, searchWord: bool) !Source {
+pub fn findInclude(comp: *Compilation, token: Token, filename: []const u8, searchWord: bool) !Source {
     _ = searchWord;
-    return comp.addSource(path);
+    return comp.addSource(filename) catch return comp.fatal(token, "'{s}' not found", .{filename});
 }
+
+pub fn fatal(comp: *Compilation, token: Token, comptime fmt: []const u8, args :anytype) Error {
+    const source = comp.getSource(token.source);
+    const lcs = source.lineColString(token.loc.start);
+
+    return comp.diag.fatal(source.path, lcs, fmt, args);
+}
+
+pub const fatalNoSrc = Diagnostics.fatalNoSrc;
+pub const renderErrors = Diagnostics.render;

@@ -7,7 +7,7 @@ const Preprocessor = @import("Preprocessor.zig");
 
 var GeneralPurposeAllocator = std.heap.GeneralPurposeAllocator(.{}){};
 
-pub fn main() !void {
+pub fn main() u8 {
     const gpa = if (builtin.link_libc) std.heap.raw_c_allocator else GeneralPurposeAllocator.allocator();
     defer if (!builtin.link_libc) {
         _ = GeneralPurposeAllocator.deinit();
@@ -19,14 +19,19 @@ pub fn main() !void {
     const arena = arenaInstance.allocator();
 
     const args = std.process.argsAlloc(arena) catch {
-        std.debug.print("Out of Memory", .{});
+        std.debug.print("Out of Memory\n", .{});
         std.process.exit(1);
     };
 
-    handleArgs(gpa, args) catch |err| {
-        fail("{s}", .{@errorName(err)});
-        std.process.exit(1);
+    handleArgs(gpa, args) catch |err| switch (err) {
+        error.OutOfMemory => {
+            std.debug.print("Out of Memory\n", .{});
+            return 1;
+        },
+        error.FatalError => return 1,
     };
+
+    return 0;
 }
 
 const usage =
