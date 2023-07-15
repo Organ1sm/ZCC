@@ -5,6 +5,7 @@ const Compilation = @import("Compilation.zig");
 const Source = @import("Source.zig");
 const Lexer = @import("Lexer.zig");
 const Parser = @import("Parser.zig");
+const Diagnostics = @import("Diagnostics.zig");
 
 const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
@@ -13,7 +14,7 @@ const Preprocessor = @This();
 const DefineMap = std.StringHashMap(Marco);
 const TokenList = std.ArrayList(Token);
 
-const Error = Allocator.Error || error{PreprocessingFailed};
+const Error = Compilation.Error;
 
 const Marco = union(enum) {
     /// #define Foo
@@ -66,7 +67,7 @@ pub fn deinit(pp: *Preprocessor) void {
     pp.tokenBuffer.deinit();
 }
 
-pub fn preprocess(pp: *Preprocessor, source: Source) !void {
+pub fn preprocess(pp: *Preprocessor, source: Source) Error!void {
     var lexer = Lexer{
         .buffer = source.buffer,
         .source = source.id,
@@ -99,13 +100,18 @@ pub fn preprocess(pp: *Preprocessor, source: Source) !void {
                         var slice = lexer.buffer[start..lexer.index];
                         slice = std.mem.trim(u8, slice, "\t\x0B\x0C");
 
-                        return pp.fail(slice, directive);
+                        try pp.compilation.diag.list.append(.{
+                            .tag = .error_directive,
+                            .sourceId = token.source,
+                            .locStart = token.loc.start,
+                            .extra = .{ .str = slice },
+                        });
                     },
 
                     .KeywordIf => {
                         const ov = @addWithOverflow(ifLevel, 1);
                         if (ov[1] != 0)
-                            return pp.fail("too many #if nestings", directive);
+                            return pp.compilation.fatal(directive, "too many #if nestings", .{});
 
                         ifLevel = ov[0];
                         if (try pp.expr(&lexer)) {
@@ -119,12 +125,12 @@ pub fn preprocess(pp: *Preprocessor, source: Source) !void {
                     .KeywordIfdef => {
                         const ov = @addWithOverflow(ifLevel, 1);
                         if (ov[1] != 0)
-                            return pp.fail("too many #ifdef nestings", directive);
+                            return pp.compilation.fatal(directive, "too many #if nestings", .{});
 
                         ifLevel = ov[0];
 
-                        const macroName = try pp.expectMacroName(&lexer);
-                        try pp.expectNewLine(&lexer, false);
+                        const macroName = try pp.expectMacroName(&lexer) orelse continue;
+                        try pp.expectNewLine(&lexer);
 
                         if (pp.defines.get(macroName) != null) {
                             ifKind.set(ifLevel, untilEndIf);
@@ -137,12 +143,12 @@ pub fn preprocess(pp: *Preprocessor, source: Source) !void {
                     .KeywordIfndef => {
                         const ov = @addWithOverflow(ifLevel, 1);
                         if (ov[1] != 0)
-                            return pp.fail("too many #ifndef nestings", directive);
+                            return pp.compilation.fatal(directive, "too many #if nestings", .{});
 
                         ifLevel = ov[0];
 
-                        const macroName = try pp.expectMacroName(&lexer);
-                        try pp.expectNewLine(&lexer, false);
+                        const macroName = try pp.expectMacroName(&lexer) orelse continue;
+                        try pp.expectNewLine(&lexer);
 
                         if (pp.defines.get(macroName) == null) {
                             ifKind.set(ifLevel, untilEndIf);
@@ -172,18 +178,26 @@ pub fn preprocess(pp: *Preprocessor, source: Source) !void {
                                 seenPragmaOnce = true;
                             }
                         } else {
-                            // todo:
+                            try pp.compilation.diag.list.append(.{
+                                .tag = .unsupported_pragma,
+                                .sourceId = token.source,
+                                .locStart = token.loc.start,
+                                .extra = .{ .str = slice },
+                            });
                         }
                     },
                     .KeywordUndef => {
-                        const macro_name = try pp.expectMacroName(&lexer);
+                        const macro_name = (try pp.expectMacroName(&lexer)) orelse continue;
                         _ = pp.defines.remove(macro_name);
-                        try pp.expectNewLine(&lexer, true);
+                        try pp.expectNewLine(&lexer);
                     },
 
                     .KeywordElIf => {
-                        if (ifLevel == 0)
-                            return pp.fail("#elif without #if", directive);
+                        if (ifLevel == 0) {
+                            try pp.err(directive, .else_without_if);
+                            ifLevel += 1;
+                            ifKind.set(ifLevel, untilElse);
+                        }
 
                         switch (ifKind.get(ifLevel)) {
                             untilElse => if (try pp.expr(&lexer)) {
@@ -193,67 +207,81 @@ pub fn preprocess(pp: *Preprocessor, source: Source) !void {
                             },
 
                             untilEndIf => try pp.skip(&lexer, .untilEndIf),
-                            untilEndIfSeenElse => return pp.fail("#elif after #else", directive),
+                            untilEndIfSeenElse => {
+                                try pp.err(directive, .elif_after_else);
+                                skipToNewLine(&lexer);
+                            },
                             else => unreachable,
                         }
                     },
 
                     .KeywordElse => {
-                        if (ifLevel == 0)
-                            return pp.fail("#else without #if", directive);
+                        try pp.expectNewLine(&lexer);
 
-                        try pp.expectNewLine(&lexer, false);
+                        if (ifLevel == 0) {
+                            try pp.err(directive, .else_without_if);
+                            continue;
+                        }
 
                         switch (ifKind.get(ifLevel)) {
                             untilElse => ifKind.set(ifLevel, untilEndIfSeenElse),
                             untilEndIf => try pp.skip(&lexer, .untilEndIfSeenElse),
-                            untilEndIfSeenElse => return pp.fail("#else after #else", directive),
+                            untilEndIfSeenElse => {
+                                try pp.err(directive, .else_after_else);
+                                skipToNewLine(&lexer);
+                            },
                             else => unreachable,
                         }
                     },
 
                     .KeywordEndIf => {
-                        if (ifLevel == 0)
-                            return pp.fail("#else without #if", directive);
+                        try pp.expectNewLine(&lexer);
+                        if (ifLevel == 0) {
+                            try pp.err(directive, .else_without_if);
+                            continue;
+                        }
 
-                        try pp.expectNewLine(&lexer, true);
                         ifLevel -= 1;
                     },
 
                     .KeywordLine => {
                         const digits = lexer.next();
                         if (digits.id != .IntegerLiteral)
-                            return pp.fail("#line directive requires a simple digit sequence", digits);
+                            try pp.err(digits, .line_simple_digit);
+
+                        if (digits.id == .Eof or digits.id == .NewLine)
+                            continue;
 
                         const name = lexer.next();
                         if (name.id == .Eof or name.id == .NewLine)
                             continue;
 
                         if (name.id != .StringLiteral)
-                            return pp.fail("invalid filename for #line directive", name);
+                            try pp.err(name, .line_invalid_filename);
 
-                        try pp.expectNewLine(&lexer, true);
+                        try pp.expectNewLine(&lexer);
                     },
 
                     .NewLine => {},
                     .Eof => {
                         if (ifLevel != 0)
-                            return pp.fail("unterminated conditional directive", directive);
+                            try pp.err(directive, .unterminated_conditional_directive);
 
-                        try pp.tokens.append(directive);
-                        return;
+                        return pp.tokens.append(directive);
                     },
-                    else => return pp.fail("invalid preprocessing directive", directive),
+                    else => {
+                        try pp.err(token, .invalid_preprocessing_directive);
+                        try pp.expectNewLine(&lexer);
+                    },
                 }
             },
 
             .NewLine => startOfLine = true,
             .Eof => {
                 if (ifLevel != 0)
-                    return pp.fail("unterminated conditional directive", token);
+                    try pp.err(token, .unterminated_conditional_directive);
 
-                try pp.tokens.append(token);
-                return;
+                return pp.tokens.append(token);
             },
 
             else => {
@@ -289,41 +317,37 @@ pub fn tokSlice(pp: *Preprocessor, token: Token) []const u8 {
     }
 }
 
-fn failFmt(pp: *Preprocessor, token: Token, comptime fmt: []const u8, args: anytype) Error {
-    const source = pp.compilation.getSource(token.source);
-    const lcs = source.lineColString(token.loc);
-
-    pp.compilation.printErrStart(source.path, lcs);
-    std.debug.print(fmt, args);
-    pp.compilation.printErrEnd(lcs);
-
-    return error.PreprocessingFailed;
+fn err(pp: *Preprocessor, token: Token, tag: Diagnostics.Tag) !void {
+    try pp.compilation.diag.list.append(.{
+        .tag = tag,
+        .sourceId = token.source,
+        .locStart = token.loc.start,
+    });
 }
 
-fn fail(pp: *Preprocessor, msg: []const u8, token: Token) Error {
-    return pp.failFmt(token, "{s}", .{msg});
-}
-
-fn expectMacroName(pp: *Preprocessor, lexer: *Lexer) Error![]const u8 {
+fn expectMacroName(pp: *Preprocessor, lexer: *Lexer) Error!?[]const u8 {
     const macroName = lexer.next();
-    if (!macroName.id.isMacroIdentifier())
-        return pp.fail("macro name missing", macroName);
+    if (!macroName.id.isMacroIdentifier()) {
+        try pp.err(macroName, .macro_name_missing);
+        skipToNewLine(lexer);
+        return null;
+    }
 
     return pp.tokSliceSafe(macroName);
 }
 
-fn expectNewLine(pp: *Preprocessor, lexer: *Lexer, allowEof: bool) Error!void {
-    const token = lexer.next();
+fn expectNewLine(pp: *Preprocessor, lexer: *Lexer) Error!void {
+    var sentErr = false;
+    while (true) {
+        const token = lexer.next();
+        if (token.id == .NewLine or token.id == .Eof)
+            return;
 
-    if (token.id == .Eof) {
-        if (!allowEof)
-            return pp.fail("unterminated conditional directive", token);
-
-        return;
+        if (!sentErr) {
+            sentErr = true;
+            try pp.err(token, .extra_tokens_directive_end);
+        }
     }
-
-    if (token.id != .NewLine)
-        return pp.fail("extra tokens at end of macro directive", token);
 }
 
 fn expr(pp: *Preprocessor, lexer: *Lexer) Error!bool {
@@ -332,8 +356,11 @@ fn expr(pp: *Preprocessor, lexer: *Lexer) Error!bool {
     while (true) {
         var token = lexer.next();
         if (token.id == .NewLine or token.id == .Eof) {
-            if (pp.tokenBuffer.items.len == 0)
-                return pp.fail("expected value in expression", token);
+            if (pp.tokenBuffer.items.len == 0) {
+                try pp.err(token, .expected_value_in_expr);
+                try pp.expectNewLine(lexer);
+                return false;
+            }
 
             token.id = .Eof;
             try pp.tokenBuffer.append(token);
@@ -344,12 +371,14 @@ fn expr(pp: *Preprocessor, lexer: *Lexer) Error!bool {
             const macroToken = if (first.id == .LParen) lexer.next() else first;
 
             if (!macroToken.id.isMacroIdentifier())
-                return pp.fail("macro name missing", macroToken);
+                try pp.err(macroToken, .macro_name_missing);
 
             if (first.id == .LParen) {
                 const rParen = lexer.next();
-                if (rParen.id != .RParen)
-                    return pp.fail("expected closing ')'", rParen);
+                if (rParen.id != .RParen) {
+                    try pp.err(rParen, .closing_paren);
+                    try pp.err(first, .to_match_paren);
+                }
             }
 
             if (pp.defines.get(pp.tokSliceSafe(macroToken))) |_| {
@@ -372,12 +401,19 @@ fn expr(pp: *Preprocessor, lexer: *Lexer) Error!bool {
             .StringLiteralUTF_16,
             .StringLiteralUTF_32,
             .StringLiteralWide,
-            => return pp.fail("string literal in preprocessor expression", tok.*),
+            => {
+                try pp.err(tok.*, .string_literal_in_pp_expr);
+                return false;
+            },
 
             .FloatLiteral,
             .FloatLiteral_F,
             .FloatLiteral_L,
-            => return pp.fail("floating point literal in preprocessor expression", tok.*),
+            => {
+                try pp.err(tok.*, .float_literal_in_pp_expr);
+                return false;
+            },
+
             else => if (tok.id.isMacroIdentifier()) {
                 tok.id = .Zero;
             },
@@ -389,11 +425,11 @@ fn expr(pp: *Preprocessor, lexer: *Lexer) Error!bool {
         .tokens = pp.tokenBuffer.items,
     };
 
-    const res = parser.constExpr() catch |err| switch (err) {
-        error.OutOfMemory => unreachable, // TODO verify this
-        error.ParsingFailed => return error.PreprocessingFailed,
+    const res = parser.constExpr() catch |e| switch (e) {
+        error.OutOfMemory => return error.OutOfMemory,
+        error.FatalError => return error.FatalError,
+        error.ParsingFailed => return false,
     };
-
     return res.getBool();
 }
 
@@ -416,8 +452,10 @@ fn skip(pp: *Preprocessor, lexer: *Lexer, cont: enum { untilElse, untilEndIf, un
                     if (ifsSeen != 0)
                         continue;
 
-                    if (cont == .untilEndIfSeenElse)
-                        return pp.fail("#else after #else", directive);
+                    if (cont == .untilEndIfSeenElse) {
+                        try pp.err(directive, .else_after_else);
+                        continue;
+                    }
 
                     lexer.index = dirStart;
                     return;
@@ -427,8 +465,10 @@ fn skip(pp: *Preprocessor, lexer: *Lexer, cont: enum { untilElse, untilEndIf, un
                     if (ifsSeen != 0 or cont == .untilEndIf)
                         continue;
 
-                    if (cont == .untilEndIfSeenElse)
-                        return pp.fail("#elif after #else", directive);
+                    if (cont == .untilEndIfSeenElse) {
+                        try pp.err(directive, .elif_after_else);
+                        continue;
+                    }
 
                     lexer.index = dirStart;
                     return;
@@ -453,7 +493,14 @@ fn skip(pp: *Preprocessor, lexer: *Lexer, cont: enum { untilElse, untilEndIf, un
         }
     } else {
         const eof = lexer.next();
-        return pp.fail("unterminated conditional directive", eof);
+        return pp.err(eof, .unterminated_conditional_directive);
+    }
+}
+
+fn skipToNewLine(lexer: *Lexer) void {
+    while (true) {
+        const token = lexer.next();
+        if (token.id == .NewLine or token.id == .Eof) return;
     }
 }
 
@@ -475,7 +522,7 @@ fn expandExtra(pp: *Preprocessor, lexer: *Lexer, origName: []const u8, arg: Toke
             }
         },
 
-        .func => return pp.fail("TODO func macro expansion", arg),
+        .func => return pp.compilation.fatal(arg, "TODO func macro expansion", .{}),
     } else {
         try tokens.append(arg);
     }
@@ -484,11 +531,15 @@ fn expandExtra(pp: *Preprocessor, lexer: *Lexer, origName: []const u8, arg: Toke
 /// Handle #define directive
 fn define(pp: *Preprocessor, lexer: *Lexer) Error!void {
     const macroName = lexer.next();
-    if (macroName.id == .KeywordDefined)
-        return pp.fail("'defined' cannot be used as macro name", macroName);
+    if (macroName.id == .KeywordDefined) {
+        try pp.err(macroName, .defined_as_macro_name);
+        return skipToNewLine(lexer);
+    }
 
-    if (!macroName.id.isMacroIdentifier())
-        return pp.fail("macro name must be an identifier", macroName);
+    if (!macroName.id.isMacroIdentifier()) {
+        try pp.err(macroName, .macro_name_must_be_identifier);
+        return skipToNewLine(lexer);
+    }
 
     const nameStr = pp.tokSliceSafe(macroName);
     var first = lexer.next();
@@ -499,11 +550,11 @@ fn define(pp: *Preprocessor, lexer: *Lexer) Error!void {
         return;
     } else if (first.loc.start == macroName.loc.end) {
         if (first.id == .LParen)
-            return pp.defineFunc(lexer, macroName);
+            return pp.defineFunc(lexer, first, macroName);
 
-        return pp.fail("ISO C99 requires whitespace after the macro name", first);
+        try pp.err(first, .whitespace_after_macro_name);
     } else if (first.id == .HashHash) {
-        return pp.fail("'##' cannot appear at start of macro expansion", first);
+        try pp.err(first, .hash_hash_at_start);
     }
 
     {
@@ -529,8 +580,10 @@ fn define(pp: *Preprocessor, lexer: *Lexer) Error!void {
             .HashHash => {
                 const prev = pp.tokenBuffer.pop();
                 const next = lexer.next();
-                if (next.id == .NewLine or next.id == .Eof)
-                    return pp.fail("'##' cannot appear at end of macro expansion", next);
+                if (next.id == .NewLine or next.id == .Eof) {
+                    try pp.err(token, .hash_hash_at_end);
+                    continue;
+                }
 
                 const nextSlice = pp.tokSliceSafe(next);
 
@@ -547,7 +600,12 @@ fn define(pp: *Preprocessor, lexer: *Lexer) Error!void {
                 const pastedToken = tempLexer.next();
 
                 if (tempLexer.next().id != .Eof) {
-                    return pp.failFmt(token, "pasting formed '{s}, an invalid preprocessing token'", .{pp.generated.items[start..end]});
+                    try pp.compilation.diag.list.append(.{
+                        .tag = .pasting_formed_invalid,
+                        .sourceId = token.source,
+                        .locStart = token.loc.start,
+                        .extra = .{ .str = try pp.arena.allocator().dupe(u8, pp.generated.items[start..end]) },
+                    });
                 }
 
                 try pp.tokenBuffer.append(pastedToken);
@@ -562,7 +620,7 @@ fn define(pp: *Preprocessor, lexer: *Lexer) Error!void {
 }
 
 /// Handle a function like #define directive
-fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: Token) Error!void {
+fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: Token, lParen: Token) Error!void {
     var params = std.ArrayList([]const u8).init(pp.compilation.gpa);
     defer params.deinit();
 
@@ -571,26 +629,34 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: Token) Error!void {
         const token = lexer.next();
 
         if (token.id == .RParen) break;
+
+        if (params.items.len != 0) {
+            if (token.id != .Comma)
+                try pp.err(token, .invalid_token_param_list)
+            else
+                continue;
+        }
+
+        if (token.id == .Eof)
+            return pp.err(token, .unterminated_macro_param_list);
+
         if (token.id == .Ellipsis) {
             varArgs = true;
             const rParen = lexer.next();
-            if (rParen.id != .RParen)
-                return pp.fail("missing ')' in macro parameter list", rParen);
+            if (rParen.id != .RParen) {
+                try pp.err(rParen, .missing_paren_param_list);
+                try pp.err(lParen, .to_match_paren);
+            }
 
             break;
         }
 
-        if (!token.id.isMacroIdentifier())
-            return pp.fail("invaild token in macro parameter list", token);
+        if (!token.id.isMacroIdentifier()) {
+            try pp.err(token, .invalid_token_param_list);
+            continue;
+        }
 
         try params.append(pp.tokSliceSafe(token));
-
-        const next = lexer.next();
-        if (next.id == .RParen)
-            break;
-
-        if (next.id != .Comma) // TODO should not allow name (a,)
-            return pp.fail("invaild token in macro parameter list", next);
     }
 
     pp.tokenBuffer.items.len = 0;
@@ -616,14 +682,17 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: Token) Error!void {
                     }
                 }
 
-                return pp.fail("'#' is not followed by a macro parameter", param);
+                try pp.err(param, .hash_not_followed_param);
+                token = param;
             },
             .HashHash => {
                 const start = lexer.index;
                 const next = lexer.next();
 
-                if (next.id == .NewLine or next.id != .Eof)
-                    return pp.fail("## cannot appear at start of macro expansion", token);
+                if (next.id == .NewLine or next.id != .Eof) {
+                    try pp.err(token, .hash_hash_at_end);
+                    continue;
+                }
 
                 lexer.index = start;
                 try pp.tokenBuffer.append(token);
@@ -670,7 +739,12 @@ fn include(pp: *Preprocessor, lexer: *Lexer) Error!void {
             }
         }
 
-        return pp.fail("expected '>'", first);
+        try pp.compilation.diag.list.append(.{
+            .tag = .header_str_closing,
+            .sourceId = first.source,
+            .locStart = lexer.index,
+        });
+        try pp.err(first, .header_str_match);
     }
 
     try pp.expandMacro(lexer, first, &pp.tokenBuffer);
@@ -678,22 +752,24 @@ fn include(pp: *Preprocessor, lexer: *Lexer) Error!void {
     const fileNameTK = if (pp.tokenBuffer.items.len == 0) first else pp.tokenBuffer.items[0];
     switch (fileNameTK.id) {
         .StringLiteral, .MacroString => {},
-        else => return pp.fail("expected \"FILENAME\" or <FILENAME>", first),
+        else => {
+            try pp.err(first, .expected_filename);
+            return pp.expectNewLine(lexer);
+        },
     }
 
     const newLine = lexer.next();
-    if ((newLine.id != .NewLine and newLine.id != .Eof) or pp.tokenBuffer.items.len > 1)
-        return pp.fail("extra tokens at end of macro directive", first);
+    if ((newLine.id != .NewLine and newLine.id != .Eof) or pp.tokenBuffer.items.len > 1) {
+        skipToNewLine(lexer);
+        return pp.err(first, .extra_tokens_directive_end);
+    }
 
     const tokenSlice = pp.tokSlice(fileNameTK);
     if (tokenSlice.len < 3)
-        return pp.fail("empty  filename", first);
+        return pp.err(first, .empty_filename);
 
     const filename = tokenSlice[1 .. tokenSlice.len - 1];
-    const newSource = pp.compilation.findInclude(filename, fileNameTK.id == .StringLiteral) catch |err| switch (err) {
-        error.OutOfMemory => return error.OutOfMemory,
-        else => return pp.failFmt(first, "'{s}' not found", .{filename}),
-    };
+    const newSource = try pp.compilation.findInclude(fileNameTK, filename, fileNameTK.id == .StringLiteral);
 
     return pp.preprocess(newSource);
 }

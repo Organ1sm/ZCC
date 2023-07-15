@@ -30,15 +30,15 @@ id: ID,
 
 pub const LCS = struct { line: u32, col: u32, str: []const u8 };
 
-pub fn lineColString(source: Source, loc: SourceLocation) LCS {
+pub fn lineColString(source: Source, locStart: u32) LCS {
     if (source.id.isGenerated())
         return .{ .line = 0, .col = 0, .str = "" };
 
     var line: u32 = 1;
     var col: u32 = 1;
 
-    var i: u32 = loc.start + 1;
-    while (i > 0) {
+    var i: u32 = 0;
+    while (i < locStart) : (i += 1) {
         i -= 1;
         col += 1;
         if (source.buffer[i] == '\n') {
