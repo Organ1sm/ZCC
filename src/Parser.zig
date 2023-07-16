@@ -9,8 +9,10 @@ const AST = @import("AST.zig");
 const Type = @import("Type.zig");
 const Diagnostics = @import("Diagnostics.zig");
 
+const TokenIndex = AST.TokenIndex;
 const TagIndex = AST.TagIndex;
 const Allocator = std.mem.Allocator;
+const Qualifiers = Type.Qualifiers;
 
 const Parser = @This();
 const Error = Compilation.Error || error{ParsingFailed};
@@ -63,7 +65,7 @@ fn eat(p: *Parser, id: TokenType) bool {
 fn expectToken(p: *Parser, id: TokenType) Error!void {
     const token = p.tokens[p.index];
     if (token.id != id) {
-        try p.pp.compilation.diag.list.append(.{
+        try p.pp.compilation.diag.add(.{
             .tag = switch (token.id) {
                 .Invalid => .expected_invalid,
                 else => .expected_token,
@@ -85,7 +87,7 @@ fn expectToken(p: *Parser, id: TokenType) Error!void {
 fn err(p: *Parser, tag: Diagnostics.Tag) Error {
     const token = p.tokens[p.index];
 
-    try p.pp.compilation.diag.list.append(.{
+    try p.pp.compilation.diag.add(.{
         .tag = tag,
         .sourceId = token.source,
         .locStart = token.loc.start,
@@ -97,7 +99,7 @@ fn err(p: *Parser, tag: Diagnostics.Tag) Error {
 fn todo(p: *Parser, msg: []const u8) Error {
     const token = p.tokens[p.index];
 
-    try p.pp.compilation.diag.list.append(.{
+    try p.pp.compilation.diag.add(.{
         .tag = .todo,
         .sourceId = token.source,
         .locStart = token.loc.start,
@@ -108,18 +110,76 @@ fn todo(p: *Parser, msg: []const u8) Error {
 }
 
 pub fn parse(p: *Parser) Error!AST {
-    _ = p;
+    try p.err(.expected_expr);
+    p.index += 1;
 }
 
 // ====== declarations ======
 
 /// decl
-///  : declSpec+ (initDeclarator ( ',' initDeclarator)*)? ';'
-///  | declSpec+ declarator declarator* compoundStmt
+///  : declSpec (initDeclarator ( ',' initDeclarator)*)? ';'
+///  | declSpec declarator declarator* compoundStmt
 ///  | staticAssert
 /// staticAssert : keyword_static_assert '(' constExpr ',' STRING_LITERAL ')' ';'
-/// declSpec: storageClassSpec | typeSpec | typeQual | funcSpec | alignSpec
-/// initDeclarator : declarator ('=' initializer)?
+fn staticAssert(p: *Parser) Error!bool {
+    const curToken = p.tokens[p.index];
+    if (!p.eat(curToken))
+        return false;
+
+    try expectToken(.LParen);
+
+    const start = p.index;
+    const res = try p.constExpr();
+    const end = p.index;
+
+    try p.expectToken(.Comma);
+    const str = p.tokens[p.index];
+
+    try p.expectToken(.StringLiteral);
+    try p.expectToken(.RParen);
+
+    if (!res.getBool()) {
+        var msg = std.ArrayList(u8).init(p.pp.compilation.gpa);
+        defer msg.deinit();
+
+        try msg.append('\'');
+        for (p.tokens[start..end], 0..) |token, i| {
+            if (i != 0)
+                try msg.append(' ');
+            try msg.appendSlice(p.pp.tokSlice(token));
+        }
+
+        try msg.appendSlice("' ");
+        try msg.appendSlice(p.pp.tokSlice(str));
+
+        try p.pp.compilation.diag.add(.{
+            .tag = .static_assert_failure,
+            .sourceId = curToken.source,
+            .locStart = curToken.loc.start,
+            .extra = .{ .str = try p.pp.arena.allocator().dupe(u8, msg.items) },
+        });
+
+        return true;
+    }
+}
+
+pub const DeclSpec = struct {
+    storageClass: union(enum) {
+        auto,
+        @"extern",
+        register,
+        static,
+        typedef,
+        none,
+    } = .none,
+
+    threadLocal: bool = false,
+    @"inline": bool = false,
+    noreturn: bool = false,
+    type: Type = .{},
+};
+
+/// declSpec: (storageClassSpec | typeSpec | typeQual | funcSpec | alignSpec)+
 /// storageClassSpec:
 ///  : keyword_typedef
 ///  | keyword_extern
@@ -127,6 +187,86 @@ pub fn parse(p: *Parser) Error!AST {
 ///  | keyword_threadlocal
 ///  | keyword_auto
 ///  | keyword_register
+fn declSpec(p: *Parser) Error!?DeclSpec {
+    var d = DeclSpec{};
+    var any: bool = false;
+
+    while (true) {
+        const token = p.tokens[p.index];
+        switch (token.id) {
+            .KeywordTypedef,
+            .KeywordExtern,
+            .KeywordStatic,
+            .KeywordAuto,
+            .KeywordRegister,
+            => {
+                if (d.storageClass != .none) {
+                    try p.pp.compilation.diag.add(.{
+                        .tag = .multiple_storage_class,
+                        .sourceId = token.source,
+                        .locStart = token.loc.start,
+                        .extra = .{ .str = @tagName(d.storageClass) },
+                    });
+
+                    return error.ParsingFailed;
+                }
+
+                switch (token.id) {
+                    .KeywordTypedef => d.storageClass = .typedef,
+                    .KeywordExtern => d.storageClass = .@"extern",
+                    .KeywordStatic => d.storageClass = .static,
+                    .KeywordAuto => d.storageClass = .auto,
+                    .KeywordRegister => d.storageClass = .register,
+                    else => unreachable,
+                }
+
+                any = true;
+                continue;
+            },
+
+            .KeywordThreadLocal => {
+                if (d.threadLocal) {
+                    try p.err(.duplicate_declsepc);
+                }
+
+                d.threadLocal = true;
+                any = true;
+                continue;
+            },
+
+            .KeywordInline => {
+                if (d.@"inline") {
+                    try p.err(.duplicate_declsepc);
+                }
+
+                d.@"inline" = true;
+                any = true;
+                continue;
+            },
+
+            .KeywordNoreturn => {
+                if (d.noreturn) {
+                    try p.err(.duplicate_declsepc);
+                }
+
+                d.noreturn = true;
+                any = true;
+                continue;
+            },
+        }
+
+        if (!any) return null;
+
+        if (d.type.specifier == .none) {
+            d.type.specifier = .int;
+            try p.err(.missing_type_specifier);
+        }
+
+        return d;
+    }
+}
+
+/// initDeclarator : declarator ('=' initializer)?
 /// typeSpec
 ///  : keyword_void
 ///  | keyword_char
@@ -143,6 +283,11 @@ pub fn parse(p: *Parser) Error!AST {
 ///  | recordSpec
 ///  | enumSpec
 ///  | typedef  // IDENTIFIER
+/// alignSpec : keyword_alignas '(' typeName ')'
+fn typeSpec(p: *Parser, ty: *Type) Error!bool {
+    _ = ty;
+    return p.todo("typeSpec");
+}
 /// recordSpec
 ///  : (keyword_struct | keyword_union) IDENTIFIER? { recordDecl* }
 ///  | (keyword_struct | keyword_union) IDENTIFIER
@@ -152,6 +297,9 @@ pub fn parse(p: *Parser) Error!AST {
 /// recordDeclarator : declarator (':' constExpr)?
 
 // specQual : typeSpec | typeQual | alignSpec
+fn specQual(p: *Parser) Error!Type {
+    return p.todo("specQual");
+}
 
 /// enumSpec
 ///  : keyword_enum IDENTIFIER? { enumerator (',' enumerator)? ',') }
@@ -159,9 +307,12 @@ pub fn parse(p: *Parser) Error!AST {
 /// enumerator : IDENTIFIER ('=' constExpr)
 /// atomicTypeSpec : keyword_atomic '(' typeName ')'
 /// typeQual : keyword_const | keyword_restrict | keyword_volatile | keyword_atomic
-/// funcSpec : keyword_inline | keyword_noreturn
-/// alignSpec : keyword_alignas '(' typeName ')'
+fn typeQual(p: *Parser, quals: *Qualifiers) Error!bool {
+    _ = quals;
+    return p.todo("typeQual");
+}
 /// declarator: pointer? directDeclarator
+
 /// directDeclarator
 ///  : IDENTIFIER
 ///  | '(' declarator ')'
@@ -173,7 +324,7 @@ pub fn parse(p: *Parser) Error!AST {
 ///  | directDeclarator '(' (IDENTIFIER (',' IDENTIFIER))? ')'
 /// pointer : '*' typeQual* pointer?
 /// paramDecls : paramDecl (',' paramDecl)* (',' '...')
-/// paramDecl : declSpec+ (declarator | abstractDeclarator?)
+/// paramDecl : declSpec (declarator | abstractDeclarator?)
 /// typeName : specQual+ abstractDeclarator?
 /// abstractDeclarator
 /// : pointer

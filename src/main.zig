@@ -44,6 +44,7 @@ const usage =
     \\  -v, --version   Print ZCC version.
     \\ 
     \\Feature Options:
+    \\  -E                      Only run the preprocessor
     \\  -fcolor-diagnostics     Enable colors in diagnostics
     \\  -fno-color-diagnostics  Disable colors in diagnostics
     \\  -Wall                   Enable all warnings
@@ -112,6 +113,7 @@ fn handleArgs(gpa: std.mem.Allocator, args: [][]const u8) !void {
             .pp = &pp,
             .tokens = pp.tokens.items,
         };
+
         pp.preprocess(source) catch |e| switch (e) {
             error.OutOfMemory => return error.OutOfMemory,
             error.FatalError => {
@@ -120,15 +122,12 @@ fn handleArgs(gpa: std.mem.Allocator, args: [][]const u8) !void {
                 continue;
             },
         };
+
         parser.parse() catch |e| switch (e) {
             error.OutOfMemory => return error.OutOfMemory,
             error.ParsingFailed, error.FatalError => {},
         };
 
-
-        for (pp.tokens.items) |token| {
-            std.debug.print("id: {s} |{s}|\n", .{ @tagName(token.id), pp.tokSlice(token) });
-        }
     }
 }
 
