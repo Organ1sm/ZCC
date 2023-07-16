@@ -392,4 +392,38 @@ pub const TokenType = enum(u8) {
             .KeywordLine => "line",
         };
     }
+
+    pub fn symbol(id: TokenType) []const u8 {
+        return id.lexeMe() orelse switch (id) {
+            .Identifier => "an identifier",
+
+            .StringLiteral,
+            .StringLiteralUTF_8,
+            .StringLiteralUTF_16,
+            .StringLiteralUTF_32,
+            .StringLiteralWide,
+            => "a string literal",
+
+            .CharLiteral,
+            .CharLiteralUTF_16,
+            .CharLiteralUTF_32,
+            .CharLiteralWide,
+            => "a character literal",
+
+            .FloatLiteral,
+            .FloatLiteral_F,
+            .FloatLiteral_L,
+            => "a float literal",
+
+            .IntegerLiteral,
+            .IntegerLiteral_U,
+            .IntegerLiteral_L,
+            .IntegerLiteral_LU,
+            .IntegerLiteral_LL,
+            .IntegerLiteral_LLU,
+            => "an integer literal",
+
+            else => unreachable, // handled in lexeme
+        };
+    }
 };

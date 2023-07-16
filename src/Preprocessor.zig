@@ -100,7 +100,7 @@ pub fn preprocess(pp: *Preprocessor, source: Source) Error!void {
                         var slice = lexer.buffer[start..lexer.index];
                         slice = std.mem.trim(u8, slice, "\t\x0B\x0C");
 
-                        try pp.compilation.diag.list.append(.{
+                        try pp.compilation.diag.add(.{
                             .tag = .error_directive,
                             .sourceId = token.source,
                             .locStart = token.loc.start,
@@ -178,7 +178,7 @@ pub fn preprocess(pp: *Preprocessor, source: Source) Error!void {
                                 seenPragmaOnce = true;
                             }
                         } else {
-                            try pp.compilation.diag.list.append(.{
+                            try pp.compilation.diag.add(.{
                                 .tag = .unsupported_pragma,
                                 .sourceId = token.source,
                                 .locStart = token.loc.start,
@@ -318,7 +318,7 @@ pub fn tokSlice(pp: *Preprocessor, token: Token) []const u8 {
 }
 
 fn err(pp: *Preprocessor, token: Token, tag: Diagnostics.Tag) !void {
-    try pp.compilation.diag.list.append(.{
+    try pp.compilation.diag.add(.{
         .tag = tag,
         .sourceId = token.source,
         .locStart = token.loc.start,
@@ -600,7 +600,7 @@ fn define(pp: *Preprocessor, lexer: *Lexer) Error!void {
                 const pastedToken = tempLexer.next();
 
                 if (tempLexer.next().id != .Eof) {
-                    try pp.compilation.diag.list.append(.{
+                    try pp.compilation.diag.add(.{
                         .tag = .pasting_formed_invalid,
                         .sourceId = token.source,
                         .locStart = token.loc.start,
@@ -739,7 +739,7 @@ fn include(pp: *Preprocessor, lexer: *Lexer) Error!void {
             }
         }
 
-        try pp.compilation.diag.list.append(.{
+        try pp.compilation.diag.add(.{
             .tag = .header_str_closing,
             .sourceId = first.source,
             .locStart = lexer.index,

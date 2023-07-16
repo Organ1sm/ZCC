@@ -26,7 +26,10 @@ const Message = struct {
 const Kind = enum { @"fatal error", @"error", note, warning, off };
 
 const Options = struct {
+    @"unsupported-pragma": Kind = .warning,
     @"C99-extensions": Kind = .warning,
+    @"implicit-int": Kind = .warning,
+    @"duplicate-decl-specifier": Kind = .warning,
 };
 
 pub const Tag = enum {
@@ -67,6 +70,9 @@ pub const Tag = enum {
     expected_token,
     expected_expr,
     expected_integer_constant_expr,
+    missing_type_specifier,
+    multiple_storage_class,
+    static_assert_failure,
 };
 
 list: std.ArrayList(Message),
@@ -158,8 +164,11 @@ const MsgWriter = struct {
 
 pub fn add(diag: *Diagnostics, msg: Message) Compilation.Error!void {
     const kind = diag.tagKind(msg.tag);
-    if (kind == .off) return;
+    if (kind == .off)
+        return;
+
     try diag.list.append(msg);
+
     if (kind == .@"fatal error" or (kind == .@"error" and diag.fatalErrors))
         return error.FatalError;
 }
@@ -273,8 +282,12 @@ pub fn render(comp: *Compilation) void {
             }),
             .expected_expr => m.write("expected expression"),
             .expected_integer_constant_expr => m.write("expression is not an integer constant expression"),
+            .missing_type_specifier => m.write("type specifier missing, defaults to 'int'"),
+            .multiple_storage_class => m.print("cannot combine with previous '{s}' declaration specifier", .{msg.extra.str}),
+            .static_assert_failure => m.print("static_assert failed due to requirement {s}", .{msg.extra.str}),
         }
-        m.end(comp.diag.color, lcs);
+
+        m.end(lcs);
     }
 
     const ws: []const u8 = if (warnings == 1) "" else "s";
@@ -324,14 +337,17 @@ fn tagKind(diag: *Diagnostics, tag: Tag) Kind {
         .expected_token,
         .expected_expr,
         .expected_integer_constant_expr,
+        .multiple_storage_class,
+        .static_assert_failure,
         => .@"error",
 
-        .unsupported_pragma => .warning,
         .to_match_paren,
         .header_str_match,
         => .note,
 
+        .unsupported_pragma => return diag.options.@"unsupported-pragma",
         .whitespace_after_macro_name => return diag.options.@"C99-extensions",
+        .missing_type_specifier => return diag.options.@"implicit-int",
     };
 
     if (kind == .@"error" and diag.fatalErrors)

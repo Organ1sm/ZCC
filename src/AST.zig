@@ -1,6 +1,6 @@
 const std = @import("std");
 const Type = @import("Type.zig");
-const Token = @import("Token.zig");
+const Token = @import("Token.zig").Token;
 
 const AST = @This();
 
