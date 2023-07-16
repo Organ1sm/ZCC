@@ -72,5 +72,5 @@ pub const Specifier = union(enum) {
 };
 
 qual: Qualifiers = .{},
-specifier: Specifier = .none,
+specifier: Specifier = .None,
 alignment: u32 = 0,
