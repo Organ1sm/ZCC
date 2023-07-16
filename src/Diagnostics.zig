@@ -23,6 +23,12 @@ const Message = struct {
     } = .{ .none = {} },
 };
 
+const Kind = enum { @"fatal error", @"error", note, warning, off };
+
+const Options = struct {
+    @"C99-extensions": Kind = .warning,
+};
+
 pub const Tag = enum {
     todo,
     error_directive,
@@ -65,6 +71,8 @@ pub const Tag = enum {
 
 list: std.ArrayList(Message),
 color: bool = true,
+fatalErrors: bool = false,
+options: Options = .{},
 
 pub fn init(gpa: Allocator) Diagnostics {
     return .{
@@ -119,6 +127,7 @@ const MsgWriter = struct {
                 .@"error" => RED ++ "error: " ++ WHITE,
                 .note => CYAN ++ "note: " ++ WHITE,
                 .warning => PURPLE ++ "warning: " ++ WHITE,
+                .off => unreachable,
             };
 
             if (lcs.col == 0)
@@ -147,6 +156,36 @@ const MsgWriter = struct {
     }
 };
 
+pub fn add(diag: *Diagnostics, msg: Message) Compilation.Error!void {
+    const kind = diag.tagKind(msg.tag);
+    if (kind == .off) return;
+    try diag.list.append(msg);
+    if (kind == .@"fatal error" or (kind == .@"error" and diag.fatalErrors))
+        return error.FatalError;
+}
+
+pub fn set(diag: *Diagnostics, name: []const u8, to: Kind) !void {
+    if (std.mem.eql(u8, name, "fatal-errors")) {
+        diag.fatalErrors = (to != .off);
+        return;
+    }
+
+    inline for (std.meta.fields(Options)) |f| {
+        if (std.mem.eql(u8, f.name, name)) {
+            @field(diag.options, f.name) = to;
+            return;
+        }
+    }
+
+    return diag.fatalNoSrc("unknown warning option `{s}`", .{name});
+}
+
+pub fn setAll(diag: *Diagnostics, to: Kind) void {
+    inline for (std.meta.fields(Options)) |f| {
+        @field(diag.options, f.name) = to;
+    }
+}
+
 pub fn fatal(diag: *Diagnostics, path: []const u8, lcs: Source.LCS, comptime fmt: []const u8, args: anytype) Compilation.Error {
     var m = MsgWriter.init(diag.color);
     defer m.deinit();
@@ -157,8 +196,8 @@ pub fn fatal(diag: *Diagnostics, path: []const u8, lcs: Source.LCS, comptime fmt
     return error.FatalError;
 }
 
-pub fn fatalNoSrc(comp: *Compilation, comptime fmt: []const u8, args: anytype) Compilation.Error {
-    if (std.builtin.os.tag == .windows or !comp.diag.color) {
+pub fn fatalNoSrc(diag: *Diagnostics, comptime fmt: []const u8, args: anytype) Compilation.Error {
+    if (builtin.os.tag == .windows or !diag.color) {
         std.debug.print("fatal error: " ++ fmt ++ "\n", args);
     } else {
         const RED = "\x1b[31;1m";
@@ -180,17 +219,17 @@ pub fn render(comp: *Compilation) void {
     var errors: u32 = 0;
     var warnings: u32 = 0;
     for (comp.diag.list.items) |msg| {
-        const source = comp.getSource(msg.sourceId);
-        const lcs = source.lineColString(msg.locStart);
         const kind = comp.diag.tagKind(msg.tag);
 
         switch (kind) {
-            .@"error" => errors += 1,
+            .@"fatal error", .@"error" => errors += 1,
             .warning => warnings += 1,
             .note => {},
-            .@"fatal error" => unreachable,
+            .off => unreachable,
         }
 
+        const source = comp.getSource(msg.sourceId);
+        const lcs = source.lineColString(msg.locStart);
         m.start(kind, source.path, lcs);
 
         switch (msg.tag) {
@@ -227,10 +266,10 @@ pub fn render(comp: *Compilation) void {
             .hash_not_followed_param => m.write("'#' is not followed by a macro parameter"),
             .expected_filename => m.write("expected \"FILENAME\" or <FILENAME>"),
             .empty_filename => m.write("empty filename"),
-            .expected_invalid => m.print("expected '{s}', found invalid bytes", .{msg.extra.tok_id.expected.symbol()}),
+            .expected_invalid => m.print("expected '{s}', found invalid bytes", .{msg.extra.tokenId.expected.symbol()}),
             .expected_token => m.print("expected '{s}', found '{s}'", .{
-                msg.extra.tok_id.expected.symbol(),
-                msg.extra.tok_id.actual.symbol(),
+                msg.extra.tokenId.expected.symbol(),
+                msg.extra.tokenId.actual.symbol(),
             }),
             .expected_expr => m.write("expected expression"),
             .expected_integer_constant_expr => m.write("expression is not an integer constant expression"),
@@ -238,14 +277,20 @@ pub fn render(comp: *Compilation) void {
         m.end(comp.diag.color, lcs);
     }
 
-    if (errors != 0 and warnings != 0) {}
+    const ws: []const u8 = if (warnings == 1) "" else "s";
+    const es: []const u8 = if (errors == 1) "" else "s";
+
+    if (errors != 0 and warnings != 0) {
+        m.print("{d} warning{s} and {d} error{s} generated.\n", .{ warnings, ws, errors, es });
+    } else if (warnings != 0) {
+        m.print("{d} warning{s} generated.\n", .{ warnings, ws });
+    } else if (errors != 0) {
+        m.print("{d} error{s} generated.\n", .{ errors, es });
+    }
 }
 
-const Kind = enum { @"fatal error", @"error", note, warning };
-
 fn tagKind(diag: *Diagnostics, tag: Tag) Kind {
-    _ = diag;
-    return switch (tag) {
+    var kind: Kind = switch (tag) {
         .todo,
         .error_directive,
         .elif_without_if,
@@ -266,7 +311,6 @@ fn tagKind(diag: *Diagnostics, tag: Tag) Kind {
         .float_literal_in_pp_expr,
         .defined_as_macro_name,
         .macro_name_must_be_identifier,
-        .whitespace_after_macro_name,
         .hash_hash_at_start,
         .hash_hash_at_end,
         .pasting_formed_invalid,
@@ -286,5 +330,12 @@ fn tagKind(diag: *Diagnostics, tag: Tag) Kind {
         .to_match_paren,
         .header_str_match,
         => .note,
+
+        .whitespace_after_macro_name => return diag.options.@"C99-extensions",
     };
+
+    if (kind == .@"error" and diag.fatalErrors)
+        kind = .@"fatal error";
+
+    return kind;
 }
