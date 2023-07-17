@@ -30,6 +30,7 @@ const Options = struct {
     @"C99-extensions": Kind = .warning,
     @"implicit-int": Kind = .warning,
     @"duplicate-decl-specifier": Kind = .warning,
+    @"miss-declaration": Kind = .warning,
 };
 
 pub const Tag = enum {
@@ -50,6 +51,8 @@ pub const Tag = enum {
     expected_value_in_expr,
     closing_paren,
     to_match_paren,
+    to_match_brace,
+    to_match_bracket,
     header_str_closing,
     header_str_match,
     string_literal_in_pp_expr,
@@ -73,10 +76,14 @@ pub const Tag = enum {
     missing_type_specifier,
     multiple_storage_class,
     static_assert_failure,
-    expected_a_type,
+    expected_type,
     cannot_combine_spec,
     duplicate_declspec,
     restrict_non_pointer,
+    expected_external_decl,
+    expected_ident_or_l_paren,
+    missing_declaration,
+    func_not_in_root,
 };
 
 list: std.ArrayList(Message),
@@ -204,7 +211,7 @@ pub fn fatal(diag: *Diagnostics, path: []const u8, lcs: Source.LCS, comptime fmt
     defer m.deinit();
 
     m.start(.@"fatal error", path, lcs);
-    std.debug.print(fmt, args);
+    m.print(fmt, args);
     m.end(lcs);
     return error.FatalError;
 }
@@ -263,6 +270,8 @@ pub fn render(comp: *Compilation) void {
             .expected_value_in_expr => m.write("expected value in expression"),
             .closing_paren => m.write("expected closing ')'"),
             .to_match_paren => m.write("to match this '('"),
+            .to_match_brace => m.write("to match this '{'"),
+            .to_match_bracket => m.write("to match this '['"),
             .header_str_closing => m.write("expected closing '>'"),
             .header_str_match => m.write("to match this '<'"),
             .string_literal_in_pp_expr => m.write("string literal in preprocessor expression"),
@@ -289,10 +298,14 @@ pub fn render(comp: *Compilation) void {
             .missing_type_specifier => m.write("type specifier missing, defaults to 'int'"),
             .multiple_storage_class => m.print("cannot combine with previous '{s}' declaration specifier", .{msg.extra.str}),
             .static_assert_failure => m.print("static_assert failed due to requirement {s}", .{msg.extra.str}),
-            .expected_a_type => m.write("expected a type"),
+            .expected_type => m.write("expected a type"),
             .cannot_combine_spec => m.print("cannot combine with previous '{s}' specifier", .{msg.extra.str}),
             .duplicate_declspec => m.print("duplicate '{s}' declaration specifier", .{msg.extra.str}),
             .restrict_non_pointer => m.print("restrict requires a pointer or reference ('{s}' is invalid)", .{msg.extra.str}),
+            .expected_external_decl => m.write("expected external declaration"),
+            .expected_ident_or_l_paren => m.write("expected identifier or ')'"),
+            .missing_declaration => m.write("declaration does not declare anything"),
+            .func_not_in_root => m.write("function definition is not allowed here"),
         }
 
         m.end(lcs);
@@ -347,19 +360,25 @@ fn tagKind(diag: *Diagnostics, tag: Tag) Kind {
         .expected_integer_constant_expr,
         .multiple_storage_class,
         .static_assert_failure,
-        .expected_a_type,
+        .expected_type,
         .cannot_combine_spec,
         .restrict_non_pointer,
+        .expected_external_decl,
+        .expected_ident_or_l_paren,
+        .func_not_in_root,
         => .@"error",
 
         .to_match_paren,
+        .to_match_brace,
+        .to_match_bracket,
         .header_str_match,
         => .note,
 
-        .unsupported_pragma => return diag.options.@"unsupported-pragma",
-        .whitespace_after_macro_name => return diag.options.@"C99-extensions",
-        .missing_type_specifier => return diag.options.@"implicit-int",
-        .duplicate_declspec => return diag.options.@"duplicate-decl-specifier",
+        .unsupported_pragma => diag.options.@"unsupported-pragma",
+        .whitespace_after_macro_name => diag.options.@"C99-extensions",
+        .missing_type_specifier => diag.options.@"implicit-int",
+        .duplicate_declspec => diag.options.@"duplicate-decl-specifier",
+        .missing_declaration => diag.options.@"miss-declaration",
     };
 
     if (kind == .@"error" and diag.fatalErrors)

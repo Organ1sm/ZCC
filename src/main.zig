@@ -125,9 +125,8 @@ fn handleArgs(gpa: std.mem.Allocator, args: [][]const u8) !void {
 
         parser.parse() catch |e| switch (e) {
             error.OutOfMemory => return error.OutOfMemory,
-            error.ParsingFailed, error.FatalError => {},
+            error.FatalError => {},
         };
-
     }
 }
 
