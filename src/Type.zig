@@ -12,20 +12,31 @@ pub const Specifier = union(enum) {
     // defaulted to int type
     None,
 
+    /// default to int
+    Unsigned,
+    Signed,
+
+    /// default to ComplexDouble
+    Complex,
+
+    /// default to ComplexLongDouble
+    ComplexLong,
+
+    Void,
     Bool,
 
     // integers
     Char,
-    Schar,
-    Uchar,
+    SChar,
+    UChar,
     Short,
-    Ushort,
+    UShort,
     Int,
-    Uint,
+    UInt,
     Long,
-    Ulong,
+    ULong,
     LongLong,
-    UlongLong,
+    ULongLong,
 
     // floating point numbers
     Float,
@@ -69,6 +80,38 @@ pub const Specifier = union(enum) {
             name: []const u8,
         };
     };
+
+    pub fn toString(spec: Specifier) []const u8 {
+        return switch (spec) {
+            .None => unreachable,
+            .Unsigned => "unsigned",
+            .Signed => "signed",
+            .Complex => "_Complex",
+            .ComplexLong => "_Complex long",
+
+            .Void => "void",
+            .Bool => "_Bool",
+            .Char => "char",
+            .SChar => "signed char",
+            .UChar => "unsigned char",
+            .Short => "short",
+            .UShort => "unsigned short",
+            .Int => "int",
+            .UInt => "unsigned int",
+            .Long => "long",
+            .ULong => "unsigned long",
+            .LongLong => "long long",
+            .ULongLong => "unsigned long long",
+            .Float => "float",
+            .Double => "double",
+            .LongDouble => "long double",
+            .ComplexFloat => "_Complex float",
+            .ComplexDouble => "_Complex double",
+            .ComplexLongDouble => "_Complex long double",
+
+            else => "TODO Specifier string",
+        };
+    }
 };
 
 qual: Qualifiers = .{},

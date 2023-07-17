@@ -73,6 +73,10 @@ pub const Tag = enum {
     missing_type_specifier,
     multiple_storage_class,
     static_assert_failure,
+    expected_a_type,
+    cannot_combine_spec,
+    duplicate_declspec,
+    restrict_non_pointer,
 };
 
 list: std.ArrayList(Message),
@@ -285,6 +289,10 @@ pub fn render(comp: *Compilation) void {
             .missing_type_specifier => m.write("type specifier missing, defaults to 'int'"),
             .multiple_storage_class => m.print("cannot combine with previous '{s}' declaration specifier", .{msg.extra.str}),
             .static_assert_failure => m.print("static_assert failed due to requirement {s}", .{msg.extra.str}),
+            .expected_a_type => m.write("expected a type"),
+            .cannot_combine_spec => m.print("cannot combine with previous '{s}' specifier", .{msg.extra.str}),
+            .duplicate_declspec => m.print("duplicate '{s}' declaration specifier", .{msg.extra.str}),
+            .restrict_non_pointer => m.print("restrict requires a pointer or reference ('{s}' is invalid)", .{msg.extra.str}),
         }
 
         m.end(lcs);
@@ -339,6 +347,9 @@ fn tagKind(diag: *Diagnostics, tag: Tag) Kind {
         .expected_integer_constant_expr,
         .multiple_storage_class,
         .static_assert_failure,
+        .expected_a_type,
+        .cannot_combine_spec,
+        .restrict_non_pointer,
         => .@"error",
 
         .to_match_paren,
@@ -348,6 +359,7 @@ fn tagKind(diag: *Diagnostics, tag: Tag) Kind {
         .unsupported_pragma => return diag.options.@"unsupported-pragma",
         .whitespace_after_macro_name => return diag.options.@"C99-extensions",
         .missing_type_specifier => return diag.options.@"implicit-int",
+        .duplicate_declspec => return diag.options.@"duplicate-decl-specifier",
     };
 
     if (kind == .@"error" and diag.fatalErrors)
