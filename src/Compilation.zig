@@ -15,13 +15,16 @@ pub const Error = error{
 gpa: Allocator,
 sources: std.StringArrayHashMap(Source),
 diag: Diagnostics,
-
+includeDirs: std.ArrayList([]const u8),
+systemIncludeDirs: std.ArrayList([]const u8),
 
 pub fn init(gpa: Allocator) Compilation {
     return .{
         .gpa = gpa,
         .sources = std.StringArrayHashMap(Source).init(gpa),
         .diag = Diagnostics.init(gpa),
+        .includeDirs = std.ArrayList([]const u8).init(gpa),
+        .systemIncludeDirs = std.ArrayList([]const u8).init(gpa),
     };
 }
 
@@ -33,6 +36,8 @@ pub fn deinit(compilation: *Compilation) void {
 
     compilation.sources.deinit();
     compilation.diag.deinit();
+    compilation.includeDirs.deinit();
+    compilation.systemIncludeDirs.deinit();
 }
 
 pub fn getSource(comp: *Compilation, id: Source.ID) Source {
@@ -67,11 +72,52 @@ pub fn addSource(compilation: *Compilation, path: []const u8) !Source {
 }
 
 pub fn findInclude(comp: *Compilation, token: Token, filename: []const u8, searchWord: bool) !Source {
-    _ = searchWord;
-    return comp.addSource(filename) catch return comp.fatal(token, "'{s}' not found", .{filename});
+    var pathBuff: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+    var fib = std.heap.FixedBufferAllocator.init(&pathBuff);
+
+    if (searchWord) blk: {
+        const source = comp.getSource(token.source);
+        const path = if (std.fs.path.dirname(source.path)) |some|
+            std.fs.path.join(fib.allocator(), &.{ some, filename }) catch break :blk
+        else
+            filename;
+
+        if (comp.addSource(path)) |some|
+            return some
+        else |err| switch (err) {
+            error.OutOfMemory => return error.OutOfMemory,
+            else => {},
+        }
+    }
+
+    for (comp.includeDirs.items) |dir| {
+        fib.end_index = 0;
+        const path = std.fs.path.join(fib.allocator(), &.{ dir, filename }) catch continue;
+
+        if (comp.addSource(path)) |some|
+            return some
+        else |err| switch (err) {
+            error.OutOfMemory => return error.OutOfMemory,
+            else => {},
+        }
+    }
+
+    for (comp.systemIncludeDirs.items) |dir| {
+        fib.end_index = 0;
+        const path = std.fs.path.join(fib.allocator(), &.{ dir, filename }) catch continue;
+
+        if (comp.addSource(path)) |some|
+            return some
+        else |err| switch (err) {
+            error.OutOfMemory => return error.OutOfMemory,
+            else => {},
+        }
+    }
+
+    return comp.fatal(token, "'{s}' not found", .{filename});
 }
 
-pub fn fatal(comp: *Compilation, token: Token, comptime fmt: []const u8, args :anytype) Error {
+pub fn fatal(comp: *Compilation, token: Token, comptime fmt: []const u8, args: anytype) Error {
     const source = comp.getSource(token.source);
     const lcs = source.lineColString(token.loc.start);
 
