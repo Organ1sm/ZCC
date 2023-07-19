@@ -363,15 +363,15 @@ pub const DeclSpec = struct {
     fn validateParam(d: DeclSpec, p: *Parser, ty: Type) Error!AST.Tag {
         switch (d.storageClass) {
             .none, .register => {},
-            .auto, .@"extern", .static, .typedef => |tokenIndex| try p.errTok(.invalid_storage_on_param, tokenIndex),
+            .auto, .@"extern", .static, .typedef => |tokenIndex| try p.errToken(.invalid_storage_on_param, tokenIndex),
         }
-        if (d.threadLocal) |tokenIndex| try p.errTok(.threadlocal_non_var, tokenIndex);
+        if (d.threadLocal) |tokenIndex| try p.errToken(.threadlocal_non_var, tokenIndex);
         if (ty.specifier != .Func) {
             if (d.@"inline") |tokenIndex| try p.errStr(.func_spec_non_func, tokenIndex, "inline");
             if (d.noreturn) |tokenIndex| try p.errStr(.func_spec_non_func, tokenIndex, "_Noreturn");
         }
 
-        return if (d.storageClass == .register) .register_param_decl else .param_decl;
+        return if (d.storageClass == .register) .RegisterParamDecl else .ParamDecl;
     }
 };
 
@@ -795,7 +795,73 @@ fn pointer(p: *Parser, ty: *Type) Error!bool {
 /// paramDecls : paramDecl (',' paramDecl)* (',' '...')
 /// paramDecl : declSpec (declarator | abstractDeclarator)
 fn paramDecls(p: *Parser) Error!?[]NodeIndex {
-    return p.todo("paramDecls");
+    var params = NodeList.init(p.pp.compilation.gpa);
+    defer params.deinit();
+
+    while (true) {
+        const paramDeclSpec = if (try p.declSpecifier()) |some|
+            some
+        else if (params.items.len == 0)
+            return null
+        else blk: {
+            var d: DeclSpec = .{};
+            var spec: TypeBuilder = .None;
+
+            try spec.finish(p, &d.type);
+
+            break :blk d;
+        };
+
+        var nameToken = p.index;
+        var paramType = (try p.abstractDeclarator(paramDeclSpec.type)) orelse
+            if (try p.declarator(paramDeclSpec.type, false)) |some|
+        blk: {
+            nameToken = some.name;
+            break :blk some.type;
+        } else paramDeclSpec.type;
+
+        if (paramType.specifier == .Func) {
+            // params declared as functions are converted to function pointers
+            const elemType = try p.arena.create(Type);
+            elemType.* = paramType;
+            paramType = Type{
+                .specifier = .Pointer,
+                .data = .{ .subType = elemType },
+            };
+        } else if (paramType.specifier == .Void) {
+            // validate void parameters
+            if (params.items.len == 0) {
+                if (p.getCurrToken().id != .RParen) {
+                    try p.err(.void_only_param);
+                    if (paramType.qual.any())
+                        try p.err(.void_param_qualified);
+
+                    return error.ParsingFailed;
+                }
+
+                return &[0]NodeIndex{};
+            }
+
+            try p.err(.void_must_be_first_param);
+
+            return error.ParsingFailed;
+        }
+
+        const param = try p.addNode(.{
+            .tag = try paramDeclSpec.validateParam(p, paramType),
+            .type = paramType,
+            .first = nameToken,
+        });
+        try params.append(param);
+
+        if (p.eat(.Comma) == null)
+            break;
+
+        if (p.getCurrToken().id == .Ellipsis)
+            break;
+    }
+
+    return try p.arena.dupe(NodeIndex, params.items);
 }
 
 /// typeName : specQual+ abstractDeclarator
@@ -822,7 +888,6 @@ fn abstractDeclarator(p: *Parser, baseType: Type) Error!?Type {
         try p.expectClosing(lp, .RParen);
 
         var d = Declarator{ .name = 0, .type = ty };
-
         try p.directDeclarator(&d, false);
 
         return p.todo("combine ty and res");

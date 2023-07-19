@@ -13,7 +13,7 @@ arena: std.heap.ArenaAllocator,
 generated: []const u8,
 tokens: []const Token,
 nodes: Node.List.Slice,
-rootDecls:[]const NodeIndex,
+rootDecls: []const NodeIndex,
 
 pub fn deinit(tree: *AST) void {
     tree.comp.gpa.free(tree.rootDecls);
@@ -76,6 +76,10 @@ pub const Tag = enum(u8) {
     NoreturnInlineFnDef,
     NoreturnInlineExternFnDef,
     NoreturnInlineStaticFnDef,
+
+    // parameter
+    ParamDecl,
+    RegisterParamDecl,
 
     // variable declaration
     Var,
@@ -304,6 +308,8 @@ pub const Tag = enum(u8) {
             .InlineStaticFnDef,
             => Declaration.FnDef,
 
+            .ParamDecl, .RegisterParamDecl => Declaration.Param,
+
             .Var,
             .AutoVar,
             .ExternVar,
@@ -402,6 +408,11 @@ pub const Declaration = struct {
         },
         isInline: bool,
         body: NodeIndex,
+    };
+
+    pub const Param = struct {
+        nameToken: TokenIndex,
+        ty: Type,
     };
 
     pub const Var = struct {
@@ -523,3 +534,14 @@ pub const Expression = struct {
         @"else": NodeIndex,
     };
 };
+
+pub fn dump(tree: AST) void {
+    for (tree.rootDecls) |i|
+        tree.dumpDeclaration(i, 0);
+}
+
+fn dumpDeclaration(tree: AST, node: NodeIndex, level: u32) void {
+    std.debug.print("{s: >[1]} ", .{ @tagName(tree.nodes.items(.tag)[node]), level });
+    tree.nodes.items(.type)[node].dump(tree);
+    std.debug.print("\n", .{});
+}

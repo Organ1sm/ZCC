@@ -106,12 +106,12 @@ pub fn dump(ty: Type, tree: Tree) void {
         },
 
         .Func, .VarArgsFunc => {
-            ty.data.func.return_type.dump(tree);
+            ty.data.func.returnType.dump(tree);
             std.debug.print(" (", .{});
             for (ty.data.func.paramTypes, 0..) |param, i| {
                 if (i != 0) std.debug.print(", ", .{});
 
-                tree.nodes.items(.ty)[param].dump(tree);
+                tree.nodes.items(.type)[param].dump(tree);
 
                 const nameToken = tree.nodes.items(.first)[param];
                 if (tree.tokens[nameToken].id == .Identifier) {
@@ -119,7 +119,7 @@ pub fn dump(ty: Type, tree: Tree) void {
                 }
             }
             if (ty.specifier == .VarArgsFunc) {
-                if (ty.data.func.param_types.len != 0)
+                if (ty.data.func.paramTypes.len != 0)
                     std.debug.print(", ", .{});
                 std.debug.print("...", .{});
             }
@@ -139,7 +139,7 @@ pub fn dump(ty: Type, tree: Tree) void {
             std.debug.print(")", .{});
         },
         else => {
-            std.debug.print("{s}", .{Builder.fromType(ty).str()});
+            std.debug.print("{s}", .{Builder.fromType(ty).toString()});
             ty.qual.dump();
         },
     }
