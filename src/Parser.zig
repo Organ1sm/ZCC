@@ -7,21 +7,25 @@ const Lexer = @import("Lexer.zig");
 const Preprocessor = @import("Preprocessor.zig");
 const AST = @import("AST.zig");
 const Type = @import("Type.zig");
+const TypeBuilder = @import("TypeBuilder.zig").Builder;
 const Diagnostics = @import("Diagnostics.zig");
 
 const TokenIndex = AST.TokenIndex;
-const TagIndex = AST.TagIndex;
+const NodeIndex = AST.NodeIndex;
 const Allocator = std.mem.Allocator;
-const Qualifiers = Type.Qualifiers;
+const NodeList = std.ArrayList(NodeIndex);
 
 const Parser = @This();
-const Error = Compilation.Error || error{ParsingFailed};
+pub const Error = Compilation.Error || error{ParsingFailed};
 
 pp: *Preprocessor,
+arena: Allocator,
 tokens: []const Token,
+nodes: AST.Node.List = .{},
 index: u32 = 0,
 wantConst: bool = false,
 inFunc: bool = false,
+currDeclList: *NodeList,
 
 pub const Result = union(enum) {
     none,
@@ -34,7 +38,7 @@ pub const Result = union(enum) {
     i32: i32,
     u64: u64,
     i64: i64,
-    node: void,
+    node: NodeIndex,
 
     pub fn getBool(res: Result) bool {
         return switch (res) {
@@ -54,20 +58,20 @@ pub const Result = union(enum) {
     }
 };
 
-fn eat(p: *Parser, id: TokenType) ?Token {
+fn eat(p: *Parser, id: TokenType) ?TokenIndex {
     const token = p.getCurrToken();
 
     if (token.id == id) {
-        p.index += 1;
-        return token;
+        defer p.index += 1;
+        return p.index;
     } else return null;
 }
 
-fn getCurrToken(p: *Parser) Token {
+pub fn getCurrToken(p: *Parser) Token {
     return p.tokens[p.index];
 }
 
-fn expectToken(p: *Parser, id: TokenType) Error!Token {
+fn expectToken(p: *Parser, id: TokenType) Error!TokenIndex {
     const token = p.getCurrToken();
     if (token.id != id) {
         try p.pp.compilation.diag.add(.{
@@ -86,15 +90,16 @@ fn expectToken(p: *Parser, id: TokenType) Error!Token {
         });
         return error.ParsingFailed;
     }
-    p.index += 1;
 
-    return token;
+    defer p.index += 1;
+    return p.index;
 }
 
-fn expectClosing(p: *Parser, opening: Token, id: TokenType) Error!void {
+fn expectClosing(p: *Parser, opening: TokenIndex, id: TokenType) Error!void {
     _ = p.expectToken(id) catch |e|
         {
         if (e == error.ParsingFailed) {
+            const oToken = p.tokens[opening];
             try p.pp.compilation.diag.add(.{
                 .tag = switch (id) {
                     .RParen => .to_match_paren,
@@ -102,8 +107,8 @@ fn expectClosing(p: *Parser, opening: Token, id: TokenType) Error!void {
                     .RBracket => .to_match_bracket,
                     else => unreachable,
                 },
-                .sourceId = opening.source,
-                .locStart = opening.loc.start,
+                .sourceId = oToken.source,
+                .locStart = oToken.loc.start,
             });
         }
 
@@ -111,9 +116,22 @@ fn expectClosing(p: *Parser, opening: Token, id: TokenType) Error!void {
     };
 }
 
-fn err(p: *Parser, tag: Diagnostics.Tag) Compilation.Error!void {
-    const token = p.getCurrToken();
+pub fn errStr(p: *Parser, tag: Diagnostics.Tag, index: TokenIndex, str: []const u8) Compilation.Error!void {
+    @setCold(true);
+    const token = p.tokens[index];
 
+    try p.pp.compilation.diag.add(.{
+        .tag = tag,
+        .sourceId = token.source,
+        .locStart = token.loc.start,
+        .extra = .{ .str = str },
+    });
+}
+
+fn errToken(p: *Parser, tag: Diagnostics.Tag, index: TokenIndex) Compilation.Error!void {
+    @setCold(true);
+
+    const token = p.tokens[index];
     try p.pp.compilation.diag.add(.{
         .tag = tag,
         .sourceId = token.source,
@@ -121,20 +139,40 @@ fn err(p: *Parser, tag: Diagnostics.Tag) Compilation.Error!void {
     });
 }
 
-fn todo(p: *Parser, msg: []const u8) Error {
-    const token = p.getCurrToken();
+pub fn err(p: *Parser, tag: Diagnostics.Tag) Compilation.Error!void {
+    @setCold(true);
+    return p.errToken(tag, p.index);
+}
 
-    try p.pp.compilation.diag.add(.{
-        .tag = .todo,
-        .sourceId = token.source,
-        .locStart = token.loc.start,
-        .extra = .{ .str = msg },
-    });
-
+pub fn todo(p: *Parser, msg: []const u8) Error {
+    try p.errStr(.todo, p.index, msg);
     return error.ParsingFailed;
 }
 
-pub fn parse(p: *Parser) Compilation.Error!void {
+fn addNode(p: *Parser, node: AST.Node) Allocator.Error!NodeIndex {
+    const res = p.nodes.len;
+    try p.nodes.append(p.pp.compilation.gpa, node);
+
+    return @intCast(res);
+}
+
+/// root : (decl | staticAssert)*
+pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
+    var rootDecls = NodeList.init(pp.compilation.gpa);
+    defer rootDecls.deinit();
+
+    var arena = std.heap.ArenaAllocator.init(pp.compilation.gpa);
+    errdefer arena.deinit();
+
+    var p = Parser{
+        .pp = pp,
+        .arena = arena.allocator(),
+        .tokens = pp.tokens.items,
+        .currDeclList = &rootDecls,
+    };
+
+    errdefer p.nodes.deinit(pp.compilation.gpa);
+
     while (p.eat(.Eof) != null) {
         if (p.staticAssert() catch |er| switch (er) {
             error.ParsingFailed => {
@@ -155,6 +193,15 @@ pub fn parse(p: *Parser) Compilation.Error!void {
         try p.err(.expected_external_decl);
         p.index += 1;
     }
+
+    return AST{
+        .comp = pp.compilation,
+        .tokens = pp.tokens.items,
+        .arena = arena,
+        .generated = pp.generated.items,
+        .nodes = p.nodes.toOwnedSlice(),
+        .rootDecls = try rootDecls.toOwnedSlice(),
+    };
 }
 
 fn nextExternDecl(p: *Parser) void {
@@ -207,31 +254,27 @@ fn nextExternDecl(p: *Parser) void {
 ///  | declSpec declarator declarator* compoundStmt
 ///  | staticAssert
 fn decl(p: *Parser) Error!bool {
-    const firstToken = p.getCurrToken();
-    const declSpecRaw = try p.declSpecifier();
-
-    if (declSpecRaw == null) {
+    const firstTokenIndex = p.index;
+    var declSpec = if (try p.declSpecifier()) |some|
+        some
+    else blk: {
         if (p.inFunc) return false;
 
-        switch (firstToken.id) {
+        switch (p.tokens[firstTokenIndex].id) {
             .Asterisk, .LParen, .Identifier => {},
             else => return false,
         }
-    }
 
-    const declSpec = declSpecRaw orelse blk: {
         var d = DeclSpec{};
-        try p.defaultTypeSpec(&d.type);
+        var spec: TypeBuilder = .None;
+        try spec.finish(p, &d.type);
+
         break :blk d;
     };
 
-    const first = (try p.initDeclarator(declSpec.type)) orelse {
+    const first = (try p.initDeclarator(&declSpec, true)) orelse {
         // TODO: return if enum, struct union
-        try p.pp.compilation.diag.add(.{
-            .tag = .missing_declaration,
-            .sourceId = firstToken.source,
-            .locStart = firstToken.loc.start,
-        });
+        try p.errToken(.missing_declaration, firstTokenIndex);
 
         // eat ';'
         _ = try p.expectToken(.Semicolon);
@@ -240,10 +283,9 @@ fn decl(p: *Parser) Error!bool {
     };
 
     // check for funtion definition
-    if (first.d.type.specifier == .Function and first.initializer == null and (p.getCurrToken().id == .LBrace or first.k_r_function)) {
-        if (!p.inFunc) {
+    if (first.d.funcDeclarator and first.initializer == 0 and (p.getCurrToken().id == .LBrace or first.d.oldTypeFunc)) {
+        if (!p.inFunc)
             try p.err(.func_not_in_root);
-        }
 
         const inFunc = p.inFunc;
         p.inFunc = true;
@@ -253,8 +295,15 @@ fn decl(p: *Parser) Error!bool {
         return true;
     }
 
+    const node = try p.addNode(.{
+        .type = first.d.type,
+        .tag = .FnProto,
+        .first = first.d.name,
+    });
+    try p.currDeclList.append(node);
+
     while (p.eat(.Comma)) |_| {
-        _ = (try p.initDeclarator(declSpec.type)) orelse {
+        _ = (try p.initDeclarator(&declSpec, false)) orelse {
             try p.err(.expected_ident_or_l_paren);
         };
     }
@@ -265,9 +314,7 @@ fn decl(p: *Parser) Error!bool {
 
 /// staticAssert : keyword_static_assert '(' constExpr ',' STRING_LITERAL ')' ';'
 fn staticAssert(p: *Parser) Error!bool {
-    const curToken = p.getCurrToken();
-    if (p.eat(.KeywordStaticAssert) == null)
-        return false;
+    const curToken = p.eat(.KeywordStaticAssert) orelse return false;
 
     const lParen = try p.expectToken(.LParen);
     const start = p.index;
@@ -291,14 +338,8 @@ fn staticAssert(p: *Parser) Error!bool {
         }
 
         try msg.appendSlice("' ");
-        try msg.appendSlice(p.pp.tokSlice(str));
-
-        try p.pp.compilation.diag.add(.{
-            .tag = .static_assert_failure,
-            .sourceId = curToken.source,
-            .locStart = curToken.loc.start,
-            .extra = .{ .str = try p.pp.arena.allocator().dupe(u8, msg.items) },
-        });
+        try msg.appendSlice(p.pp.tokSlice(p.tokens[str]));
+        try p.errStr(.static_assert_failure, curToken, try p.pp.arena.allocator().dupe(u8, msg.items));
     }
 
     return true;
@@ -306,18 +347,32 @@ fn staticAssert(p: *Parser) Error!bool {
 
 pub const DeclSpec = struct {
     storageClass: union(enum) {
-        auto,
-        @"extern",
-        register,
-        static,
-        typedef,
+        auto: TokenIndex,
+        @"extern": TokenIndex,
+        register: TokenIndex,
+        static: TokenIndex,
+        typedef: TokenIndex,
         none,
     } = .none,
 
-    threadLocal: bool = false,
-    @"inline": bool = false,
-    noreturn: bool = false,
-    type: Type = .{},
+    threadLocal: ?TokenIndex = null,
+    @"inline": ?TokenIndex = null,
+    noreturn: ?TokenIndex = null,
+    type: Type = .{ .specifier = undefined },
+
+    fn validateParam(d: DeclSpec, p: *Parser, ty: Type) Error!AST.Tag {
+        switch (d.storageClass) {
+            .none, .register => {},
+            .auto, .@"extern", .static, .typedef => |tokenIndex| try p.errTok(.invalid_storage_on_param, tokenIndex),
+        }
+        if (d.threadLocal) |tokenIndex| try p.errTok(.threadlocal_non_var, tokenIndex);
+        if (ty.specifier != .Func) {
+            if (d.@"inline") |tokenIndex| try p.errStr(.func_spec_non_func, tokenIndex, "inline");
+            if (d.noreturn) |tokenIndex| try p.errStr(.func_spec_non_func, tokenIndex, "_Noreturn");
+        }
+
+        return if (d.storageClass == .register) .register_param_decl else .param_decl;
+    }
 };
 
 /// declSpec: (storageClassSpec | typeSpec | typeQual | funcSpec | alignSpec)+
@@ -329,14 +384,13 @@ pub const DeclSpec = struct {
 ///  | keyword_auto
 ///  | keyword_register
 fn declSpecifier(p: *Parser) Error!?DeclSpec {
-    var d = DeclSpec{};
-    var any: bool = false;
+    var d: DeclSpec = .{};
+    var spec: TypeBuilder = .None;
 
+    const start = p.index;
     while (true) {
-        if (try p.typeSpec(&d.type)) {
-            any = true;
+        if (try p.typeSpec(&spec, &d.type))
             continue;
-        }
 
         const token = p.getCurrToken();
         switch (token.id) {
@@ -347,70 +401,75 @@ fn declSpecifier(p: *Parser) Error!?DeclSpec {
             .KeywordRegister,
             => {
                 if (d.storageClass != .none) {
-                    try p.pp.compilation.diag.add(.{
-                        .tag = .multiple_storage_class,
-                        .sourceId = token.source,
-                        .locStart = token.loc.start,
-                        .extra = .{ .str = @tagName(d.storageClass) },
-                    });
+                    try p.errStr(.multiple_storage_class, p.index, @tagName(d.storageClass));
 
                     return error.ParsingFailed;
                 }
 
                 switch (token.id) {
-                    .KeywordTypedef => d.storageClass = .typedef,
-                    .KeywordExtern => d.storageClass = .@"extern",
-                    .KeywordStatic => d.storageClass = .static,
-                    .KeywordAuto => d.storageClass = .auto,
-                    .KeywordRegister => d.storageClass = .register,
+                    .KeywordTypedef => d.storageClass = .{ .typedef = p.index },
+                    .KeywordExtern => d.storageClass = .{ .@"extern" = p.index },
+                    .KeywordStatic => d.storageClass = .{ .static = p.index },
+                    .KeywordAuto => d.storageClass = .{ .auto = p.index },
+                    .KeywordRegister => d.storageClass = .{ .register = p.index },
                     else => unreachable,
                 }
             },
 
             .KeywordThreadLocal => {
-                if (d.threadLocal) {
-                    try p.err(.duplicate_declspec);
+                if (d.threadLocal != null) {
+                    try p.errStr(.duplicate_declspec, p.index, "_Thread_local");
                 }
 
-                d.threadLocal = true;
+                d.threadLocal = p.index;
             },
 
             .KeywordInline => {
-                if (d.@"inline") {
-                    try p.err(.duplicate_declspec);
+                if (d.@"inline" != null) {
+                    try p.errStr(.duplicate_declspec, p.index, "inline");
                 }
 
-                d.@"inline" = true;
+                d.@"inline" = p.index;
             },
 
             .KeywordNoreturn => {
-                if (d.noreturn) {
-                    try p.err(.duplicate_declspec);
+                if (d.noreturn != null) {
+                    try p.errStr(.duplicate_declspec, p.index, "_Noreturn");
                 }
 
-                d.noreturn = true;
+                d.noreturn = null;
             },
             else => break,
         }
 
         p.index += 1;
-        any = true;
     }
 
-    if (!any) return null;
-    try p.defaultTypeSpec(&d.type);
+    if (p.index == start) return null;
+    try spec.finish(p, &d.type);
+
     return d;
 }
 
-const InitDeclarator = struct { d: Declarator, initializer: ?TagIndex, k_r_function: bool = false };
+const InitDeclarator = struct { d: Declarator, initializer: NodeIndex = 0 };
+
 /// initDeclarator : declarator ('=' initializer)?
-fn initDeclarator(p: *Parser, baseType: Type) Error!?InitDeclarator {
-    const d = (try p.declarator(baseType)) orelse return null;
+fn initDeclarator(p: *Parser, declSpec: *DeclSpec, allowOldStyle: bool) Error!?InitDeclarator {
+    var init = InitDeclarator{ .d = (try p.declarator(declSpec.type, allowOldStyle)) orelse return null };
+
     if (p.eat(.Equal)) |_| {
-        return p.todo("initializer");
+        if (declSpec.storageClass == .typedef or declSpec.type.specifier == .Func)
+            try p.err(.illegal_initializer);
+
+        if (declSpec.storageClass == .@"extern") {
+            try p.err(.extern_initializer);
+            declSpec.storageClass = .none;
+        }
+
+        init.initializer = try p.initializer();
     }
 
-    return InitDeclarator{ .d = d, .initializer = null };
+    return init;
 }
 
 /// typeSpec
@@ -431,241 +490,129 @@ fn initDeclarator(p: *Parser, baseType: Type) Error!?InitDeclarator {
 ///  | typedef  // IDENTIFIER
 /// atomicTypeSpec : keyword_atomic '(' typeName ')'
 /// alignSpec : keyword_alignas '(' typeName ')'
-fn typeSpec(p: *Parser, ty: *Type) Error!bool {
-    var any = false;
-
+fn typeSpec(p: *Parser, ty: *TypeBuilder, completeType: *Type) Error!bool {
+    const start = p.index;
     while (true) {
-        if (try p.typeQual(ty)) {
-            any = true;
+        if (try p.typeQual(completeType)) {
             continue;
         }
 
         const token = p.getCurrToken();
         switch (token.id) {
-            .KeywordVoid => {
-                if (ty.specifier != .None) {
-                    return p.cannotCombineSpec(ty.specifier);
-                }
-
-                ty.specifier = .Void;
-            },
-
-            .KeywordBool => {
-                if (ty.specifier != .None) {
-                    return p.cannotCombineSpec(ty.specifier);
-                }
-                ty.specifier = .Bool;
-            },
-
-            .KeywordChar => switch (ty.specifier) {
-                .None => ty.specifier = .Char,
-                .Unsigned => ty.specifier = .UChar,
-                .Signed => ty.specifier = .SChar,
-                else => return p.cannotCombineSpec(ty.specifier),
-            },
-
-            .KeywordShort => switch (ty.specifier) {
-                .None, .Signed => ty.specifier = .Short,
-                .Unsigned => ty.specifier = .UShort,
-                .UShort, .Short => try p.duplicateSpecifier("short"),
-                else => return p.cannotCombineSpec(ty.specifier),
-            },
-
-            .KeywordInt => switch (ty.specifier) {
-                .None, .Signed => ty.specifier = .Int,
-                .Unsigned => ty.specifier = .UInt,
-
-                .UShort,
-                .Long,
-                .ULong,
-                .LongLong,
-                .ULongLong,
-                => {}, // TODO warn duplicate int specifier
-
-                .Int, .UInt => try p.duplicateSpecifier("int"),
-                else => return p.cannotCombineSpec(ty.specifier),
-            },
-            .KeywordLong => switch (ty.specifier) {
-                .None, .Signed => ty.specifier = .Long,
-                .Long => ty.specifier = .LongLong,
-                .Unsigned => ty.specifier = .ULong,
-                .ULong => ty.specifier = .ULongLong,
-                .LongLong, .ULongLong => try p.duplicateSpecifier("long"),
-                else => return p.cannotCombineSpec(ty.specifier),
-            },
-
-            .KeywordSigned => switch (ty.specifier) {
-                .None => ty.specifier = .Signed,
-                .Char => ty.specifier = .SChar,
-
-                .Int,
-                .Short,
-                .Long,
-                .LongLong,
-                => {}, // TODO warn duplicate signed specifier
-
-                .SChar, .Signed => try p.duplicateSpecifier("signed"),
-                else => return p.cannotCombineSpec(ty.specifier),
-            },
-
-            .KeywordUnsigned => switch (ty.specifier) {
-                .None => ty.specifier = .Unsigned,
-                .Char => ty.specifier = .UChar,
-
-                .UInt,
-                .UShort,
-                .ULong,
-                .ULongLong,
-                => {}, // TODO warn duplicate unsigned specifier
-
-                .UChar, .Unsigned => try p.duplicateSpecifier("unsigned"),
-                else => return p.cannotCombineSpec(ty.specifier),
-            },
-            .KeywordFloat => switch (ty.specifier) {
-                .LongDouble,
-                .ComplexLongDouble,
-                .ComplexLong,
-                .ComplexDouble,
-                .Double,
-                => {}, // TODO warn duplicate float
-
-                .Long => ty.specifier = .LongDouble, // TODO long float is invalid
-                .None => ty.specifier = .Float,
-                .Complex => ty.specifier = .ComplexFloat,
-
-                .ComplexFloat, .Float => try p.duplicateSpecifier("float"),
-                else => return p.cannotCombineSpec(ty.specifier),
-            },
-
-            .KeywordDouble => switch (ty.specifier) {
-                .Long => ty.specifier = .LongDouble,
-                .ComplexLong => ty.specifier = .ComplexLongDouble,
-                .ComplexFloat, .Complex => ty.specifier = .ComplexDouble,
-                .Float, .None => ty.specifier = .Double,
-
-                .LongDouble,
-                .ComplexLongDouble,
-                .ComplexDouble,
-                .Double,
-                => try p.duplicateSpecifier("double"),
-                else => return p.cannotCombineSpec(ty.specifier),
-            },
-
-            .KeywordComplex => switch (ty.specifier) {
-                .Long => ty.specifier = .ComplexLong,
-                .Float => ty.specifier = .ComplexFloat,
-                .Double => ty.specifier = .ComplexDouble,
-                .LongDouble => ty.specifier = .ComplexLongDouble,
-                .None => ty.specifier = .Complex,
-
-                .ComplexLong,
-                .Complex,
-                .ComplexFloat,
-                .ComplexDouble,
-                .ComplexLongDouble,
-                => try p.duplicateSpecifier("_Complex"),
-                else => return p.cannotCombineSpec(ty.specifier),
-            },
+            .KeywordVoid => try ty.combine(p, .Void),
+            .KeywordBool => try ty.combine(p, .Bool),
+            .KeywordChar => try ty.combine(p, .Char),
+            .KeywordShort => try ty.combine(p, .Short),
+            .KeywordInt => try ty.combine(p, .Int),
+            .KeywordLong => try ty.combine(p, .Long),
+            .KeywordSigned => try ty.combine(p, .Signed),
+            .KeywordUnsigned => try ty.combine(p, .Unsigned),
+            .KeywordFloat => try ty.combine(p, .Float),
+            .KeywordDouble => try ty.combine(p, .Double),
+            .KeywordComplex => try ty.combine(p, .Complex),
 
             .KeywordAtomic => return p.todo("atomic types"),
-            .KeywordEnum => return p.todo("enum types"),
-            .KeywordStruct => return p.todo("struct types"),
-            .KeywordUnion => return p.todo("union types"),
+            .KeywordEnum => {
+                try ty.combine(p, .{ .Enum = 0 });
+                ty.Enum = try p.enumSpec();
+                continue;
+            },
+
+            .KeywordStruct => {
+                try ty.combine(p, .{ .Struct = 0 });
+                ty.Struct = try p.recordSpec();
+                continue;
+            },
+
+            .KeywordUnion => {
+                try ty.combine(p, .{ .Union = 0 });
+                ty.Union = try p.recordSpec();
+                continue;
+            },
+
             .KeywordAlignas => {
-                if (ty.alignment != 0)
-                    try p.duplicateSpecifier("alignment");
+                if (completeType.alignment != 0)
+                    try p.errStr(.duplicate_declspec, p.index, "alignment");
 
                 const lp = try p.expectToken(.LParen);
-                const otherType = try p.typeName();
-                try p.expectClosing(lp, .RParen);
+                const otherType = (try p.typeName()) orelse {
+                    try p.err(.expected_type);
+                    return error.ParsingFailed;
+                };
 
-                ty.alignment = otherType.alignment;
+                try p.expectClosing(lp, .RParen);
+                completeType.alignment = otherType.alignment;
+            },
+
+            .Identifier => {
+                if (true) break; // TODO check for typdef identifier
+                const typedefType: Type = undefined;
+                const new_spec = Type.Builder.fromType(typedefType);
+
+                ty.combine(new_spec) catch |e| switch (e) {
+                    error.OutOfMemory => return e,
+                    error.ParsingFailed, error.FatalError => {
+                        // TODO use typedef decl token
+                        try p.errStr(.typedef_is, p.index, new_spec.str());
+                        return e;
+                    },
+                };
             },
             else => break,
         }
 
         p.index += 1;
-        any = true;
     }
 
-    return any;
+    return p.index != start;
 }
 
-fn cannotCombineSpec(p: *Parser, spec: Type.Specifier) Error {
-    const token = p.getCurrToken();
-    try p.pp.compilation.diag.add(.{
-        .tag = .cannot_combine_spec,
-        .sourceId = token.source,
-        .locStart = token.loc.start,
-        .extra = .{ .str = spec.toString() },
-    });
-
-    return error.ParsingFailed;
-}
-
-fn duplicateSpecifier(p: *Parser, spec: []const u8) Error!void {
-    const token = p.getCurrToken();
-    try p.pp.compilation.diag.add(.{
-        .tag = .duplicate_declspec,
-        .sourceId = token.source,
-        .locStart = token.loc.start,
-        .extra = .{ .str = spec },
-    });
-}
-
-fn defaultTypeSpec(p: *Parser, ty: *Type) Error!void {
-    switch (ty.specifier) {
-        .None => {
-            ty.specifier = .Int;
-            try p.err(.missing_type_specifier);
-        },
-        .Unsigned => ty.specifier = .UInt,
-        .Signed => ty.specifier = .Int,
-        .Complex => ty.specifier = .ComplexDouble,
-        .ComplexLong => ty.specifier = .ComplexLongDouble,
-        else => {},
-    }
-}
 /// recordSpec
 ///  : (keyword_struct | keyword_union) IDENTIFIER? { recordDecl* }
 ///  | (keyword_struct | keyword_union) IDENTIFIER
-fn recordSpec(p: *Parser) Error!TagIndex {
+fn recordSpec(p: *Parser) Error!NodeIndex {
+    _ = p.getCurrToken();
+    p.index += 1;
+
     return p.todo("recordSpec");
 }
 /// recordDecl
 ///  : specQual+ (recordDeclarator (',' recordDeclarator)*)? ;
 ///  | staticAssert
-fn recordDecl(p: *Parser) Error!TagIndex {
+fn recordDecl(p: *Parser) Error!NodeIndex {
     return p.todo("recordDecl");
 }
 
 /// recordDeclarator : declarator (':' constExpr)?
-fn recordDeclarator(p: *Parser) Error!TagIndex {
+fn recordDeclarator(p: *Parser) Error!NodeIndex {
     return p.todo("recordDeclarator");
 }
 
 // specQual : typeSpec | typeQual | alignSpec
-fn specQual(p: *Parser) Error!Type {
-    var ty = Type{};
-    if (try p.typeSpec(&ty)) {
-        try p.defaultTypeSpec(&ty);
+fn specQual(p: *Parser) Error!?Type {
+    var spec: TypeBuilder = .None;
+    var ty: Type = .{ .specifier = undefined };
+
+    if (try p.typeSpec(&spec, &ty)) {
+        try spec.finish(p, &ty);
         return ty;
     }
 
-    try p.err(.expected_type);
-
-    return error.ParsingFailed;
+    return null;
 }
 
 /// enumSpec
 ///  : keyword_enum IDENTIFIER? { enumerator (',' enumerator)? ',') }
 ///  | keyword_enum IDENTIFIER
-fn enumSpec(p: *Parser) Error!TagIndex {
+fn enumSpec(p: *Parser) Error!NodeIndex {
+    _ = p.getCurrToken();
+    p.index += 1;
+
     return p.todo("enumSpec");
 }
 
 /// enumerator : IDENTIFIER ('=' constExpr)
-fn enumerator(p: *Parser) Error!TagIndex {
+fn enumerator(p: *Parser) Error!NodeIndex {
     return p.todo("enumerator");
 }
 
@@ -683,31 +630,31 @@ fn typeQual(p: *Parser, ty: *Type) Error!bool {
                         .tag = .restrict_non_pointer,
                         .sourceId = token.source,
                         .locStart = token.loc.start,
-                        .extra = .{ .str = ty.specifier.toString() },
+                        .extra = .{ .str = TypeBuilder.fromType(ty.*).toString() },
                     })
                 else if (ty.qual.restrict)
-                    try p.duplicateSpecifier("restrict")
+                    try p.errStr(.duplicate_declspec, p.index, "restrict")
                 else
                     ty.qual.restrict = true;
             },
 
             .KeywordConst => {
                 if (ty.qual.@"const")
-                    try p.duplicateSpecifier("const")
+                    try p.errStr(.duplicate_declspec, p.index, "const")
                 else
                     ty.qual.@"const" = true;
             },
 
             .KeywordVolatile => {
                 if (ty.qual.@"volatile")
-                    try p.duplicateSpecifier("volatile")
+                    try p.errStr(.duplicate_declspec, p.index, "volatile")
                 else
                     ty.qual.@"volatile" = true;
             },
 
             .KeywordAtomic => {
                 if (ty.qual.atomic)
-                    try p.duplicateSpecifier("atomic")
+                    try p.errStr(.duplicate_declspec, p.index, "atomic")
                 else
                     ty.qual.atomic = true;
             },
@@ -721,25 +668,35 @@ fn typeQual(p: *Parser, ty: *Type) Error!bool {
     return any;
 }
 
-const Declarator = struct { name: []const u8, type: Type };
+const Declarator = struct {
+    name: TokenIndex, //
+    type: Type,
+    funcDeclarator: bool = false,
+    oldTypeFunc: bool = false,
+};
+
 /// declarator: pointer? directDeclarator
-fn declarator(p: *Parser, baseType: Type) Error!?Declarator {
+fn declarator(p: *Parser, baseType: Type, allowOldStyle: bool) Error!?Declarator {
     var ty = baseType;
     const sawPtr = try p.pointer(&ty);
 
-    if (p.eat(.Identifier)) |some| {
-        const name = p.pp.tokSlice(some);
-        try p.directDeclarator(&ty, false);
-
-        return Declarator{ .name = name, .type = ty };
+    if (p.eat(.Identifier)) |name| {
+        var d = Declarator{ .name = name, .type = ty };
+        try p.directDeclarator(&d, allowOldStyle);
+        return d;
     } else if (p.eat(.LParen)) |lp| {
-        const res = try p.declarator(ty);
+        const res = try p.declarator(ty, allowOldStyle);
 
         try p.expectClosing(lp, .RParen);
-        var unwrapped = res orelse return null;
+        const unwrapped = res orelse {
+            try p.err(.expected_ident_or_l_paren);
+            return null;
+        };
 
-        try p.directDeclarator(&unwrapped.type, false);
-        return unwrapped;
+        var d = Declarator{ .name = unwrapped.name, .type = ty };
+        try p.directDeclarator(&d, allowOldStyle);
+
+        return p.todo("combine ty and res");
     }
 
     if (!sawPtr) {
@@ -763,68 +720,144 @@ fn declarator(p: *Parser, baseType: Type) Error!?Declarator {
 ///  | '[' typeQual+ keyword_static assignExpr ']'
 ///  | '[' '*' ']'
 ///  | '(' paramDecls? ')'
-fn directDeclarator(p: *Parser, ty: *Type, isAbstract: bool) Error!void {
-    _ = ty;
-    _ = isAbstract;
+/// if declarator.name == 0 then the declarator is assumed to be abstract
+fn directDeclarator(p: *Parser, d: *Declarator, allowOldStyle: bool) Error!void {
+    _ = allowOldStyle;
     while (true) {
-        if (p.eat(.LBracket)) |_| {
+        if (p.eat(.LBracket)) |lb| {
+            try p.expectClosing(lb, .RBracket);
             return p.todo("array byte");
-        } else if (p.eat(.LParen)) |_| {
-            return p.todo("function type");
+        } else if (p.eat(.LParen)) |lp| {
+            d.funcDeclarator = true;
+            if (p.getCurrToken().id == .Ellipsis) {
+                try p.err(.param_before_var_args);
+                return error.ParsingFailed;
+            }
+
+            if (try p.paramDecls()) |params| {
+                var func = try p.arena.create(Type.Function);
+                func.* = .{
+                    .returnType = d.type,
+                    .paramTypes = params,
+                };
+
+                var funcType = Type{
+                    .specifier = .Func,
+                    .data = .{ .func = func },
+                };
+
+                if (p.eat(.Ellipsis)) |_| {
+                    funcType.specifier = .VarArgsFunc;
+                }
+
+                try p.expectClosing(lp, .RParen);
+                d.type = funcType;
+                continue;
+            }
+
+            if (p.eat(.RParen)) |_| {
+                var func = try p.arena.create(Type.Function);
+                func.* = .{
+                    .returnType = d.type,
+                    .paramTypes = &.{},
+                };
+
+                var funcType = Type{
+                    .specifier = .VarArgsFunc,
+                    .data = .{ .func = func },
+                };
+                d.type = funcType;
+                continue;
+            }
+
+            return p.todo("old style function type");
         } else return;
     }
 }
 
 /// pointer : '*' typeQual* pointer?
 fn pointer(p: *Parser, ty: *Type) Error!bool {
-    _ = ty;
-    if (p.eat(.Asterisk) == null)
-        return false;
+    const start = p.index;
+    while (p.eat(.Asterisk)) |_| {
+        const elemType = try p.arena.create(Type);
+        elemType.* = ty.*;
+        var ptrType = Type{
+            .specifier = .Pointer,
+            .data = .{ .subType = elemType },
+        };
+        _ = try p.typeQual(&ptrType);
+        ty.* = ptrType;
+    }
 
-    return p.todo("pointer");
+    return start != p.index;
 }
 
 /// paramDecls : paramDecl (',' paramDecl)* (',' '...')
 /// paramDecl : declSpec (declarator | abstractDeclarator)
-fn paramDecls(p: *Parser) Error!TagIndex {
+fn paramDecls(p: *Parser) Error!?[]NodeIndex {
     return p.todo("paramDecls");
 }
 
 /// typeName : specQual+ abstractDeclarator
-fn typeName(p: *Parser) Error!Type {
-    _ = try p.specQual();
-
-    return p.todo("typeName");
+fn typeName(p: *Parser) Error!?Type {
+    var ty = (try p.specQual()) orelse return null;
+    return (try p.abstractDeclarator(ty)) orelse return ty;
 }
 
 /// abstractDeclarator
 /// : pointer
 /// : pointer? ('(' abstractDeclarator ')')? directAbstractDeclarator*
-fn abstractDeclarator(p: *Parser) Error!TagIndex {
-    return p.todo("abstractDeclarator");
+fn abstractDeclarator(p: *Parser, baseType: Type) Error!?Type {
+    const start = p.index;
+    var ty = baseType;
+    _ = try p.pointer(&ty);
+
+    if (p.eat(.LParen)) |lp| blk: {
+        const res = (try p.abstractDeclarator(ty)) orelse {
+            p.index -= 1;
+            break :blk;
+        };
+        _ = res;
+
+        try p.expectClosing(lp, .RParen);
+
+        var d = Declarator{ .name = 0, .type = ty };
+
+        try p.directDeclarator(&d, false);
+
+        return p.todo("combine ty and res");
+    }
+
+    var d = Declarator{ .name = 0, .type = ty };
+    try p.directDeclarator(&d, false);
+
+    if (p.index == start)
+        return null;
+
+    return ty;
 }
 
 /// initializer
 ///  : assignExpr
 ///  | '{' initializerItems '}'
-fn initializer(p: *Parser) Error!TagIndex {
+fn initializer(p: *Parser) Error!NodeIndex {
     return p.todo("initializer");
 }
 
 /// initializerItems : designation? initializer  (',' designation? initializer)? ','?
-fn initializerItems(p: *Parser) Error!TagIndex {
+fn initializerItems(p: *Parser) Error!NodeIndex {
     return p.todo("initializerItems");
 }
 
 /// designation : designator+ '='
-fn designation(p: *Parser) Error!TagIndex {
+fn designation(p: *Parser) Error!NodeIndex {
     return p.todo("designation");
 }
 
 /// designator
 ///  : '[' constExpr ']'
 ///  | '.' identifier
-fn designator(p: *Parser) Error!TagIndex {
+fn designator(p: *Parser) Error!NodeIndex {
     return p.todo("designator");
 }
 
@@ -843,7 +876,7 @@ fn designator(p: *Parser) Error!TagIndex {
 ///  | keyword_break ';'
 ///  | keyword_return expr? ';'
 ///  | expr? ';'
-fn stmt(p: *Parser) Error!TagIndex {
+fn stmt(p: *Parser) Error!NodeIndex {
     return p.todo("stmt");
 }
 
@@ -851,12 +884,12 @@ fn stmt(p: *Parser) Error!TagIndex {
 /// : IDENTIFIER ':' stmt
 /// | keyword_case constExpr ':' stmt
 /// | keyword_default ':' stmt
-fn labeledStmt(p: *Parser) Error!TagIndex {
+fn labeledStmt(p: *Parser) Error!NodeIndex {
     return p.todo("labeledStmt");
 }
 
 /// compoundStmt : '{' ( decl | staticAssert |stmt)* '}'
-fn compoundStmt(p: *Parser) Error!TagIndex {
+fn compoundStmt(p: *Parser) Error!NodeIndex {
     return p.todo("compoundStmt");
 }
 
@@ -1064,7 +1097,11 @@ fn mulExpr(p: *Parser) Error!Result {
 /// castExpr :  ( '(' type_name ')' )* unaryExpr
 fn castExpr(p: *Parser) Error!Result {
     while (p.eat(.LParen)) |lp| {
-        _ = try p.typeName();
+        const ty = (try p.typeName()) orelse {
+            p.index += 1;
+            break;
+        };
+        _ = ty;
         try p.expectClosing(lp, .RParen);
 
         return p.todo("cast");

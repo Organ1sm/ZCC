@@ -135,11 +135,6 @@ fn handleArgs(gpa: std.mem.Allocator, args: [][]const u8) !void {
         var pp = Preprocessor.init(&comp);
         defer pp.deinit();
 
-        var parser = Parser{
-            .pp = &pp,
-            .tokens = pp.tokens.items,
-        };
-
         pp.preprocess(source) catch |e| switch (e) {
             error.OutOfMemory => return error.OutOfMemory,
             error.FatalError => {
@@ -149,10 +144,18 @@ fn handleArgs(gpa: std.mem.Allocator, args: [][]const u8) !void {
             },
         };
 
-        parser.parse() catch |e| switch (e) {
+        var tree = Parser.parse(&pp) catch |e| switch (e) {
             error.OutOfMemory => return error.OutOfMemory,
-            error.FatalError => {},
+            error.FatalError => {
+                comp.renderErrors();
+                comp.diag.list.items.len = 0;
+                continue;
+            },
         };
+        defer tree.deinit();
+
+        comp.renderErrors();
+        comp.diag.list.items.len = 0;
     }
 }
 
