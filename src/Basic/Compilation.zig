@@ -1,8 +1,8 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const Source = @import("Source.zig");
-const Diagnostics = @import("Diagnostics.zig");
-const Token = @import("Token.zig").Token;
+const Diagnostics = @import("../Basic/Diagnostics.zig");
+const Token = @import("../Lexer/Token.zig").Token;
 
 const Allocator = std.mem.Allocator;
 

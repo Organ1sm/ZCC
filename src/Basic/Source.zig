@@ -22,7 +22,7 @@ pub const ID = enum(u16) {
     pub fn markGenerated(id: *ID) void {
         id.* = @as(ID, @enumFromInt((@intFromEnum(id.*) | ID.generatedBit)));
     }
-};
+}; 
 
 path: []const u8,
 buffer: []const u8,

@@ -1,7 +1,7 @@
 const std = @import("std");
-const TokenType = @import("TokenType.zig").TokenType;
+const TokenType = @import("../Basic/TokenType.zig").TokenType;
 const Token = @import("Token.zig").Token;
-const Source = @import("Source.zig");
+const Source = @import("../Basic/Source.zig");
 const Lexer = @This();
 
 buffer: []const u8 = undefined,

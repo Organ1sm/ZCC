@@ -1,15 +1,16 @@
 const std = @import("std");
-const Compilation = @import("Compilation.zig");
-const Source = @import("Source.zig");
-const Token = @import("Token.zig").Token;
-const TokenType = @import("TokenType.zig").TokenType;
-const Lexer = @import("Lexer.zig");
-const Preprocessor = @import("Preprocessor.zig");
-const AST = @import("AST.zig");
-const AstTag = @import("AstTag.zig").Tag;
-const Type = @import("Type.zig");
-const TypeBuilder = @import("TypeBuilder.zig").Builder;
-const Diagnostics = @import("Diagnostics.zig");
+const Compilation = @import("../Basic/Compilation.zig");
+const Source = @import("../Basic/Source.zig");
+const Token = @import("../Lexer/Token.zig").Token;
+const TokenType = @import("../Basic/TokenType.zig").TokenType;
+const Lexer = @import("../Lexer/Lexer.zig");
+const Preprocessor = @import("../Lexer/Preprocessor.zig");
+const AST = @import("../AST/AST.zig");
+const AstTag = @import("../AST/AstTag.zig").Tag;
+const Type = @import("../AST/Type.zig");
+const TypeBuilder = @import("../AST/TypeBuilder.zig").Builder;
+const Diagnostics = @import("../Basic/Diagnostics.zig");
+const DeclSpec = @import("../AST/DeclSpec.zig");
 
 const TokenIndex = AST.TokenIndex;
 const NodeIndex = AST.NodeIndex;
@@ -129,7 +130,7 @@ pub fn errStr(p: *Parser, tag: Diagnostics.Tag, index: TokenIndex, str: []const 
     });
 }
 
-fn errToken(p: *Parser, tag: Diagnostics.Tag, index: TokenIndex) Compilation.Error!void {
+pub fn errToken(p: *Parser, tag: Diagnostics.Tag, index: TokenIndex) Compilation.Error!void {
     @setCold(true);
 
     const token = p.tokens[index];
@@ -359,140 +360,6 @@ fn staticAssert(p: *Parser) Error!bool {
     return true;
 }
 
-pub const DeclSpec = struct {
-    storageClass: union(enum) {
-        auto: TokenIndex,
-        @"extern": TokenIndex,
-        register: TokenIndex,
-        static: TokenIndex,
-        typedef: TokenIndex,
-        none,
-    } = .none,
-
-    threadLocal: ?TokenIndex = null,
-    @"inline": ?TokenIndex = null,
-    noreturn: ?TokenIndex = null,
-    type: Type = .{ .specifier = undefined },
-
-    fn validateParam(d: DeclSpec, p: *Parser, ty: Type) Error!AstTag {
-        switch (d.storageClass) {
-            .none, .register => {},
-            .auto, .@"extern", .static, .typedef => |tokenIndex| try p.errToken(.invalid_storage_on_param, tokenIndex),
-        }
-        if (d.threadLocal) |tokenIndex| try p.errToken(.threadlocal_non_var, tokenIndex);
-        if (ty.specifier != .Func) {
-            if (d.@"inline") |tokenIndex| try p.errStr(.func_spec_non_func, tokenIndex, "inline");
-            if (d.noreturn) |tokenIndex| try p.errStr(.func_spec_non_func, tokenIndex, "_Noreturn");
-        }
-
-        return if (d.storageClass == .register) .RegisterParamDecl else .ParamDecl;
-    }
-
-    fn validateFnDef(d: DeclSpec, p: *Parser) Error!AstTag {
-        switch (d.storageClass) {
-            .none, //
-            .@"extern",
-            .static,
-            => {},
-
-            .auto, //
-            .register,
-            .typedef,
-            => |index| try p.errToken(.illegal_storage_on_func, index),
-        }
-
-        if (d.threadLocal) |index|
-            try p.errToken(.threadlocal_non_var, index);
-
-        const isStatic = d.storageClass == .static;
-        const isInline = d.@"inline" != null;
-        const isNoreturn = d.noreturn != null;
-
-        if (isStatic) {
-            if (isInline and isNoreturn)
-                return AstTag.NoreturnInlineStaticFnDef;
-            if (isInline)
-                return AstTag.InlineStaticFnDef;
-            if (isNoreturn)
-                return AstTag.NoreturnStaticFnDef;
-
-            return AstTag.StaticFnDef;
-        } else {
-            if (isInline and isNoreturn)
-                return AstTag.NoreturnInlineFnDef;
-            if (isInline)
-                return AstTag.InlineFnDef;
-            if (isNoreturn)
-                return AstTag.NoreturnFnDef;
-
-            return AstTag.StaticFnDef;
-        }
-    }
-    fn validate(d: DeclSpec, p: *Parser, ty: Type, hasInit: bool) Error!AstTag {
-        const isStatic = d.storageClass == .static;
-        if ((ty.specifier == .Func or ty.specifier == .VarArgsFunc) and d.storageClass != .typedef) {
-            switch (d.storageClass) {
-                .none, //
-                .@"extern",
-                .static,
-                => {},
-                .typedef => unreachable,
-
-                .auto, //
-                .register,
-                => |tokenIndex| try p.errToken(.illegal_storage_on_func, tokenIndex),
-            }
-            if (d.threadLocal) |tokenIndex|
-                try p.errToken(.threadlocal_non_var, tokenIndex);
-
-            const isInline = d.@"inline" != null;
-            const isNoreturn = d.noreturn != null;
-
-            if (isStatic) {
-                if (isInline and isNoreturn)
-                    return AstTag.NoreturnInlineStaticFnProto;
-                if (isInline)
-                    return AstTag.InlineStaticFnProto;
-                if (isNoreturn)
-                    return AstTag.NoreturnStaticFnProto;
-
-                return AstTag.StaticFnProto;
-            } else {
-                if (isInline and isNoreturn)
-                    return AstTag.NoreturnInlineFnProto;
-                if (isInline)
-                    return AstTag.InlineFnProto;
-                if (isNoreturn) return AstTag.NoreturnFnProto;
-
-                return AstTag.FnProto;
-            }
-        } else {
-            if (d.@"inline") |tokenIndex|
-                try p.errStr(.func_spec_non_func, tokenIndex, "inline");
-            if (d.noreturn) |tokenIndex|
-                try p.errStr(.func_spec_non_func, tokenIndex, "_Noreturn");
-            switch (d.storageClass) {
-                .auto, .register => if (!p.inFunc) try p.err(.illegal_storage_on_global),
-                .typedef => return AstTag.TypeDef,
-                else => {},
-            }
-
-            const isExtern = d.storageClass == .@"extern" and !hasInit;
-            if (d.threadLocal != null) {
-                if (isStatic)
-                    return AstTag.ThreadlocalStaticVar;
-                if (isExtern)
-                    return AstTag.ThreadlocalExternVar;
-
-                return AstTag.ThreadlocalVar;
-            } else {
-                if (isStatic) return AstTag.StaticVar;
-                if (isExtern) return AstTag.ExternVar;
-                return AstTag.Var;
-            }
-        }
-    }
-};
 
 /// declSpec: (storageClassSpec | typeSpec | typeQual | funcSpec | alignSpec)+
 /// storageClassSpec:

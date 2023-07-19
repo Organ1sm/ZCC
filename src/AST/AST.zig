@@ -1,7 +1,7 @@
 const std = @import("std");
 const Type = @import("Type.zig");
-const Token = @import("Token.zig").Token;
-const Compilation = @import("Compilation.zig");
+const Token = @import("../Lexer/Token.zig").Token;
+const Compilation = @import("../Basic/Compilation.zig");
 const AstTag = @import("AstTag.zig").Tag;
 
 const AST = @This();

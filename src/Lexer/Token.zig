@@ -1,6 +1,6 @@
 const std = @import("std");
-const TokenType = @import("TokenType.zig").TokenType;
-const Source = @import("Source.zig");
+const TokenType = @import("../Basic/TokenType.zig").TokenType;
+const Source = @import("../Basic/Source.zig");
 
 pub const Token = struct {
     id: TokenType,

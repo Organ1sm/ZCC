@@ -1,11 +1,11 @@
 const std = @import("std");
-const Token = @import("Token.zig").Token;
-const TokenType = @import("TokenType.zig").TokenType;
-const Compilation = @import("Compilation.zig");
-const Source = @import("Source.zig");
+const Token = @import("../Lexer/Token.zig").Token;
+const TokenType = @import("../Basic/TokenType.zig").TokenType;
+const Compilation = @import("../Basic/Compilation.zig");
+const Source = @import("../Basic/Source.zig");
 const Lexer = @import("Lexer.zig");
-const Parser = @import("Parser.zig");
-const Diagnostics = @import("Diagnostics.zig");
+const Parser = @import("../Parser/Parser.zig");
+const Diagnostics = @import("../Basic/Diagnostics.zig");
 
 const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;

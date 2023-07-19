@@ -1,5 +1,5 @@
 const std = @import("std");
-const Parser = @import("Parser.zig");
+const Parser = @import("../Parser/Parser.zig");
 const Tree = @import("AST.zig");
 const Builder = @import("TypeBuilder.zig").Builder;
 
