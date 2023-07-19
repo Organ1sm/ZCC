@@ -183,7 +183,7 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
             else => |e| return e,
         }) continue;
 
-        if (p.decl() catch |er| switch (er) {
+        if (p.parseDeclaration() catch |er| switch (er) {
             error.ParsingFailed => {
                 p.nextExternDecl();
                 continue;
@@ -254,7 +254,7 @@ fn nextExternDecl(p: *Parser) void {
 ///  : declSpec (initDeclarator ( ',' initDeclarator)*)? ';'
 ///  | declSpec declarator declarator* compoundStmt
 ///  | staticAssert
-fn decl(p: *Parser) Error!bool {
+fn parseDeclaration(p: *Parser) Error!bool {
     const firstTokenIndex = p.index;
     var declSpec = if (try p.declSpecifier()) |some|
         some
@@ -273,7 +273,7 @@ fn decl(p: *Parser) Error!bool {
         break :blk d;
     };
 
-    const first = (try p.initDeclarator(&declSpec, true)) orelse {
+    var initD = (try p.initDeclarator(&declSpec, true)) orelse {
         // TODO: return if enum, struct union
         try p.errToken(.missing_declaration, firstTokenIndex);
 
@@ -284,28 +284,41 @@ fn decl(p: *Parser) Error!bool {
     };
 
     // check for funtion definition
-    if (first.d.funcDeclarator and first.initializer == 0 and (p.getCurrToken().id == .LBrace or first.d.oldTypeFunc)) {
-        if (!p.inFunc)
+    if (initD.d.funcDeclarator and initD.initializer == 0 and (p.getCurrToken().id == .LBrace or initD.d.oldTypeFunc)) {
+        if (p.inFunc)
             try p.err(.func_not_in_root);
 
         const inFunc = p.inFunc;
         p.inFunc = true;
         defer p.inFunc = inFunc;
 
-        _ = try p.compoundStmt();
+        const body = try p.compoundStmt();
+        const node = try p.addNode(.{
+            .type = initD.d.type,
+            .tag = try declSpec.validateFnDef(p),
+            .first = initD.d.name,
+            .second = body.?,
+        });
+
+        try p.currDeclList.append(node);
+
         return true;
     }
 
-    const node = try p.addNode(.{
-        .type = first.d.type,
-        .tag = .FnProto,
-        .first = first.d.name,
-    });
-    try p.currDeclList.append(node);
+    while (true) {
+        const node = try p.addNode(.{
+            .type = initD.d.type,
+            .tag = try declSpec.validate(p, initD.d.type, initD.initializer != 0),
+            .first = initD.d.name,
+        });
+        try p.currDeclList.append(node);
 
-    while (p.eat(.Comma)) |_| {
-        _ = (try p.initDeclarator(&declSpec, false)) orelse {
+        if (p.eat(.Comma) == null)
+            break;
+
+        initD = (try p.initDeclarator(&declSpec, false)) orelse {
             try p.err(.expected_ident_or_l_paren);
+            continue;
         };
     }
 
@@ -374,6 +387,111 @@ pub const DeclSpec = struct {
 
         return if (d.storageClass == .register) .RegisterParamDecl else .ParamDecl;
     }
+
+    fn validateFnDef(d: DeclSpec, p: *Parser) Error!AstTag {
+        switch (d.storageClass) {
+            .none, //
+            .@"extern",
+            .static,
+            => {},
+
+            .auto, //
+            .register,
+            .typedef,
+            => |index| try p.errToken(.illegal_storage_on_func, index),
+        }
+
+        if (d.threadLocal) |index|
+            try p.errToken(.threadlocal_non_var, index);
+
+        const isStatic = d.storageClass == .static;
+        const isInline = d.@"inline" != null;
+        const isNoreturn = d.noreturn != null;
+
+        if (isStatic) {
+            if (isInline and isNoreturn)
+                return AstTag.NoreturnInlineStaticFnDef;
+            if (isInline)
+                return AstTag.InlineStaticFnDef;
+            if (isNoreturn)
+                return AstTag.NoreturnStaticFnDef;
+
+            return AstTag.StaticFnDef;
+        } else {
+            if (isInline and isNoreturn)
+                return AstTag.NoreturnInlineFnDef;
+            if (isInline)
+                return AstTag.InlineFnDef;
+            if (isNoreturn)
+                return AstTag.NoreturnFnDef;
+
+            return AstTag.StaticFnDef;
+        }
+    }
+    fn validate(d: DeclSpec, p: *Parser, ty: Type, hasInit: bool) Error!AstTag {
+        const isStatic = d.storageClass == .static;
+        if ((ty.specifier == .Func or ty.specifier == .VarArgsFunc) and d.storageClass != .typedef) {
+            switch (d.storageClass) {
+                .none, //
+                .@"extern",
+                .static,
+                => {},
+                .typedef => unreachable,
+
+                .auto, //
+                .register,
+                => |tokenIndex| try p.errToken(.illegal_storage_on_func, tokenIndex),
+            }
+            if (d.threadLocal) |tokenIndex|
+                try p.errToken(.threadlocal_non_var, tokenIndex);
+
+            const isInline = d.@"inline" != null;
+            const isNoreturn = d.noreturn != null;
+
+            if (isStatic) {
+                if (isInline and isNoreturn)
+                    return AstTag.NoreturnInlineStaticFnProto;
+                if (isInline)
+                    return AstTag.InlineStaticFnProto;
+                if (isNoreturn)
+                    return AstTag.NoreturnStaticFnProto;
+
+                return AstTag.StaticFnProto;
+            } else {
+                if (isInline and isNoreturn)
+                    return AstTag.NoreturnInlineFnProto;
+                if (isInline)
+                    return AstTag.InlineFnProto;
+                if (isNoreturn) return AstTag.NoreturnFnProto;
+
+                return AstTag.FnProto;
+            }
+        } else {
+            if (d.@"inline") |tokenIndex|
+                try p.errStr(.func_spec_non_func, tokenIndex, "inline");
+            if (d.noreturn) |tokenIndex|
+                try p.errStr(.func_spec_non_func, tokenIndex, "_Noreturn");
+            switch (d.storageClass) {
+                .auto, .register => if (!p.inFunc) try p.err(.illegal_storage_on_global),
+                .typedef => return AstTag.TypeDef,
+                else => {},
+            }
+
+            const isExtern = d.storageClass == .@"extern" and !hasInit;
+            if (d.threadLocal != null) {
+                if (isStatic)
+                    return AstTag.ThreadlocalStaticVar;
+                if (isExtern)
+                    return AstTag.ThreadlocalExternVar;
+
+                return AstTag.ThreadlocalVar;
+            } else {
+                if (isStatic) return AstTag.StaticVar;
+                if (isExtern) return AstTag.ExternVar;
+                return AstTag.Var;
+            }
+        }
+    }
 };
 
 /// declSpec: (storageClassSpec | typeSpec | typeQual | funcSpec | alignSpec)+
@@ -407,6 +525,17 @@ fn declSpecifier(p: *Parser) Error!?DeclSpec {
                     return error.ParsingFailed;
                 }
 
+                if (d.threadLocal != null) {
+                    switch (token.id) {
+                        .KeywordTypedef,
+                        .KeywordAuto,
+                        .KeywordRegister,
+                        => try p.errStr(.cannot_combine_spec, p.index, token.id.lexeMe().?),
+
+                        else => {},
+                    }
+                }
+
                 switch (token.id) {
                     .KeywordTypedef => d.storageClass = .{ .typedef = p.index },
                     .KeywordExtern => d.storageClass = .{ .@"extern" = p.index },
@@ -420,6 +549,11 @@ fn declSpecifier(p: *Parser) Error!?DeclSpec {
             .KeywordThreadLocal => {
                 if (d.threadLocal != null) {
                     try p.errStr(.duplicate_declspec, p.index, "_Thread_local");
+                }
+
+                switch (d.storageClass) {
+                    .@"extern", .none, .static => {},
+                    else => try p.errStr(.cannot_combine_spec, p.index, @tagName(d.storageClass)),
                 }
 
                 d.threadLocal = p.index;
@@ -821,7 +955,7 @@ fn paramDecls(p: *Parser) Error!?[]NodeIndex {
             break :blk some.type;
         } else paramDeclSpec.type;
 
-        if (paramType.specifier == .Func) {
+        if (paramType.specifier == .Func or paramType.specifier == .VarArgsFunc) {
             // params declared as functions are converted to function pointers
             const elemType = try p.arena.create(Type);
             elemType.* = paramType;
@@ -943,7 +1077,11 @@ fn designator(p: *Parser) Error!NodeIndex {
 ///  | keyword_return expr? ';'
 ///  | expr? ';'
 fn stmt(p: *Parser) Error!NodeIndex {
-    return p.todo("stmt");
+    if (try p.compoundStmt()) |some|
+        return some;
+
+    try p.err(.expected_stmt);
+    return error.ParsingFailed;
 }
 
 /// labeledStmt
@@ -955,8 +1093,105 @@ fn labeledStmt(p: *Parser) Error!NodeIndex {
 }
 
 /// compoundStmt : '{' ( decl | staticAssert |stmt)* '}'
-fn compoundStmt(p: *Parser) Error!NodeIndex {
-    return p.todo("compoundStmt");
+fn compoundStmt(p: *Parser) Error!?NodeIndex {
+    _ = p.eat(.LBrace) orelse return null;
+
+    var statements = NodeList.init(p.pp.compilation.gpa);
+    defer statements.deinit();
+
+    const savedDS = p.currDeclList;
+    defer p.currDeclList = savedDS;
+    p.currDeclList = &statements;
+
+    while (p.eat(.RBrace) == null) {
+        if (p.staticAssert() catch |er| switch (er) {
+            error.ParsingFailed => {
+                p.nextStmt();
+                continue;
+            },
+            else => |e| return e,
+        }) continue;
+
+        if (p.parseDeclaration() catch |er| switch (er) {
+            error.ParsingFailed => {
+                p.nextStmt();
+                continue;
+            },
+            else => |e| return e,
+        }) continue;
+
+        const s = p.stmt() catch |er| switch (er) {
+            error.ParsingFailed => {
+                p.nextStmt();
+                continue;
+            },
+            else => |e| return e,
+        };
+
+        try statements.append(s);
+    }
+
+    return try p.addNode(.{
+        .tag = AstTag.CompoundStmt,
+        .type = .{ .specifier = .Void },
+    });
+}
+
+fn nextStmt(p: *Parser) void {
+    var parens: u32 = 0;
+    while (p.index < p.tokens.len) : (p.index += 1) {
+        switch (p.getCurrToken().id) {
+            .LParen, .LBrace, .LBracket => parens += 1,
+            .RParen, .RBracket => if (parens != 0) {
+                parens -= 1;
+            },
+
+            .RBrace => if (parens == 0)
+                break
+            else {
+                parens -= 1;
+            },
+
+            .KeywordFor,
+            .KeywordWhile,
+            .KeywordDo,
+            .KeywordIf,
+            .KeywordGoto,
+            .KeywordSwitch,
+            .KeywordContinue,
+            .KeywordBreak,
+            .KeywordReturn,
+            .KeywordTypedef,
+            .KeywordExtern,
+            .KeywordStatic,
+            .KeywordAuto,
+            .KeywordRegister,
+            .KeywordThreadLocal,
+            .KeywordInline,
+            .KeywordNoreturn,
+            .KeywordVoid,
+            .KeywordBool,
+            .KeywordChar,
+            .KeywordShort,
+            .KeywordInt,
+            .KeywordLong,
+            .KeywordSigned,
+            .KeywordUnsigned,
+            .KeywordFloat,
+            .KeywordDouble,
+            .KeywordComplex,
+            .KeywordAtomic,
+            .KeywordEnum,
+            .KeywordStruct,
+            .KeywordUnion,
+            .KeywordAlignas,
+            .Identifier,
+            => if (parens == 0) return,
+            else => {},
+        }
+    }
+    // so  we can consume d eof
+    p.index -= 1;
 }
 
 //////////////////////

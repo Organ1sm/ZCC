@@ -10,30 +10,22 @@ pub const Tag = enum(u8) {
 
     // function prototype
     FnProto,
-    ExternFnProto,
     StaticFnProto,
     InlineFnProto,
-    InlineExternFnProto,
     InlineStaticFnProto,
     NoreturnFnProto,
-    NoreturnExternFnProto,
     NoreturnStaticFnProto,
     NoreturnInlineFnProto,
-    NoreturnInlineExternFnProto,
     NoreturnInlineStaticFnProto,
 
     // function definition
     FnDef,
-    ExternFnDef,
     StaticFnDef,
     InlineFnDef,
-    InlineExternFnDef,
     InlineStaticFnDef,
     NoreturnFnDef,
-    NoreturnExternFnDef,
     NoreturnStaticFnDef,
     NoreturnInlineFnDef,
-    NoreturnInlineExternFnDef,
     NoreturnInlineStaticFnDef,
 
     // parameter
@@ -42,15 +34,12 @@ pub const Tag = enum(u8) {
 
     // variable declaration
     Var,
-    AutoVar,
     ExternVar,
     StaticVar,
     RegisterVar,
     ThreadlocalVar,
-    ThreadlocalAutoVar,
     ThreadlocalExternVar,
     ThreadlocalStaticVar,
-    ThreadlocalRegisterVar,
 
     // typdef declaration
     TypeDef,

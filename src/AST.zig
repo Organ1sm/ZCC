@@ -48,11 +48,7 @@ pub const Declaration = struct {
     pub const FnProto = struct {
         name: []const u8,
         ty: Type,
-        storageClass: enum {
-            none,
-            static,
-            @"extern",
-        },
+        isStatic: bool,
         isInline: bool,
         definition: ?*FnDef,
     };
@@ -60,11 +56,7 @@ pub const Declaration = struct {
     pub const FnDef = struct {
         name: []const u8,
         ty: Type,
-        storageClass: enum {
-            none,
-            static,
-            @"extern",
-        },
+        isStatic: bool,
         isInline: bool,
         body: NodeIndex,
     };
@@ -79,7 +71,6 @@ pub const Declaration = struct {
         ty: Type,
         storageClass: enum {
             none,
-            auto,
             static,
             @"extern",
             register,
