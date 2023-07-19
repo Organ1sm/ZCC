@@ -423,6 +423,8 @@ fn expr(pp: *Preprocessor, lexer: *Lexer) Error!bool {
     var parser = Parser{
         .pp = pp,
         .tokens = pp.tokenBuffer.items,
+        .arena = pp.arena.allocator(),
+        .currDeclList = undefined,
     };
 
     const res = parser.constExpr() catch |e| switch (e) {

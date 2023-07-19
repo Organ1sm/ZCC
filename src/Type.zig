@@ -1,27 +1,54 @@
 const std = @import("std");
+const Parser = @import("Parser.zig");
+const Tree = @import("AST.zig");
+const Builder = @import("TypeBuilder.zig").Builder;
+
 const Type = @This();
 
-pub const Qualifiers = struct {
+const NodeIndex = @import("AST.zig").NodeIndex;
+
+pub const Qualifiers = packed struct {
     @"const": bool = false,
     atomic: bool = false,
     @"volatile": bool = false,
     restrict: bool = false,
+
+    pub fn any(quals: Qualifiers) bool {
+        return quals.@"const" or quals.restrict or quals.@"volatile" or quals.atomic;
+    }
+
+    pub fn dump(quals: Qualifiers) void {
+        if (quals.@"const") std.debug.print(" const", .{});
+        if (quals.atomic) std.debug.print(" _Atomic", .{});
+        if (quals.@"volatile") std.debug.print(" volatile", .{});
+        if (quals.restrict) std.debug.print(" restrict", .{});
+    }
+};
+pub const Function = struct {
+    returnType: Type,
+    paramTypes: []NodeIndex,
 };
 
-pub const Specifier = union(enum) {
-    // defaulted to int type
-    None,
+pub const Array = struct {
+    qual: Qualifiers,
+    len: u64,
+    static: bool,
+    elem: *Type,
+};
 
-    /// default to int
-    Unsigned,
-    Signed,
+data: union {
+    subType: *Type,
+    func: *Function,
+    array: *Array,
+    node: NodeIndex,
+    none: void,
+} = .{ .none = {} },
 
-    /// default to ComplexDouble
-    Complex,
+qual: Qualifiers = .{},
+specifier: Specifier,
+alignment: u32 = 0,
 
-    /// default to ComplexLongDouble
-    ComplexLong,
-
+pub const Specifier = enum {
     Void,
     Bool,
 
@@ -46,74 +73,74 @@ pub const Specifier = union(enum) {
     ComplexDouble,
     ComplexLongDouble,
 
-    Pointer: struct {
-        qual: Qualifiers,
-        elem: *Type,
-    },
+    // data.SubType
+    Pointer,
+    Atomic,
+    // data.func
+    Func,
+    VarArgsFunc,
 
-    Function: struct {
-        returnType: *Type,
-        paramTypes: []Type,
-    },
+    // data.array
+    Array,
+    StaticArray,
 
-    /// Decays to pointer
-    Array: struct {
-        len: u64,
-        static: bool,
-        elem: *Type,
-    },
-
-    incomplete_enum,
-    incomplete_struct,
-    incomplete_union,
-
-    typedef: *Type,
-    @"struct": Record,
-    @"union": Record,
-    @"enum": struct {},
-
-    pub const Record = struct {
-        fields: []Field,
-
-        pub const Field = struct {
-            type: Type,
-            name: []const u8,
-        };
-    };
-
-    pub fn toString(spec: Specifier) []const u8 {
-        return switch (spec) {
-            .None => unreachable,
-            .Unsigned => "unsigned",
-            .Signed => "signed",
-            .Complex => "_Complex",
-            .ComplexLong => "_Complex long",
-
-            .Void => "void",
-            .Bool => "_Bool",
-            .Char => "char",
-            .SChar => "signed char",
-            .UChar => "unsigned char",
-            .Short => "short",
-            .UShort => "unsigned short",
-            .Int => "int",
-            .UInt => "unsigned int",
-            .Long => "long",
-            .ULong => "unsigned long",
-            .LongLong => "long long",
-            .ULongLong => "unsigned long long",
-            .Float => "float",
-            .Double => "double",
-            .LongDouble => "long double",
-            .ComplexFloat => "_Complex float",
-            .ComplexDouble => "_Complex double",
-            .ComplexLongDouble => "_Complex long double",
-
-            else => "TODO Specifier string",
-        };
-    }
+    // data.node
+    Struct,
+    Union,
+    Enum,
 };
 
-qual: Qualifiers = .{},
-specifier: Specifier = .None,
-alignment: u32 = 0,
+pub fn dump(ty: Type, tree: Tree) void {
+    switch (ty.specifier) {
+        .Pointer => {
+            ty.data.subType.dump(tree);
+            std.debug.print("*", .{});
+            ty.qual.dump();
+        },
+
+        .Atomic => {
+            std.debug.print("_Atomic", .{});
+            ty.data.subType.dump(tree);
+            std.debug.print(")", .{});
+            ty.qual.dump();
+        },
+
+        .Func, .VarArgsFunc => {
+            ty.data.func.return_type.dump(tree);
+            std.debug.print(" (", .{});
+            for (ty.data.func.paramTypes, 0..) |param, i| {
+                if (i != 0) std.debug.print(", ", .{});
+
+                tree.nodes.items(.ty)[param].dump(tree);
+
+                const nameToken = tree.nodes.items(.first)[param];
+                if (tree.tokens[nameToken].id == .Identifier) {
+                    std.debug.print(" {s}", .{tree.tokSlice(nameToken)});
+                }
+            }
+            if (ty.specifier == .VarArgsFunc) {
+                if (ty.data.func.param_types.len != 0)
+                    std.debug.print(", ", .{});
+                std.debug.print("...", .{});
+            }
+            std.debug.print(")", .{});
+            ty.qual.dump();
+        },
+
+        .Array, .StaticArray => {
+            ty.data.array.elem.dump(tree);
+
+            std.debug.print("[{d}", .{ty.data.array.len});
+
+            ty.qual.dump();
+            if (ty.specifier == .StaticArray)
+                std.debug.print(" static", .{});
+
+            std.debug.print(")", .{});
+        },
+        else => {
+            std.debug.print("{s}", .{Builder.fromType(ty).str()});
+            ty.qual.dump();
+        },
+    }
+}

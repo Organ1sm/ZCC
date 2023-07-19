@@ -31,6 +31,7 @@ const Options = struct {
     @"implicit-int": Kind = .warning,
     @"duplicate-decl-specifier": Kind = .warning,
     @"miss-declaration": Kind = .warning,
+    @"extern-initializer": Kind = .warning,
 };
 
 pub const Tag = enum {
@@ -84,6 +85,17 @@ pub const Tag = enum {
     expected_ident_or_l_paren,
     missing_declaration,
     func_not_in_root,
+    illegal_initializer,
+    extern_initializer,
+    typedef_is,
+    type_is_invalid,
+    param_before_var_args,
+    void_only_param,
+    void_param_qualified,
+    void_must_be_first_param,
+    invalid_storage_on_param,
+    threadlocal_non_var,
+    func_spec_non_func,
 };
 
 list: std.ArrayList(Message),
@@ -306,6 +318,17 @@ pub fn render(comp: *Compilation) void {
             .expected_ident_or_l_paren => m.write("expected identifier or ')'"),
             .missing_declaration => m.write("declaration does not declare anything"),
             .func_not_in_root => m.write("function definition is not allowed here"),
+            .illegal_initializer => m.write("illegal initializer (only variables can be initialized)"),
+            .extern_initializer => m.write("extern variable has initializer"),
+            .typedef_is => m.print("typedef is '{s}'", .{msg.extra.str}),
+            .type_is_invalid => m.print("'{s}' is invalid", .{msg.extra.str}),
+            .param_before_var_args => m.write("ISO C requires a named parameter before '...'"),
+            .void_only_param => m.write("'void' must be the only parameter if specified"),
+            .void_param_qualified => m.write("'void' parameter cannot be qualified"),
+            .void_must_be_first_param => m.write("'void' must be the first parameter if specified"),
+            .invalid_storage_on_param => m.write("invalid storage class on function parameter"),
+            .threadlocal_non_var => m.write("_Thread_local only allowed on variables"),
+            .func_spec_non_func => m.print("'{s}' can only appear on functions", .{msg.extra.str}),
         }
 
         m.end(lcs);
@@ -366,12 +389,22 @@ fn tagKind(diag: *Diagnostics, tag: Tag) Kind {
         .expected_external_decl,
         .expected_ident_or_l_paren,
         .func_not_in_root,
+        .illegal_initializer,
+        .type_is_invalid,
+        .param_before_var_args,
+        .void_only_param,
+        .void_param_qualified,
+        .void_must_be_first_param,
+        .invalid_storage_on_param,
+        .threadlocal_non_var,
+        .func_spec_non_func,
         => .@"error",
 
         .to_match_paren,
         .to_match_brace,
         .to_match_bracket,
         .header_str_match,
+        .typedef_is,
         => .note,
 
         .unsupported_pragma => diag.options.@"unsupported-pragma",
@@ -379,6 +412,7 @@ fn tagKind(diag: *Diagnostics, tag: Tag) Kind {
         .missing_type_specifier => diag.options.@"implicit-int",
         .duplicate_declspec => diag.options.@"duplicate-decl-specifier",
         .missing_declaration => diag.options.@"miss-declaration",
+        .extern_initializer => diag.options.@"extern-initializer",
     };
 
     if (kind == .@"error" and diag.fatalErrors)
