@@ -6,6 +6,7 @@ const TokenType = @import("TokenType.zig").TokenType;
 const Lexer = @import("Lexer.zig");
 const Preprocessor = @import("Preprocessor.zig");
 const AST = @import("AST.zig");
+const AstTag = @import("AstTag.zig").Tag;
 const Type = @import("Type.zig");
 const TypeBuilder = @import("TypeBuilder.zig").Builder;
 const Diagnostics = @import("Diagnostics.zig");
@@ -360,7 +361,7 @@ pub const DeclSpec = struct {
     noreturn: ?TokenIndex = null,
     type: Type = .{ .specifier = undefined },
 
-    fn validateParam(d: DeclSpec, p: *Parser, ty: Type) Error!AST.Tag {
+    fn validateParam(d: DeclSpec, p: *Parser, ty: Type) Error!AstTag {
         switch (d.storageClass) {
             .none, .register => {},
             .auto, .@"extern", .static, .typedef => |tokenIndex| try p.errToken(.invalid_storage_on_param, tokenIndex),
