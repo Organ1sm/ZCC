@@ -1,6 +1,6 @@
 const Type = @import("Type.zig");
 const NodeIndex = @import("AST.zig").NodeIndex;
-const Parser = @import("Parser.zig");
+const Parser = @import("../Parser/Parser.zig");
 
 const TypeBuilder = @This();
 

@@ -1,10 +1,10 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-const Compilation = @import("Compilation.zig");
-const Source = @import("Source.zig");
-const Preprocessor = @import("Preprocessor.zig");
-const Parser = @import("Parser.zig");
+const Compilation = @import("Basic/Compilation.zig");
+const Source = @import("Basic/Source.zig");
+const Preprocessor = @import("Lexer/Preprocessor.zig");
+const Parser = @import("Parser/Parser.zig");
 
 var GeneralPurposeAllocator = std.heap.GeneralPurposeAllocator(.{}){};
 
@@ -77,7 +77,7 @@ fn handleArgs(gpa: std.mem.Allocator, args: [][]const u8) !void {
                     return comp.diag.fatalNoSrc("{s} when trying to print usage", .{@errorName(err)});
                 };
             } else if (std.mem.eql(u8, arg, "-v") or std.mem.eql(u8, arg, "--version")) {
-                return stdOut.writeAll(@import("Info.zig").VersionStr ++ "\n") catch |err| {
+                return stdOut.writeAll(@import("Basic/Info.zig").VersionStr ++ "\n") catch |err| {
                     return comp.diag.fatalNoSrc("{s} when trying to print version", .{@errorName(err)});
                 };
             } else if (std.mem.eql(u8, arg, "-fcolor-diagnostics")) {
@@ -162,10 +162,10 @@ fn handleArgs(gpa: std.mem.Allocator, args: [][]const u8) !void {
 }
 
 test "simple test" {
-    _ = @import("Lexer.zig");
-    _ = @import("Preprocessor.zig");
-    _ = @import("Source.zig");
-    _ = @import("Compilation.zig");
-    _ = @import("AST.zig");
-    _ = @import("Type.zig");
+    _ = @import("Lexer/Lexer.zig");
+    _ = @import("Lexer/Preprocessor.zig");
+    _ = @import("Basic/Source.zig");
+    _ = @import("Basic/Compilation.zig");
+    _ = @import("AST/AST.zig");
+    _ = @import("AST/Type.zig");
 }
