@@ -90,6 +90,19 @@ pub const Specifier = enum {
     Enum,
 };
 
+pub fn combine(inner: Type, outer: Type, p: *Parser) !Type {
+    switch (inner.specifier) {
+        .Pointer => {
+            var res = inner;
+            res.data.subType.* = outer;
+            return res;
+        },
+        .Array, .StaticArray => return p.todo("combine array"),
+        .Func, .VarArgsFunc => return p.todo("combine func"),
+        else => return outer,
+    }
+}
+
 pub fn dump(ty: Type, tree: Tree) void {
     switch (ty.specifier) {
         .Pointer => {

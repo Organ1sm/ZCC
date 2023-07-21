@@ -1,213 +1,223 @@
 const Type = @import("Type.zig");
+const TokenIndex = @import("AST.zig").TokenIndex;
 const NodeIndex = @import("AST.zig").NodeIndex;
 const Parser = @import("../Parser/Parser.zig");
 
 const TypeBuilder = @This();
 
-pub const Builder = union(enum) {
-    None,
-    Void,
-    Bool,
-    Char,
-    SChar,
-    UChar,
+pub const Builder = struct {
+    typedef: ?struct {
+        token: TokenIndex,
+        spec: []const u8,
+    } = null,
 
-    Unsigned,
-    Signed,
-    Short,
-    SShort,
-    UShort,
-    ShortInt,
-    SShortInt,
-    UShortInt,
-    Int,
-    SInt,
-    UInt,
-    Long,
-    SLong,
-    ULong,
-    LongInt,
-    SLongInt,
-    ULongInt,
-    LongLong,
-    SLongLong,
-    ULongLong,
-    LongLongInt,
-    SLongLongInt,
-    ULongLongInt,
+    kind: Kind = .None,
 
-    Float,
-    Double,
-    LongDouble,
-    Complex,
-    ComplexLong,
-    ComplexFloat,
-    ComplexDouble,
-    ComplexLongDouble,
+    pub const Kind = union(enum) {
+        None,
+        Void,
+        Bool,
+        Char,
+        SChar,
+        UChar,
 
-    Pointer: *Type,
-    Atomic: *Type,
-    Func: *Type.Function,
-    VarArgsFunc: *Type.Function,
-    Array: *Type.Array,
-    StaticArray: *Type.Array,
+        Unsigned,
+        Signed,
+        Short,
+        SShort,
+        UShort,
+        ShortInt,
+        SShortInt,
+        UShortInt,
+        Int,
+        SInt,
+        UInt,
+        Long,
+        SLong,
+        ULong,
+        LongInt,
+        SLongInt,
+        ULongInt,
+        LongLong,
+        SLongLong,
+        ULongLong,
+        LongLongInt,
+        SLongLongInt,
+        ULongLongInt,
 
-    Struct: NodeIndex,
-    Union: NodeIndex,
-    Enum: NodeIndex,
+        Float,
+        Double,
+        LongDouble,
+        Complex,
+        ComplexLong,
+        ComplexFloat,
+        ComplexDouble,
+        ComplexLongDouble,
 
-    pub fn toString(spec: Builder) []const u8 {
-        return switch (spec) {
-            Builder.None => unreachable,
+        Pointer: *Type,
+        Atomic: *Type,
+        Func: *Type.Function,
+        VarArgsFunc: *Type.Function,
+        Array: *Type.Array,
+        StaticArray: *Type.Array,
 
-            Builder.Void => "void",
-            Builder.Bool => "_Bool",
+        Struct: NodeIndex,
+        Union: NodeIndex,
+        Enum: NodeIndex,
 
-            Builder.Char => "char",
-            Builder.SChar => "signed char",
-            Builder.UChar => "unsigned char",
+        pub fn toString(spec: Kind) []const u8 {
+            return switch (spec) {
+                Kind.None => unreachable,
 
-            Builder.Unsigned => "unsigned",
-            Builder.Signed => "signed",
+                Kind.Void => "void",
+                Kind.Bool => "_Bool",
 
-            Builder.Short => "short",
-            Builder.UShort => "unsigned short",
-            Builder.SShort => "signed short",
+                Kind.Char => "char",
+                Kind.SChar => "signed char",
+                Kind.UChar => "unsigned char",
 
-            Builder.ShortInt => "short int",
-            Builder.SShortInt => "signed short int",
-            Builder.UShortInt => "unsigned short int",
-            Builder.Int => "int",
-            Builder.SInt => "signed int",
-            Builder.UInt => "unsigned int",
+                Kind.Unsigned => "unsigned",
+                Kind.Signed => "signed",
 
-            Builder.Long => "long",
-            Builder.SLong => "signed long",
-            Builder.ULong => "unsigned long",
-            Builder.LongInt => "long int",
-            Builder.SLongInt => "signed long int",
-            Builder.ULongInt => "unsigned long int",
-            Builder.LongLong => "long long",
-            Builder.SLongLong => "signed long long",
-            Builder.ULongLong => "unsigned long long",
-            Builder.LongLongInt => "long long int",
-            Builder.SLongLongInt => "signed long long int",
-            Builder.ULongLongInt => "unsigned long long int",
+                Kind.Short => "short",
+                Kind.UShort => "unsigned short",
+                Kind.SShort => "signed short",
 
-            Builder.Float => "float",
-            Builder.Double => "double",
-            Builder.LongDouble => "long double",
-            Builder.Complex => "_Complex",
-            Builder.ComplexFloat => "_Complex float",
-            Builder.ComplexLong => "_Complex long",
-            Builder.ComplexDouble => "_Complex double",
-            Builder.ComplexLongDouble => "_Complex long double",
+                Kind.ShortInt => "short int",
+                Kind.SShortInt => "signed short int",
+                Kind.UShortInt => "unsigned short int",
+                Kind.Int => "int",
+                Kind.SInt => "signed int",
+                Kind.UInt => "unsigned int",
 
-            Builder.Pointer => "pointer",
-            Builder.Atomic => "atomic",
-            Builder.Func, Builder.VarArgsFunc => "function",
-            Builder.Array, Builder.StaticArray => "array",
-            Builder.Struct => "struct",
-            Builder.Union => "union",
-            Builder.Enum => "enum",
-        };
-    }
+                Kind.Long => "long",
+                Kind.SLong => "signed long",
+                Kind.ULong => "unsigned long",
+                Kind.LongInt => "long int",
+                Kind.SLongInt => "signed long int",
+                Kind.ULongInt => "unsigned long int",
+                Kind.LongLong => "long long",
+                Kind.SLongLong => "signed long long",
+                Kind.ULongLong => "unsigned long long",
+                Kind.LongLongInt => "long long int",
+                Kind.SLongLongInt => "signed long long int",
+                Kind.ULongLongInt => "unsigned long long int",
+
+                Kind.Float => "float",
+                Kind.Double => "double",
+                Kind.LongDouble => "long double",
+                Kind.Complex => "_Complex",
+                Kind.ComplexFloat => "_Complex float",
+                Kind.ComplexLong => "_Complex long",
+                Kind.ComplexDouble => "_Complex double",
+                Kind.ComplexLongDouble => "_Complex long double",
+
+                Kind.Pointer => "pointer",
+                Kind.Atomic => "atomic",
+                Kind.Func, Kind.VarArgsFunc => "function",
+                Kind.Array, Kind.StaticArray => "array",
+                Kind.Struct => "struct",
+                Kind.Union => "union",
+                Kind.Enum => "enum",
+            };
+        }
+    };
 
     pub fn finish(spec: Builder, p: *Parser, ty: *Type) Parser.Error!void {
-        ty.specifier = switch (spec) {
-            Builder.None => {
+        ty.specifier = switch (spec.kind) {
+            Kind.None => {
                 ty.specifier = .Int;
                 return p.err(.missing_type_specifier);
             },
 
-            Builder.Void => .Void,
-            Builder.Bool => .Bool,
-            Builder.Char => .Char,
-            Builder.SChar => .SChar,
-            Builder.UChar => .UChar,
+            Kind.Void => .Void,
+            Kind.Bool => .Bool,
+            Kind.Char => .Char,
+            Kind.SChar => .SChar,
+            Kind.UChar => .UChar,
 
-            Builder.Unsigned => .UInt,
-            Builder.Signed => .Int,
+            Kind.Unsigned => .UInt,
+            Kind.Signed => .Int,
 
-            Builder.ShortInt, Builder.SShortInt, Builder.Short, Builder.SShort => .Short,
-            Builder.UShort, Builder.UShortInt => .UShort,
+            Kind.ShortInt, Kind.SShortInt, Kind.Short, Kind.SShort => .Short,
+            Kind.UShort, Kind.UShortInt => .UShort,
 
-            Builder.Int, .SInt => .Int,
-            Builder.UInt => .UInt,
+            Kind.Int, .SInt => .Int,
+            Kind.UInt => .UInt,
 
-            Builder.Long, Builder.SLong, Builder.LongInt, Builder.SLongInt => .Long,
-            Builder.ULong, Builder.ULongInt => .ULong,
+            Kind.Long, Kind.SLong, Kind.LongInt, Kind.SLongInt => .Long,
+            Kind.ULong, Kind.ULongInt => .ULong,
 
-            Builder.LongLong, Builder.SLongLong, Builder.LongLongInt, Builder.SLongLongInt => .LongLong,
-            Builder.ULongLong, Builder.ULongLongInt => .ULongLong,
+            Kind.LongLong, Kind.SLongLong, Kind.LongLongInt, Kind.SLongLongInt => .LongLong,
+            Kind.ULongLong, Kind.ULongLongInt => .ULongLong,
 
-            Builder.Float => .Float,
-            Builder.Double => .Double,
-            Builder.LongDouble => .LongDouble,
-            Builder.ComplexFloat => .ComplexFloat,
-            Builder.ComplexDouble => .ComplexDouble,
-            Builder.ComplexLongDouble => .ComplexLongDouble,
-            Builder.Complex, Builder.ComplexLong => {
+            Kind.Float => .Float,
+            Kind.Double => .Double,
+            Kind.LongDouble => .LongDouble,
+            Kind.ComplexFloat => .ComplexFloat,
+            Kind.ComplexDouble => .ComplexDouble,
+            Kind.ComplexLongDouble => .ComplexLongDouble,
+            Kind.Complex, Kind.ComplexLong => {
                 const token = p.getCurrToken();
                 try p.pp.compilation.diag.add(.{
                     .tag = .type_is_invalid,
                     .sourceId = token.source,
                     .locStart = token.loc.start,
-                    .extra = .{ .str = spec.toString() },
+                    .extra = .{ .str = spec.kind.toString() },
                 });
 
                 return error.ParsingFailed;
             },
 
-            Builder.Atomic => |data| {
+            Kind.Atomic => |data| {
                 ty.specifier = .Atomic;
                 ty.data = .{ .subType = data };
                 return;
             },
 
-            Builder.Pointer => |data| {
+            Kind.Pointer => |data| {
                 ty.specifier = .Pointer;
                 ty.data = .{ .subType = data };
                 return;
             },
 
-            Builder.Func => |data| {
+            Kind.Func => |data| {
                 ty.specifier = .Func;
                 ty.data = .{ .func = data };
                 return;
             },
 
-            Builder.VarArgsFunc => |data| {
+            Kind.VarArgsFunc => |data| {
                 ty.specifier = .VarArgsFunc;
                 ty.data = .{ .func = data };
                 return;
             },
 
-            Builder.Array => |data| {
+            Kind.Array => |data| {
                 ty.specifier = .Array;
                 ty.data = .{ .array = data };
                 return;
             },
 
-            Builder.StaticArray => |data| {
+            Kind.StaticArray => |data| {
                 ty.specifier = .StaticArray;
                 ty.data = .{ .array = data };
                 return;
             },
 
-            Builder.Struct => |data| {
+            Kind.Struct => |data| {
                 ty.specifier = .Struct;
                 ty.data = .{ .node = data };
                 return;
             },
 
-            Builder.Union => |data| {
+            Kind.Union => |data| {
                 ty.specifier = .Union;
                 ty.data = .{ .node = data };
                 return;
             },
 
-            Builder.Enum => |data| {
+            Kind.Enum => |data| {
                 ty.specifier = .Enum;
                 ty.data = .{ .node = data };
                 return;
@@ -215,171 +225,174 @@ pub const Builder = union(enum) {
         };
     }
 
-    pub fn cannotCombine(spec: *Builder, p: *Parser) Parser.Error {
+    pub fn cannotCombine(spec: Builder, p: *Parser) Parser.Error {
         const token = p.getCurrToken();
 
         try p.pp.compilation.diag.add(.{
             .tag = .cannot_combine_spec,
             .sourceId = token.source,
             .locStart = token.loc.start,
-            .extra = .{ .str = spec.toString() },
+            .extra = .{ .str = spec.kind.toString() },
         });
+
+        if (spec.typedef) |some|
+            try p.errStr(.spec_from_typedef, some.token, some.spec);
 
         return error.ParsingFailed;
     }
 
-    pub fn combine(spec: *Builder, p: *Parser, new: Builder) Parser.Error!void {
+    pub fn combine(spec: *Builder, p: *Parser, new: Kind) Parser.Error!void {
         switch (new) {
-            Builder.Void,
-            Builder.Bool,
-            Builder.Enum,
-            Builder.Struct,
-            Builder.Union,
-            Builder.Pointer,
-            Builder.Array,
-            Builder.StaticArray, //
-            Builder.Func,
-            Builder.VarArgsFunc,
-            => switch (spec.*) {
-                .None => spec.* = new,
+            Kind.Void,
+            Kind.Bool,
+            Kind.Enum,
+            Kind.Struct,
+            Kind.Union,
+            Kind.Pointer,
+            Kind.Array,
+            Kind.StaticArray, //
+            Kind.Func,
+            Kind.VarArgsFunc,
+            => switch (spec.kind) {
+                .None => spec.kind = new,
                 else => return spec.cannotCombine(p),
             },
 
-            Builder.Atomic => return p.todo("atomic type"),
-            Builder.Signed => spec.* = switch (spec.*) {
-                Builder.None => Builder.Signed,
-                Builder.Char => Builder.SChar,
-                Builder.Short => Builder.SShort,
-                Builder.ShortInt => Builder.SShortInt,
-                Builder.Int => Builder.SInt,
-                Builder.Long => Builder.SLong,
-                Builder.LongInt => Builder.SLongInt,
-                Builder.LongLong => Builder.SLongLong,
-                Builder.LongLongInt => Builder.SLongLongInt,
+            Kind.Atomic => return p.todo("atomic type"),
+            Kind.Signed => spec.kind = switch (spec.kind) {
+                Kind.None => Kind.Signed,
+                Kind.Char => Kind.SChar,
+                Kind.Short => Kind.SShort,
+                Kind.ShortInt => Kind.SShortInt,
+                Kind.Int => Kind.SInt,
+                Kind.Long => Kind.SLong,
+                Kind.LongInt => Kind.SLongInt,
+                Kind.LongLong => Kind.SLongLong,
+                Kind.LongLongInt => Kind.SLongLongInt,
 
-                Builder.SShort,
-                Builder.SShortInt,
-                Builder.SInt,
-                Builder.SLong,
-                Builder.SLongInt,
-                Builder.SLongLong,
-                Builder.SLongLongInt,
+                Kind.SShort,
+                Kind.SShortInt,
+                Kind.SInt,
+                Kind.SLong,
+                Kind.SLongInt,
+                Kind.SLongLong,
+                Kind.SLongLongInt,
                 => return p.errStr(.duplicate_declspec, p.index, "signed"),
 
                 else => return spec.cannotCombine(p),
             },
 
-            Builder.Unsigned => spec.* = switch (spec.*) {
-                Builder.None => Builder.Unsigned,
-                Builder.Char => Builder.UChar,
-                Builder.Short => Builder.UShort,
-                Builder.ShortInt => Builder.UShortInt,
-                Builder.Int => Builder.UInt,
-                Builder.Long => Builder.ULong,
-                Builder.LongInt => Builder.ULongInt,
-                Builder.LongLong => Builder.ULongLong,
-                Builder.LongLongInt => Builder.ULongLongInt,
+            Kind.Unsigned => spec.kind = switch (spec.kind) {
+                Kind.None => Kind.Unsigned,
+                Kind.Char => Kind.UChar,
+                Kind.Short => Kind.UShort,
+                Kind.ShortInt => Kind.UShortInt,
+                Kind.Int => Kind.UInt,
+                Kind.Long => Kind.ULong,
+                Kind.LongInt => Kind.ULongInt,
+                Kind.LongLong => Kind.ULongLong,
+                Kind.LongLongInt => Kind.ULongLongInt,
 
-                Builder.UShort,
-                Builder.UShortInt,
-                Builder.UInt,
-                Builder.ULong,
-                Builder.ULongInt,
-                Builder.ULongLong, //
-                Builder.ULongLongInt,
+                Kind.UShort,
+                Kind.UShortInt,
+                Kind.UInt,
+                Kind.ULong,
+                Kind.ULongInt,
+                Kind.ULongLong, //
+                Kind.ULongLongInt,
                 => return p.errStr(.duplicate_declspec, p.index, "unsigned"),
 
                 else => return spec.cannotCombine(p),
             },
 
-            Builder.Char => spec.* = switch (spec.*) {
-                Builder.None => Builder.Char,
-                Builder.Unsigned => Builder.UChar,
-                Builder.Signed => Builder.SChar,
-                Builder.Char, Builder.SChar, Builder.UChar => return p.errStr(.duplicate_declspec, p.index, "char"),
+            Kind.Char => spec.kind = switch (spec.kind) {
+                Kind.None => Kind.Char,
+                Kind.Unsigned => Kind.UChar,
+                Kind.Signed => Kind.SChar,
+                Kind.Char, Kind.SChar, Kind.UChar => return p.errStr(.duplicate_declspec, p.index, "char"),
 
                 else => return spec.cannotCombine(p),
             },
 
-            Builder.Int => spec.* = switch (spec.*) {
-                Builder.None => Builder.Int,
-                Builder.Signed => Builder.SInt,
-                Builder.Unsigned => Builder.UInt,
-                Builder.Short => Builder.ShortInt,
-                Builder.SShort => Builder.SShortInt,
-                Builder.UShort => Builder.UShortInt,
-                Builder.Long => Builder.LongInt,
-                Builder.SLong => Builder.SLongInt,
-                Builder.ULong => Builder.ULongInt,
-                Builder.LongLong => Builder.LongLongInt,
-                Builder.SLongLong => Builder.SLongLongInt,
-                Builder.ULongLong => Builder.ULongLongInt,
+            Kind.Int => spec.kind = switch (spec.kind) {
+                Kind.None => Kind.Int,
+                Kind.Signed => Kind.SInt,
+                Kind.Unsigned => Kind.UInt,
+                Kind.Short => Kind.ShortInt,
+                Kind.SShort => Kind.SShortInt,
+                Kind.UShort => Kind.UShortInt,
+                Kind.Long => Kind.LongInt,
+                Kind.SLong => Kind.SLongInt,
+                Kind.ULong => Kind.ULongInt,
+                Kind.LongLong => Kind.LongLongInt,
+                Kind.SLongLong => Kind.SLongLongInt,
+                Kind.ULongLong => Kind.ULongLongInt,
 
-                Builder.Int,
-                Builder.SInt,
-                Builder.UInt,
-                Builder.ShortInt,
-                Builder.SShortInt,
-                Builder.UShortInt,
-                Builder.LongInt,
-                Builder.SLongInt,
-                Builder.ULongInt,
-                Builder.LongLongInt,
-                Builder.SLongLongInt,
-                Builder.ULongLongInt,
+                Kind.Int,
+                Kind.SInt,
+                Kind.UInt,
+                Kind.ShortInt,
+                Kind.SShortInt,
+                Kind.UShortInt,
+                Kind.LongInt,
+                Kind.SLongInt,
+                Kind.ULongInt,
+                Kind.LongLongInt,
+                Kind.SLongLongInt,
+                Kind.ULongLongInt,
                 => return p.errStr(.duplicate_declspec, p.index, "int"),
 
                 else => return spec.cannotCombine(p),
             },
 
-            Builder.Long => spec.* = switch (spec.*) {
-                Builder.None => Builder.Long,
-                Builder.Long => Builder.LongLong,
-                Builder.Unsigned => Builder.ULong,
-                Builder.Signed => Builder.Long,
-                Builder.Int => Builder.LongInt,
-                Builder.SInt => Builder.SLongInt,
-                Builder.ULong => Builder.ULongLong,
-                Builder.LongLong, Builder.ULongLong => return p.errStr(.duplicate_declspec, p.index, "long"),
+            Kind.Long => spec.kind = switch (spec.kind) {
+                Kind.None => Kind.Long,
+                Kind.Long => Kind.LongLong,
+                Kind.Unsigned => Kind.ULong,
+                Kind.Signed => Kind.Long,
+                Kind.Int => Kind.LongInt,
+                Kind.SInt => Kind.SLongInt,
+                Kind.ULong => Kind.ULongLong,
+                Kind.LongLong, Kind.ULongLong => return p.errStr(.duplicate_declspec, p.index, "long"),
 
                 else => return spec.cannotCombine(p),
             },
 
-            Builder.Float => spec.* = switch (spec.*) {
-                Builder.None => Builder.Float,
-                Builder.Complex => Builder.ComplexFloat,
+            Kind.Float => spec.kind = switch (spec.kind) {
+                Kind.None => Kind.Float,
+                Kind.Complex => Kind.ComplexFloat,
 
-                Builder.ComplexFloat, Builder.Float => return p.errStr(.duplicate_declspec, p.index, "float"),
+                Kind.ComplexFloat, Kind.Float => return p.errStr(.duplicate_declspec, p.index, "float"),
                 else => return spec.cannotCombine(p),
             },
 
-            Builder.Double => spec.* = switch (spec.*) {
-                Builder.None => Builder.Double,
-                Builder.Long => Builder.LongDouble,
-                Builder.Complex => Builder.ComplexDouble,
-                Builder.ComplexLong => Builder.ComplexLongDouble,
+            Kind.Double => spec.kind = switch (spec.kind) {
+                Kind.None => Kind.Double,
+                Kind.Long => Kind.LongDouble,
+                Kind.Complex => Kind.ComplexDouble,
+                Kind.ComplexLong => Kind.ComplexLongDouble,
 
-                Builder.LongDouble,
-                Builder.ComplexLongDouble,
-                Builder.ComplexDouble,
-                Builder.Double,
+                Kind.LongDouble,
+                Kind.ComplexLongDouble,
+                Kind.ComplexDouble,
+                Kind.Double,
                 => return p.errStr(.duplicate_declspec, p.index, "double"),
 
                 else => return spec.cannotCombine(p),
             },
 
-            Builder.Complex => spec.* = switch (spec.*) {
-                Builder.None => Builder.Complex,
-                Builder.Long => Builder.ComplexLong,
-                Builder.Float => Builder.ComplexFloat,
-                Builder.Double => Builder.ComplexDouble,
-                Builder.LongDouble => Builder.ComplexLongDouble,
+            Kind.Complex => spec.kind = switch (spec.kind) {
+                Kind.None => Kind.Complex,
+                Kind.Long => Kind.ComplexLong,
+                Kind.Float => Kind.ComplexFloat,
+                Kind.Double => Kind.ComplexDouble,
+                Kind.LongDouble => Kind.ComplexLongDouble,
 
-                Builder.Complex,
-                Builder.ComplexLong,
-                Builder.ComplexFloat,
-                Builder.ComplexDouble, //
-                Builder.ComplexLongDouble,
+                Kind.Complex,
+                Kind.ComplexLong,
+                Kind.ComplexFloat,
+                Kind.ComplexDouble, //
+                Kind.ComplexLongDouble,
                 => return p.errStr(.duplicate_declspec, p.index, "_Complex"),
 
                 else => return spec.cannotCombine(p),
@@ -389,27 +402,27 @@ pub const Builder = union(enum) {
         }
     }
 
-    pub fn fromType(ty: Type) Builder {
+    pub fn fromType(ty: Type) Kind {
         return switch (ty.specifier) {
-            .Void => Builder.Void,
-            .Bool => Builder.Bool,
-            .Char => Builder.Char,
-            .SChar => Builder.SChar,
-            .UChar => Builder.UChar,
-            .Short => Builder.Short,
-            .UShort => Builder.UShort,
-            .Int => Builder.Int,
-            .UInt => Builder.UInt,
-            .Long => Builder.Long,
-            .ULong => Builder.ULong,
-            .LongLong => Builder.LongLong,
-            .ULongLong => Builder.ULongLong,
-            .Float => Builder.Float,
-            .Double => Builder.Double,
-            .LongDouble => Builder.LongDouble,
-            .ComplexFloat => Builder.ComplexFloat,
-            .ComplexDouble => Builder.ComplexDouble,
-            .ComplexLongDouble => Builder.ComplexLongDouble,
+            .Void => Kind.Void,
+            .Bool => Kind.Bool,
+            .Char => Kind.Char,
+            .SChar => Kind.SChar,
+            .UChar => Kind.UChar,
+            .Short => Kind.Short,
+            .UShort => Kind.UShort,
+            .Int => Kind.Int,
+            .UInt => Kind.UInt,
+            .Long => Kind.Long,
+            .ULong => Kind.ULong,
+            .LongLong => Kind.LongLong,
+            .ULongLong => Kind.ULongLong,
+            .Float => Kind.Float,
+            .Double => Kind.Double,
+            .LongDouble => Kind.LongDouble,
+            .ComplexFloat => Kind.ComplexFloat,
+            .ComplexDouble => Kind.ComplexDouble,
+            .ComplexLongDouble => Kind.ComplexLongDouble,
 
             .Pointer => .{ .Pointer = ty.data.subType },
             .Atomic => .{ .Atomic = ty.data.subType },

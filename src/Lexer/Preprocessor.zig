@@ -425,6 +425,7 @@ fn expr(pp: *Preprocessor, lexer: *Lexer) Error!bool {
         .tokens = pp.tokenBuffer.items,
         .arena = pp.arena.allocator(),
         .currDeclList = undefined,
+        .scopes = undefined,
     };
 
     const res = parser.constExpr() catch |e| switch (e) {
