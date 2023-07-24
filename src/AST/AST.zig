@@ -207,6 +207,8 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
     try w.writeAll("'\n" ++ RESET);
 
     switch (tag) {
+        .Invalid => unreachable,
+
         .FnProto,
         .StaticFnProto,
         .InlineFnProto,
@@ -300,6 +302,70 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
                 try tree.dumpNode(arg, level + delta, w);
             }
         },
+
+        .CommaExpr,
+        .BinaryCondExpr,
+        .AssignExpr,
+        .MulAssignExpr,
+        .DivAssignExpr,
+        .ModAssignExpr,
+        .AddAssignExpr,
+        .SubAssignExpr,
+        .ShlAssignExpr,
+        .ShrAssignExpr,
+        .AndAssignExpr,
+        .XorAssignExpr,
+        .OrAssignExpr,
+        .BoolOrExpr,
+        .BoolAndExpr,
+        .BitOrExpr,
+        .BitXorExpr,
+        .BitAndExpr,
+        .EqualExpr,
+        .NotEqualExpr,
+        .LessThanExpr,
+        .LessThanEqualExpr,
+        .GreaterThanExpr,
+        .GreaterThanEqualExpr,
+        .ShlExpr,
+        .ShrExpr,
+        .AddExpr,
+        .SubExpr,
+        .MulExpr,
+        .DivExpr,
+        .ModExpr,
+        => {
+            try w.writeByteNTimes(' ', level + 1);
+            try w.writeAll("lhs:\n");
+            try tree.dumpNode(tree.nodes.items(.first)[node], level + delta, w);
+            try w.writeByteNTimes(' ', level + 1);
+            try w.writeAll("rhs:\n");
+            try tree.dumpNode(tree.nodes.items(.second)[node], level + delta, w);
+        },
+
+        .CastExpr,
+        .AddrOfExpr,
+        .DerefExpr,
+        .PlusExpr,
+        .NegateExpr,
+        .BitNotExpr,
+        .BoolNotExpr,
+        .PreIncExpr,
+        .PreDecExpr,
+        .PostIncExpr,
+        .PostDecExpr,
+        .ArrayToPointer,
+        => {
+            try w.writeByteNTimes(' ', level + 1);
+            try w.writeAll("operand:\n");
+            try tree.dumpNode(tree.nodes.items(.first)[node], level + delta, w);
+        },
+
+        .DeclRefExpr => {
+            try w.writeByteNTimes(' ', level + 1);
+            try w.print("name: " ++ GREEN ++ "\"{s}\"\n" ++ RESET, .{tree.tokSlice(tree.nodes.items(.first)[node])});
+        },
+
         else => {},
     }
 }
