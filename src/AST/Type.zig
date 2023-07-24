@@ -5,7 +5,8 @@ const Builder = @import("TypeBuilder.zig").Builder;
 
 const Type = @This();
 
-const NodeIndex = @import("AST.zig").NodeIndex;
+const NodeIndex = Tree.NodeIndex;
+const TokenIndex = Tree.TokenIndex;
 
 pub const Qualifiers = packed struct {
     @"const": bool = false,
@@ -24,6 +25,7 @@ pub const Qualifiers = packed struct {
         if (quals.restrict) try w.writeAll(" restrict ");
     }
 };
+
 pub const Function = struct {
     returnType: Type,
     paramTypes: []NodeIndex,
@@ -110,61 +112,64 @@ pub fn isArray(ty: Type) bool {
     };
 }
 
-pub fn combine(inner: Type, outer: Type, p: *Parser) !Type {
+pub fn combine(inner: *Type, outer: Type, p: *Parser, sourceToken: TokenIndex) Parser.Error!void {
     switch (inner.specifier) {
-        .Pointer => {
-            var res = inner;
-            res.data.subType.* = outer;
-            return res;
+        .Pointer => return inner.data.subType.combine(outer, p, sourceToken),
+        .Array, .StaticArray => return p.errStr(.todo, sourceToken, "combine array"),
+        .Func, .VarArgsFunc => {
+            try inner.data.func.returnType.combine(outer, p, sourceToken);
+            switch (inner.data.func.returnType.specifier) {
+                .Func, .VarArgsFunc => return p.errToken(.func_cannot_return_func, sourceToken),
+                .Array, .StaticArray => return p.errToken(.func_cannot_return_array, sourceToken),
+                else => {},
+            }
         },
-        .Array, .StaticArray => return p.todo("combine array"),
-        .Func, .VarArgsFunc => return p.todo("combine func"),
-        else => return outer,
+        else => inner.* = outer,
     }
 }
 
 pub fn dump(ty: Type, tree: Tree, w: anytype) @TypeOf(w).Error!void {
+    try ty.qual.dump(w);
     switch (ty.specifier) {
         .Pointer => {
-            try ty.data.subType.dump(tree, w);
             try w.writeAll("*");
-            try ty.qual.dump(w);
+            try ty.data.subType.dump(tree, w);
         },
+
         .Atomic => {
             try w.writeAll("_Atomic");
             try ty.data.subType.dump(tree, w);
             try w.writeAll(")");
-            try ty.qual.dump(w);
         },
+
         .Func, .VarArgsFunc => {
-            try ty.data.func.returnType.dump(tree, w);
-            try w.writeAll(" (");
+            try w.writeAll("fn (");
             for (ty.data.func.paramTypes, 0..) |param, i| {
                 if (i != 0) try w.writeAll(", ");
-                try tree.nodes.items(.type)[param].dump(tree, w);
                 const nameToken = tree.nodes.items(.first)[param];
                 if (tree.tokens[nameToken].id == .Identifier) {
-                    try w.print(" {s}", .{tree.tokSlice(nameToken)});
+                    try w.print("{s}: ", .{tree.tokSlice(nameToken)});
                 }
+
+                try tree.nodes.items(.type)[param].dump(tree, w);
             }
 
             if (ty.specifier == .VarArgsFunc) {
                 if (ty.data.func.paramTypes.len != 0) try w.writeAll(", ");
                 try w.writeAll("...");
             }
-            try w.writeAll(")");
-            try ty.qual.dump(w);
+
+            try w.writeAll(") ");
+            try ty.data.func.returnType.dump(tree, w);
         },
         .Array, .StaticArray => {
-            try ty.data.array.elem.dump(tree, w);
             try w.print("[{d}", .{ty.data.array.len});
-            try ty.qual.dump(w);
-            if (ty.specifier == .StaticArray) try w.writeAll(" static");
-            try w.writeAll("]");
+            try w.writeAll("] ");
+            if (ty.specifier == .StaticArray) try w.writeAll("static ");
+            try ty.data.array.elem.dump(tree, w);
         },
         else => {
             try w.writeAll(Builder.fromType(ty).toString());
-            try ty.qual.dump(w);
         },
     }
 }
