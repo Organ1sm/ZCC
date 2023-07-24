@@ -325,7 +325,7 @@ pub fn next(self: *Lexer) Token {
             },
 
             .escape_sequence => switch (c) {
-                '\'', '"', '?', '\\', 'a', 'b', 'f', 'n', 'r', 't', 'v', '\n' => {
+                '\'', '"', '?', '\\', 'a', 'b', 'e', 'f', 'n', 'r', 't', 'v', '\n' => {
                     state = if (string) .string_literal else .char_literal;
                 },
                 '\r' => state = .cr_escape,

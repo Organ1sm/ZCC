@@ -7,11 +7,13 @@ const Compilation = @import("Compilation.zig");
 const Allocator = std.mem.Allocator;
 const Diagnostics = @This();
 
-const Message = struct {
+pub const Message = struct {
     tag: Tag,
     sourceId: Source.ID,
     locStart: u32,
-    extra: union {
+    extra: Extra = .{ .none = {} },
+
+    pub const Extra = union {
         str: []const u8,
 
         tokenId: struct {
@@ -19,8 +21,13 @@ const Message = struct {
             actual: TokenType,
         },
 
+        arguments: struct {
+            expected: u32,
+            actual: u32,
+        },
+
         none: void,
-    } = .{ .none = {} },
+    };
 };
 
 const Kind = enum { @"fatal error", @"error", note, warning, off };
@@ -32,6 +39,7 @@ const Options = struct {
     @"duplicate-decl-specifier": Kind = .warning,
     @"miss-declaration": Kind = .warning,
     @"extern-initializer": Kind = .warning,
+    @"implicit-function-declaration": Kind = .warning,
 };
 
 pub const Tag = enum {
@@ -101,6 +109,11 @@ pub const Tag = enum {
     expected_stmt,
     func_cannot_return_func,
     func_cannot_return_array,
+    undeclared_identifier,
+    not_callable,
+    unsupported_str_cat,
+    static_func_not_global,
+    implicit_func_decl,
 };
 
 list: std.ArrayList(Message),
@@ -339,6 +352,11 @@ pub fn render(comp: *Compilation) void {
             .expected_stmt => m.write("expected statement"),
             .func_cannot_return_func => m.write("function cannot return a function"),
             .func_cannot_return_array => m.write("function cannot return an array"),
+            .undeclared_identifier => m.write("use of undeclared identifier"),
+            .not_callable => m.print("cannot call non function type '{s}'", .{msg.extra.str}),
+            .implicit_func_decl => m.print("implicit declaration of function '{s}' is invalid in C99", .{msg.extra.str}),
+            .unsupported_str_cat => m.write("unsupported string literal concatenation"),
+            .static_func_not_global => m.write("static functions must be global"),
         }
 
         m.end(lcs);
@@ -413,6 +431,10 @@ fn tagKind(diag: *Diagnostics, tag: Tag) Kind {
         .expected_stmt,
         .func_cannot_return_func,
         .func_cannot_return_array,
+        .undeclared_identifier,
+        .unsupported_str_cat,
+        .static_func_not_global,
+        .not_callable,
         => .@"error",
 
         .to_match_paren,
@@ -428,6 +450,7 @@ fn tagKind(diag: *Diagnostics, tag: Tag) Kind {
         .duplicate_declspec => diag.options.@"duplicate-decl-specifier",
         .missing_declaration => diag.options.@"miss-declaration",
         .extern_initializer => diag.options.@"extern-initializer",
+        .implicit_func_decl => diag.options.@"implicit-function-declaration",
     };
 
     if (kind == .@"error" and diag.fatalErrors)

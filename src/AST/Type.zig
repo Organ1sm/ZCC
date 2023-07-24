@@ -17,11 +17,11 @@ pub const Qualifiers = packed struct {
         return quals.@"const" or quals.restrict or quals.@"volatile" or quals.atomic;
     }
 
-    pub fn dump(quals: Qualifiers) void {
-        if (quals.@"const") std.debug.print(" const", .{});
-        if (quals.atomic) std.debug.print(" _Atomic", .{});
-        if (quals.@"volatile") std.debug.print(" volatile", .{});
-        if (quals.restrict) std.debug.print(" restrict", .{});
+    pub fn dump(quals: Qualifiers, w: anytype) !void {
+        if (quals.@"const") try w.writeAll(" const");
+        if (quals.atomic) try w.writeAll(" _Atomic");
+        if (quals.@"volatile") try w.writeAll(" volatile");
+        if (quals.restrict) try w.writeAll(" restrict");
     }
 };
 pub const Function = struct {
@@ -30,10 +30,8 @@ pub const Function = struct {
 };
 
 pub const Array = struct {
-    qual: Qualifiers,
     len: u64,
-    static: bool,
-    elem: *Type,
+    elem: Type,
 };
 
 data: union {
@@ -90,6 +88,14 @@ pub const Specifier = enum {
     Enum,
 };
 
+pub fn isCallable(ty: Type) ?Type {
+    return switch (ty.specifier) {
+        .Func, .VarArgsFunc => ty,
+        .Pointer => ty.data.subType.isCallable(),
+        else => null,
+    };
+}
+
 pub fn combine(inner: Type, outer: Type, p: *Parser) !Type {
     switch (inner.specifier) {
         .Pointer => {
@@ -103,57 +109,48 @@ pub fn combine(inner: Type, outer: Type, p: *Parser) !Type {
     }
 }
 
-pub fn dump(ty: Type, tree: Tree) void {
+pub fn dump(ty: Type, tree: Tree, w: anytype) @TypeOf(w).Error!void {
     switch (ty.specifier) {
         .Pointer => {
-            ty.data.subType.dump(tree);
-            std.debug.print("*", .{});
-            ty.qual.dump();
+            try ty.data.subType.dump(tree, w);
+            try w.writeAll("*");
+            try ty.qual.dump(w);
         },
-
         .Atomic => {
-            std.debug.print("_Atomic", .{});
-            ty.data.subType.dump(tree);
-            std.debug.print(")", .{});
-            ty.qual.dump();
+            try w.writeAll("_Atomic");
+            try ty.data.subType.dump(tree, w);
+            try w.writeAll(")");
+            try ty.qual.dump(w);
         },
-
         .Func, .VarArgsFunc => {
-            ty.data.func.returnType.dump(tree);
-            std.debug.print(" (", .{});
+            try ty.data.func.returnType.dump(tree, w);
+            try w.writeAll(" (");
             for (ty.data.func.paramTypes, 0..) |param, i| {
-                if (i != 0) std.debug.print(", ", .{});
-
-                tree.nodes.items(.type)[param].dump(tree);
-
+                if (i != 0) try w.writeAll(", ");
+                try tree.nodes.items(.type)[param].dump(tree, w);
                 const nameToken = tree.nodes.items(.first)[param];
                 if (tree.tokens[nameToken].id == .Identifier) {
-                    std.debug.print(" {s}", .{tree.tokSlice(nameToken)});
+                    try w.print(" {s}", .{tree.tokSlice(nameToken)});
                 }
             }
+
             if (ty.specifier == .VarArgsFunc) {
-                if (ty.data.func.paramTypes.len != 0)
-                    std.debug.print(", ", .{});
-                std.debug.print("...", .{});
+                if (ty.data.func.paramTypes.len != 0) try w.writeAll(", ");
+                try w.writeAll("...");
             }
-            std.debug.print(")", .{});
-            ty.qual.dump();
+            try w.writeAll(")");
+            try ty.qual.dump(w);
         },
-
         .Array, .StaticArray => {
-            ty.data.array.elem.dump(tree);
-
-            std.debug.print("[{d}", .{ty.data.array.len});
-
-            ty.qual.dump();
-            if (ty.specifier == .StaticArray)
-                std.debug.print(" static", .{});
-
-            std.debug.print(")", .{});
+            try ty.data.array.elem.dump(tree, w);
+            try w.print("[{d}", .{ty.data.array.len});
+            try ty.qual.dump(w);
+            if (ty.specifier == .StaticArray) try w.writeAll(" static");
+            try w.writeAll("]");
         },
         else => {
-            std.debug.print("{s}", .{Builder.fromType(ty).toString()});
-            ty.qual.dump();
+            try w.writeAll(Builder.fromType(ty).toString());
+            try ty.qual.dump(w);
         },
     }
 }
