@@ -18,10 +18,10 @@ pub const Qualifiers = packed struct {
     }
 
     pub fn dump(quals: Qualifiers, w: anytype) !void {
-        if (quals.@"const") try w.writeAll(" const");
-        if (quals.atomic) try w.writeAll(" _Atomic");
-        if (quals.@"volatile") try w.writeAll(" volatile");
-        if (quals.restrict) try w.writeAll(" restrict");
+        if (quals.@"const") try w.writeAll(" const ");
+        if (quals.atomic) try w.writeAll(" _Atomic ");
+        if (quals.@"volatile") try w.writeAll("volatile ");
+        if (quals.restrict) try w.writeAll(" restrict ");
     }
 };
 pub const Function = struct {
@@ -93,6 +93,20 @@ pub fn isCallable(ty: Type) ?Type {
         .Func, .VarArgsFunc => ty,
         .Pointer => ty.data.subType.isCallable(),
         else => null,
+    };
+}
+
+pub fn isFunc(ty: Type) bool {
+    return switch (ty.specifier) {
+        .Func, .VarArgsFunc => true,
+        else => false,
+    };
+}
+
+pub fn isArray(ty: Type) bool {
+    return switch (ty.specifier) {
+        .Array, .StaticArray => true,
+        else => false,
     };
 }
 

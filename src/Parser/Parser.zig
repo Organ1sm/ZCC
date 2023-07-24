@@ -92,6 +92,19 @@ pub const Result = union(enum) {
             else => p.todo("number to ast"),
         };
     }
+
+    fn coerce(res: Result, p: *Parser, destType: Type) !Result {
+        var casted = res;
+        var curType = res.ty(p);
+        if (destType.specifier == .Pointer and curType.isArray()) {
+            casted = try node(p, .{
+                .tag = .ArrayToPointer,
+                .type = destType,
+                .first = try casted.toNode(p),
+            });
+        }
+        return casted;
+    }
 };
 
 fn eat(p: *Parser, id: TokenType) ?TokenIndex {
@@ -564,10 +577,10 @@ const InitDeclarator = struct { d: Declarator, initializer: NodeIndex = 0 };
 
 /// initDeclarator : declarator ('=' initializer)?
 fn initDeclarator(p: *Parser, declSpec: *DeclSpec, allowOldStyle: bool) Error!?InitDeclarator {
-    var init = InitDeclarator{ .d = (try p.declarator(declSpec.type, allowOldStyle)) orelse return null };
+    var initD = InitDeclarator{ .d = (try p.declarator(declSpec.type, allowOldStyle)) orelse return null };
 
     if (p.eat(.Equal)) |_| {
-        if (declSpec.storageClass == .typedef or declSpec.type.specifier == .Func)
+        if (declSpec.storageClass == .typedef or declSpec.type.isFunc())
             try p.err(.illegal_initializer);
 
         if (declSpec.storageClass == .@"extern") {
@@ -575,10 +588,13 @@ fn initDeclarator(p: *Parser, declSpec: *DeclSpec, allowOldStyle: bool) Error!?I
             declSpec.storageClass = .none;
         }
 
-        init.initializer = try p.initializer();
+        const init = try p.initializer();
+        const casted = try init.coerce(p, initD.d.type);
+
+        initD.initializer = try casted.toNode(p);
     }
 
-    return init;
+    return initD;
 }
 
 /// typeSpec
@@ -942,7 +958,7 @@ fn paramDecls(p: *Parser) Error!?[]NodeIndex {
             break :blk some.type;
         } else paramDeclSpec.type;
 
-        if (paramType.specifier == .Func or paramType.specifier == .VarArgsFunc) {
+        if (paramType.isFunc()) {
             // params declared as functions are converted to function pointers
             const elemType = try p.arena.create(Type);
             elemType.* = paramType;
@@ -1026,7 +1042,7 @@ fn abstractDeclarator(p: *Parser, baseType: Type) Error!?Type {
 /// initializer
 ///  : assignExpr
 ///  | '{' initializerItems '}'
-fn initializer(p: *Parser) Error!NodeIndex {
+fn initializer(p: *Parser) Error!Result {
     if (p.eat(.LBrace)) |_| {
         return p.todo("compound initializer");
     }
@@ -1034,7 +1050,7 @@ fn initializer(p: *Parser) Error!NodeIndex {
     const res = try p.assignExpr();
     try res.expect(p);
 
-    return res.node;
+    return res;
 }
 
 /// initializerItems : designation? initializer  (',' designation? initializer)? ','?
@@ -1499,13 +1515,14 @@ fn suffixExpr(p: *Parser, lhs: Result) Error!Result {
             defer args.deinit();
 
             for (ty.data.func.paramTypes, 0..) |paramDecl, i| {
-                _ = paramDecl;
                 if (i != 0) _ = try p.expectToken(.Comma);
-                // TODO coerce type
-                // const param_ty = p.nodes.items(.ty)[param_decl];
+                const paramType = p.nodes.items(.type)[paramDecl];
                 const arg = try p.assignExpr();
+
                 try arg.expect(p);
-                try args.append(try arg.toNode(p));
+
+                const casted = try arg.coerce(p, paramType);
+                try args.append(try casted.toNode(p));
             }
             if (ty.specifier == .VarArgsFunc) blk: {
                 if (args.items.len != 0)

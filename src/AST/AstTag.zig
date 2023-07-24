@@ -4,7 +4,7 @@ const Expression = @import("AST.zig").Expression;
 
 pub const Tag = enum(u8) {
     /// Only appears at index 0 and reaching it is always a result of a bug.
-    invalid,
+    Invalid,
 
     // ====== Decl ======
 
@@ -182,6 +182,8 @@ pub const Tag = enum(u8) {
     CompoundLiteralExpr,
 
     // implicit casts ///
+    /// convert T[] to T*
+    ArrayToPointer,
     ///  same as deref
     LValueToRValue,
 
