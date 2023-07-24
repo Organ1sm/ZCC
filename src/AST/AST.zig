@@ -14,10 +14,12 @@ arena: std.heap.ArenaAllocator,
 generated: []const u8,
 tokens: []const Token,
 nodes: Node.List.Slice,
+data: []const NodeIndex,
 rootDecls: []const NodeIndex,
 
 pub fn deinit(tree: *AST) void {
     tree.comp.gpa.free(tree.rootDecls);
+    tree.comp.gpa.free(tree.data);
     tree.nodes.deinit(tree.comp.gpa);
     tree.arena.deinit();
 }
@@ -27,7 +29,6 @@ pub const Node = struct {
     type: Type,
     first: NodeIndex = 0,
     second: NodeIndex = 0,
-    third: NodeIndex = 0,
 
     pub const List = std.MultiArrayList(Node);
 };
@@ -185,13 +186,120 @@ pub const Expression = struct {
     };
 };
 
-pub fn dump(tree: AST) void {
-    for (tree.rootDecls) |i|
-        tree.dumpDeclaration(i, 0);
+pub fn dump(tree: AST, writer: anytype) @TypeOf(writer).Error!void {
+    for (tree.rootDecls) |i| {
+        try tree.dumpNode(i, 0, writer);
+        try writer.writeByte('\n');
+    }
 }
 
-fn dumpDeclaration(tree: AST, node: NodeIndex, level: u32) void {
-    std.debug.print("{s: >[1]} ", .{ @tagName(tree.nodes.items(.tag)[node]), level });
-    tree.nodes.items(.type)[node].dump(tree);
-    std.debug.print("\n", .{});
+fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error!void {
+    const delta = 2;
+    const PURPLE = "\x1b[35;1m";
+    const CYAN = "\x1b[36;1m";
+    const GREEN = "\x1b[32;1m";
+    const RESET = "\x1b[0m";
+
+    const tag = tree.nodes.items(.tag)[node];
+    try w.writeByteNTimes(' ', level);
+    try w.print(CYAN ++ "{s}: " ++ PURPLE ++ "'", .{@tagName(tag)});
+    try tree.nodes.items(.type)[node].dump(tree, w);
+    try w.writeAll("'\n" ++ RESET);
+
+    switch (tag) {
+        .FnProto,
+        .StaticFnProto,
+        .InlineFnProto,
+        .InlineStaticFnProto,
+        .NoreturnFnProto,
+        .NoreturnStaticFnProto,
+        .NoreturnInlineFnProto,
+        .NoreturnInlineStaticFnProto,
+        => {
+            try w.writeByteNTimes(' ', level + 1);
+            try w.print("name: " ++ GREEN ++ "{s}\n" ++ RESET, .{tree.tokSlice(tree.nodes.items(.first)[node])});
+        },
+
+        .FnDef,
+        .StaticFnDef,
+        .InlineFnDef,
+        .InlineStaticFnDef,
+        .NoreturnFnDef,
+        .NoreturnStaticFnDef,
+        .NoreturnInlineFnDef,
+        .NoreturnInlineStaticFnDef,
+        => {
+            try w.writeByteNTimes(' ', level + 1);
+            try w.print("name: " ++ GREEN ++ "\"{s}\"\n" ++ RESET, .{tree.tokSlice(tree.nodes.items(.first)[node])});
+            try w.writeByteNTimes(' ', level + 1);
+            try w.writeAll("body:\n");
+            try tree.dumpNode(tree.nodes.items(.second)[node], level + delta, w);
+        },
+
+        .CompoundStmt => {
+            const start = tree.nodes.items(.first)[node];
+            const end = tree.nodes.items(.second)[node];
+            for (tree.data[start..end]) |stmt| try tree.dumpNode(stmt, level + delta, w);
+        },
+
+        .CompoundStmtTwo => {
+            const first = tree.nodes.items(.first)[node];
+            if (first != 0) try tree.dumpNode(first, level + delta, w);
+            const second = tree.nodes.items(.second)[node];
+            if (second != 0) try tree.dumpNode(second, level + delta, w);
+        },
+
+        .Var,
+        .ExternVar,
+        .StaticVar,
+        .RegisterVar,
+        .ThreadlocalVar,
+        .ThreadlocalExternVar,
+        .ThreadlocalStaticVar,
+        .TypeDef,
+        => {
+            try w.writeByteNTimes(' ', level + 1);
+            try w.print("name: " ++ GREEN ++ "\"{s}\"\n" ++ RESET, .{tree.tokSlice(tree.nodes.items(.first)[node])});
+            const init = tree.nodes.items(.second)[node];
+            if (init != 0) {
+                try w.writeByteNTimes(' ', level + 1);
+                try w.writeAll("init:\n");
+                try tree.dumpNode(init, level + delta, w);
+            }
+        },
+
+        .StringLiteralExpr => {
+            const start = tree.nodes.items(.first)[node];
+            const ptr: [*]const u8 = @ptrFromInt(@as(usize, @bitCast(tree.data[start..][0..2].*)));
+            const len = tree.nodes.items(.second)[node];
+
+            try w.writeByteNTimes(' ', level + 1);
+            try w.print("data: " ++ GREEN ++ "{s}\n" ++ RESET, .{ptr[0 .. len - 1]});
+        },
+
+        .CallExpr => {
+            const start = tree.nodes.items(.first)[node];
+            const end = tree.nodes.items(.second)[node];
+            try w.writeByteNTimes(' ', level + 1);
+            try w.writeAll("lhs:\n");
+            try tree.dumpNode(tree.data[start], level + delta, w);
+
+            try w.writeByteNTimes(' ', level + 1);
+            try w.writeAll("args:\n");
+            for (tree.data[start + 1 .. end]) |stmt| try tree.dumpNode(stmt, level + delta, w);
+        },
+
+        .CallExprOne => {
+            try w.writeByteNTimes(' ', level + 1);
+            try w.writeAll("lhs:\n");
+            try tree.dumpNode(tree.nodes.items(.first)[node], level + delta, w);
+            const arg = tree.nodes.items(.second)[node];
+            if (arg != 0) {
+                try w.writeByteNTimes(' ', level + 1);
+                try w.writeAll("arg:\n");
+                try tree.dumpNode(arg, level + delta, w);
+            }
+        },
+        else => {},
+    }
 }

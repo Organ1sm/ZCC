@@ -56,6 +56,9 @@ pub const Tag = enum(u8) {
 
     // ====== Stmt ======
     LabeledStmt,
+    // {first; second;} first and second may be null
+    CompoundStmtTwo,
+    // { data }
     CompoundStmt,
     IfStmt,
     SwitchStmt,
@@ -72,7 +75,7 @@ pub const Tag = enum(u8) {
     CommaExpr,
     /// lhs ?: rhs
     BinaryCondExpr,
-    /// TODO
+    /// lhs ? data[0] : data[1]
     CondExpr,
     /// lhs = rhs
     AssignExpr,
@@ -153,7 +156,9 @@ pub const Tag = enum(u8) {
     PreDecExpr,
     /// lhs[rhs]  lhs is pointer/array type, rhs is integer type
     ArrayAccessExpr,
-    /// TODO
+    /// first(second) second may be 0
+    CallExprOne,
+    /// data[0](data[1..])
     CallExpr,
     /// lhs.rhs rhs is a TokenIndex of the identifier
     MemberAccessExpr,
@@ -171,72 +176,16 @@ pub const Tag = enum(u8) {
     FloatLiteralExpr,
     /// TODO
     CharLiteralExpr,
-    /// TODO
+    /// data[first][0..second]
     StringLiteralExpr,
     /// TODO
     CompoundLiteralExpr,
 
+    // implicit casts ///
+    ///  same as deref
+    LValueToRValue,
+
     /// Asserts that the tag is an expression.
-    pub fn isLeftvalue(tag: Tag) bool {
-        return switch (tag) {
-            .CommaExpr,
-            .BinaryCondExpr,
-            .CondExpr,
-            .AssignExpr,
-            .MulAssignExpr,
-            .DivAssignExpr,
-            .ModAssignExpr,
-            .AddAssignExpr,
-            .SubAssignExpr,
-            .ShlAssignExpr,
-            .ShrAssignExpr,
-            .AndAssignExpr,
-            .XorAssignExpr,
-            .OrAssignExpr,
-            .BoolOrExpr,
-            .BoolAndExpr,
-            .BitOrExpr,
-            .BitXorExpr,
-            .BitAndExpr,
-            .EqualExpr,
-            .NotEqualExpr,
-            .LessThanExpr,
-            .LessThanEqualExpr,
-            .GreaterThanExpr,
-            .GreaterThanEqualExpr,
-            .ShlExpr,
-            .ShrExpr,
-            .AddExpr,
-            .SubExpr,
-            .MulExpr,
-            .DivExpr,
-            .ModExpr,
-            .CastExpr,
-            .AddrOfExpr,
-            .DerefExpr,
-            .PlusExpr,
-            .NegateExpr,
-            .BitNotExpr,
-            .BoolNotExpr,
-            .PreIncExpr,
-            .PreDecExpr,
-            .ArrayAccessExpr,
-            .CallExpr,
-            => false,
-
-            .DeclRefExpr,
-            .StringLiteralExpr,
-            .CompoundLiteralExpr,
-            // .member_access_expr, if lhs.isLval()
-            .MemberAccessPtrExpr,
-            .Deref,
-            .ArrayAccessExpr,
-            => true,
-
-            else => unreachable,
-        };
-    }
-
     pub fn Type(comptime tag: Tag) ?type {
         return switch (tag) {
             .Invalid => unreachable,

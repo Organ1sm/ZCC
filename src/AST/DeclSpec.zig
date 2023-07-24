@@ -83,8 +83,8 @@ pub fn validate(d: DeclSpec, p: *Parser, ty: Type, hasInit: bool) Error!AstTag {
         switch (d.storageClass) {
             .none, //
             .@"extern",
-            .static,
             => {},
+            .static => |tokenIdx| if (p.inFunc) try p.errToken(.static_func_not_global, tokenIdx),
             .typedef => unreachable,
 
             .auto, //
