@@ -301,6 +301,10 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
                 try tree.dumpNode(then, level + delta, w);
             }
         },
+        .GotoStmt => {
+            try w.writeByteNTimes(' ', level + half);
+            try w.print("label: " ++ GREEN ++ "{s}\n" ++ RESET, .{tree.tokSlice(tree.nodes.items(.first)[node])});
+        },
 
         .ContinueStmt, .BreakStmt => {},
         .ReturnStmt => {

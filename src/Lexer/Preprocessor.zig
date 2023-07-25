@@ -427,6 +427,7 @@ fn expr(pp: *Preprocessor, lexer: *Lexer) Error!bool {
         .currDeclList = undefined,
         .scopes = undefined,
         .data = undefined,
+        .labels = undefined,
     };
 
     const res = parser.constExpr() catch |e| switch (e) {
