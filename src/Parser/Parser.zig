@@ -117,7 +117,12 @@ fn eat(p: *Parser, id: TokenType) ?TokenIndex {
 }
 
 pub fn getCurrToken(p: *Parser) Token {
-    return p.tokens[p.index];
+    return p.lookAhead(0);
+}
+
+pub fn lookAhead(p: *Parser, n: u32) Token {
+    std.debug.assert(p.index + n < p.tokens.len);
+    return p.tokens[p.index + n];
 }
 
 fn expectToken(p: *Parser, id: TokenType) Error!TokenIndex {
@@ -233,6 +238,31 @@ fn findTypedef(p: *Parser, name: []const u8) ?Scope.Symbol {
     }
 
     return null;
+}
+
+fn inLoop(p: *Parser) bool {
+    var i = p.scopes.items.len;
+    while (i > 0) {
+        i -= 1;
+        switch (p.scopes.items[i]) {
+            .loop => return true,
+            else => {},
+        }
+    }
+
+    return false;
+}
+
+fn inLoopOrSwitch(p: *Parser) bool {
+    var i = p.scopes.items.len;
+    while (i > 0) {
+        i -= 1;
+        switch (p.scopes.items[i]) {
+            .loop, .@"switch" => return true,
+            else => {},
+        }
+    }
+    return false;
 }
 
 fn findSymbol(p: *Parser, nameToken: TokenIndex) ?Scope {
@@ -918,7 +948,7 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator) Error!Type {
 
             if (p.eat(.Ellipsis) == null)
                 specifier = .VarArgsFunc;
-        } else if (p.eat(.RParen)) {
+        } else if (p.getCurrToken().id == .Identifier) {
             specifier = .OldStyleFunc;
         } else if (p.getCurrToken().id == .Identifier) {
             d.oldTypeFunc = p.index;
@@ -1030,7 +1060,7 @@ fn paramDecls(p: *Parser) Error!?[]NodeIndex {
         }
 
         const param = try p.addNode(.{
-            .tag = try paramDeclSpec.validateParam(p, paramType),
+            .tag = try paramDeclSpec.validateParam(p),
             .type = paramType,
             .first = nameToken,
         });
@@ -1104,27 +1134,121 @@ fn designator(p: *Parser) Error!NodeIndex {
 ///  | keyword_return expr? ';'
 ///  | expr? ';'
 fn stmt(p: *Parser) Error!NodeIndex {
+    if (try p.labeledStmt()) |some|
+        return some;
+
     if (try p.compoundStmt()) |some|
         return some;
 
-    const e = try p.expr();
-    if (e == .node) {
-        _ = try p.expectToken(.Semicolon);
-        return e.node;
+    if (p.eat(.KeywordIf)) |_| {
+        const lp = try p.expectToken(.LParen);
+        const cond = try p.expr();
+
+        try cond.expect(p);
+
+        const condNode = try cond.toNode(p);
+        try p.expectClosing(lp, .RParen);
+
+        const then = try p.stmt();
+        const elseTK = if (p.eat(.KeywordElse)) |_| try p.stmt() else 0;
+
+        if (then != 0 and elseTK != 0) {
+            return try p.addNode(.{
+                .tag = .IfThenElseStmt,
+                .first = condNode,
+                .second = (try p.addList(&.{ then, elseTK })).start,
+            });
+        } else if (then == 0 and elseTK != 0) {
+            return try p.addNode(.{
+                .tag = .IfElseStmt,
+                .first = condNode,
+                .second = elseTK,
+            });
+        } else return try p.addNode(.{
+            .tag = .IfThenStmt,
+            .first = condNode,
+            .second = elseTK,
+        });
     }
 
-    if (p.eat(.Semicolon)) |_| return 0;
+    if (p.eat(.KeywordContinue)) |cont| {
+        if (!p.inLoop())
+            try p.errToken(.continue_not_in_loop, cont);
+        _ = try p.expectToken(.Semicolon);
+
+        return try p.addNode(.{ .tag = .BreakStmt });
+    }
+
+    if (p.eat(.KeywordBreak)) |br| {
+        if (!p.inLoopOrSwitch())
+            try p.errToken(.break_not_in_loop_or_switch, br);
+
+        _ = try p.expectToken(.Semicolon);
+        return try p.addNode(.{ .tag = .BreakStmt });
+    }
+
+    if (p.eat(.KeywordReturn)) |_| {
+        const e = try p.expr();
+        _ = try p.expectToken(.Semicolon);
+
+        const first = if (e == .none) 0 else try e.toNode(p);
+        return try p.addNode(.{ .tag = .ReturnStmt, .first = first });
+    }
+
+    const exprStart = p.index;
+    const e = try p.expr();
+    if (e == .none) {
+        _ = try p.expectToken(.Semicolon);
+        const exprNode = try e.toNode(p);
+        try p.maybeWarnUnused(exprNode, exprStart);
+        return exprNode;
+    }
+
+    if (p.eat(.Semicolon)) |_|
+        return @as(NodeIndex, 0);
 
     try p.err(.expected_stmt);
     return error.ParsingFailed;
+}
+
+fn maybeWarnUnused(p: *Parser, node: NodeIndex, exprStart: TokenIndex) Error!void {
+    switch (p.nodes.items(.tag)[node]) {
+        .AssignExpr,
+        .MulAssignExpr,
+        .DivAssignExpr,
+        .ModAssignExpr,
+        .AddAssignExpr,
+        .SubAssignExpr,
+        .ShlAssignExpr,
+        .ShrAssignExpr,
+        .AndAssignExpr,
+        .XorAssignExpr,
+        .OrAssignExpr, //
+        .CallExpr,
+        => {},
+        else => try p.errToken(.unused_value, exprStart),
+    }
 }
 
 /// labeledStmt
 /// : IDENTIFIER ':' stmt
 /// | keyword_case constExpr ':' stmt
 /// | keyword_default ':' stmt
-fn labeledStmt(p: *Parser) Error!NodeIndex {
-    return p.todo("labeledStmt");
+fn labeledStmt(p: *Parser) Error!?NodeIndex {
+    if (p.getCurrToken().id == .Identifier and p.lookAhead(1).id == .Colon) {
+        const nameToken = p.index;
+        p.index += 2;
+
+        return try p.addNode(.{
+            .tag = .LabeledStmt,
+            .first = nameToken,
+            .second = try p.stmt(),
+        });
+    } else if (p.eat(.KeywordCase)) |_| {
+        return p.todo("case");
+    } else if (p.eat(.KeywordDefault)) |_| {
+        return p.todo("default");
+    } else return null;
 }
 
 /// compoundStmt : '{' ( decl | staticAssert |stmt)* '}'
@@ -1163,22 +1287,18 @@ fn compoundStmt(p: *Parser) Error!?NodeIndex {
             else => |e| return e,
         };
 
+        if (s == 0) continue;
         try statements.append(s);
     }
 
     switch (statements.items.len) {
-        0 => return try p.addNode(.{
-            .tag = .CompoundStmtTwo,
-            .type = .{ .specifier = .Void },
-        }),
+        0 => return try p.addNode(.{ .tag = .CompoundStmtTwo }),
         1 => return try p.addNode(.{
             .tag = .CompoundStmtTwo,
-            .type = .{ .specifier = .Void },
             .first = statements.items[0],
         }),
         2 => return try p.addNode(.{
             .tag = .CompoundStmtTwo,
-            .type = .{ .specifier = .Void },
             .first = statements.items[0],
             .second = statements.items[1],
         }),
@@ -1186,7 +1306,6 @@ fn compoundStmt(p: *Parser) Error!?NodeIndex {
             const range = try p.addList(statements.items);
             return try p.addNode(.{
                 .tag = .CompoundStmt,
-                .type = .{ .specifier = .Void },
                 .first = range.start,
                 .second = range.end,
             });
@@ -1213,12 +1332,12 @@ fn nextStmt(p: *Parser, lBrace: TokenIndex) !void {
             // .KeywordFor,
             // .KeywordWhile,
             // .KeywordDo,
-            // .KeywordIf,
+            .KeywordIf,
             // .KeywordGoto,
             // .KeywordSwitch,
-            // .KeywordContinue,
+            .KeywordContinue,
             // .KeywordBreak,
-            // .KeywordReturn,
+            .KeywordReturn,
             .KeywordTypedef,
             .KeywordExtern,
             .KeywordStatic,
