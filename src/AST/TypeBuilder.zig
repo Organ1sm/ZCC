@@ -58,6 +58,7 @@ pub const Builder = struct {
         Atomic: *Type,
         Func: *Type.Function,
         VarArgsFunc: *Type.Function,
+        OldStyleFunc: *Type.Function,
         Array: *Type.Array,
         StaticArray: *Type.Array,
 
@@ -114,7 +115,7 @@ pub const Builder = struct {
 
                 Kind.Pointer => "pointer",
                 Kind.Atomic => "atomic",
-                Kind.Func, Kind.VarArgsFunc => "function",
+                Kind.Func, Kind.VarArgsFunc, Kind.OldStyleFunc => "function",
                 Kind.Array, Kind.StaticArray => "array",
                 Kind.Struct => "struct",
                 Kind.Union => "union",
@@ -193,6 +194,12 @@ pub const Builder = struct {
                 return;
             },
 
+            Kind.OldStyleFunc => |data| {
+                ty.specifier = .OldStyleFunc;
+                ty.data = .{ .func = data };
+                return;
+            },
+
             Kind.Array => |data| {
                 ty.specifier = .Array;
                 ty.data = .{ .array = data };
@@ -252,6 +259,7 @@ pub const Builder = struct {
             Kind.Array,
             Kind.StaticArray, //
             Kind.Func,
+            Kind.OldStyleFunc,
             Kind.VarArgsFunc,
             => switch (spec.kind) {
                 .None => spec.kind = new,
@@ -428,6 +436,7 @@ pub const Builder = struct {
             .Atomic => .{ .Atomic = ty.data.subType },
             .Func => .{ .Func = ty.data.func },
             .VarArgsFunc => .{ .VarArgsFunc = ty.data.func },
+            .OldStyleFunc => .{ .OldStyleFunc = ty.data.func },
             .Array => .{ .Array = ty.data.array },
             .StaticArray => .{ .StaticArray = ty.data.array },
             .Struct => .{ .Struct = ty.data.node },

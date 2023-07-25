@@ -354,7 +354,7 @@ fn nextExternDecl(p: *Parser) void {
 
 /// decl
 ///  : declSpec (initDeclarator ( ',' initDeclarator)*)? ';'
-///  | declSpec declarator declarator* compoundStmt
+///  | declSpec declarator decl* compoundStmt
 ///  | staticAssert
 fn parseDeclaration(p: *Parser) Error!bool {
     const firstTokenIndex = p.index;
@@ -386,9 +386,52 @@ fn parseDeclaration(p: *Parser) Error!bool {
     };
 
     // check for funtion definition
-    if (initD.d.funcDeclarator != null and initD.initializer == 0 and (p.getCurrToken().id == .LBrace or initD.d.oldTypeFunc != null)) {
-        if (p.inFunc)
-            try p.err(.func_not_in_root);
+    if (initD.d.funcDeclarator != null and initD.initializer == 0) fndef: {
+        std.debug.assert(initD.d.type.isFunc());
+
+        switch (p.getCurrToken().id) {
+            .Comma, .Semicolon => break :fndef,
+            .LBrace => {},
+            else => {
+                if (!p.inFunc) try p.err(.expected_fn_body);
+                break :fndef;
+            },
+        }
+
+        if (initD.d.oldTypeFunc != null and !p.inFunc) {
+            paramLoop: while (true) {
+                const paramDeclSpec = (try p.declSpecifier()) orelse break;
+                if (p.eat(.Semicolon)) |semi| {
+                    try p.errToken(.missing_declaration, semi);
+                    continue :paramLoop;
+                }
+
+                while (true) {
+                    var d = (try p.declarator(paramDeclSpec.type, .normal)) orelse {
+                        try p.errToken(.missing_declaration, firstTokenIndex);
+                        _ = try p.expectToken(.Semicolon);
+                        continue :paramLoop;
+                    };
+
+                    if (d.type.isFunc()) {
+                        const elemType = try p.arena.create(Type);
+                        elemType.* = d.type;
+                        d.type = Type{
+                            .specifier = .Pointer,
+                            .data = .{ .subType = elemType },
+                        };
+                    } else if (d.type.specifier == .Void) {
+                        try p.errToken(.invalid_void_param, d.name);
+                    }
+
+                    if (p.eat(.Comma) == null) break;
+                }
+
+                _ = try p.expectToken(.Semicolon);
+            }
+        }
+
+        if (p.inFunc) try p.err(.func_not_in_root);
 
         const inFunc = p.inFunc;
         p.inFunc = true;
@@ -413,7 +456,11 @@ fn parseDeclaration(p: *Parser) Error!bool {
         return true;
     }
 
+    // Declare all variable/typedef declarators.
     while (true) {
+        if (initD.d.oldTypeFunc) |tokenIdx|
+            try p.errToken(.invalid_old_style_params, tokenIdx);
+
         const node = try p.addNode(.{
             .type = initD.d.type,
             .tag = try declSpec.validate(p, initD.d.type, initD.initializer != 0),
@@ -814,7 +861,7 @@ fn declarator(p: *Parser, baseType: Type, kind: enum { normal, abstract, either 
         d.type = try p.directDeclarator(d.type, &d);
     } else if (p.eat(.LParen)) |lp| blk: {
         var res = (try p.declarator(.{ .specifier = .Void }, kind)) orelse {
-            p.index -= 1;
+            p.index = lp;
             break :blk;
         };
 
@@ -823,6 +870,7 @@ fn declarator(p: *Parser, baseType: Type, kind: enum { normal, abstract, either 
         const outer = try p.directDeclarator(d.type, &d);
 
         try res.type.combine(outer, p, res.funcDeclarator orelse suffixStart);
+        res.oldTypeFunc = d.oldTypeFunc;
         return res;
     }
 
@@ -858,27 +906,45 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator) Error!Type {
         d.funcDeclarator = lp;
         if (p.getCurrToken().id == .Ellipsis) {
             try p.err(.param_before_var_args);
-            return error.ParsingFailed;
+            p.index += 1;
         }
 
-        var isVarArgs = true;
         var funcType = try p.arena.create(Type.Function);
+        funcType.paramTypes = &.{};
+        var specifier: Type.Specifier = .Func;
 
         if (try p.paramDecls()) |params| {
             funcType.paramTypes = params;
 
             if (p.eat(.Ellipsis) == null)
-                isVarArgs = false;
+                specifier = .VarArgsFunc;
+        } else if (p.eat(.RParen)) {
+            specifier = .OldStyleFunc;
+        } else if (p.getCurrToken().id == .Identifier) {
+            d.oldTypeFunc = p.index;
+            var params = NodeList.init(p.pp.compilation.gpa);
+            defer params.deinit();
 
-            try p.expectClosing(lp, .RParen);
-        } else if (p.eat(.RParen)) |_| {
-            funcType.paramTypes = &.{};
+            specifier = .OldStyleFunc;
+            while (true) {
+                const param = try p.addNode(.{
+                    .tag = .ParamDecl,
+                    .type = .{ .specifier = .Int },
+                    .first = try p.expectToken(.Identifier),
+                });
+                try params.append(param);
+
+                if (p.eat(.Comma) == null) break;
+            }
+
+            funcType.paramTypes = try p.arena.dupe(NodeIndex, params.items);
         } else {
-            return p.todo("old style function type");
+            try p.err(.expected_param_decl);
         }
 
+        try p.expectClosing(lp, .RParen);
         var resType = Type{
-            .specifier = if (isVarArgs) .VarArgsFunc else .Func,
+            .specifier = specifier,
             .data = .{ .func = funcType },
         };
 
@@ -928,6 +994,9 @@ fn paramDecls(p: *Parser) Error!?[]NodeIndex {
         var nameToken = p.index;
         var paramType = paramDeclSpec.type;
         if (try p.declarator(paramDeclSpec.type, .either)) |some| {
+            if (some.oldTypeFunc) |tokenIdx|
+                try p.errToken(.invalid_old_style_params, tokenIdx);
+
             // TODO: declare()
             nameToken = some.name;
             paramType = some.type;
@@ -980,10 +1049,12 @@ fn paramDecls(p: *Parser) Error!?[]NodeIndex {
 /// typeName : specQual+ abstractDeclarator
 fn typeName(p: *Parser) Error!?Type {
     var ty = (try p.specQual()) orelse return null;
-    if (try p.declarator(ty, .abstract)) |some|
-        return some.type
-    else
-        return null;
+    if (try p.declarator(ty, .abstract)) |some| {
+        if (some.oldTypeFunc) |tokenIdx|
+            try p.errToken(.invalid_old_style_params, tokenIdx);
+
+        return some.type;
+    } else return null;
 }
 
 /// initializer
@@ -1552,7 +1623,7 @@ fn primaryExpr(p: *Parser) Error!Result {
 
                     const funcType = try p.arena.create(Type.Function);
                     funcType.* = .{ .returnType = .{ .specifier = .Int }, .paramTypes = &.{} };
-                    const ty: Type = .{ .specifier = .VarArgsFunc, .data = .{ .func = funcType } };
+                    const ty: Type = .{ .specifier = .OldStyleFunc, .data = .{ .func = funcType } };
                     const node = try p.addNode(.{
                         .type = ty,
                         .tag = .FnProto,
