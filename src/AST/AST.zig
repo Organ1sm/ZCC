@@ -26,7 +26,7 @@ pub fn deinit(tree: *AST) void {
 
 pub const Node = struct {
     tag: AstTag,
-    type: Type,
+    type: Type = .{ .specifier = .Void },
     first: NodeIndex = 0,
     second: NodeIndex = 0,
 
@@ -242,7 +242,8 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
         .CompoundStmt => {
             const start = tree.nodes.items(.first)[node];
             const end = tree.nodes.items(.second)[node];
-            for (tree.data[start..end]) |stmt| try tree.dumpNode(stmt, level + delta, w);
+            for (tree.data[start..end]) |stmt|
+                try tree.dumpNode(stmt, level + delta, w);
         },
 
         .CompoundStmtTwo => {
@@ -250,6 +251,65 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
             if (first != 0) try tree.dumpNode(first, level + delta, w);
             const second = tree.nodes.items(.second)[node];
             if (second != 0) try tree.dumpNode(second, level + delta, w);
+        },
+
+        .LabeledStmt => {
+            try w.writeByteNTimes(' ', level + half);
+            try w.print("label: " ++ GREEN ++ "{s}\n" ++ RESET, .{tree.tokSlice(tree.nodes.items(.first)[node])});
+            const stmt = tree.nodes.items(.second)[node];
+            if (stmt != 0) {
+                try w.writeByteNTimes(' ', level + half);
+                try w.writeAll("stmt:\n");
+                try tree.dumpNode(stmt, level + delta, w);
+            }
+        },
+
+        .IfThenElseStmt => {
+            try w.writeByteNTimes(' ', level + half);
+            try w.writeAll("cond:\n");
+            try tree.dumpNode(tree.nodes.items(.first)[node], level + delta, w);
+
+            const second = tree.nodes.items(.second)[node];
+            try w.writeByteNTimes(' ', level + half);
+            try w.writeAll("then:\n");
+            try tree.dumpNode(tree.data[second], level + delta, w);
+
+            try w.writeByteNTimes(' ', level + half);
+            try w.writeAll("else:\n");
+            try tree.dumpNode(tree.data[second + 1], level + delta, w);
+        },
+
+        .IfElseStmt => {
+            try w.writeByteNTimes(' ', level + half);
+            try w.writeAll("cond:\n");
+            try tree.dumpNode(tree.nodes.items(.first)[node], level + delta, w);
+
+            try w.writeByteNTimes(' ', level + half);
+            try w.writeAll("else:\n");
+            try tree.dumpNode(tree.nodes.items(.second)[node], level + delta, w);
+        },
+
+        .IfThenStmt => {
+            try w.writeByteNTimes(' ', level + half);
+            try w.writeAll("cond:\n");
+            try tree.dumpNode(tree.nodes.items(.first)[node], level + delta, w);
+
+            const then = tree.nodes.items(.second)[node];
+            if (then != 0) {
+                try w.writeByteNTimes(' ', level + half);
+                try w.writeAll("then:\n");
+                try tree.dumpNode(then, level + delta, w);
+            }
+        },
+
+        .ContinueStmt, .BreakStmt => {},
+        .ReturnStmt => {
+            const expr = tree.nodes.items(.first)[node];
+            if (expr != 0) {
+                try w.writeByteNTimes(' ', level + half);
+                try w.writeAll("expr:\n");
+                try tree.dumpNode(expr, level + delta, w);
+            }
         },
 
         .Var,

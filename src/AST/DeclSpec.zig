@@ -22,11 +22,12 @@ threadLocal: ?TokenIndex = null,
 noreturn: ?TokenIndex = null,
 type: Type = .{ .specifier = undefined },
 
-pub fn validateParam(d: DeclSpec, p: *Parser, ty: Type) Error!AstTag {
+pub fn validateParam(d: DeclSpec, p: *Parser) Error!AstTag {
     switch (d.storageClass) {
         .none, .register => {},
         .auto, .@"extern", .static, .typedef => |tokenIndex| try p.errToken(.invalid_storage_on_param, tokenIndex),
     }
+
     if (d.threadLocal) |tokenIndex| try p.errToken(.threadlocal_non_var, tokenIndex);
     if (d.@"inline") |tokenIndex| try p.errStr(.func_spec_non_func, tokenIndex, "inline");
     if (d.noreturn) |tokenIndex| try p.errStr(.func_spec_non_func, tokenIndex, "_Noreturn");

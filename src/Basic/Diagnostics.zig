@@ -40,6 +40,7 @@ const Options = struct {
     @"miss-declaration": Kind = .warning,
     @"extern-initializer": Kind = .warning,
     @"implicit-function-declaration": Kind = .warning,
+    @"unused-value": Kind = .warning,
 };
 
 pub const Tag = enum {
@@ -118,6 +119,9 @@ pub const Tag = enum {
     invalid_old_style_params,
     expected_fn_body,
     invalid_void_param,
+    unused_value,
+    continue_not_in_loop,
+    break_not_in_loop_or_switch,
 };
 
 list: std.ArrayList(Message),
@@ -365,6 +369,9 @@ pub fn render(comp: *Compilation) void {
             .invalid_old_style_params => m.write("identifier parameter lists are only allowed in function definitions"),
             .expected_fn_body => m.write("expected function body after function declaration"),
             .invalid_void_param => m.write("parameter cannot have void type"),
+            .unused_value => m.write("expression result unused"),
+            .continue_not_in_loop => m.write("'continue' statement not in a loop"),
+            .break_not_in_loop_or_switch => m.write("'break' statement not in a loop or a switch"),
         }
 
         m.end(lcs);
@@ -446,6 +453,8 @@ fn tagKind(diag: *Diagnostics, tag: Tag) Kind {
         .expected_param_decl,
         .expected_fn_body,
         .invalid_void_param,
+        .continue_not_in_loop,
+        .break_not_in_loop_or_switch,
         => .@"error",
 
         .to_match_paren,
@@ -463,6 +472,7 @@ fn tagKind(diag: *Diagnostics, tag: Tag) Kind {
         .missing_declaration => diag.options.@"miss-declaration",
         .extern_initializer => diag.options.@"extern-initializer",
         .implicit_func_decl => diag.options.@"implicit-function-declaration",
+        .unused_value => diag.options.@"unused-value",
     };
 
     if (kind == .@"error" and diag.fatalErrors)
