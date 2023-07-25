@@ -30,6 +30,8 @@ index: u32 = 0,
 wantConst: bool = false,
 inFunc: bool = false,
 currDeclList: *NodeList,
+labels: std.ArrayList(Label),
+labelCount: u32 = 0,
 
 pub const Result = union(enum) {
     none,
@@ -105,6 +107,11 @@ pub const Result = union(enum) {
         }
         return casted;
     }
+};
+
+const Label = union(enum) {
+    unresolvedGoto: TokenIndex,
+    label: TokenIndex,
 };
 
 fn eat(p: *Parser, id: TokenType) ?TokenIndex {
@@ -265,6 +272,16 @@ fn inLoopOrSwitch(p: *Parser) bool {
     return false;
 }
 
+fn getLabel(p: *Parser, name: []const u8) ?NodeIndex {
+    for (p.labels.items) |item| {
+        switch (item) {
+            .label => |l| if (std.mem.eql(u8, p.pp.tokSlice(p.tokens[l]), name)) return l,
+            .unresolvedGoto => {},
+        }
+    }
+    return null;
+}
+
 fn findSymbol(p: *Parser, nameToken: TokenIndex) ?Scope {
     const name = p.pp.tokSlice(p.tokens[nameToken]);
     var i = p.scopes.items.len;
@@ -296,9 +313,11 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
         .currDeclList = &rootDecls,
         .scopes = std.ArrayList(Scope).init(pp.compilation.gpa),
         .data = NodeList.init(pp.compilation.gpa),
+        .labels = std.ArrayList(Label).init(pp.compilation.gpa),
     };
     defer p.scopes.deinit();
     defer p.data.deinit();
+    defer p.labels.deinit();
 
     errdefer p.nodes.deinit(pp.compilation.gpa);
 
@@ -463,9 +482,9 @@ fn parseDeclaration(p: *Parser) Error!bool {
 
         if (p.inFunc) try p.err(.func_not_in_root);
 
-        const inFunc = p.inFunc;
+        const inFunction = p.inFunc;
         p.inFunc = true;
-        defer p.inFunc = inFunc;
+        defer p.inFunc = inFunction;
 
         const node = try p.addNode(.{
             .type = initD.d.type,
@@ -480,6 +499,17 @@ fn parseDeclaration(p: *Parser) Error!bool {
 
         const body = try p.compoundStmt();
         p.nodes.items(.second)[node] = body.?;
+
+        // check gotos
+        if (inFunction) {
+            for (p.labels.items) |item| {
+                if (item == .unresolvedGoto)
+                    try p.errStr(.undeclared_label, item.unresolvedGoto, p.pp.tokSlice(p.tokens[item.unresolvedGoto]));
+
+                p.labels.items.len = 0;
+                p.labelCount = 0;
+            }
+        }
 
         try p.currDeclList.append(node);
 
@@ -1171,6 +1201,19 @@ fn stmt(p: *Parser) Error!NodeIndex {
         });
     }
 
+    if (p.eat(.KeywordGoto)) |_| {
+        const nameToken = try p.expectToken(.Identifier);
+        const str = p.pp.tokSlice(p.tokens[nameToken]);
+
+        if (p.getLabel(str) == null)
+            try p.labels.append(.{ .unresolvedGoto = nameToken });
+
+        _ = try p.expectToken(.Semicolon);
+        return try p.addNode(.{
+            .tag = .GotoStmt,
+            .first = nameToken,
+        });
+    }
     if (p.eat(.KeywordContinue)) |cont| {
         if (!p.inLoop())
             try p.errToken(.continue_not_in_loop, cont);
@@ -1237,6 +1280,21 @@ fn maybeWarnUnused(p: *Parser, node: NodeIndex, exprStart: TokenIndex) Error!voi
 fn labeledStmt(p: *Parser) Error!?NodeIndex {
     if (p.getCurrToken().id == .Identifier and p.lookAhead(1).id == .Colon) {
         const nameToken = p.index;
+        const str = p.pp.tokSlice(p.tokens[nameToken]);
+        if (p.getLabel(str)) |some| {
+            try p.errStr(.duplicate_label, nameToken, str);
+            try p.errStr(.previous_label, some, str);
+        } else {
+            p.labelCount += 1;
+            try p.labels.append(.{ .label = nameToken });
+
+            var i: usize = 0;
+            while (i < p.labels.items.len) : (i += 1) {
+                if (p.labels.items[i] == .unresolvedGoto and std.mem.eql(u8, p.pp.tokSlice(p.tokens[p.labels.items[i].unresolvedGoto]), str))
+                    _ = p.labels.swapRemove(i);
+            }
+        }
+
         p.index += 2;
 
         return try p.addNode(.{
@@ -1261,6 +1319,9 @@ fn compoundStmt(p: *Parser) Error!?NodeIndex {
     const savedDS = p.currDeclList;
     defer p.currDeclList = savedDS;
     p.currDeclList = &statements;
+
+    var noreturnIdx: ?TokenIndex = null;
+    var noreturnLabelCount: u32 = 0;
 
     while (p.eat(.RBrace) == null) {
         if (p.staticAssert() catch |er| switch (er) {
@@ -1289,6 +1350,16 @@ fn compoundStmt(p: *Parser) Error!?NodeIndex {
 
         if (s == 0) continue;
         try statements.append(s);
+
+        if (noreturnIdx == null and p.nodeIsNoreturn(s)) {
+            noreturnIdx = p.index;
+            noreturnLabelCount = p.labelCount;
+        }
+    }
+
+    if (noreturnIdx) |some| {
+        if (noreturnLabelCount == p.labelCount)
+            try p.errToken(.unreachable_code, some);
     }
 
     switch (statements.items.len) {
@@ -1310,6 +1381,17 @@ fn compoundStmt(p: *Parser) Error!?NodeIndex {
                 .second = range.end,
             });
         },
+    }
+}
+
+fn nodeIsNoreturn(p: *Parser, node: NodeIndex) bool {
+    switch (p.nodes.items(.tag)[node]) {
+        .BreakStmt, .ContinueStmt, .ReturnStmt => return true,
+        .IfThenElseStmt => {
+            const data = p.data.items[p.nodes.items(.second)[node]..];
+            return p.nodeIsNoreturn(data[0]) and p.nodeIsNoreturn(data[1]);
+        },
+        else => return false,
     }
 }
 
@@ -1844,7 +1926,7 @@ fn primaryExpr(p: *Parser) Error!Result {
 
             for (p.tokens[start..p.index]) |tk| {
                 var slice = p.pp.tokSlice(tk);
-                slice = slice[std.mem.indexOf(u8, slice, "\"").? .. slice.len - 1];
+                slice = slice[std.mem.indexOf(u8, slice, "\"").? + 1 .. slice.len - 1];
 
                 try builder.ensureTotalCapacity(slice.len);
                 var i: u32 = 0;
