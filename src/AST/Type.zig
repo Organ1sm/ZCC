@@ -76,9 +76,17 @@ pub const Specifier = enum {
     // data.SubType
     Pointer,
     Atomic,
+
     // data.func
+    /// int foo(int bar, char baz) and int (void)
     Func,
+
+    /// int foo(int bar, char baz, ...)
     VarArgsFunc,
+
+    /// int foo(bar, baz) and int foo()
+    /// is also var args, but give warnings
+    OldStyleFunc,
 
     // data.array
     Array,
@@ -92,7 +100,7 @@ pub const Specifier = enum {
 
 pub fn isCallable(ty: Type) ?Type {
     return switch (ty.specifier) {
-        .Func, .VarArgsFunc => ty,
+        .Func, .VarArgsFunc, .OldStyleFunc => ty,
         .Pointer => ty.data.subType.isCallable(),
         else => null,
     };
@@ -100,7 +108,7 @@ pub fn isCallable(ty: Type) ?Type {
 
 pub fn isFunc(ty: Type) bool {
     return switch (ty.specifier) {
-        .Func, .VarArgsFunc => true,
+        .Func, .VarArgsFunc, .OldStyleFunc => true,
         else => false,
     };
 }
@@ -116,10 +124,10 @@ pub fn combine(inner: *Type, outer: Type, p: *Parser, sourceToken: TokenIndex) P
     switch (inner.specifier) {
         .Pointer => return inner.data.subType.combine(outer, p, sourceToken),
         .Array, .StaticArray => return p.errStr(.todo, sourceToken, "combine array"),
-        .Func, .VarArgsFunc => {
+        .Func, .VarArgsFunc, .OldStyleFunc => {
             try inner.data.func.returnType.combine(outer, p, sourceToken);
             switch (inner.data.func.returnType.specifier) {
-                .Func, .VarArgsFunc => return p.errToken(.func_cannot_return_func, sourceToken),
+                .Func, .VarArgsFunc, .OldStyleFunc => return p.errToken(.func_cannot_return_func, sourceToken),
                 .Array, .StaticArray => return p.errToken(.func_cannot_return_array, sourceToken),
                 else => {},
             }
@@ -142,7 +150,7 @@ pub fn dump(ty: Type, tree: Tree, w: anytype) @TypeOf(w).Error!void {
             try w.writeAll(")");
         },
 
-        .Func, .VarArgsFunc => {
+        .Func, .VarArgsFunc, .OldStyleFunc => {
             try w.writeAll("fn (");
             for (ty.data.func.paramTypes, 0..) |param, i| {
                 if (i != 0) try w.writeAll(", ");
@@ -163,9 +171,9 @@ pub fn dump(ty: Type, tree: Tree, w: anytype) @TypeOf(w).Error!void {
             try ty.data.func.returnType.dump(tree, w);
         },
         .Array, .StaticArray => {
-            try w.print("[{d}", .{ty.data.array.len});
-            try w.writeAll("] ");
+            try w.writeAll("[");
             if (ty.specifier == .StaticArray) try w.writeAll("static ");
+            try w.print("{d}]", .{ty.data.array.len});
             try ty.data.array.elem.dump(tree, w);
         },
         else => {
