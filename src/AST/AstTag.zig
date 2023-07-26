@@ -72,7 +72,14 @@ pub const Tag = enum(u8) {
     /// if (a) do_1; do_1 may be null
     IfThenStmt,
 
+    /// switch (first): second
     SwitchStmt,
+
+    /// case first: second
+    CaseStmt,
+
+    /// default: first
+    DefaultStmt,
 
     /// while (first) second
     WhileStmt,

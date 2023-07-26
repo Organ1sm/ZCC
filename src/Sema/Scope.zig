@@ -1,3 +1,4 @@
+const std = @import("std");
 const AST = @import("../AST/AST.zig");
 const Parser = @import("../Parser/Parser.zig");
 
@@ -13,7 +14,7 @@ pub const Scope = union(enum) {
     symbol: Symbol,
     enumeration: Enumeration,
     loop,
-    @"switch",
+    @"switch": *Switch,
 
     pub const Symbol = struct {
         name: []const u8,
@@ -24,5 +25,25 @@ pub const Scope = union(enum) {
     pub const Enumeration = struct {
         name: []const u8,
         value: Result,
+    };
+
+    pub const Switch = struct {
+        cases: CaseMap,
+        default: ?Case = null,
+
+        const ResultContext = struct {
+            pub fn eql(_: ResultContext, a: Result, b: Result) bool {
+                return a.eql(b);
+            }
+            pub fn hash(_: ResultContext, a: Result) u64 {
+                return a.hash();
+            }
+        };
+
+        pub const CaseMap = std.HashMap(Result, Case, ResultContext, std.hash_map.default_max_load_percentage);
+        const Case = struct {
+            node: NodeIndex,
+            token: TokenIndex,
+        };
     };
 };
