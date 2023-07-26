@@ -319,7 +319,7 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
             }
         },
 
-        .WhileStmt, .DoWhileStmt => {
+        .SwitchStmt, .WhileStmt, .DoWhileStmt => {
             try w.writeByteNTimes(' ', level + half);
             try w.writeAll("cond:\n");
             try tree.dumpNode(tree.nodes.items(.first)[node], level + delta, w);
@@ -329,6 +329,27 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
                 try w.writeByteNTimes(' ', level + half);
                 try w.writeAll("body:\n");
                 try tree.dumpNode(body, level + delta, w);
+            }
+        },
+
+        .CaseStmt => {
+            try w.writeByteNTimes(' ', level + half);
+            try w.writeAll("value:\n");
+            try tree.dumpNode(tree.nodes.items(.first)[node], level + delta, w);
+            const stmt = tree.nodes.items(.second)[node];
+            if (stmt != 0) {
+                try w.writeByteNTimes(' ', level + half);
+                try w.writeAll("stmt:\n");
+                try tree.dumpNode(stmt, level + delta, w);
+            }
+        },
+
+        .DefaultStmt => {
+            const stmt = tree.nodes.items(.first)[node];
+            if (stmt != 0) {
+                try w.writeByteNTimes(' ', level + half);
+                try w.writeAll("stmt:\n");
+                try tree.dumpNode(stmt, level + delta, w);
             }
         },
 

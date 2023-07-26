@@ -107,6 +107,58 @@ pub const Result = union(enum) {
         }
         return casted;
     }
+
+    pub fn hash(res: Result) u64 {
+        var val: i64 = undefined;
+        switch (res) {
+            .bool => |v| val = @intFromBool(v),
+            .u8 => |v| val = v,
+            .i8 => |v| val = v,
+            .u16 => |v| val = v,
+            .i16 => |v| val = v,
+            .u32 => |v| val = v,
+            .i32 => |v| val = v,
+            .u64 => |v| val = @as(i64, @bitCast(v)), // doesn't matter we only want a hash
+            .i64 => |v| val = v,
+            .none, .node, .lVal => unreachable,
+        }
+        return std.hash.Wyhash.hash(0, std.mem.asBytes(&val));
+    }
+
+    pub fn eql(a: Result, b: Result) bool {
+        var aVal: i64 = undefined;
+        switch (a) {
+            .bool => |v| aVal = @intFromBool(v),
+            .u8 => |v| aVal = v,
+            .i8 => |v| aVal = v,
+            .u16 => |v| aVal = v,
+            .i16 => |v| aVal = v,
+            .u32 => |v| aVal = v,
+            .i32 => |v| aVal = v,
+            .u64 => |v| {
+                if (v == @as(u63, @truncate(v))) aVal = @as(u63, @truncate(v)) else @panic("eql a_val u64");
+            },
+            .i64 => |v| aVal = v,
+            .none, .node, .lVal => unreachable,
+        }
+
+        var bVal: i64 = undefined;
+        switch (b) {
+            .bool => |v| bVal = @intFromBool(v),
+            .u8 => |v| bVal = v,
+            .i8 => |v| bVal = v,
+            .u16 => |v| bVal = v,
+            .i16 => |v| bVal = v,
+            .u32 => |v| bVal = v,
+            .i32 => |v| bVal = v,
+            .u64 => |v| {
+                if (v == @as(u63, @truncate(v))) bVal = @as(u63, @truncate(v)) else @panic("eql b_val u64");
+            },
+            .i64 => |v| bVal = v,
+            .none, .node, .lVal => unreachable,
+        }
+        return aVal == bVal;
+    }
 };
 
 const Label = union(enum) {
@@ -272,13 +324,26 @@ fn inLoopOrSwitch(p: *Parser) bool {
     return false;
 }
 
-fn getLabel(p: *Parser, name: []const u8) ?NodeIndex {
+fn findLabel(p: *Parser, name: []const u8) ?NodeIndex {
     for (p.labels.items) |item| {
         switch (item) {
             .label => |l| if (std.mem.eql(u8, p.pp.tokSlice(p.tokens[l]), name)) return l,
             .unresolvedGoto => {},
         }
     }
+    return null;
+}
+
+fn findSwitch(p: *Parser) ?*Scope.Switch {
+    var i = p.scopes.items.len;
+    while (i > 0) {
+        i -= 1;
+        switch (p.scopes.items[i]) {
+            .@"switch" => |s| return s,
+            else => {},
+        }
+    }
+
     return null;
 }
 
@@ -1173,9 +1238,8 @@ fn stmt(p: *Parser) Error!NodeIndex {
     if (p.eat(.KeywordIf)) |_|
         return p.parseIfStmt();
 
-    if (p.eat(.KeywordSwitch)) |_| {
-        return p.todo("switch");
-    }
+    if (p.eat(.KeywordSwitch)) |_|
+        return p.parseSwitchStmt();
 
     if (p.eat(.KeywordWhile)) |_|
         return p.parseWhileStmt();
@@ -1187,7 +1251,7 @@ fn stmt(p: *Parser) Error!NodeIndex {
         const nameToken = try p.expectToken(.Identifier);
         const str = p.pp.tokSlice(p.tokens[nameToken]);
 
-        if (p.getLabel(str) == null)
+        if (p.findLabel(str) == null)
             try p.labels.append(.{ .unresolvedGoto = nameToken });
 
         _ = try p.expectToken(.Semicolon);
@@ -1316,6 +1380,85 @@ fn parseDoWhileStmt(p: *Parser) Error!NodeIndex {
     });
 }
 
+fn parseSwitchStmt(p: *Parser) Error!NodeIndex {
+    const startScopeLen = p.scopes.items.len;
+    defer p.scopes.items.len = startScopeLen;
+
+    const lp = try p.expectToken(.LParen);
+    const cond = try p.expr();
+
+    try cond.expect(p);
+    const condNode = try cond.toNode(p);
+    try p.expectClosing(lp, .RParen);
+
+    var switchScope = Scope.Switch{
+        .cases = Scope.Switch.CaseMap.init(p.pp.compilation.gpa),
+    };
+    defer switchScope.cases.deinit();
+
+    try p.scopes.append(.{ .@"switch" = &switchScope });
+    const body = try p.stmt();
+
+    return try p.addNode(.{
+        .tag = .SwitchStmt,
+        .first = condNode,
+        .second = body,
+    });
+}
+
+fn parseCaseStmt(p: *Parser, caseToken: u32) Error!?NodeIndex {
+    const val = try p.constExpr();
+    _ = try p.expectToken(.Colon);
+
+    const s = try p.stmt();
+    const node = try p.addNode(.{
+        .tag = .CaseStmt,
+        .first = try val.toNode(p),
+        .second = s,
+    });
+
+    if (p.findSwitch()) |some| {
+        const gop = try some.cases.getOrPut(val);
+        if (gop.found_existing) {
+            try p.errToken(.duplicate_switch_case, caseToken);
+            try p.errToken(.previous_case, gop.value_ptr.token);
+        } else {
+            gop.value_ptr.* = .{
+                .token = caseToken,
+                .node = node,
+            };
+        }
+    } else {
+        try p.errStr(.case_not_in_switch, caseToken, "case");
+    }
+    return node;
+}
+
+fn parseDefaultStmt(p: *Parser, defaultToken: u32) Error!?NodeIndex {
+    _ = try p.expectToken(.Colon);
+    const s = try p.stmt();
+
+    const node = try p.addNode(.{
+        .tag = .DefaultStmt,
+        .first = s,
+    });
+
+    if (p.findSwitch()) |some| {
+        if (some.default) |previous| {
+            try p.errToken(.multiple_default, defaultToken);
+            try p.errToken(.previous_case, previous.token);
+        } else {
+            some.default = .{
+                .token = defaultToken,
+                .node = node,
+            };
+        }
+    } else {
+        try p.errStr(.case_not_in_switch, defaultToken, "default");
+    }
+
+    return node;
+}
 fn maybeWarnUnused(p: *Parser, node: NodeIndex, exprStart: TokenIndex) Error!void {
     switch (p.nodes.items(.tag)[node]) {
         .AssignExpr,
@@ -1344,7 +1487,7 @@ fn labeledStmt(p: *Parser) Error!?NodeIndex {
     if (p.getCurrToken().id == .Identifier and p.lookAhead(1).id == .Colon) {
         const nameToken = p.index;
         const str = p.pp.tokSlice(p.tokens[nameToken]);
-        if (p.getLabel(str)) |some| {
+        if (p.findLabel(str)) |some| {
             try p.errStr(.duplicate_label, nameToken, str);
             try p.errStr(.previous_label, some, str);
         } else {
@@ -1365,10 +1508,10 @@ fn labeledStmt(p: *Parser) Error!?NodeIndex {
             .first = nameToken,
             .second = try p.stmt(),
         });
-    } else if (p.eat(.KeywordCase)) |_| {
-        return p.todo("case");
-    } else if (p.eat(.KeywordDefault)) |_| {
-        return p.todo("default");
+    } else if (p.eat(.KeywordCase)) |case| {
+        return p.parseCaseStmt(case);
+    } else if (p.eat(.KeywordDefault)) |default| {
+        return p.parseDefaultStmt(default);
     } else return null;
 }
 
@@ -1479,6 +1622,8 @@ fn nextStmt(p: *Parser, lBrace: TokenIndex) !void {
             .KeywordIf,
             .KeywordGoto,
             .KeywordSwitch,
+            .KeywordCase,
+            .KeywordDefault,
             .KeywordContinue,
             .KeywordBreak,
             .KeywordReturn,
@@ -1543,7 +1688,10 @@ pub fn constExpr(p: *Parser) Error!Result {
     defer p.wantConst = saved_const;
     p.wantConst = true;
 
-    return p.conditionalExpr();
+    const res = try p.conditionalExpr();
+    try res.expect(p);
+
+    return res;
 }
 
 /// conditionalExpr : logicalOrExpr ('?' expression? ':' conditionalExpr)?
