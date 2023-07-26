@@ -73,9 +73,16 @@ pub const Tag = enum(u8) {
     IfThenStmt,
 
     SwitchStmt,
+
+    /// while (first) second
     WhileStmt,
+
+    /// do second while(first);
     DoWhileStmt,
+
     ForStmt,
+
+    /// goto first;
     GotoStmt,
     ContinueStmt,
     BreakStmt,
