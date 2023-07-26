@@ -242,8 +242,11 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
         .CompoundStmt => {
             const start = tree.nodes.items(.first)[node];
             const end = tree.nodes.items(.second)[node];
-            for (tree.data[start..end]) |stmt|
+            for (tree.data[start..end], 0..) |stmt, i| {
+                if (i != 0)
+                    try w.writeByte('\n');
                 try tree.dumpNode(stmt, level + delta, w);
+            }
         },
 
         .CompoundStmtTwo => {
@@ -313,6 +316,19 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
                 try w.writeByteNTimes(' ', level + half);
                 try w.writeAll("expr:\n");
                 try tree.dumpNode(expr, level + delta, w);
+            }
+        },
+
+        .WhileStmt, .DoWhileStmt => {
+            try w.writeByteNTimes(' ', level + half);
+            try w.writeAll("cond:\n");
+            try tree.dumpNode(tree.nodes.items(.first)[node], level + delta, w);
+
+            const body = tree.nodes.items(.second)[node];
+            if (body != 0) {
+                try w.writeByteNTimes(' ', level + half);
+                try w.writeAll("body:\n");
+                try tree.dumpNode(body, level + delta, w);
             }
         },
 

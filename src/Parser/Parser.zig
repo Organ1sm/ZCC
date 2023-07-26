@@ -1170,36 +1170,18 @@ fn stmt(p: *Parser) Error!NodeIndex {
     if (try p.compoundStmt()) |some|
         return some;
 
-    if (p.eat(.KeywordIf)) |_| {
-        const lp = try p.expectToken(.LParen);
-        const cond = try p.expr();
+    if (p.eat(.KeywordIf)) |_|
+        return p.parseIfStmt();
 
-        try cond.expect(p);
-
-        const condNode = try cond.toNode(p);
-        try p.expectClosing(lp, .RParen);
-
-        const then = try p.stmt();
-        const elseTK = if (p.eat(.KeywordElse)) |_| try p.stmt() else 0;
-
-        if (then != 0 and elseTK != 0) {
-            return try p.addNode(.{
-                .tag = .IfThenElseStmt,
-                .first = condNode,
-                .second = (try p.addList(&.{ then, elseTK })).start,
-            });
-        } else if (then == 0 and elseTK != 0) {
-            return try p.addNode(.{
-                .tag = .IfElseStmt,
-                .first = condNode,
-                .second = elseTK,
-            });
-        } else return try p.addNode(.{
-            .tag = .IfThenStmt,
-            .first = condNode,
-            .second = elseTK,
-        });
+    if (p.eat(.KeywordSwitch)) |_| {
+        return p.todo("switch");
     }
+
+    if (p.eat(.KeywordWhile)) |_|
+        return p.parseWhileStmt();
+
+    if (p.eat(.KeywordDo)) |_|
+        return p.parseDoWhileStmt();
 
     if (p.eat(.KeywordGoto)) |_| {
         const nameToken = try p.expectToken(.Identifier);
@@ -1214,12 +1196,13 @@ fn stmt(p: *Parser) Error!NodeIndex {
             .first = nameToken,
         });
     }
+
     if (p.eat(.KeywordContinue)) |cont| {
         if (!p.inLoop())
             try p.errToken(.continue_not_in_loop, cont);
         _ = try p.expectToken(.Semicolon);
 
-        return try p.addNode(.{ .tag = .BreakStmt });
+        return try p.addNode(.{ .tag = .ContinueStmt });
     }
 
     if (p.eat(.KeywordBreak)) |br| {
@@ -1254,6 +1237,85 @@ fn stmt(p: *Parser) Error!NodeIndex {
     return error.ParsingFailed;
 }
 
+fn parseIfStmt(p: *Parser) Error!NodeIndex {
+    const startScopeLen = p.scopes.items.len;
+    defer p.scopes.items.len = startScopeLen;
+
+    const lp = try p.expectToken(.LParen);
+    const cond = try p.expr();
+
+    try cond.expect(p);
+
+    const condNode = try cond.toNode(p);
+    try p.expectClosing(lp, .RParen);
+
+    const then = try p.stmt();
+    const elseTK = if (p.eat(.KeywordElse)) |_| try p.stmt() else 0;
+
+    if (then != 0 and elseTK != 0) {
+        return try p.addNode(.{
+            .tag = .IfThenElseStmt,
+            .first = condNode,
+            .second = (try p.addList(&.{ then, elseTK })).start,
+        });
+    } else if (then == 0 and elseTK != 0) {
+        return try p.addNode(.{
+            .tag = .IfElseStmt,
+            .first = condNode,
+            .second = elseTK,
+        });
+    } else return try p.addNode(.{
+        .tag = .IfThenStmt,
+        .first = condNode,
+        .second = elseTK,
+    });
+}
+
+fn parseWhileStmt(p: *Parser) Error!NodeIndex {
+    const startScopeLen = p.scopes.items.len;
+    defer p.scopes.items.len = startScopeLen;
+
+    const lp = try p.expectToken(.LParen);
+    const cond = try p.expr();
+
+    try cond.expect(p);
+    const condNode = try cond.toNode(p);
+    try p.expectClosing(lp, .RParen);
+
+    try p.scopes.append(.loop);
+    const body = try p.stmt();
+
+    return try p.addNode(.{
+        .tag = .WhileStmt,
+        .first = condNode,
+        .second = body,
+    });
+}
+
+fn parseDoWhileStmt(p: *Parser) Error!NodeIndex {
+    const startScopeLen = p.scopes.items.len;
+    defer p.scopes.items.len = startScopeLen;
+
+    try p.scopes.append(.loop);
+    const body = try p.stmt();
+    p.scopes.items.len = startScopeLen;
+
+    _ = try p.expectToken(.KeywordWhile);
+    const lp = try p.expectToken(.LParen);
+    const cond = try p.expr();
+
+    try cond.expect(p);
+    const condNode = try cond.toNode(p);
+    try p.expectClosing(lp, .RParen);
+
+    _ = try p.expectToken(.Semicolon);
+    return try p.addNode(.{
+        .tag = .WhileStmt,
+        .first = condNode,
+        .second = body,
+    });
+}
+
 fn maybeWarnUnused(p: *Parser, node: NodeIndex, exprStart: TokenIndex) Error!void {
     switch (p.nodes.items(.tag)[node]) {
         .AssignExpr,
@@ -1268,6 +1330,7 @@ fn maybeWarnUnused(p: *Parser, node: NodeIndex, exprStart: TokenIndex) Error!voi
         .XorAssignExpr,
         .OrAssignExpr, //
         .CallExpr,
+        .CallExprOne,
         => {},
         else => try p.errToken(.unused_value, exprStart),
     }
@@ -1410,15 +1473,14 @@ fn nextStmt(p: *Parser, lBrace: TokenIndex) !void {
                 parens -= 1;
             },
 
-            // TODO: uncomment once implemented
-            // .KeywordFor,
-            // .KeywordWhile,
-            // .KeywordDo,
+            .KeywordFor,
+            .KeywordWhile,
+            .KeywordDo,
             .KeywordIf,
-            // .KeywordGoto,
-            // .KeywordSwitch,
+            .KeywordGoto,
+            .KeywordSwitch,
             .KeywordContinue,
-            // .KeywordBreak,
+            .KeywordBreak,
             .KeywordReturn,
             .KeywordTypedef,
             .KeywordExtern,

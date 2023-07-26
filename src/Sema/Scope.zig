@@ -12,7 +12,7 @@ pub const Scope = union(enum) {
     @"enum": Symbol,
     symbol: Symbol,
     enumeration: Enumeration,
-    loop: Symbol,
+    loop,
     @"switch",
 
     pub const Symbol = struct {
