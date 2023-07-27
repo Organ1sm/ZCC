@@ -195,12 +195,14 @@ pub const Tag = enum(u8) {
     PostDecExpr,
     /// lhs is a TokenIndex of the identifier
     DeclRefExpr,
-    /// TODO
-    IntegerLiteralExpr,
-    /// TODO
-    FloatLiteralExpr,
-    /// TODO
-    CharLiteralExpr,
+    /// integer literal with 32bit or fewer bits, stored in first
+    Int32Literal,
+    /// integer literal with 64bit, split in first and second
+    Int64Literal,
+    /// f32 literal stored in node.first
+    FloatLiteral,
+    /// f64 literal stored in node.first and node.second
+    DoubleLiteral,
     /// data[first][0..second]
     StringLiteralExpr,
     /// TODO
