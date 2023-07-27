@@ -36,6 +36,7 @@ labelCount: u32 = 0,
 pub const Result = union(enum) {
     none,
     bool: bool,
+    char: i16,
     u8: u8,
     i8: i8,
     u16: u16,
@@ -50,11 +51,10 @@ pub const Result = union(enum) {
     pub fn getBool(res: Result) bool {
         return switch (res) {
             .bool => |v| v,
-
             .u8 => |v| v != 0,
             .i8 => |v| v != 0,
             .u16 => |v| v != 0,
-            .i16 => |v| v != 0,
+            .i16, .char => |v| v != 0,
             .u32 => |v| v != 0,
             .i32 => |v| v != 0,
             .u64 => |v| v != 0,
@@ -80,19 +80,45 @@ pub const Result = union(enum) {
     }
 
     fn ty(res: Result, p: *Parser) Type {
+        const intIs32Bits = (Type{ .specifier = .Int }).sizeof(p.pp.compilation) == 4;
         return switch (res) {
             .none => unreachable,
             .node, .lVal => |n| p.nodes.items(.type)[n],
-            else => .{ .specifier = .Int }, // TODO get actual type
+            .bool => .{ .specifier = .Bool },
+            .char => .{ .specifier = .Char },
+            .u8 => .{ .specifier = .UChar },
+            .i8 => .{ .specifier = .SChar },
+            .u16 => .{ .specifier = .UShort },
+            .i16 => .{ .specifier = .Short },
+            .u32 => .{ .specifier = if (intIs32Bits) .UInt else .ULong },
+            .i32 => .{ .specifier = if (intIs32Bits) .Int else .Long },
+            .u64 => .{ .specifier = .ULongLong },
+            .i64 => .{ .specifier = .LongLong },
         };
     }
 
     fn toNode(res: Result, p: *Parser) !NodeIndex {
-        return switch (res) {
-            .none => 0,
-            .node, .lVal => |n| n,
-            else => p.todo("number to ast"),
-        };
+        var parts: [2]TokenIndex = undefined;
+        switch (res) {
+            .none => return 0,
+            .node, .lVal => |n| return n,
+            .bool => |v| parts[0] = @intFromBool(v),
+            .u8 => |v| parts[0] = v,
+            .i8 => |v| parts[0] = @as(u32, @bitCast(@as(i32, v))),
+            .u16 => |v| parts[0] = v,
+            .i16, .char => |v| parts[0] = @as(u32, @bitCast(@as(i32, v))),
+            .u32 => |v| parts[0] = v,
+            .i32 => |v| parts[0] = @as(u32, @bitCast(v)),
+            .u64 => |v| parts = @as([2]TokenIndex, @bitCast(v)),
+            .i64 => |v| parts = @as([2]TokenIndex, @bitCast(v)),
+        }
+
+        return p.addNode(.{
+            .tag = if (res == .u64 or res == .i64) .Int64Literal else .Int32Literal,
+            .type = res.ty(p),
+            .first = parts[0],
+            .second = parts[1],
+        });
     }
 
     fn coerce(res: Result, p: *Parser, destType: Type) !Result {
@@ -115,7 +141,7 @@ pub const Result = union(enum) {
             .u8 => |v| val = v,
             .i8 => |v| val = v,
             .u16 => |v| val = v,
-            .i16 => |v| val = v,
+            .i16, .char => |v| val = v,
             .u32 => |v| val = v,
             .i32 => |v| val = v,
             .u64 => |v| val = @as(i64, @bitCast(v)), // doesn't matter we only want a hash
@@ -132,7 +158,7 @@ pub const Result = union(enum) {
             .u8 => |v| aVal = v,
             .i8 => |v| aVal = v,
             .u16 => |v| aVal = v,
-            .i16 => |v| aVal = v,
+            .i16, .char => |v| aVal = v,
             .u32 => |v| aVal = v,
             .i32 => |v| aVal = v,
             .u64 => |v| {
@@ -148,7 +174,7 @@ pub const Result = union(enum) {
             .u8 => |v| bVal = v,
             .i8 => |v| bVal = v,
             .u16 => |v| bVal = v,
-            .i16 => |v| bVal = v,
+            .i16, .char => |v| bVal = v,
             .u32 => |v| bVal = v,
             .i32 => |v| bVal = v,
             .u64 => |v| {
@@ -386,7 +412,9 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
 
     errdefer p.nodes.deinit(pp.compilation.gpa);
 
-    while (p.eat(.Eof) != null) {
+    _ = try p.addNode(.{ .tag = .Invalid, .type = undefined });
+
+    while (p.eat(.Eof) == null) {
         if (p.staticAssert() catch |er| switch (er) {
             error.ParsingFailed => {
                 p.nextExternDecl();
@@ -590,6 +618,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
             .type = initD.d.type,
             .tag = try declSpec.validate(p, initD.d.type, initD.initializer != 0),
             .first = initD.d.name,
+            .second = initD.initializer,
         });
         try p.currDeclList.append(node);
 
@@ -984,6 +1013,7 @@ fn declarator(p: *Parser, baseType: Type, kind: enum { normal, abstract, either 
         d.name = p.index;
         p.index += 1;
         d.type = try p.directDeclarator(d.type, &d);
+        return d;
     } else if (p.eat(.LParen)) |lp| blk: {
         var res = (try p.declarator(.{ .specifier = .Void }, kind)) orelse {
             p.index = lp;
@@ -1717,7 +1747,7 @@ fn logicalOrExpr(p: *Parser) Error!Result {
         const rhs = try p.logicalAndExpr();
 
         if (p.wantConst or (lhs != .node and rhs != .node)) {
-            lhs = Result{ .bool = lhs.getBool() or rhs.getBool() };
+            lhs = Result{ .i32 = @intFromBool(lhs.getBool() or rhs.getBool()) }; //TODO: result has int type
         } else {
             return p.todo("ast");
         }
@@ -2226,10 +2256,43 @@ fn primaryExpr(p: *Parser) Error!Result {
         .IntegerLiteral_LL,
         .IntegerLiteral_LLU,
         => {
-            if (p.wantConst) {
-                return p.todo("integer literals");
+            const curToken = p.getCurrToken();
+            var slice = p.pp.tokSlice(curToken);
+
+            p.index += 1;
+            var base: u8 = 10;
+
+            if (std.mem.startsWith(u8,  slice, "0x") or std.mem.startsWith(u8, slice, "0X")) {
+                slice = slice[2..];
+                base = 16;
+            } else if (std.mem.startsWith(u8, slice, "0b") or std.mem.startsWith(u8, slice, "0B")) {
+                slice = slice[2..];
+                base = 2;
+            } else if (slice[0] == '0') {
+                base = 8;
             }
-            return p.todo("ast");
+
+            if (base == 10) {
+                switch (curToken.id) {
+                    .IntegerLiteral => return p.parseInt(base, slice, &.{ .Int, .Long, .LongLong }),
+                    .IntegerLiteral_U => return p.parseInt(base, slice, &.{ .UInt, .ULong, .ULongLong }),
+                    .IntegerLiteral_L => return p.parseInt(base, slice, &.{ .Long, .LongLong }),
+                    .IntegerLiteral_LU => return p.parseInt(base, slice, &.{ .ULong, .ULongLong }),
+                    .IntegerLiteral_LL => return p.parseInt(base, slice, &.{.LongLong}),
+                    .IntegerLiteral_LLU => return p.parseInt(base, slice, &.{.ULongLong}),
+                    else => unreachable,
+                }
+            } else {
+                switch (curToken.id) {
+                    .IntegerLiteral => return p.parseInt(base, slice, &.{ .Int, .UInt, .Long, .ULong, .LongLong, .ULongLong }),
+                    .IntegerLiteral_U => return p.parseInt(base, slice, &.{ .UInt, .ULong, .ULongLong }),
+                    .IntegerLiteral_L => return p.parseInt(base, slice, &.{ .Long, .ULong, .LongLong, .ULongLong }),
+                    .IntegerLiteral_LU => return p.parseInt(base, slice, &.{ .ULong, .ULongLong }),
+                    .IntegerLiteral_LL => return p.parseInt(base, slice, &.{ .LongLong, .ULongLong }),
+                    .IntegerLiteral_LLU => return p.parseInt(base, slice, &.{.ULongLong}),
+                    else => unreachable,
+                }
+            }
         },
         .KeywordGeneric => {
             return p.todo("generic");
@@ -2237,4 +2300,36 @@ fn primaryExpr(p: *Parser) Error!Result {
 
         else => return Result{ .none = {} },
     }
+}
+
+fn parseInt(p: *Parser, base: u8, slice: []const u8, specs: []const Type.Specifier) Error!Result {
+    const wrappedParse = struct {
+        fn func(comptime T: type, b: u8, s: []const u8) ?T {
+            return std.fmt.parseInt(T, s, b) catch return null;
+        }
+    }.func;
+
+    for (specs) |spec| {
+        const ty = Type{ .specifier = spec };
+        const isUnsigned = ty.isUnsignedInt(p.pp.compilation);
+        const tySize = ty.sizeof(p.pp.compilation);
+
+        if (isUnsigned) {
+            switch (tySize) {
+                2 => if (wrappedParse(u16, base, slice)) |r| return Result{ .u16 = r },
+                4 => if (wrappedParse(u32, base, slice)) |r| return Result{ .u32 = r },
+                8 => if (wrappedParse(u64, base, slice)) |r| return Result{ .u64 = r },
+                else => unreachable,
+            }
+        } else {
+            switch (tySize) {
+                2 => if (wrappedParse(i16, base, slice)) |r| return Result{ .i16 = r },
+                4 => if (wrappedParse(i32, base, slice)) |r| return Result{ .i32 = r },
+                8 => if (wrappedParse(i64, base, slice)) |r| return Result{ .i64 = r },
+                else => unreachable,
+            }
+        }
+    }
+
+    return p.todo("huge integer constants");
 }

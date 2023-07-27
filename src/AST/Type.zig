@@ -1,6 +1,7 @@
 const std = @import("std");
 const Parser = @import("../Parser/Parser.zig");
 const Tree = @import("AST.zig");
+const Compilation = @import("../Basic/Compilation.zig");
 const Builder = @import("TypeBuilder.zig").Builder;
 
 const Type = @This();
@@ -117,6 +118,43 @@ pub fn isArray(ty: Type) bool {
     return switch (ty.specifier) {
         .Array, .StaticArray => true,
         else => false,
+    };
+}
+
+pub fn isUnsignedInt(ty: Type, comp: *Compilation) bool {
+    _ = comp;
+    return switch (ty.specifier) {
+        .UChar, .UShort, .UInt, .ULong, .ULongLong => return true,
+        else => false,
+    };
+}
+
+pub fn wideChar(p: *Parser) Type {
+    _ = p;
+    return .{ .specifier = .Int };
+}
+
+/// Size of type as reported by sizeof
+pub fn sizeof(ty: Type, comp: *Compilation) u64 {
+    // TODO get target from compilation
+    return switch (ty.specifier) {
+        .Func, .VarArgsFunc, .OldStyleFunc, .Void, .Bool => 1,
+        .Char, .SChar, .UChar => 1,
+        .Short, .UShort => 2,
+        .Int, .UInt => 4,
+        .Long, .ULong, .LongLong, .ULongLong => 8,
+        .Float => 4,
+        .Double => 8,
+        .LongDouble => 16,
+        .ComplexFloat => 8,
+        .ComplexDouble => 16,
+        .ComplexLongDouble => 32,
+        .Pointer => 8,
+        .Atomic => return ty.data.subType.sizeof(comp),
+        .Array, .StaticArray => return ty.data.subType.sizeof(comp) * ty.data.array.len,
+        .Struct => @panic("TODO"),
+        .Union => @panic("TODO"),
+        .Enum => @panic("TODO"),
     };
 }
 

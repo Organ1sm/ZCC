@@ -22,7 +22,7 @@ pub const ID = enum(u16) {
     pub fn markGenerated(id: *ID) void {
         id.* = @as(ID, @enumFromInt((@intFromEnum(id.*) | ID.generatedBit)));
     }
-}; 
+};
 
 path: []const u8,
 buffer: []const u8,
@@ -39,11 +39,11 @@ pub fn lineColString(source: Source, locStart: u32) LCS {
 
     var i: u32 = 0;
     while (i < locStart) : (i += 1) {
-        i -= 1;
-        col += 1;
         if (source.buffer[i] == '\n') {
+            line += 1;
+            col = 1;
+        } else {
             col += 1;
-            break;
         }
     }
 
