@@ -87,6 +87,13 @@ pub const Tag = enum(u8) {
     /// do second while(first);
     DoWhileStmt,
 
+    /// for (data[..]; data[len-3]; data[len-2]) data[len-1]
+    ForDeclStmt,
+
+    /// for(;;;) first
+    ForEverStmt,
+
+    /// for(data[first]; data[first + 1]; data[first+2]) second
     ForStmt,
 
     /// goto first;
