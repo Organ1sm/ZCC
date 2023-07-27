@@ -37,10 +37,16 @@ pub const Array = struct {
     elem: Type,
 };
 
+pub const VLA = struct {
+    expr: NodeIndex,
+    elem: Type,
+};
+
 data: union {
     subType: *Type,
     func: *Function,
     array: *Array,
+    vla: *VLA,
     node: NodeIndex,
     none: void,
 } = .{ .none = {} },
@@ -77,6 +83,7 @@ pub const Specifier = enum {
     // data.SubType
     Pointer,
     Atomic,
+    UnspecifiedVariableLenArray,
 
     // data.func
     /// int foo(int bar, char baz) and int (void)
@@ -92,6 +99,8 @@ pub const Specifier = enum {
     // data.array
     Array,
     StaticArray,
+    IncompleteArray,
+    VariableLenArray,
 
     // data.node
     Struct,
@@ -116,7 +125,7 @@ pub fn isFunc(ty: Type) bool {
 
 pub fn isArray(ty: Type) bool {
     return switch (ty.specifier) {
-        .Array, .StaticArray => true,
+        .Array, .StaticArray, .IncompleteArray, .VariableLenArray, .UnspecifiedVariableLenArray => true,
         else => false,
     };
 }
@@ -134,10 +143,18 @@ pub fn wideChar(p: *Parser) Type {
     return .{ .specifier = .Int };
 }
 
+pub fn hasIncompleteSize(ty: Type) bool {
+    return switch (ty.specifier) {
+        .Void, .IncompleteArray => true,
+        else => false,
+    };
+}
+
 /// Size of type as reported by sizeof
 pub fn sizeof(ty: Type, comp: *Compilation) u64 {
     // TODO get target from compilation
     return switch (ty.specifier) {
+        .VariableLenArray, .UnspecifiedVariableLenArray, .IncompleteArray => unreachable,
         .Func, .VarArgsFunc, .OldStyleFunc, .Void, .Bool => 1,
         .Char, .SChar, .UChar => 1,
         .Short, .UShort => 2,
@@ -161,14 +178,21 @@ pub fn sizeof(ty: Type, comp: *Compilation) u64 {
 pub fn combine(inner: *Type, outer: Type, p: *Parser, sourceToken: TokenIndex) Parser.Error!void {
     switch (inner.specifier) {
         .Pointer => return inner.data.subType.combine(outer, p, sourceToken),
+
+        .VariableLenArray, .IncompleteArray => {
+            try inner.data.array.elem.combine(outer, p, sourceToken);
+
+            if (inner.data.array.elem.hasIncompleteSize()) return p.errToken(.array_incomplete_elem, sourceToken);
+            if (inner.data.array.elem.isFunc()) return p.errToken(.array_func_elem, sourceToken);
+            if (inner.data.array.elem.specifier == .StaticArray and inner.isArray()) return p.errToken(.static_non_outernmost_array, sourceToken);
+            if (inner.data.array.elem.qual.any() and inner.isArray()) return p.errToken(.qualifier_non_outernmost_array, sourceToken);
+        },
+
         .Array, .StaticArray => return p.errStr(.todo, sourceToken, "combine array"),
         .Func, .VarArgsFunc, .OldStyleFunc => {
             try inner.data.func.returnType.combine(outer, p, sourceToken);
-            switch (inner.data.func.returnType.specifier) {
-                .Func, .VarArgsFunc, .OldStyleFunc => return p.errToken(.func_cannot_return_func, sourceToken),
-                .Array, .StaticArray => return p.errToken(.func_cannot_return_array, sourceToken),
-                else => {},
-            }
+            if (inner.data.func.returnType.isFunc()) return p.errToken(.func_cannot_return_func, sourceToken);
+            if (inner.data.func.returnType.isArray()) return p.errToken(.func_cannot_return_array, sourceToken);
         },
         else => inner.* = outer,
     }
@@ -208,12 +232,19 @@ pub fn dump(ty: Type, tree: Tree, w: anytype) @TypeOf(w).Error!void {
             try w.writeAll(") ");
             try ty.data.func.returnType.dump(tree, w);
         },
+
         .Array, .StaticArray => {
             try w.writeAll("[");
             if (ty.specifier == .StaticArray) try w.writeAll("static ");
             try w.print("{d}]", .{ty.data.array.len});
             try ty.data.array.elem.dump(tree, w);
         },
+
+        .IncompleteArray => {
+            try w.writeAll("[]");
+            try ty.data.array.elem.dump(tree, w);
+        },
+
         else => {
             try w.writeAll(Builder.fromType(ty).toString());
         },

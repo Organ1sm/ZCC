@@ -56,11 +56,14 @@ pub const Builder = struct {
 
         Pointer: *Type,
         Atomic: *Type,
+        UnspecifiedVariableLenArray: *Type,
         Func: *Type.Function,
         VarArgsFunc: *Type.Function,
         OldStyleFunc: *Type.Function,
         Array: *Type.Array,
         StaticArray: *Type.Array,
+        IncompleteArray: *Type.Array,
+        VariableLenArray: *Type.VLA,
 
         Struct: NodeIndex,
         Union: NodeIndex,
@@ -116,7 +119,7 @@ pub const Builder = struct {
                 Kind.Pointer => "pointer",
                 Kind.Atomic => "atomic",
                 Kind.Func, Kind.VarArgsFunc, Kind.OldStyleFunc => "function",
-                Kind.Array, Kind.StaticArray => "array",
+                Kind.Array, Kind.StaticArray, Kind.UnspecifiedVariableLenArray, Kind.VariableLenArray, Kind.IncompleteArray => "array",
                 Kind.Struct => "struct",
                 Kind.Union => "union",
                 Kind.Enum => "enum",
@@ -182,6 +185,12 @@ pub const Builder = struct {
                 return;
             },
 
+            .UnspecifiedVariableLenArray => |data| {
+                ty.specifier = .UnspecifiedVariableLenArray;
+                ty.data = .{ .subType = data };
+                return;
+            },
+
             Kind.Func => |data| {
                 ty.specifier = .Func;
                 ty.data = .{ .func = data };
@@ -209,6 +218,18 @@ pub const Builder = struct {
             Kind.StaticArray => |data| {
                 ty.specifier = .StaticArray;
                 ty.data = .{ .array = data };
+                return;
+            },
+
+            Kind.IncompleteArray => |data| {
+                ty.specifier = .IncompleteArray;
+                ty.data = .{ .array = data };
+                return;
+            },
+
+            Kind.VariableLenArray => |data| {
+                ty.specifier = .VariableLenArray;
+                ty.data = .{ .vla = data };
                 return;
             },
 
@@ -434,11 +455,14 @@ pub const Builder = struct {
 
             .Pointer => .{ .Pointer = ty.data.subType },
             .Atomic => .{ .Atomic = ty.data.subType },
+            .UnspecifiedVariableLenArray => .{.UnspecifiedVariableLenArray = ty.data.subType},
             .Func => .{ .Func = ty.data.func },
             .VarArgsFunc => .{ .VarArgsFunc = ty.data.func },
             .OldStyleFunc => .{ .OldStyleFunc = ty.data.func },
             .Array => .{ .Array = ty.data.array },
             .StaticArray => .{ .StaticArray = ty.data.array },
+            .IncompleteArray => .{.IncompleteArray = ty.data.array},
+            .VariableLenArray => .{.VariableLenArray = ty.data.vla},
             .Struct => .{ .Struct = ty.data.node },
             .Union => .{ .Union = ty.data.node },
             .Enum => .{ .Enum = ty.data.node },

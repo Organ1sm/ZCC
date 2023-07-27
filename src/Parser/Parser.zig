@@ -528,9 +528,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
     };
 
     // check for funtion definition
-    if (initD.d.funcDeclarator != null and initD.initializer == 0) fndef: {
-        std.debug.assert(initD.d.type.isFunc());
-
+    if (initD.d.funcDeclarator != null and initD.initializer == 0 and initD.d.type.isFunc()) fndef: {
         switch (p.getCurrToken().id) {
             .Comma, .Semicolon => break :fndef,
             .LBrace => {},
@@ -1002,17 +1000,19 @@ const Declarator = struct {
     oldTypeFunc: ?TokenIndex = null,
 };
 
+const DeclaratorKind = enum { normal, abstract, param };
+
 /// declarator: pointer? directDeclarator
 /// abstractDeclarator
 /// : pointer? ('(' abstractDeclarator ')')? directAbstractDeclarator*
-fn declarator(p: *Parser, baseType: Type, kind: enum { normal, abstract, either }) Error!?Declarator {
+fn declarator(p: *Parser, baseType: Type, kind: DeclaratorKind) Error!?Declarator {
     const start = p.index;
     var d = Declarator{ .name = 0, .type = try p.pointer(baseType) };
 
     if (kind != .abstract and p.getCurrToken().id == .Identifier) {
         d.name = p.index;
         p.index += 1;
-        d.type = try p.directDeclarator(d.type, &d);
+        d.type = try p.directDeclarator(d.type, &d, kind);
         return d;
     } else if (p.eat(.LParen)) |lp| blk: {
         var res = (try p.declarator(.{ .specifier = .Void }, kind)) orelse {
@@ -1022,7 +1022,7 @@ fn declarator(p: *Parser, baseType: Type, kind: enum { normal, abstract, either 
 
         try p.expectClosing(lp, .RParen);
         const suffixStart = p.index;
-        const outer = try p.directDeclarator(d.type, &d);
+        const outer = try p.directDeclarator(d.type, &d, kind);
 
         try res.type.combine(outer, p, res.funcDeclarator orelse suffixStart);
         res.oldTypeFunc = d.oldTypeFunc;
@@ -1033,7 +1033,7 @@ fn declarator(p: *Parser, baseType: Type, kind: enum { normal, abstract, either 
         try p.err(.expected_ident_or_l_paren);
     }
 
-    d.type = try p.directDeclarator(d.type, &d);
+    d.type = try p.directDeclarator(d.type, &d, kind);
     if (start == p.index)
         return null;
 
@@ -1053,10 +1053,99 @@ fn declarator(p: *Parser, baseType: Type, kind: enum { normal, abstract, either 
 ///  | '[' typeQual+ keyword_static assignExpr ']'
 ///  | '[' '*' ']'
 ///  | '(' paramDecls? ')'
-fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator) Error!Type {
+fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: DeclaratorKind) Error!Type {
     if (p.eat(.LBracket)) |lb| {
+        var resType = Type{ .specifier = .Pointer };
+        var gotQuals = try p.typeQual(&resType);
+        var static = p.eat(.KeywordStatic);
+
+        if (static != null and !gotQuals)
+            gotQuals = try p.typeQual(&resType);
+
+        var star = p.eat(.Asterisk);
+        const size = if (star) |_| Result{ .none = {} } else try p.assignExpr();
+
         try p.expectClosing(lb, .RBracket);
-        return p.todo("array byte");
+
+        if (star != null and static != null) {
+            try p.errToken(.invalid_static_star, static.?);
+        }
+
+        if (kind != .param) {
+            if (static != null)
+                try p.errToken(.star_non_param, lb)
+            else if (gotQuals)
+                try p.errToken(.array_qualifiers, lb);
+
+            if (star) |some| try p.errToken(.star_non_param, some);
+
+            static = null;
+            resType.qual = .{};
+            star = null;
+        }
+
+        if (static) |_|
+            try size.expect(p);
+
+        switch (size) {
+            .none => if (star) |_| {
+                const elemType = try p.arena.create(Type);
+                resType.data = .{ .subType = elemType };
+                resType.specifier = .UnspecifiedVariableLenArray;
+            } else {
+                const arrayType = try p.arena.create(Type.Array);
+                arrayType.len = 0;
+                resType.data = .{ .array = arrayType };
+                resType.specifier = .IncompleteArray;
+            },
+
+            .lVal, .node => |n| {
+                if (!p.inFunc and kind != .param) try p.errToken(.variable_len_array_file_scope, lb);
+                const vlaType = try p.arena.create(Type.VLA);
+                vlaType.expr = n;
+                resType.data = .{ .vla = vlaType };
+                resType.specifier = .VariableLenArray;
+
+                if (static) |some| try p.errToken(.useless_static, some);
+            },
+
+            else => {
+                const arrayType = try p.arena.create(Type.Array);
+                resType.data = .{ .array = arrayType };
+                resType.specifier = if (static != null) .StaticArray else .Array;
+
+                var negative = false;
+                switch (size) {
+                    .u8 => |v| arrayType.len = v,
+                    .u16 => |v| arrayType.len = v,
+                    .u32 => |v| arrayType.len = v,
+                    .u64 => |v| arrayType.len = v,
+                    .i8 => |v| {
+                        if (v < 0) negative = true;
+                        arrayType.len = @as(u8, @bitCast(v));
+                    },
+                    .i16, .char => |v| {
+                        if (v < 0) negative = true;
+                        arrayType.len = @as(u16, @bitCast(v));
+                    },
+                    .i32 => |v| {
+                        if (v < 0) negative = true;
+                        arrayType.len = @as(u32, @bitCast(v));
+                    },
+                    .i64 => |v| {
+                        if (v < 0) negative = true;
+                        arrayType.len = @as(u64, @bitCast(v));
+                    },
+                    else => unreachable,
+                }
+                if (negative) try p.errToken(.negative_array_size, lb);
+            },
+        }
+
+        const outer = try p.directDeclarator(baseType, d, kind);
+        try resType.combine(outer, p, lb);
+
+        return resType;
     } else if (p.eat(.LParen)) |lp| {
         d.funcDeclarator = lp;
         if (p.getCurrToken().id == .Ellipsis) {
@@ -1064,7 +1153,7 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator) Error!Type {
             p.index += 1;
         }
 
-        var funcType = try p.arena.create(Type.Function);
+        const funcType = try p.arena.create(Type.Function);
         funcType.paramTypes = &.{};
         var specifier: Type.Specifier = .Func;
 
@@ -1104,7 +1193,7 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator) Error!Type {
             .data = .{ .func = funcType },
         };
 
-        const outer = try p.directDeclarator(baseType, d);
+        const outer = try p.directDeclarator(baseType, d, kind);
         try resType.combine(outer, p, lp);
 
         return resType;
@@ -1149,7 +1238,7 @@ fn paramDecls(p: *Parser) Error!?[]NodeIndex {
 
         var nameToken = p.index;
         var paramType = paramDeclSpec.type;
-        if (try p.declarator(paramDeclSpec.type, .either)) |some| {
+        if (try p.declarator(paramDeclSpec.type, .param)) |some| {
             if (some.oldTypeFunc) |tokenIdx|
                 try p.errToken(.invalid_old_style_params, tokenIdx);
 
@@ -1183,6 +1272,8 @@ fn paramDecls(p: *Parser) Error!?[]NodeIndex {
             try p.err(.void_must_be_first_param);
 
             return error.ParsingFailed;
+        } else if (paramType.isArray()) {
+            // TODO : convert to pointer
         }
 
         const param = try p.addNode(.{
