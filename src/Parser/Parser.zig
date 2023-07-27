@@ -1277,6 +1277,9 @@ fn stmt(p: *Parser) Error!NodeIndex {
     if (p.eat(.KeywordDo)) |_|
         return p.parseDoWhileStmt();
 
+    if (p.eat(.KeywordFor)) |_|
+        return p.parseForStmt();
+
     if (p.eat(.KeywordGoto)) |_| {
         const nameToken = try p.expectToken(.Identifier);
         const str = p.pp.tokSlice(p.tokens[nameToken]);
@@ -1363,6 +1366,68 @@ fn parseIfStmt(p: *Parser) Error!NodeIndex {
         .first = condNode,
         .second = elseTK,
     });
+}
+
+fn parseForStmt(p: *Parser) Error!NodeIndex {
+    const startScopeLen = p.scopes.items.len;
+    defer p.scopes.items.len = startScopeLen;
+
+    var decls = NodeList.init(p.pp.compilation.gpa);
+    defer decls.deinit();
+
+    const savedDecls = p.currDeclList;
+    defer p.currDeclList = savedDecls;
+    p.currDeclList = &decls;
+
+    const lp = try p.expectToken(.LParen);
+    const gotDecl = try p.parseDeclaration();
+
+    // for-init
+    const initStart = p.index;
+    const init = if (!gotDecl) try p.expr() else Result{ .none = {} };
+    const initNode = try init.toNode(p);
+    try p.maybeWarnUnused(initNode, initStart);
+
+    if (!gotDecl)
+        _ = try p.expectToken(.Semicolon);
+
+    // cond
+    const cond = try p.expr();
+    const condNode = try cond.toNode(p);
+    _ = try p.expectToken(.Semicolon);
+
+    // increment
+    const incrStart = p.index;
+    const incr = try p.expr();
+    const incrNode = try incr.toNode(p);
+    try p.maybeWarnUnused(incrNode, incrStart);
+    try p.expectClosing(lp, .RParen);
+
+    try p.scopes.append(.loop);
+    const body = try p.stmt();
+
+    if (gotDecl) {
+        const start = (try p.addList(decls.items)).start;
+        const end = (try p.addList(&.{ condNode, incrNode, body })).end;
+
+        return try p.addNode(.{
+            .tag = .ForDeclStmt,
+            .first = start,
+            .second = end,
+        });
+    } else if (init == .none and cond == .none and incr == .none) {
+        return try p.addNode(.{
+            .tag = .ForEverStmt,
+            .first = body,
+        });
+    } else {
+        const range = try p.addList(&.{ initNode, condNode, incrNode });
+        return try p.addNode(.{
+            .tag = .ForStmt,
+            .first = range.start,
+            .second = body,
+        });
+    }
 }
 
 fn parseWhileStmt(p: *Parser) Error!NodeIndex {
@@ -1491,6 +1556,7 @@ fn parseDefaultStmt(p: *Parser, defaultToken: u32) Error!?NodeIndex {
 }
 fn maybeWarnUnused(p: *Parser, node: NodeIndex, exprStart: TokenIndex) Error!void {
     switch (p.nodes.items(.tag)[node]) {
+        .Invalid,
         .AssignExpr,
         .MulAssignExpr,
         .DivAssignExpr,
@@ -2262,7 +2328,7 @@ fn primaryExpr(p: *Parser) Error!Result {
             p.index += 1;
             var base: u8 = 10;
 
-            if (std.mem.startsWith(u8,  slice, "0x") or std.mem.startsWith(u8, slice, "0X")) {
+            if (std.mem.startsWith(u8, slice, "0x") or std.mem.startsWith(u8, slice, "0X")) {
                 slice = slice[2..];
                 base = 16;
             } else if (std.mem.startsWith(u8, slice, "0b") or std.mem.startsWith(u8, slice, "0B")) {
