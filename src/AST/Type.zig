@@ -200,7 +200,7 @@ pub fn dump(ty: Type, tree: Tree, w: anytype) @TypeOf(w).Error!void {
                 try tree.nodes.items(.type)[param].dump(tree, w);
             }
 
-            if (ty.specifier == .VarArgsFunc) {
+            if (ty.specifier != .Func) {
                 if (ty.data.func.paramTypes.len != 0) try w.writeAll(", ");
                 try w.writeAll("...");
             }

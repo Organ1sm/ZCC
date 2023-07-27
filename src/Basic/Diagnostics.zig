@@ -131,6 +131,9 @@ pub const Tag = enum {
     duplicate_switch_case,
     multiple_default,
     previous_case,
+    expected_arguments,
+    expected_arguments_old,
+    expected_at_least_arguments,
 };
 
 list: std.ArrayList(Message),
@@ -389,6 +392,8 @@ pub fn render(comp: *Compilation) void {
             .duplicate_switch_case => m.write("duplicate case value"),
             .multiple_default => m.write("multiple default cases in the same switch"),
             .previous_case => m.write("previous case defined here"),
+            .expected_arguments, .expected_arguments_old => m.print("expected {d} argument(s) got {d}", .{ msg.extra.arguments.expected, msg.extra.arguments.actual }),
+            .expected_at_least_arguments => m.print("expected at least {d} argument(s) got {d}", .{ msg.extra.arguments.expected, msg.extra.arguments.actual }),
         }
 
         m.end(lcs);
@@ -477,6 +482,8 @@ fn tagKind(diag: *Diagnostics, tag: Tag) Kind {
         .case_not_in_switch,
         .duplicate_switch_case,
         .multiple_default,
+        .expected_arguments,
+        .expected_at_least_arguments,
         => .@"error",
 
         .to_match_paren,
@@ -488,7 +495,10 @@ fn tagKind(diag: *Diagnostics, tag: Tag) Kind {
         .previous_case,
         => .note,
 
-        .invalid_old_style_params => .warning,
+        .invalid_old_style_params,
+        .expected_arguments_old,
+        => .warning,
+
         .unsupported_pragma => diag.options.@"unsupported-pragma",
         .whitespace_after_macro_name => diag.options.@"C99-extensions",
         .missing_type_specifier => diag.options.@"implicit-int",
