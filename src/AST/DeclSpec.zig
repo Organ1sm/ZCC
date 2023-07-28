@@ -72,7 +72,7 @@ pub fn validateFnDef(d: DeclSpec, p: *Parser) Error!AstTag {
         if (isNoreturn)
             return AstTag.NoreturnFnDef;
 
-        return AstTag.StaticFnDef;
+        return AstTag.FnDef;
     }
 }
 
