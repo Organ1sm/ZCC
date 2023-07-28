@@ -137,35 +137,30 @@ fn handleArgs(gpa: std.mem.Allocator, args: [][]const u8) !void {
 
     for (sourceFiles.items) |source| {
         var pp = Preprocessor.init(&comp);
-        defer pp.deinit();
+        defer {
+            _ = comp.renderErrors();
+            comp.diag.list.items.len = 0;
+            pp.deinit();
+        }
 
         pp.preprocess(source) catch |e| switch (e) {
             error.OutOfMemory => return error.OutOfMemory,
-            error.FatalError => {
-                _ = comp.renderErrors();
-                comp.diag.list.items.len = 0;
-                continue;
-            },
+            error.FatalError => continue,
         };
 
         if (onlyPreprocess) {
-            i = 0;
-            while (i < pp.tokens.len) : (i += 1) {
-                std.debug.print("{s}\n", .{pp.expandedSlice(pp.tokens.get(i))});
-            }
-
             _ = comp.renderErrors();
             comp.diag.list.items.len = 0;
+
+            pp.prettyPrintTokens(stdOut) catch |err| {
+                return comp.diag.fatalNoSrc("{s} when trying to print tokens", .{@errorName(err)});
+            };
             continue;
         }
 
         var tree = Parser.parse(&pp) catch |e| switch (e) {
             error.OutOfMemory => return error.OutOfMemory,
-            error.FatalError => {
-                _ = comp.renderErrors();
-                comp.diag.list.items.len = 0;
-                continue;
-            },
+            error.FatalError => continue,
         };
         defer tree.deinit();
 

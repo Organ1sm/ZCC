@@ -834,15 +834,15 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: RawToken, lParen: Raw
     // parse the parameter list
     var varArgs = false;
     while (true) {
-        const token = lexer.next();
-
-        if (token.id == .RParen) break;
+        var token = lexer.next();
+        if (token.id == .RParen)
+            break;
 
         if (params.items.len != 0) {
             if (token.id != .Comma)
                 try pp.err(token, .invalid_token_param_list)
             else
-                continue;
+                token = lexer.next();
         }
 
         if (token.id == .Eof)
@@ -1005,6 +1005,54 @@ fn findIncludeSource(pp: *Preprocessor, lexer: *Lexer) !Source {
     // find the file
     const filename = tkSlice[1 .. tkSlice.len - 1];
     return pp.compilation.findInclude(first, filename, fileNameTK.id == .StringLiteral);
+}
+
+/// pretty print tokens and try to preserve whitespace
+pub fn prettyPrintTokens(pp: *Preprocessor, w: anytype) !void {
+    var i: usize = 0;
+    var cur: Token = pp.tokens.get(i);
+    while (true) {
+        if (cur.id == .Eof) break;
+
+        const slice = pp.expandedSlice(cur);
+        try w.writeAll(slice);
+
+        i += 1;
+        const next = pp.tokens.get(i);
+        if (next.id == .Eof) {
+            try w.writeByte('\n');
+        } else if (next.loc.next != null or next.loc.id == .generated) {
+            // next was expanded from a macro
+            try w.writeByte(' ');
+        } else if (next.loc.id == cur.loc.id) {
+            const source = pp.compilation.getSource(cur.loc.id).buffer;
+            const curEnd = cur.loc.byteOffset + slice.len;
+            try pp.printInBetween(source[curEnd..next.loc.byteOffset], w);
+        } else {
+            // next was included from another file
+            try w.writeByte('\n');
+        }
+        cur = next;
+    }
+}
+
+fn printInBetween(pp: *Preprocessor, slice: []const u8, w: anytype) !void {
+    _ = pp;
+    var inBetween = slice;
+    while (true) {
+        if (std.mem.indexOfScalar(u8, inBetween, '#') orelse std.mem.indexOf(u8, inBetween, "//")) |some| {
+            try w.writeAll(inBetween[0..some]);
+            inBetween = inBetween[some..];
+            const nl = std.mem.indexOfScalar(u8, inBetween, '\n') orelse inBetween.len;
+            inBetween = inBetween[nl..];
+        } else if (std.mem.indexOf(u8, inBetween, "/*")) |some| {
+            try w.writeAll(inBetween[0..some]);
+            inBetween = inBetween[some..];
+            const nl = std.mem.indexOf(u8, inBetween, "*/") orelse inBetween.len;
+            inBetween = inBetween[nl + 2 ..];
+        } else break;
+    }
+    try w.writeAll(inBetween);
 }
 
 fn expectTokens(buffer: []const u8, expectedTokens: []const TokenType) void {
