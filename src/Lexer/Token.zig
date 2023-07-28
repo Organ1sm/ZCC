@@ -5,7 +5,8 @@ const Source = @import("../Basic/Source.zig");
 pub const Token = struct {
     id: TokenType,
     source: Source.ID,
-    loc: Source.SourceLocation,
+    start: u32,
+    end: u32,
 
     pub const keywords = std.ComptimeStringMap(TokenType, .{
         .{ "enum", .KeywordEnum },

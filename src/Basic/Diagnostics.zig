@@ -2,6 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const Source = @import("Source.zig");
 const TokenType = @import("TokenType.zig").TokenType;
+const Tree = @import("../AST/AST.zig");
 const Compilation = @import("Compilation.zig");
 
 const Allocator = std.mem.Allocator;
@@ -9,8 +10,7 @@ const Diagnostics = @This();
 
 pub const Message = struct {
     tag: Tag,
-    sourceId: Source.ID,
-    locStart: u32,
+    loc: Source.Location = .{},
     extra: Extra = .{ .none = {} },
 
     pub const Extra = union {
@@ -145,6 +145,7 @@ pub const Tag = enum {
     array_func_elem,
     static_non_outernmost_array,
     qualifier_non_outernmost_array,
+    unterminated_macro_arg_list,
 };
 
 list: std.ArrayList(Message),
@@ -188,12 +189,18 @@ const MsgWriter = struct {
         m.w.writeAll(msg) catch {};
     }
 
-    fn start(m: *MsgWriter, kind: Kind, path: []const u8, lcs: Source.LCS) void {
+    fn location(m: *MsgWriter, path: []const u8, lcs: Source.LCS) void {
         if (builtin.os.tag == .windows or !m.color) {
-            if (lcs.col == 0)
-                m.print("{s}:??:??: {s}: ", .{ path, @tagName(kind) })
-            else
-                m.print("{s}:{d}:{d}: {s}: ", .{ path, lcs.line, lcs.col, @tagName(kind) });
+            m.print("{s}:{d}:{d}: ", .{ path, lcs.line, lcs.col });
+        } else {
+            const WHITE = "\x1b[37;1m";
+            m.print(WHITE ++ "{s}:{d}:{d}: ", .{ path, lcs.line, lcs.col });
+        }
+    }
+
+    fn start(m: *MsgWriter, kind: Kind) void {
+        if (builtin.os.tag == .windows or !m.color) {
+            m.print("{s}: ", .{@tagName(kind)});
         } else {
             const PURPLE = "\x1b[35;1m";
             const CYAN = "\x1b[36;1m";
@@ -208,28 +215,28 @@ const MsgWriter = struct {
                 .off => unreachable,
             };
 
-            if (lcs.col == 0)
-                m.print(WHITE ++ "{s}:??:??: {s}", .{ path, msgKindStr })
-            else
-                m.print(WHITE ++ "{s}:{d}:{d}: {s}", .{ path, lcs.line, lcs.col, msgKindStr });
+            m.write(msgKindStr);
         }
     }
 
-    fn end(m: *MsgWriter, lcs: Source.LCS) void {
+    fn end(m: *MsgWriter, lcs: ?Source.LCS) void {
         if (builtin.os.tag == .windows or !m.color) {
-            if (lcs.col == 0) return;
-            m.print("\n{s}\n", .{lcs.str});
-            m.print("{s: >[1]}^\n", .{ "", lcs.col - 1 });
+            if (lcs == null) {
+                m.write("\n");
+                return;
+            }
+            m.print("\n{s}\n", .{lcs.?.str});
+            m.print("{s: >[1]}^\n", .{ "", lcs.?.col - 1 });
         } else {
             const GREEN = "\x1b[32;1m";
             const RESET = "\x1b[0m";
-            if (lcs.col == 0) {
+            if (lcs == null) {
                 m.write("\n" ++ RESET);
                 return;
             }
 
-            m.print("\n" ++ RESET ++ "{s}\n", .{lcs.str});
-            m.print("{s: >[1]}" ++ GREEN ++ "^" ++ RESET ++ "\n", .{ "", lcs.col - 1 });
+            m.print("\n" ++ RESET ++ "{s}\n", .{lcs.?.str});
+            m.print("{s: >[1]}" ++ GREEN ++ "^" ++ RESET ++ "\n", .{ "", lcs.?.col - 1 });
         }
     }
 };
@@ -271,7 +278,8 @@ pub fn fatal(diag: *Diagnostics, path: []const u8, lcs: Source.LCS, comptime fmt
     var m = MsgWriter.init(diag.color);
     defer m.deinit();
 
-    m.start(.@"fatal error", path, lcs);
+    m.location(path, lcs);
+    m.start(.@"fatal error");
     m.print(fmt, args);
     m.end(lcs);
     return error.FatalError;
@@ -290,9 +298,9 @@ pub fn fatalNoSrc(diag: *Diagnostics, comptime fmt: []const u8, args: anytype) C
     return error.FatalError;
 }
 
-pub fn render(comp: *Compilation) void {
+pub fn render(comp: *Compilation) u32 {
     if (comp.diag.list.items.len == 0)
-        return;
+        return 0;
 
     var m = MsgWriter.init(comp.diag.color);
     defer m.deinit();
@@ -309,9 +317,15 @@ pub fn render(comp: *Compilation) void {
             .off => unreachable,
         }
 
-        const source = comp.getSource(msg.sourceId);
-        const lcs = source.lineColString(msg.locStart);
-        m.start(kind, source.path, lcs);
+        var lcs: ?Source.LCS = null;
+        if (msg.loc.id != .unused) {
+            const loc = if (msg.loc.id == .generated) msg.loc.next.?.* else msg.loc;
+            const source = comp.getSource(loc.id);
+            lcs = source.lineColString(loc.byteOffset);
+            m.location(source.path, lcs.?);
+        }
+
+        m.start(kind);
 
         switch (msg.tag) {
             .todo => m.print("TODO: {s}", .{msg.extra.str}),
@@ -383,7 +397,7 @@ pub fn render(comp: *Compilation) void {
             .expected_stmt => m.write("expected statement"),
             .func_cannot_return_func => m.write("function cannot return a function"),
             .func_cannot_return_array => m.write("function cannot return an array"),
-            .undeclared_identifier => m.write("use of undeclared identifier"),
+            .undeclared_identifier => m.print("use of undeclared identifier '{s}'", .{msg.extra.str}),
             .not_callable => m.print("cannot call non function type '{s}'", .{msg.extra.str}),
             .implicit_func_decl => m.print("implicit declaration of function '{s}' is invalid in C99", .{msg.extra.str}),
             .unsupported_str_cat => m.write("unsupported string literal concatenation"),
@@ -416,9 +430,31 @@ pub fn render(comp: *Compilation) void {
             .array_func_elem => m.write("arrays cannot have functions as their element type"),
             .static_non_outernmost_array => m.write("'static' used in non-outernmost array type"),
             .qualifier_non_outernmost_array => m.write("type qualifier used in non-outernmost array type"),
+            .unterminated_macro_arg_list => m.write("unterminated function macro argument list"),
         }
 
         m.end(lcs);
+
+        if (msg.loc.id != .unused) {
+            var maybeLoc = msg.loc.next;
+            if (msg.loc.id == .generated)
+                maybeLoc = maybeLoc.?.next;
+
+            while (maybeLoc) |loc| {
+                if (loc.id == .unused)
+                    break;
+
+                const source = comp.getSource(loc.id);
+                const endLcs = source.lineColString(loc.byteOffset);
+
+                m.location(source.path, endLcs);
+                m.start(.note);
+                m.write("expanded from here");
+                m.end(endLcs);
+
+                maybeLoc = loc.next;
+            }
+        }
     }
 
     const ws: []const u8 = if (warnings == 1) "" else "s";
@@ -431,6 +467,8 @@ pub fn render(comp: *Compilation) void {
     } else if (errors != 0) {
         m.print("{d} error{s} generated.\n", .{ errors, es });
     }
+
+    return errors;
 }
 
 fn tagKind(diag: *Diagnostics, tag: Tag) Kind {
@@ -516,6 +554,7 @@ fn tagKind(diag: *Diagnostics, tag: Tag) Kind {
         .array_func_elem,
         .static_non_outernmost_array,
         .qualifier_non_outernmost_array,
+        .unterminated_macro_arg_list,
         => .@"error",
 
         .to_match_paren,

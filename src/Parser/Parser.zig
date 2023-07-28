@@ -1,7 +1,6 @@
 const std = @import("std");
 const Compilation = @import("../Basic/Compilation.zig");
 const Source = @import("../Basic/Source.zig");
-const Token = @import("../Lexer/Token.zig").Token;
 const TokenType = @import("../Basic/TokenType.zig").TokenType;
 const Lexer = @import("../Lexer/Lexer.zig");
 const Preprocessor = @import("../Lexer/Preprocessor.zig");
@@ -12,6 +11,7 @@ const TypeBuilder = @import("../AST/TypeBuilder.zig").Builder;
 const Diagnostics = @import("../Basic/Diagnostics.zig");
 const DeclSpec = @import("../AST/DeclSpec.zig");
 const Scope = @import("../Sema/Scope.zig").Scope;
+const Token = AST.Token;
 const TokenIndex = AST.TokenIndex;
 const NodeIndex = AST.NodeIndex;
 const Allocator = std.mem.Allocator;
@@ -22,7 +22,7 @@ pub const Error = Compilation.Error || error{ParsingFailed};
 
 pp: *Preprocessor,
 arena: Allocator,
-tokens: []const Token,
+tokenIds: []const TokenType,
 nodes: AST.Node.List = .{},
 data: NodeList,
 scopes: std.ArrayList(Scope),
@@ -192,37 +192,35 @@ const Label = union(enum) {
     label: TokenIndex,
 };
 
-fn eat(p: *Parser, id: TokenType) ?TokenIndex {
-    const token = p.getCurrToken();
-
-    if (token.id == id) {
+fn eat(p: *Parser, expected: TokenType) ?TokenIndex {
+    if (p.getCurrToken() == expected) {
         defer p.index += 1;
         return p.index;
     } else return null;
 }
 
-pub fn getCurrToken(p: *Parser) Token {
+pub fn getCurrToken(p: *Parser) TokenType {
     return p.lookAhead(0);
 }
 
-pub fn lookAhead(p: *Parser, n: u32) Token {
-    std.debug.assert(p.index + n < p.tokens.len);
-    return p.tokens[p.index + n];
+pub fn lookAhead(p: *Parser, n: u32) TokenType {
+    std.debug.assert(p.index + n < p.tokenIds.len);
+    return p.tokenIds[p.index + n];
 }
 
-fn expectToken(p: *Parser, id: TokenType) Error!TokenIndex {
-    const token = p.getCurrToken();
-    if (token.id != id) {
+fn expectToken(p: *Parser, expected: TokenType) Error!TokenIndex {
+    const actual = p.getCurrToken();
+    if (actual != expected) {
         try p.errExtra(
-            switch (token.id) {
+            switch (actual) {
                 .Invalid => .expected_invalid,
                 else => .expected_token,
             },
             p.index,
             .{
                 .tokenId = .{
-                    .expected = id,
-                    .actual = token.id,
+                    .expected = actual,
+                    .actual = expected,
                 },
             },
         );
@@ -237,7 +235,6 @@ fn expectClosing(p: *Parser, opening: TokenIndex, id: TokenType) Error!void {
     _ = p.expectToken(id) catch |e|
         {
         if (e == error.ParsingFailed) {
-            const oToken = p.tokens[opening];
             try p.pp.compilation.diag.add(.{
                 .tag = switch (id) {
                     .RParen => .to_match_paren,
@@ -245,13 +242,30 @@ fn expectClosing(p: *Parser, opening: TokenIndex, id: TokenType) Error!void {
                     .RBracket => .to_match_bracket,
                     else => unreachable,
                 },
-                .sourceId = oToken.source,
-                .locStart = oToken.loc.start,
+                .loc = p.pp.tokens.items(.loc)[opening],
             });
         }
 
         return e;
     };
+}
+
+fn tokSlice(p: *Parser, index: TokenIndex) []const u8 {
+    if (p.tokenIds[index].lexeMe()) |some|
+        return some;
+
+    const loc = p.pp.tokens.items(.loc)[index];
+    var lexer = Lexer{
+        .buffer = if (loc.id == .generated)
+            p.pp.generated.items
+        else
+            p.pp.compilation.getSource(loc.id).buffer,
+        .index = loc.byteOffset,
+        .source = .generated,
+    };
+
+    const res = lexer.next();
+    return lexer.buffer[res.start..res.end];
 }
 
 pub fn errStr(p: *Parser, tag: Diagnostics.Tag, index: TokenIndex, str: []const u8) Compilation.Error!void {
@@ -261,12 +275,9 @@ pub fn errStr(p: *Parser, tag: Diagnostics.Tag, index: TokenIndex, str: []const 
 
 pub fn errExtra(p: *Parser, tag: Diagnostics.Tag, index: TokenIndex, extra: Diagnostics.Message.Extra) Compilation.Error!void {
     @setCold(true);
-    const token = p.tokens[index];
-
     try p.pp.compilation.diag.add(.{
         .tag = tag,
-        .sourceId = token.source,
-        .locStart = token.loc.start,
+        .loc = p.pp.tokens.items(.loc)[index],
         .extra = extra,
     });
 }
@@ -274,11 +285,9 @@ pub fn errExtra(p: *Parser, tag: Diagnostics.Tag, index: TokenIndex, extra: Diag
 pub fn errToken(p: *Parser, tag: Diagnostics.Tag, index: TokenIndex) Compilation.Error!void {
     @setCold(true);
 
-    const token = p.tokens[index];
     try p.pp.compilation.diag.add(.{
         .tag = tag,
-        .sourceId = token.source,
-        .locStart = token.loc.start,
+        .loc = p.pp.tokens.items(.loc)[index],
     });
 }
 
@@ -353,7 +362,7 @@ fn inLoopOrSwitch(p: *Parser) bool {
 fn findLabel(p: *Parser, name: []const u8) ?NodeIndex {
     for (p.labels.items) |item| {
         switch (item) {
-            .label => |l| if (std.mem.eql(u8, p.pp.tokSlice(p.tokens[l]), name)) return l,
+            .label => |l| if (std.mem.eql(u8, p.tokSlice(l), name)) return l,
             .unresolvedGoto => {},
         }
     }
@@ -374,7 +383,7 @@ fn findSwitch(p: *Parser) ?*Scope.Switch {
 }
 
 fn findSymbol(p: *Parser, nameToken: TokenIndex) ?Scope {
-    const name = p.pp.tokSlice(p.tokens[nameToken]);
+    const name = p.tokSlice(nameToken);
     var i = p.scopes.items.len;
     while (i > 0) {
         i -= 1;
@@ -400,7 +409,7 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
     var p = Parser{
         .pp = pp,
         .arena = arena.allocator(),
-        .tokens = pp.tokens.items,
+        .tokenIds = pp.tokens.items(.id),
         .currDeclList = &rootDecls,
         .scopes = std.ArrayList(Scope).init(pp.compilation.gpa),
         .data = NodeList.init(pp.compilation.gpa),
@@ -440,7 +449,7 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
 
     return AST{
         .comp = pp.compilation,
-        .tokens = pp.tokens.items,
+        .tokens = pp.tokens.slice(),
         .arena = arena,
         .generated = pp.generated.items,
         .nodes = p.nodes.toOwnedSlice(),
@@ -452,8 +461,8 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
 fn nextExternDecl(p: *Parser) void {
     var parens: u32 = 0;
 
-    while (p.index < p.tokens.len) : (p.index += 1) {
-        switch (p.getCurrToken().id) {
+    while (p.index < p.tokenIds.len) : (p.index += 1) {
+        switch (p.getCurrToken()) {
             .LParen, .LBrace, .LBracket => parens += 1,
             .RParen, .RBrace, .RBracket => if (parens != 0) {
                 parens -= 1;
@@ -505,7 +514,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
     else blk: {
         if (p.inFunc) return false;
 
-        switch (p.tokens[firstTokenIndex].id) {
+        switch (p.tokenIds[firstTokenIndex]) {
             .Asterisk, .LParen, .Identifier => {},
             else => return false,
         }
@@ -529,7 +538,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
 
     // check for funtion definition
     if (initD.d.funcDeclarator != null and initD.initializer == 0 and initD.d.type.isFunc()) fndef: {
-        switch (p.getCurrToken().id) {
+        switch (p.getCurrToken()) {
             .Comma, .Semicolon => break :fndef,
             .LBrace => {},
             else => {
@@ -537,7 +546,9 @@ fn parseDeclaration(p: *Parser) Error!bool {
                 break :fndef;
             },
         }
+        // TODO declare all parameters
 
+        // collect old style parameters
         if (initD.d.oldTypeFunc != null and !p.inFunc) {
             paramLoop: while (true) {
                 const paramDeclSpec = (try p.declSpecifier()) orelse break;
@@ -583,7 +594,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
             .first = initD.d.name,
         });
         try p.scopes.append(.{ .symbol = .{
-            .name = p.pp.tokSlice(p.tokens[initD.d.name]),
+            .name = p.tokSlice(initD.d.name),
             .node = node,
             .nameToken = initD.d.name,
         } });
@@ -595,7 +606,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
         if (inFunction) {
             for (p.labels.items) |item| {
                 if (item == .unresolvedGoto)
-                    try p.errStr(.undeclared_label, item.unresolvedGoto, p.pp.tokSlice(p.tokens[item.unresolvedGoto]));
+                    try p.errStr(.undeclared_label, item.unresolvedGoto, p.tokSlice(item.unresolvedGoto));
 
                 p.labels.items.len = 0;
                 p.labelCount = 0;
@@ -622,13 +633,13 @@ fn parseDeclaration(p: *Parser) Error!bool {
 
         if (declSpec.storageClass == .typedef) {
             try p.scopes.append(.{ .typedef = .{
-                .name = p.pp.tokSlice(p.tokens[initD.d.name]),
+                .name = p.tokSlice(initD.d.name),
                 .node = node,
                 .nameToken = initD.d.name,
             } });
         } else {
             try p.scopes.append(.{ .symbol = .{
-                .name = p.pp.tokSlice(p.tokens[initD.d.name]),
+                .name = p.tokSlice(initD.d.name),
                 .node = node,
                 .nameToken = initD.d.name,
             } });
@@ -652,7 +663,7 @@ fn staticAssert(p: *Parser) Error!bool {
     const curToken = p.eat(.KeywordStaticAssert) orelse return false;
 
     const lParen = try p.expectToken(.LParen);
-    const start = p.index;
+    var start = p.index;
     const res = try p.constExpr();
     const end = p.index;
 
@@ -666,14 +677,14 @@ fn staticAssert(p: *Parser) Error!bool {
         defer msg.deinit();
 
         try msg.append('\'');
-        for (p.tokens[start..end], 0..) |token, i| {
-            if (i != 0)
-                try msg.append(' ');
-            try msg.appendSlice(p.pp.tokSlice(token));
+        while (start < end) {
+            try msg.appendSlice(p.tokSlice(start));
+            start += 1;
+            if (start != end) try msg.append(' ');
         }
 
         try msg.appendSlice("' ");
-        try msg.appendSlice(p.pp.tokSlice(p.tokens[str]));
+        try msg.appendSlice(p.tokSlice(str));
         try p.errStr(.static_assert_failure, curToken, try p.pp.arena.allocator().dupe(u8, msg.items));
     }
 
@@ -698,7 +709,7 @@ fn declSpecifier(p: *Parser) Error!?DeclSpec {
             continue;
 
         const token = p.getCurrToken();
-        switch (token.id) {
+        switch (token) {
             .KeywordTypedef,
             .KeywordExtern,
             .KeywordStatic,
@@ -712,17 +723,17 @@ fn declSpecifier(p: *Parser) Error!?DeclSpec {
                 }
 
                 if (d.threadLocal != null) {
-                    switch (token.id) {
+                    switch (token) {
                         .KeywordTypedef,
                         .KeywordAuto,
                         .KeywordRegister,
-                        => try p.errStr(.cannot_combine_spec, p.index, token.id.lexeMe().?),
+                        => try p.errStr(.cannot_combine_spec, p.index, token.lexeMe().?),
 
                         else => {},
                     }
                 }
 
-                switch (token.id) {
+                switch (token) {
                     .KeywordTypedef => d.storageClass = .{ .typedef = p.index },
                     .KeywordExtern => d.storageClass = .{ .@"extern" = p.index },
                     .KeywordStatic => d.storageClass = .{ .static = p.index },
@@ -821,8 +832,7 @@ fn typeSpec(p: *Parser, ty: *TypeBuilder, completeType: *Type) Error!bool {
             continue;
         }
 
-        const token = p.getCurrToken();
-        switch (token.id) {
+        switch (p.getCurrToken()) {
             .KeywordVoid => try ty.combine(p, .Void),
             .KeywordBool => try ty.combine(p, .Bool),
             .KeywordChar => try ty.combine(p, .Char),
@@ -869,7 +879,7 @@ fn typeSpec(p: *Parser, ty: *TypeBuilder, completeType: *Type) Error!bool {
             },
 
             .Identifier => {
-                const typedef = p.findTypedef(p.pp.tokSlice(token)) orelse break;
+                const typedef = p.findTypedef(p.tokSlice(p.index)) orelse break;
                 const newSpec = TypeBuilder.fromType(p.nodes.items(.type)[typedef.node]);
 
                 const errStart = p.pp.compilation.diag.list.items.len;
@@ -947,16 +957,14 @@ fn typeQual(p: *Parser, ty: *Type) Error!bool {
     var any = false;
 
     while (true) {
-        const token = p.getCurrToken();
-        switch (token.id) {
+        switch (p.getCurrToken()) {
             .KeywordRestrict => {
                 if (ty.specifier != .Pointer)
-                    try p.pp.compilation.diag.add(.{
-                        .tag = .restrict_non_pointer,
-                        .sourceId = token.source,
-                        .locStart = token.loc.start,
-                        .extra = .{ .str = TypeBuilder.fromType(ty.*).toString() },
-                    })
+                    try p.errExtra(
+                        .restrict_non_pointer,
+                        p.index,
+                        .{ .str = TypeBuilder.fromType(ty.*).toString() },
+                    )
                 else if (ty.qual.restrict)
                     try p.errStr(.duplicate_declspec, p.index, "restrict")
                 else
@@ -1009,7 +1017,7 @@ fn declarator(p: *Parser, baseType: Type, kind: DeclaratorKind) Error!?Declarato
     const start = p.index;
     var d = Declarator{ .name = 0, .type = try p.pointer(baseType) };
 
-    if (kind != .abstract and p.getCurrToken().id == .Identifier) {
+    if (kind != .abstract and p.getCurrToken() == .Identifier) {
         d.name = p.index;
         p.index += 1;
         d.type = try p.directDeclarator(d.type, &d, kind);
@@ -1148,7 +1156,7 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: Declarator
         return resType;
     } else if (p.eat(.LParen)) |lp| {
         d.funcDeclarator = lp;
-        if (p.getCurrToken().id == .Ellipsis) {
+        if (p.getCurrToken() == .Ellipsis) {
             try p.err(.param_before_var_args);
             p.index += 1;
         }
@@ -1162,9 +1170,9 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: Declarator
 
             if (p.eat(.Ellipsis)) |_|
                 specifier = .VarArgsFunc;
-        } else if (p.getCurrToken().id == .RParen) {
+        } else if (p.getCurrToken() == .RParen) {
             specifier = .OldStyleFunc;
-        } else if (p.getCurrToken().id == .Identifier) {
+        } else if (p.getCurrToken() == .Identifier) {
             d.oldTypeFunc = p.index;
 
             var params = NodeList.init(p.pp.compilation.gpa);
@@ -1197,7 +1205,9 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: Declarator
         try resType.combine(outer, p, lp);
 
         return resType;
-    } else return baseType;
+    } else {
+        return baseType;
+    }
 }
 
 /// pointer : '*' typeQual* pointer?
@@ -1258,7 +1268,7 @@ fn paramDecls(p: *Parser) Error!?[]NodeIndex {
         } else if (paramType.specifier == .Void) {
             // validate void parameters
             if (params.items.len == 0) {
-                if (p.getCurrToken().id != .RParen) {
+                if (p.getCurrToken() != .RParen) {
                     try p.err(.void_only_param);
                     if (paramType.qual.any())
                         try p.err(.void_param_qualified);
@@ -1286,7 +1296,7 @@ fn paramDecls(p: *Parser) Error!?[]NodeIndex {
         if (p.eat(.Comma) == null)
             break;
 
-        if (p.getCurrToken().id == .Ellipsis)
+        if (p.getCurrToken() == .Ellipsis)
             break;
     }
 
@@ -1374,7 +1384,7 @@ fn stmt(p: *Parser) Error!NodeIndex {
 
     if (p.eat(.KeywordGoto)) |_| {
         const nameToken = try p.expectToken(.Identifier);
-        const str = p.pp.tokSlice(p.tokens[nameToken]);
+        const str = p.tokSlice(nameToken);
 
         if (p.findLabel(str) == null)
             try p.labels.append(.{ .unresolvedGoto = nameToken });
@@ -1672,9 +1682,9 @@ fn maybeWarnUnused(p: *Parser, node: NodeIndex, exprStart: TokenIndex) Error!voi
 /// | keyword_case constExpr ':' stmt
 /// | keyword_default ':' stmt
 fn labeledStmt(p: *Parser) Error!?NodeIndex {
-    if (p.getCurrToken().id == .Identifier and p.lookAhead(1).id == .Colon) {
+    if (p.getCurrToken() == .Identifier and p.lookAhead(1) == .Colon) {
         const nameToken = p.index;
-        const str = p.pp.tokSlice(p.tokens[nameToken]);
+        const str = p.tokSlice(nameToken);
         if (p.findLabel(str)) |some| {
             try p.errStr(.duplicate_label, nameToken, str);
             try p.errStr(.previous_label, some, str);
@@ -1684,7 +1694,7 @@ fn labeledStmt(p: *Parser) Error!?NodeIndex {
 
             var i: usize = 0;
             while (i < p.labels.items.len) : (i += 1) {
-                if (p.labels.items[i] == .unresolvedGoto and std.mem.eql(u8, p.pp.tokSlice(p.tokens[p.labels.items[i].unresolvedGoto]), str))
+                if (p.labels.items[i] == .unresolvedGoto and std.mem.eql(u8, p.tokSlice(p.labels.items[i].unresolvedGoto), str))
                     _ = p.labels.swapRemove(i);
             }
         }
@@ -1791,8 +1801,8 @@ fn nodeIsNoreturn(p: *Parser, node: NodeIndex) bool {
 
 fn nextStmt(p: *Parser, lBrace: TokenIndex) !void {
     var parens: u32 = 0;
-    while (p.index < p.tokens.len) : (p.index += 1) {
-        switch (p.getCurrToken().id) {
+    while (p.index < p.tokenIds.len) : (p.index += 1) {
+        switch (p.getCurrToken()) {
             .LParen, .LBrace, .LBracket => parens += 1,
             .RParen, .RBracket => if (parens != 0) {
                 parens -= 1;
@@ -2081,7 +2091,7 @@ fn castExpr(p: *Parser) Error!Result {
 ///  | keyword_sizeof '(' type_name ')'
 ///  | keyword_alignof '(' type_name ')'
 fn unaryExpr(p: *Parser) Error!Result {
-    switch (p.getCurrToken().id) {
+    switch (p.getCurrToken()) {
         .Ampersand => return p.todo("unaryExpr ampersand"),
         .Asterisk => return p.todo("unaryExpr asterisk"),
         .Plus => return p.todo("unaryExpr plus"),
@@ -2118,7 +2128,7 @@ fn unaryExpr(p: *Parser) Error!Result {
 ///  | '++'
 ///  | '--'
 fn suffixExpr(p: *Parser, lhs: Result) Error!Result {
-    switch (p.getCurrToken().id) {
+    switch (p.getCurrToken()) {
         .LBracket => return p.todo("array access"),
         .LParen => {
             const lParen = p.index;
@@ -2225,16 +2235,15 @@ fn primaryExpr(p: *Parser) Error!Result {
         return e;
     }
 
-    const token = p.getCurrToken();
-    switch (token.id) {
+    switch (p.getCurrToken()) {
         .Identifier => {
             const nameToken = p.index;
             p.index += 1;
 
             const sym = p.findSymbol(nameToken) orelse {
-                if (p.getCurrToken().id == .LParen) {
+                if (p.getCurrToken() == .LParen) {
                     // implicitly declare simple functions as like `puts("foo")`;
-                    const name = p.pp.tokSlice(p.tokens[nameToken]);
+                    const name = p.tokSlice(nameToken);
                     try p.errStr(.implicit_func_decl, nameToken, name);
 
                     const funcType = try p.arena.create(Type.Function);
@@ -2260,7 +2269,7 @@ fn primaryExpr(p: *Parser) Error!Result {
                         .second = node,
                     });
                 }
-                try p.errToken(.undeclared_identifier, nameToken);
+                try p.errStr(.undeclared_identifier, nameToken, p.tokSlice(nameToken));
                 return error.ParsingFailed;
             };
 
@@ -2294,11 +2303,11 @@ fn primaryExpr(p: *Parser) Error!Result {
                 return error.ParsingFailed;
             }
 
-            const start = p.index;
+            var start = p.index;
             var width: ?u8 = null;
 
             while (true) {
-                switch (p.getCurrToken().id) {
+                switch (p.getCurrToken()) {
                     .StringLiteral => {},
                     .StringLiteralUTF_8 => if (width) |some| {
                         if (some != 8) try p.err(.unsupported_str_cat);
@@ -2339,8 +2348,8 @@ fn primaryExpr(p: *Parser) Error!Result {
             var builder = std.ArrayList(u8).init(p.pp.compilation.gpa);
             defer builder.deinit();
 
-            for (p.tokens[start..p.index]) |tk| {
-                var slice = p.pp.tokSlice(tk);
+            while (start < p.index) : (start += 1) {
+                var slice = p.tokSlice(start);
                 slice = slice[std.mem.indexOf(u8, slice, "\"").? + 1 .. slice.len - 1];
 
                 try builder.ensureTotalCapacity(slice.len);
@@ -2432,7 +2441,7 @@ fn primaryExpr(p: *Parser) Error!Result {
         .IntegerLiteral_LLU,
         => {
             const curToken = p.getCurrToken();
-            var slice = p.pp.tokSlice(curToken);
+            var slice = p.tokSlice(p.index);
 
             p.index += 1;
             var base: u8 = 10;
@@ -2447,8 +2456,15 @@ fn primaryExpr(p: *Parser) Error!Result {
                 base = 8;
             }
 
+            switch (curToken) {
+                .IntegerLiteral_U, .IntegerLiteral_L => slice = slice[0 .. slice.len - 1],
+                .IntegerLiteral_LU, .IntegerLiteral_LL => slice = slice[0 .. slice.len - 2],
+                .IntegerLiteral_LLU => slice = slice[0 .. slice.len - 3],
+                else => {},
+            }
+
             if (base == 10) {
-                switch (curToken.id) {
+                switch (curToken) {
                     .IntegerLiteral => return p.parseInt(base, slice, &.{ .Int, .Long, .LongLong }),
                     .IntegerLiteral_U => return p.parseInt(base, slice, &.{ .UInt, .ULong, .ULongLong }),
                     .IntegerLiteral_L => return p.parseInt(base, slice, &.{ .Long, .LongLong }),
@@ -2458,7 +2474,7 @@ fn primaryExpr(p: *Parser) Error!Result {
                     else => unreachable,
                 }
             } else {
-                switch (curToken.id) {
+                switch (curToken) {
                     .IntegerLiteral => return p.parseInt(base, slice, &.{ .Int, .UInt, .Long, .ULong, .LongLong, .ULongLong }),
                     .IntegerLiteral_U => return p.parseInt(base, slice, &.{ .UInt, .ULong, .ULongLong }),
                     .IntegerLiteral_L => return p.parseInt(base, slice, &.{ .Long, .ULong, .LongLong, .ULongLong }),

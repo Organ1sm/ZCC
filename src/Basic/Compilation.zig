@@ -41,11 +41,7 @@ pub fn deinit(compilation: *Compilation) void {
 }
 
 pub fn getSource(comp: *Compilation, id: Source.ID) Source {
-    var src = comp.sources.values()[id.index()];
-    if (id.isGenerated())
-        src.id.markGenerated();
-
-    return src;
+    return comp.sources.values()[@intFromEnum(id) - 2];
 }
 
 pub fn addSource(compilation: *Compilation, path: []const u8) !Source {
@@ -61,7 +57,7 @@ pub fn addSource(compilation: *Compilation, path: []const u8) !Source {
     errdefer compilation.gpa.free(contents);
 
     const source = Source{
-        .id = @enumFromInt(@as(u15, @intCast(compilation.sources.count()))),
+        .id = @enumFromInt(@as(u32, @intCast(compilation.sources.count() + 2))),
         .path = dupedPath,
         .buffer = contents,
     };
@@ -119,7 +115,7 @@ pub fn findInclude(comp: *Compilation, token: Token, filename: []const u8, searc
 
 pub fn fatal(comp: *Compilation, token: Token, comptime fmt: []const u8, args: anytype) Error {
     const source = comp.getSource(token.source);
-    const lcs = source.lineColString(token.loc.start);
+    const lcs = source.lineColString(token.start);
 
     return comp.diag.fatal(source.path, lcs, fmt, args);
 }
