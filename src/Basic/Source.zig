@@ -32,7 +32,7 @@ pub fn lineColString(source: Source, byteOffset: u32) LCS {
         }
     }
 
-    const start = i - (col - i);
+    const start = i - (col - 1);
     while (i < source.buffer.len) : (i += 1) {
         if (source.buffer[i] == '\n')
             break;

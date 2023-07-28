@@ -179,7 +179,7 @@ pub fn combine(inner: *Type, outer: Type, p: *Parser, sourceToken: TokenIndex) P
     switch (inner.specifier) {
         .Pointer => return inner.data.subType.combine(outer, p, sourceToken),
 
-        .VariableLenArray, .IncompleteArray => {
+        .Array, .StaticArray, .IncompleteArray => {
             try inner.data.array.elem.combine(outer, p, sourceToken);
 
             if (inner.data.array.elem.hasIncompleteSize()) return p.errToken(.array_incomplete_elem, sourceToken);
@@ -188,7 +188,8 @@ pub fn combine(inner: *Type, outer: Type, p: *Parser, sourceToken: TokenIndex) P
             if (inner.data.array.elem.qual.any() and inner.isArray()) return p.errToken(.qualifier_non_outernmost_array, sourceToken);
         },
 
-        .Array, .StaticArray => return p.errStr(.todo, sourceToken, "combine array"),
+        .VariableLenArray, .UnspecifiedVariableLenArray => return p.errStr(.todo, sourceToken, "combine array"),
+
         .Func, .VarArgsFunc, .OldStyleFunc => {
             try inner.data.func.returnType.combine(outer, p, sourceToken);
             if (inner.data.func.returnType.isFunc()) return p.errToken(.func_cannot_return_func, sourceToken);

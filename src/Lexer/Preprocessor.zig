@@ -14,6 +14,7 @@ const assert = std.debug.assert;
 const Preprocessor = @This();
 const DefineMap = std.StringHashMap(Marco);
 const RawTokenList = std.ArrayList(RawToken);
+const MaxIncludeDepth = 200;
 
 const Error = Compilation.Error;
 
@@ -54,6 +55,7 @@ tokenBuffer: RawTokenList,
 // It is safe to have pointers to entries of defines since it
 // cannot be modified while we are expanding a macro.
 expansionLog: std.AutoHashMap(DefineMap.Entry, void),
+includeDepth: u8 = 0,
 
 pub fn init(comp: *Compilation) Preprocessor {
     return .{
@@ -414,7 +416,7 @@ fn expr(pp: *Preprocessor, lexer: *Lexer) Error!bool {
         try pp.tokens.append(pp.compilation.gpa, tokenFromRaw(token));
     }
 
-    for (pp.tokens.items(.id), 0..) |*tok, i| {
+    for (pp.tokens.items(.id)[start..], 0..) |*tok, i| {
         switch (tok.*) {
             .StringLiteral,
             .StringLiteralUTF_8,
@@ -934,6 +936,21 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: RawToken, lParen: Raw
 }
 
 fn include(pp: *Preprocessor, lexer: *Lexer) Error!void {
+    const newSource = pp.findIncludeSource(lexer) catch |er| switch (er) {
+        error.InvalidInclude => return,
+        else => |e| return e,
+    };
+
+    pp.includeDepth += 1;
+    defer pp.includeDepth -= 1;
+    if (pp.includeDepth > MaxIncludeDepth)
+        return;
+
+    try pp.preprocess(newSource);
+    pp.tokens.len -= 1; // remove eof
+}
+
+fn findIncludeSource(pp: *Preprocessor, lexer: *Lexer) !Source {
     const start = pp.tokens.len;
     defer pp.tokens.len = start;
 
@@ -965,7 +982,9 @@ fn include(pp: *Preprocessor, lexer: *Lexer) Error!void {
         .StringLiteral, .MacroString => {},
         else => {
             try pp.err(first, .expected_filename);
-            return pp.expectNewLine(lexer);
+            try pp.expectNewLine(lexer);
+
+            return error.InvalidInclude;
         },
     }
 
@@ -973,19 +992,19 @@ fn include(pp: *Preprocessor, lexer: *Lexer) Error!void {
     const newLine = lexer.next();
     if ((newLine.id != .NewLine and newLine.id != .Eof) or pp.tokens.len > start + 1) {
         skipToNewLine(lexer);
-        return pp.err(first, .extra_tokens_directive_end);
+        try pp.err(first, .extra_tokens_directive_end);
     }
 
     // check for empty filename
     const tkSlice = pp.expandedSlice(fileNameTK);
-    if (tkSlice.len < 3)
-        return pp.err(first, .empty_filename);
+    if (tkSlice.len < 3) {
+        try pp.err(first, .empty_filename);
+        return error.InvalidInclude;
+    }
 
-    // find the file and preprocess it.
+    // find the file
     const filename = tkSlice[1 .. tkSlice.len - 1];
-    const newSource = try pp.compilation.findInclude(first, filename, fileNameTK.id == .StringLiteral);
-
-    return pp.preprocess(newSource);
+    return pp.compilation.findInclude(first, filename, fileNameTK.id == .StringLiteral);
 }
 
 fn expectTokens(buffer: []const u8, expectedTokens: []const TokenType) void {
