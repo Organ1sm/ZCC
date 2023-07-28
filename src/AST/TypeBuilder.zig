@@ -162,14 +162,7 @@ pub const Builder = struct {
             Kind.ComplexDouble => .ComplexDouble,
             Kind.ComplexLongDouble => .ComplexLongDouble,
             Kind.Complex, Kind.ComplexLong => {
-                const token = p.getCurrToken();
-                try p.pp.compilation.diag.add(.{
-                    .tag = .type_is_invalid,
-                    .sourceId = token.source,
-                    .locStart = token.loc.start,
-                    .extra = .{ .str = spec.kind.toString() },
-                });
-
+                try p.errExtra(.type_is_invalid, p.index, .{ .str = spec.kind.toString() });
                 return error.ParsingFailed;
             },
 
@@ -254,14 +247,11 @@ pub const Builder = struct {
     }
 
     pub fn cannotCombine(spec: Builder, p: *Parser) Parser.Error {
-        const token = p.getCurrToken();
-
-        try p.pp.compilation.diag.add(.{
-            .tag = .cannot_combine_spec,
-            .sourceId = token.source,
-            .locStart = token.loc.start,
-            .extra = .{ .str = spec.kind.toString() },
-        });
+        try p.errExtra(
+            .cannot_combine_spec,
+            p.index,
+            .{ .str = spec.kind.toString() },
+        );
 
         if (spec.typedef) |some|
             try p.errStr(.spec_from_typedef, some.token, some.spec);
@@ -455,14 +445,14 @@ pub const Builder = struct {
 
             .Pointer => .{ .Pointer = ty.data.subType },
             .Atomic => .{ .Atomic = ty.data.subType },
-            .UnspecifiedVariableLenArray => .{.UnspecifiedVariableLenArray = ty.data.subType},
+            .UnspecifiedVariableLenArray => .{ .UnspecifiedVariableLenArray = ty.data.subType },
             .Func => .{ .Func = ty.data.func },
             .VarArgsFunc => .{ .VarArgsFunc = ty.data.func },
             .OldStyleFunc => .{ .OldStyleFunc = ty.data.func },
             .Array => .{ .Array = ty.data.array },
             .StaticArray => .{ .StaticArray = ty.data.array },
-            .IncompleteArray => .{.IncompleteArray = ty.data.array},
-            .VariableLenArray => .{.VariableLenArray = ty.data.vla},
+            .IncompleteArray => .{ .IncompleteArray = ty.data.array },
+            .VariableLenArray => .{ .VariableLenArray = ty.data.vla },
             .Struct => .{ .Struct = ty.data.node },
             .Union => .{ .Union = ty.data.node },
             .Enum => .{ .Enum = ty.data.node },

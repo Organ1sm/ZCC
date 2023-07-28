@@ -1,7 +1,9 @@
 const std = @import("std");
 const Type = @import("Type.zig");
-const Token = @import("../Lexer/Token.zig").Token;
 const Compilation = @import("../Basic/Compilation.zig");
+const Source = @import("../Basic/Source.zig");
+const Lexer = @import("../Lexer/Lexer.zig");
+const TokenType = @import("../Basic/TokenType.zig").TokenType;
 const AstTag = @import("AstTag.zig").Tag;
 
 const AST = @This();
@@ -12,7 +14,7 @@ pub const NodeIndex = u32;
 comp: *Compilation,
 arena: std.heap.ArenaAllocator,
 generated: []const u8,
-tokens: []const Token,
+tokens: Token.List.Slice,
 nodes: Node.List.Slice,
 data: []const NodeIndex,
 rootDecls: []const NodeIndex,
@@ -24,6 +26,19 @@ pub fn deinit(tree: *AST) void {
     tree.arena.deinit();
 }
 
+pub const Token = struct {
+    id: TokenType,
+
+    /// This location contains the actual token slice which might be generated.
+    /// If it is generated then the next location will be the location of the concatenation.
+    /// Any subsequent locations mark where the token was expanded from.
+    loc: Source.Location,
+
+    /// How many source locations do we track for each token.
+    /// Must be at least 2.
+    pub const List = std.MultiArrayList(Token);
+};
+
 pub const Node = struct {
     tag: AstTag,
     type: Type = .{ .specifier = .Void },
@@ -34,15 +49,22 @@ pub const Node = struct {
 };
 
 pub fn tokSlice(tree: AST, index: TokenIndex) []const u8 {
-    const token = tree.tokens[index];
-    if (token.id.lexeMe()) |some| return some;
+    if (tree.tokens.items(.id)[index].lexeMe()) |some|
+        return some;
 
-    if (token.source.isGenerated()) {
-        return tree.generated[token.loc.start..token.loc.end];
-    } else {
-        const source = tree.comp.getSource(token.source);
-        return source.buffer[token.loc.start..token.loc.end];
-    }
+    const loc = tree.tokens.items(.loc)[index];
+
+    var lexer = Lexer{
+        .buffer = if (loc.id == .generated)
+            tree.generated
+        else
+            tree.comp.getSource(loc.id).buffer,
+        .index = loc.byteOffset,
+        .source = .generated,
+    };
+
+    const token = lexer.next();
+    return lexer.buffer[token.start..token.end];
 }
 
 pub const Declaration = struct {

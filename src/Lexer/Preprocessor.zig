@@ -1,18 +1,19 @@
 const std = @import("std");
-const Token = @import("../Lexer/Token.zig").Token;
+const RawToken = @import("../Lexer/Token.zig").Token;
 const TokenType = @import("../Basic/TokenType.zig").TokenType;
 const Compilation = @import("../Basic/Compilation.zig");
 const Source = @import("../Basic/Source.zig");
 const Lexer = @import("Lexer.zig");
 const Parser = @import("../Parser/Parser.zig");
 const Diagnostics = @import("../Basic/Diagnostics.zig");
+const Token = @import("../AST/AST.zig").Token;
 
 const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 
 const Preprocessor = @This();
 const DefineMap = std.StringHashMap(Marco);
-const TokenList = std.ArrayList(Token);
+const RawTokenList = std.ArrayList(RawToken);
 
 const Error = Compilation.Error;
 
@@ -24,7 +25,10 @@ const Marco = union(enum) {
     self,
 
     /// #define Add a + b
-    simple: []const Token,
+    simple: struct {
+        tokens: []const RawToken,
+        loc: Source.Location,
+    },
 
     /// #define Add(a, b) ((a)+(b))
     func: struct {
@@ -32,39 +36,45 @@ const Marco = union(enum) {
         params: []const []const u8,
 
         /// Token constituting the macro body
-        tokens: []const Token,
+        tokens: []const RawToken,
 
         varArgs: bool,
+        loc: Source.Location,
     },
 };
 
 compilation: *Compilation,
 arena: std.heap.ArenaAllocator,
 defines: DefineMap,
-tokens: TokenList,
+tokens: Token.List = .{},
 generated: std.ArrayList(u8),
 pragmaOnce: std.AutoHashMap(Source.ID, void),
-tokenBuffer: TokenList,
+tokenBuffer: RawTokenList,
+
+// It is safe to have pointers to entries of defines since it
+// cannot be modified while we are expanding a macro.
+expansionLog: std.AutoHashMap(DefineMap.Entry, void),
 
 pub fn init(comp: *Compilation) Preprocessor {
     return .{
         .compilation = comp,
         .arena = std.heap.ArenaAllocator.init(comp.gpa),
         .defines = DefineMap.init(comp.gpa),
-        .tokens = TokenList.init(comp.gpa),
         .generated = std.ArrayList(u8).init(comp.gpa),
         .pragmaOnce = std.AutoHashMap(Source.ID, void).init(comp.gpa),
-        .tokenBuffer = TokenList.init(comp.gpa),
+        .tokenBuffer = RawTokenList.init(comp.gpa),
+        .expansionLog = std.AutoHashMap(DefineMap.Entry, void).init(comp.gpa),
     };
 }
 
 pub fn deinit(pp: *Preprocessor) void {
     pp.defines.deinit();
-    pp.tokens.deinit();
+    pp.tokens.deinit(pp.compilation.gpa);
     pp.arena.deinit();
     pp.generated.deinit();
     pp.pragmaOnce.deinit();
     pp.tokenBuffer.deinit();
+    pp.expansionLog.deinit();
 }
 
 pub fn preprocess(pp: *Preprocessor, source: Source) Error!void {
@@ -75,7 +85,7 @@ pub fn preprocess(pp: *Preprocessor, source: Source) Error!void {
 
     // Estimate how many new tokens this source will contain.
     const estimatedTokenCount = source.buffer.len / 8;
-    try pp.tokens.ensureTotalCapacity(pp.tokens.items.len + estimatedTokenCount);
+    try pp.tokens.ensureTotalCapacity(pp.compilation.gpa, pp.tokens.len + estimatedTokenCount);
 
     var ifLevel: u8 = 0;
     var ifKind = std.packed_int_array.PackedIntArray(u2, 256).init([1]u2{0} ** 256);
@@ -102,8 +112,7 @@ pub fn preprocess(pp: *Preprocessor, source: Source) Error!void {
 
                         try pp.compilation.diag.add(.{
                             .tag = .error_directive,
-                            .sourceId = token.source,
-                            .locStart = token.loc.start,
+                            .loc = .{ .id = token.source, .byteOffset = token.start },
                             .extra = .{ .str = slice },
                         });
                     },
@@ -180,8 +189,7 @@ pub fn preprocess(pp: *Preprocessor, source: Source) Error!void {
                         } else {
                             try pp.compilation.diag.add(.{
                                 .tag = .unsupported_pragma,
-                                .sourceId = token.source,
-                                .locStart = token.loc.start,
+                                .loc = .{ .id = token.source, .byteOffset = token.start },
                                 .extra = .{ .str = slice },
                             });
                         }
@@ -267,7 +275,7 @@ pub fn preprocess(pp: *Preprocessor, source: Source) Error!void {
                         if (ifLevel != 0)
                             try pp.err(directive, .unterminated_conditional_directive);
 
-                        return pp.tokens.append(directive);
+                        return pp.tokens.append(pp.compilation.gpa, tokenFromRaw(directive));
                     },
                     else => {
                         try pp.err(token, .invalid_preprocessing_directive);
@@ -281,50 +289,60 @@ pub fn preprocess(pp: *Preprocessor, source: Source) Error!void {
                 if (ifLevel != 0)
                     try pp.err(token, .unterminated_conditional_directive);
 
-                return pp.tokens.append(token);
+                return pp.tokens.append(pp.compilation.gpa, tokenFromRaw(token));
             },
 
             else => {
+                // add the token to the buffer do any necessary expansions
                 startOfLine = false;
-                if (token.id.isMacroIdentifier()) {
-                    token.id.simplifyMacroKeyword();
-                    try pp.expandMacro(&lexer, token, &pp.tokens);
-                } else {
-                    try pp.tokens.append(token);
-                }
+                token.id.simplifyMacroKeyword();
+                try pp.expandMacro(&lexer, token);
             },
         }
     }
 }
 
-fn tokSliceSafe(pp: *Preprocessor, token: Token) []const u8 {
+fn tokSliceSafe(pp: *Preprocessor, token: RawToken) []const u8 {
     if (token.id.lexeMe()) |some| return some;
 
-    assert(!token.source.isGenerated());
-
-    const sourceBuf = pp.compilation.sources.values()[token.source.index()].buffer;
-    return sourceBuf[token.loc.start..token.loc.end];
+    std.debug.assert(token.source != .generated);
+    return pp.compilation.getSource(token.source).buffer[token.start..token.end];
 }
 
 // Returned slice is invalidated when generated is updated.
-pub fn tokSlice(pp: *Preprocessor, token: Token) []const u8 {
+pub fn tokenSlice(pp: *Preprocessor, token: RawToken) []const u8 {
     if (token.id.lexeMe()) |some| return some;
-    if (token.source.isGenerated()) {
-        return pp.generated.items[token.loc.start..token.loc.end];
+
+    if (token.source == .generated) {
+        return pp.generated.items[token.start..token.end];
     } else {
         const source = pp.compilation.getSource(token.source);
-        return source.buffer[token.loc.start..token.loc.end];
+        return source.buffer[token.start..token.end];
     }
 }
 
-fn err(pp: *Preprocessor, token: Token, tag: Diagnostics.Tag) !void {
+/// Convert a token from the Tokenizer into a token used by the parser.
+fn tokenFromRaw(raw: RawToken) Token {
+    return .{
+        .id = raw.id,
+        .loc = .{
+            .id = raw.source,
+            .byteOffset = raw.start,
+        },
+    };
+}
+
+fn err(pp: *Preprocessor, raw: RawToken, tag: Diagnostics.Tag) !void {
     try pp.compilation.diag.add(.{
         .tag = tag,
-        .sourceId = token.source,
-        .locStart = token.loc.start,
+        .loc = .{
+            .id = raw.source,
+            .byteOffset = raw.start,
+        },
     });
 }
 
+/// Consume next token, error if it is not an identifier.
 fn expectMacroName(pp: *Preprocessor, lexer: *Lexer) Error!?[]const u8 {
     const macroName = lexer.next();
     if (!macroName.id.isMacroIdentifier()) {
@@ -336,6 +354,7 @@ fn expectMacroName(pp: *Preprocessor, lexer: *Lexer) Error!?[]const u8 {
     return pp.tokSliceSafe(macroName);
 }
 
+/// Skip until after a newline, error if extra tokens before it.
 fn expectNewLine(pp: *Preprocessor, lexer: *Lexer) Error!void {
     var sentErr = false;
     while (true) {
@@ -350,21 +369,22 @@ fn expectNewLine(pp: *Preprocessor, lexer: *Lexer) Error!void {
     }
 }
 
+/// Consume all tokens until a newline and parse the result into a boolean.
 fn expr(pp: *Preprocessor, lexer: *Lexer) Error!bool {
-    pp.tokenBuffer.items.len = 0;
+    const start = pp.tokens.len;
+    defer pp.tokens.len = start;
 
     while (true) {
         var token = lexer.next();
         if (token.id == .NewLine or token.id == .Eof) {
-            if (pp.tokenBuffer.items.len == 0) {
+            if (pp.tokens.len == start) {
                 try pp.err(token, .expected_value_in_expr);
                 try pp.expectNewLine(lexer);
                 return false;
             }
 
             token.id = .Eof;
-            try pp.tokenBuffer.append(token);
-
+            try pp.tokens.append(pp.compilation.gpa, tokenFromRaw(token));
             break;
         } else if (token.id == .KeywordDefined) {
             const first = lexer.next();
@@ -387,22 +407,25 @@ fn expr(pp: *Preprocessor, lexer: *Lexer) Error!bool {
                 token.id = .Zero;
             }
         } else if (token.id.isMacroIdentifier()) {
-            try pp.expandMacro(lexer, token, &pp.tokenBuffer);
+            try pp.expandMacro(lexer, token);
             continue;
         }
 
-        try pp.tokenBuffer.append(token);
+        try pp.tokens.append(pp.compilation.gpa, tokenFromRaw(token));
     }
 
-    for (pp.tokenBuffer.items) |*tok| {
-        switch (tok.id) {
+    for (pp.tokens.items(.id), 0..) |*tok, i| {
+        switch (tok.*) {
             .StringLiteral,
             .StringLiteralUTF_8,
             .StringLiteralUTF_16,
             .StringLiteralUTF_32,
             .StringLiteralWide,
             => {
-                try pp.err(tok.*, .string_literal_in_pp_expr);
+                try pp.compilation.diag.add(.{
+                    .tag = .string_literal_in_pp_expr,
+                    .loc = pp.tokens.items(.loc)[i],
+                });
                 return false;
             },
 
@@ -410,19 +433,23 @@ fn expr(pp: *Preprocessor, lexer: *Lexer) Error!bool {
             .FloatLiteral_F,
             .FloatLiteral_L,
             => {
-                try pp.err(tok.*, .float_literal_in_pp_expr);
+                try pp.compilation.diag.add(.{
+                    .tag = .float_literal_in_pp_expr,
+                    .loc = pp.tokens.items(.loc)[i],
+                });
                 return false;
             },
 
-            else => if (tok.id.isMacroIdentifier()) {
-                tok.id = .Zero;
+            else => if (tok.isMacroIdentifier()) {
+                tok.* = .Zero; // undefined macro
             },
         }
     }
 
     var parser = Parser{
         .pp = pp,
-        .tokens = pp.tokenBuffer.items,
+        .tokenIds = pp.tokens.items(.id),
+        .index = @intCast(start),
         .arena = pp.arena.allocator(),
         .currDeclList = undefined,
         .scopes = undefined,
@@ -502,6 +529,7 @@ fn skip(pp: *Preprocessor, lexer: *Lexer, cont: enum { untilElse, untilEndIf, un
     }
 }
 
+// Skip until newline, ignore other tokens.
 fn skipToNewLine(lexer: *Lexer) void {
     while (true) {
         const token = lexer.next();
@@ -509,32 +537,224 @@ fn skipToNewLine(lexer: *Lexer) void {
     }
 }
 
-fn expandMacro(pp: *Preprocessor, lexer: *Lexer, token: Token, tokens: *TokenList) Error!void {
-    const name = pp.tokSliceSafe(token);
-    return pp.expandExtra(lexer, name, token, tokens);
-}
+const ExpandBuffer = std.ArrayList(Token);
 
-fn expandExtra(pp: *Preprocessor, lexer: *Lexer, origName: []const u8, arg: Token, tokens: *TokenList) Error!void {
-    if (pp.defines.get(pp.tokSlice(arg))) |some| switch (some) {
-        .empty => {},
-        .self => try tokens.append(arg),
-        .simple => |macroTokens| {
-            for (macroTokens) |token| {
-                if (token.id.isMacroIdentifier() and !std.mem.eql(u8, pp.tokSlice(token), origName))
-                    try pp.expandExtra(lexer, origName, token, tokens)
-                else
-                    try tokens.append(token);
+fn expandMacro(pp: *Preprocessor, lexer: *Lexer, raw: RawToken) Error!void {
+    const rawSlice = pp.tokSliceSafe(raw);
+
+    if (pp.defines.getEntry(rawSlice)) |some| switch (some.value_ptr.*) {
+        .empty => return,
+        .self => {},
+        .simple => {
+            pp.expansionLog.clearRetainingCapacity();
+            var buffer = ExpandBuffer.init(pp.compilation.gpa);
+            defer buffer.deinit();
+
+            // add the token to the buffer and expand it
+            try buffer.append(tokenFromRaw(raw));
+            var start: usize = 0;
+            try pp.expandExtra(rawSlice, &buffer, &start);
+
+            // Add the result tokens to the token list and mark that they were expanded.
+            try pp.tokens.ensureTotalCapacity(pp.compilation.gpa, pp.tokens.len + buffer.items.len);
+            const loc = Source.Location{ .id = raw.source, .byteOffset = raw.start };
+            for (buffer.items) |*r| {
+                try pp.markExpandedFrom(r, loc);
+                pp.tokens.appendAssumeCapacity(r.*);
             }
+
+            return;
         },
 
-        .func => return pp.compilation.fatal(arg, "TODO func macro expansion", .{}),
+        .func => blk: {
+            const start = lexer.index;
+            const lp = lexer.next();
+
+            if (lp.id != .LParen) {
+                lexer.index = start;
+                break :blk;
+            }
+
+            pp.expansionLog.clearRetainingCapacity();
+            var buffer = ExpandBuffer.init(pp.compilation.gpa);
+            defer buffer.deinit();
+
+            // collect the macro name and arguments into a new buffer
+            try buffer.append(tokenFromRaw(raw));
+            try buffer.append(tokenFromRaw(lp));
+
+            while (true) {
+                const token = lexer.next();
+                switch (token.id) {
+                    .NewLine => continue,
+                    .Eof => {
+                        try pp.err(token, .unterminated_macro_arg_list);
+                        return;
+                    },
+                    .RParen => {
+                        try buffer.append(tokenFromRaw(token));
+                        break;
+                    },
+
+                    else => try buffer.append(tokenFromRaw(token)),
+                }
+            }
+
+            var startIdx: usize = 0;
+            try pp.expandExtra(rawSlice, &buffer, &startIdx);
+
+            // add the result tokens to the token list and mark they were expanded,
+            try pp.tokens.ensureTotalCapacity(pp.compilation.gpa, pp.tokens.len + buffer.items.len);
+            const loc = Source.Location{ .id = raw.source, .byteOffset = raw.start };
+            for (buffer.items) |*r| {
+                try pp.markExpandedFrom(r, loc);
+                pp.tokens.appendAssumeCapacity(r.*);
+            }
+
+            return;
+        },
+    };
+
+    // Not a macro, continue as usual.
+    try pp.tokens.append(pp.compilation.gpa, tokenFromRaw(raw));
+}
+
+// mark that this token has been expanded from `loc`
+fn markExpandedFrom(pp: *Preprocessor, token: *Token, loc: Source.Location) !void {
+    const newLoc = try pp.arena.allocator().create(Source.Location);
+    newLoc.* = loc;
+    newLoc.next = token.loc.next;
+    token.loc.next = newLoc;
+}
+
+/// Try to expand a macro in the `source` buffer at `start_index`.
+fn expandExtra(pp: *Preprocessor, sourceName: []const u8, source: *ExpandBuffer, start: *usize) Error!void {
+    if (pp.defines.getEntry(pp.expandedSlice(source.items[start.*]))) |some| {
+        if (pp.expansionLog.get(some)) |_| {
+            // If we have already expanded this macro, do not recursively expand it.
+            start.* += 1;
+            return;
+        }
+
+        // Mark that we have seen this macro.
+        try pp.expansionLog.putNoClobber(some, {});
+
+        switch (some.value_ptr.*) {
+            .empty => _ = source.orderedRemove(start.*), // Simply remove the token.
+            .self => start.* += 1, // Just go over the token.
+            .simple => |macro| {
+                _ = source.orderedRemove(start.*);
+                var buffer = ExpandBuffer.init(pp.compilation.gpa);
+                defer buffer.deinit();
+                try buffer.ensureTotalCapacity(macro.tokens.len);
+
+                // add all of the macros tokens to the new buffer handing any concats
+                var i: usize = 0;
+                while (i < macro.tokens.len) : (i += 1) {
+                    const raw = macro.tokens[i];
+                    if (raw.id == .HashHash) {
+                        _ = buffer.pop();
+                        const lhs = macro.tokens[i - 1];
+                        const rhs = macro.tokens[i + 1];
+                        i += 1;
+
+                        buffer.appendAssumeCapacity(try pp.pasteTokens(lhs, rhs));
+                    } else {
+                        buffer.appendAssumeCapacity(tokenFromRaw(raw));
+                    }
+                }
+
+                // Try to expand the result tokens.
+                i = 0;
+                while (i < buffer.items.len) {
+                    if (buffer.items[i].id.isMacroIdentifier()) {
+                        try pp.expandExtra(sourceName, &buffer, &i);
+                    } else {
+                        i += 1;
+                    }
+                }
+
+                // Mark all the tokens before adding them to the source buffer.
+                for (buffer.items) |*tok| try pp.markExpandedFrom(tok, macro.loc);
+                try source.insertSlice(start.*, buffer.items);
+                start.* += buffer.items.len;
+            },
+
+            .func => @panic("TODO func macro expansion"),
+        }
     } else {
-        try tokens.append(arg);
+        start.* += 1;
     }
+}
+
+// TODO there are like 5 tokSlice functions, can we combine them somehow.
+pub fn expandedSlice(pp: *Preprocessor, token: Token) []const u8 {
+    if (token.id.lexeMe()) |some|
+        return some;
+
+    var lexer = Lexer{
+        .buffer = if (token.loc.id == .generated)
+            pp.generated.items
+        else
+            pp.compilation.getSource(token.loc.id).buffer,
+
+        .index = token.loc.byteOffset,
+        .source = .generated,
+    };
+
+    if (token.id == .MacroString) {
+        while (true) : (lexer.index += 1) {
+            if (lexer.buffer[lexer.index] == '>') break;
+        }
+
+        return lexer.buffer[token.loc.byteOffset .. lexer.index + 1];
+    }
+
+    const res = lexer.next();
+    return lexer.buffer[res.start..res.end];
+}
+
+/// Concat two tokens and add the result to pp.generated
+fn pasteTokens(pp: *Preprocessor, lhs: RawToken, rhs: RawToken) Error!Token {
+    const start = pp.generated.items.len;
+    const end = start + pp.tokenSlice(lhs).len + pp.tokenSlice(rhs).len;
+    try pp.generated.ensureTotalCapacity(end + 1); // +1 for a newline
+
+    // We cannot use the same slices here since they might be invalidated by `ensureCapacity`
+    pp.generated.appendSliceAssumeCapacity(pp.tokenSlice(lhs));
+    pp.generated.appendSliceAssumeCapacity(pp.tokenSlice(rhs));
+    pp.generated.appendAssumeCapacity('\n');
+
+    // Try to tokenize the result.
+    var lexer = Lexer{
+        .buffer = pp.generated.items,
+        .index = @as(u32, @intCast(start)),
+        .source = .generated,
+    };
+
+    const pastedToken = lexer.next();
+    const next = lexer.next().id;
+
+    if (next != .NewLine and next != .Eof) {
+        try pp.compilation.diag.add(.{
+            .tag = .pasting_formed_invalid,
+            .loc = .{ .id = lhs.source, .byteOffset = lhs.start },
+            .extra = .{ .str = try pp.arena.allocator().dupe(u8, pp.generated.items[start..end]) },
+        });
+    }
+
+    return Token{
+        .id = pastedToken.id,
+        .loc = .{
+            .id = .generated,
+            .byteOffset = @intCast(start),
+        },
+    };
 }
 
 /// Handle #define directive
 fn define(pp: *Preprocessor, lexer: *Lexer) Error!void {
+    // get the macro name and validate.
     const macroName = lexer.next();
     if (macroName.id == .KeywordDefined) {
         try pp.err(macroName, .defined_as_macro_name);
@@ -553,7 +773,7 @@ fn define(pp: *Preprocessor, lexer: *Lexer) Error!void {
     if (first.id == .NewLine or first.id == .Eof) {
         _ = try pp.defines.put(nameStr, .empty);
         return;
-    } else if (first.loc.start == macroName.loc.end) {
+    } else if (first.start == macroName.end) {
         if (first.id == .LParen)
             return pp.defineFunc(lexer, first, macroName);
 
@@ -566,7 +786,7 @@ fn define(pp: *Preprocessor, lexer: *Lexer) Error!void {
         const start = lexer.index;
         const second = lexer.next();
         if (second.id == .NewLine or second.id == .Eof) {
-            if (std.mem.eql(u8, pp.tokSlice(first), nameStr)) {
+            if (std.mem.eql(u8, pp.tokSliceSafe(first), nameStr)) {
                 _ = try pp.defines.put(nameStr, .self);
                 return;
             }
@@ -583,52 +803,33 @@ fn define(pp: *Preprocessor, lexer: *Lexer) Error!void {
         token.id.simplifyMacroKeyword();
         switch (token.id) {
             .HashHash => {
-                const prev = pp.tokenBuffer.pop();
                 const next = lexer.next();
                 if (next.id == .NewLine or next.id == .Eof) {
                     try pp.err(token, .hash_hash_at_end);
-                    continue;
+                    break;
                 }
 
-                const nextSlice = pp.tokSliceSafe(next);
-
-                const start = pp.generated.items.len;
-                const end = pp.tokSlice(prev).len + nextSlice.len;
-                try pp.generated.ensureTotalCapacity(end);
-
-                pp.generated.appendSliceAssumeCapacity(pp.tokSlice(prev));
-                pp.generated.appendSliceAssumeCapacity(nextSlice);
-
-                var tempSource = lexer.source;
-                tempSource.markGenerated();
-                var tempLexer = Lexer{ .buffer = pp.generated.items, .index = @as(u32, @intCast(start)), .source = tempSource };
-                const pastedToken = tempLexer.next();
-
-                if (tempLexer.next().id != .Eof) {
-                    try pp.compilation.diag.add(.{
-                        .tag = .pasting_formed_invalid,
-                        .sourceId = token.source,
-                        .locStart = token.loc.start,
-                        .extra = .{ .str = try pp.arena.allocator().dupe(u8, pp.generated.items[start..end]) },
-                    });
-                }
-
-                try pp.tokenBuffer.append(pastedToken);
+                try pp.tokenBuffer.append(token);
+                try pp.tokenBuffer.append(next);
             },
             .NewLine, .Eof => break,
             else => try pp.tokenBuffer.append(token),
         }
     }
 
-    const list = try pp.arena.allocator().dupe(Token, pp.tokenBuffer.items);
-    _ = try pp.defines.put(nameStr, .{ .simple = list });
+    const list = try pp.arena.allocator().dupe(RawToken, pp.tokenBuffer.items);
+    _ = try pp.defines.put(nameStr, .{ .simple = .{
+        .loc = .{ .id = macroName.source, .byteOffset = macroName.start },
+        .tokens = list,
+    } });
 }
 
 /// Handle a function like #define directive
-fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: Token, lParen: Token) Error!void {
+fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: RawToken, lParen: RawToken) Error!void {
     var params = std.ArrayList([]const u8).init(pp.compilation.gpa);
     defer params.deinit();
 
+    // parse the parameter list
     var varArgs = false;
     while (true) {
         const token = lexer.next();
@@ -664,6 +865,7 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: Token, lParen: Token)
         try params.append(pp.tokSliceSafe(token));
     }
 
+    // Collect the body tokens and validate # and ##'s found.
     pp.tokenBuffer.items.len = 0;
     tokenLoop: while (true) {
         var token = lexer.next();
@@ -679,7 +881,7 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: Token, lParen: Token)
                     for (params.items, 0..) |p, i| {
                         if (std.mem.eql(u8, p, s)) {
                             token.id = .StringifyParam;
-                            token.loc.end = @intCast(i);
+                            token.end = @intCast(i);
                             try pp.tokenBuffer.append(token);
 
                             continue :tokenLoop;
@@ -709,7 +911,7 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: Token, lParen: Token)
                     for (params.items, 0..) |param, i| {
                         if (std.mem.eql(u8, param, s)) {
                             token.id = .MacroParam;
-                            token.loc.end = @intCast(i);
+                            token.end = @intCast(i);
                             break;
                         }
                     }
@@ -721,13 +923,19 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: Token, lParen: Token)
     }
 
     const paramList = try pp.arena.allocator().dupe([]const u8, params.items);
-    const tokenList = try pp.arena.allocator().dupe(Token, pp.tokenBuffer.items);
+    const tokenList = try pp.arena.allocator().dupe(RawToken, pp.tokenBuffer.items);
     const nameStr = pp.tokSliceSafe(macroName);
-    _ = try pp.defines.put(nameStr, .{ .func = .{ .params = paramList, .varArgs = varArgs, .tokens = tokenList } });
+    _ = try pp.defines.put(nameStr, .{ .func = .{
+        .params = paramList,
+        .varArgs = varArgs,
+        .tokens = tokenList,
+        .loc = .{ .id = macroName.source, .byteOffset = macroName.start },
+    } });
 }
 
 fn include(pp: *Preprocessor, lexer: *Lexer) Error!void {
-    pp.tokenBuffer.items.len = 0;
+    const start = pp.tokens.len;
+    defer pp.tokens.len = start;
 
     var first = lexer.next();
     if (first.id == .AngleBracketLeft) to_end: {
@@ -735,7 +943,7 @@ fn include(pp: *Preprocessor, lexer: *Lexer) Error!void {
             switch (lexer.buffer[lexer.index]) {
                 '>' => {
                     lexer.index += 1;
-                    first.loc.end = lexer.index;
+                    first.end = lexer.index;
                     first.id = .MacroString;
                     break :to_end;
                 },
@@ -744,17 +952,15 @@ fn include(pp: *Preprocessor, lexer: *Lexer) Error!void {
             }
         }
 
-        try pp.compilation.diag.add(.{
-            .tag = .header_str_closing,
-            .sourceId = first.source,
-            .locStart = lexer.index,
-        });
+        try pp.compilation.diag.add(.{ .tag = .header_str_closing, .loc = .{ .id = first.source, .byteOffset = first.start } });
         try pp.err(first, .header_str_match);
     }
 
-    try pp.expandMacro(lexer, first, &pp.tokenBuffer);
+    // Try expand if the argument is a macro
+    try pp.expandMacro(lexer, first);
 
-    const fileNameTK = if (pp.tokenBuffer.items.len == 0) first else pp.tokenBuffer.items[0];
+    // check that we actually got a string
+    const fileNameTK = pp.tokens.get(start);
     switch (fileNameTK.id) {
         .StringLiteral, .MacroString => {},
         else => {
@@ -763,18 +969,21 @@ fn include(pp: *Preprocessor, lexer: *Lexer) Error!void {
         },
     }
 
+    // error on the extra tokens.
     const newLine = lexer.next();
-    if ((newLine.id != .NewLine and newLine.id != .Eof) or pp.tokenBuffer.items.len > 1) {
+    if ((newLine.id != .NewLine and newLine.id != .Eof) or pp.tokens.len > start + 1) {
         skipToNewLine(lexer);
         return pp.err(first, .extra_tokens_directive_end);
     }
 
-    const tokenSlice = pp.tokSlice(fileNameTK);
-    if (tokenSlice.len < 3)
+    // check for empty filename
+    const tkSlice = pp.expandedSlice(fileNameTK);
+    if (tkSlice.len < 3)
         return pp.err(first, .empty_filename);
 
-    const filename = tokenSlice[1 .. tokenSlice.len - 1];
-    const newSource = try pp.compilation.findInclude(fileNameTK, filename, fileNameTK.id == .StringLiteral);
+    // find the file and preprocess it.
+    const filename = tkSlice[1 .. tkSlice.len - 1];
+    const newSource = try pp.compilation.findInclude(first, filename, fileNameTK.id == .StringLiteral);
 
     return pp.preprocess(newSource);
 }
@@ -785,7 +994,7 @@ fn expectTokens(buffer: []const u8, expectedTokens: []const TokenType) void {
 
     const source = Source{
         .buffer = buffer,
-        .id = @enumFromInt(0),
+        .id = @enumFromInt(2),
         .path = "<test-buffer>",
     };
 
@@ -796,15 +1005,16 @@ fn expectTokens(buffer: []const u8, expectedTokens: []const TokenType) void {
     defer pp.deinit();
 
     pp.preprocess(source) catch unreachable;
+    std.testing.expect(comp.renderErrors() == 0) catch std.debug.print("nothing TODO", .{});
 
     for (expectedTokens, 0..) |expectedTokenId, i| {
-        const token = pp.tokens.items[i];
-        if (!std.meta.eql(token.id, expectedTokenId)) {
-            std.debug.panic("expected {s}, found {s}\n", .{ @tagName(expectedTokenId), @tagName(token.id) });
+        const actual = pp.tokens.items(.id)[i];
+        if (!std.meta.eql(actual, expectedTokenId)) {
+            std.debug.panic("expected {s}, found {s}\n", .{ @tagName(expectedTokenId), @tagName(actual) });
         }
     }
-    const lastToken = pp.tokens.items[expectedTokens.len];
-    std.testing.expect(lastToken.id == .Eof) catch std.debug.print("", .{});
+    const lastToken = pp.tokens.items(.id)[expectedTokens.len];
+    std.testing.expect(lastToken == .Eof) catch std.debug.print("", .{});
 }
 
 fn expectStr(buffer: []const u8, expected: []const u8) void {
@@ -813,7 +1023,7 @@ fn expectStr(buffer: []const u8, expected: []const u8) void {
 
     const source = Source{
         .buffer = buffer,
-        .id = @as(Source.ID, @enumFromInt(0)),
+        .id = @as(Source.ID, @enumFromInt(2)),
         .path = "<test-buf>",
     };
 
@@ -824,16 +1034,17 @@ fn expectStr(buffer: []const u8, expected: []const u8) void {
     defer pp.deinit();
 
     pp.preprocess(source) catch unreachable;
+    std.testing.expect(comp.renderErrors() == 0) catch std.debug.print("nothing TODO", .{});
 
     var actual = std.ArrayList(u8).init(std.testing.allocator);
     defer actual.deinit();
 
-    for (pp.tokens.items, 0..) |token, i| {
-        if (token.id == .Eof) break;
+    for (pp.tokens.items(.id), 0..) |id, i| {
+        if (id == .Eof) break;
 
         if (i != 0) actual.append(' ') catch unreachable;
 
-        actual.appendSlice(pp.tokSlice(token)) catch unreachable;
+        actual.appendSlice(pp.expandedSlice(pp.tokens.get(i))) catch unreachable;
     }
 
     std.testing.expectEqualStrings(expected, actual.items) catch std.debug.print("nothing TODO", .{});
