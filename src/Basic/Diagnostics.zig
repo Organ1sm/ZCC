@@ -319,7 +319,7 @@ pub fn render(comp: *Compilation) u32 {
 
         var lcs: ?Source.LCS = null;
         if (msg.loc.id != .unused) {
-            const loc = if (msg.loc.id == .generated) msg.loc.next.?.* else msg.loc;
+            const loc = if (msg.loc.next != null) msg.loc.next.?.* else msg.loc;
             const source = comp.getSource(loc.id);
             lcs = source.lineColString(loc.byteOffset);
             m.location(source.path, lcs.?);
@@ -437,7 +437,7 @@ pub fn render(comp: *Compilation) u32 {
 
         if (msg.loc.id != .unused) {
             var maybeLoc = msg.loc.next;
-            if (msg.loc.id == .generated)
+            if (msg.loc.next != null)
                 maybeLoc = maybeLoc.?.next;
 
             while (maybeLoc) |loc| {
