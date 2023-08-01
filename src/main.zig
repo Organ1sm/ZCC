@@ -21,19 +21,22 @@ pub fn main() u8 {
 
     const args = std.process.argsAlloc(arena) catch {
         std.debug.print("Out of Memory\n", .{});
-        std.process.exit(1);
+        return 1;
     };
 
-    handleArgs(gpa, args) catch |err| switch (err) {
+    var comp = Compilation.init(gpa);
+    defer comp.deinit();
+
+    handleArgs(&comp, args) catch |err| switch (err) {
         error.OutOfMemory => {
             std.debug.print("Out of Memory\n", .{});
             return 1;
         },
-        error.FatalError => return 1,
+        error.FatalError => comp.renderErrors(),
         else => return 1,
     };
 
-    return 0;
+    return @intFromBool(comp.diag.errors != 0);
 }
 
 const usage =
@@ -58,16 +61,11 @@ const usage =
     \\
 ;
 
-fn handleArgs(gpa: std.mem.Allocator, args: [][]const u8) !void {
-    var comp = Compilation.init(gpa);
-    defer comp.deinit();
-
+fn handleArgs(comp: *Compilation, args: [][]const u8) !void {
     try comp.systemIncludeDirs.append("/usr/include");
 
-    var sourceFiles = std.ArrayList(Source).init(gpa);
+    var sourceFiles = std.ArrayList(Source).init(comp.gpa);
     defer sourceFiles.deinit();
-
-    var onlyPreprocess = false;
 
     const stdOut = std.io.getStdOut().writer();
     var i: usize = 1;
@@ -83,7 +81,7 @@ fn handleArgs(gpa: std.mem.Allocator, args: [][]const u8) !void {
                     return comp.diag.fatalNoSrc("{s} when trying to print version", .{@errorName(err)});
                 };
             } else if (std.mem.eql(u8, arg, "-E")) {
-                onlyPreprocess = true;
+                comp.onlyPreprocess = true;
             } else if (std.mem.eql(u8, arg, "-fcolor-diagnostics")) {
                 comp.diag.color = true;
             } else if (std.mem.eql(u8, arg, "-fno-color-diagnostics")) {
@@ -108,6 +106,16 @@ fn handleArgs(gpa: std.mem.Allocator, args: [][]const u8) !void {
                     path = args[i];
                 }
                 try comp.systemIncludeDirs.append(path);
+            } else if (std.mem.startsWith(u8, arg, "-o")) {
+                var filename = arg["-o".len..];
+                if (filename.len == 0) {
+                    i += 1;
+                    if (i >= args.len)
+                        return comp.diag.fatalNoSrc("expected argument after -o", .{});
+
+                    filename = args[i];
+                }
+                comp.outputName = filename;
             } else if (std.mem.eql(u8, arg, "-Wall")) {
                 comp.diag.setAll(.warning);
             } else if (std.mem.eql(u8, arg, "-Werror")) {
@@ -133,42 +141,45 @@ fn handleArgs(gpa: std.mem.Allocator, args: [][]const u8) !void {
 
     if (sourceFiles.items.len == 0) {
         return comp.diag.fatalNoSrc("no input files", .{});
+    } else if (sourceFiles.items.len != 1 and comp.outputName != null) {
+        return comp.diag.fatalNoSrc("cannot specify -o when generating multiple output files", .{});
     }
 
     for (sourceFiles.items) |source| {
-        var pp = Preprocessor.init(&comp);
-        defer {
-            _ = comp.renderErrors();
-            comp.diag.list.items.len = 0;
-            pp.deinit();
-        }
-
-        pp.preprocess(source) catch |e| switch (e) {
+        processSource(comp, source) catch |e| switch (e) {
             error.OutOfMemory => return error.OutOfMemory,
-            error.FatalError => continue,
+            error.FatalError => {},
         };
 
-        if (onlyPreprocess) {
-            _ = comp.renderErrors();
-            comp.diag.list.items.len = 0;
-
-            pp.prettyPrintTokens(stdOut) catch |err| {
-                return comp.diag.fatalNoSrc("{s} when trying to print tokens", .{@errorName(err)});
-            };
-            continue;
-        }
-
-        var tree = Parser.parse(&pp) catch |e| switch (e) {
-            error.OutOfMemory => return error.OutOfMemory,
-            error.FatalError => continue,
-        };
-        defer tree.deinit();
-
-        _ = comp.renderErrors();
-        comp.diag.list.items.len = 0;
-
-        tree.dump(std.io.getStdOut().writer()) catch {};
+        comp.renderErrors();
     }
+}
+
+fn processSource(comp: *Compilation, source: Source) !void {
+    var pp = Preprocessor.init(comp);
+    defer pp.deinit();
+
+    try pp.preprocess(source);
+    if (comp.onlyPreprocess) {
+        comp.renderErrors();
+
+        const file = if (comp.outputName) |some|
+            std.fs.cwd().createFile(some, .{}) catch |err|
+                return comp.diag.fatalNoSrc("{s} when trying to print tokens", .{@errorName(err)})
+        else
+            std.io.getStdOut();
+        defer if (comp.outputName != null) file.close();
+
+        return pp.prettyPrintTokens(file.writer()) catch |err|
+            comp.diag.fatalNoSrc("{s} when trying to print tokens", .{@errorName(err)});
+    }
+
+    var tree = try Parser.parse(&pp);
+    defer tree.deinit();
+
+    comp.renderErrors();
+
+    tree.dump(std.io.getStdOut().writer()) catch {};
 }
 
 test "simple test" {

@@ -42,6 +42,7 @@ const Options = struct {
     @"implicit-function-declaration": Kind = .warning,
     @"unused-value": Kind = .warning,
     @"unreachable-code": Kind = .warning,
+    @"unknown-warning-option": Kind = .warning,
 };
 
 pub const Tag = enum {
@@ -146,12 +147,14 @@ pub const Tag = enum {
     static_non_outernmost_array,
     qualifier_non_outernmost_array,
     unterminated_macro_arg_list,
+    unknown_warning,
 };
 
 list: std.ArrayList(Message),
 color: bool = true,
 fatalErrors: bool = false,
 options: Options = .{},
+errors: u32 = 0,
 
 pub fn init(gpa: Allocator) Diagnostics {
     return .{
@@ -265,7 +268,7 @@ pub fn set(diag: *Diagnostics, name: []const u8, to: Kind) !void {
         }
     }
 
-    return diag.fatalNoSrc("unknown warning option `{s}`", .{name});
+    try diag.add(.{ .tag = .unknown_warning, .extra = .{ .str = name } });
 }
 
 pub fn setAll(diag: *Diagnostics, to: Kind) void {
@@ -298,9 +301,9 @@ pub fn fatalNoSrc(diag: *Diagnostics, comptime fmt: []const u8, args: anytype) C
     return error.FatalError;
 }
 
-pub fn render(comp: *Compilation) u32 {
+pub fn render(comp: *Compilation) void {
     if (comp.diag.list.items.len == 0)
-        return 0;
+        return;
 
     var m = MsgWriter.init(comp.diag.color);
     defer m.deinit();
@@ -431,6 +434,7 @@ pub fn render(comp: *Compilation) u32 {
             .static_non_outernmost_array => m.write("'static' used in non-outernmost array type"),
             .qualifier_non_outernmost_array => m.write("type qualifier used in non-outernmost array type"),
             .unterminated_macro_arg_list => m.write("unterminated function macro argument list"),
+            .unknown_warning => m.print("unknown warning '{s}'", .{msg.extra.str}),
         }
 
         m.end(lcs);
@@ -468,7 +472,8 @@ pub fn render(comp: *Compilation) u32 {
         m.print("{d} error{s} generated.\n", .{ errors, es });
     }
 
-    return errors;
+    comp.diag.list.items.len = 0;
+    comp.diag.errors += errors;
 }
 
 fn tagKind(diag: *Diagnostics, tag: Tag) Kind {
@@ -580,6 +585,7 @@ fn tagKind(diag: *Diagnostics, tag: Tag) Kind {
         .implicit_func_decl => diag.options.@"implicit-function-declaration",
         .unused_value => diag.options.@"unused-value",
         .unreachable_code => diag.options.@"unreachable-code",
+        .unknown_warning => diag.options.@"unknown-warning-option",
     };
 
     if (kind == .@"error" and diag.fatalErrors)
