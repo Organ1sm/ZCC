@@ -771,8 +771,18 @@ fn expandFunc(pp: *Preprocessor, source: *ExpandBuffer, startIdx: *usize, macro:
                 if (targetArg.len == 0)
                     // This is needed so that we can properly do token pasting.
                     try buf.append(.{ .id = .EmptyArg, .loc = .{ .id = raw.source, .byteOffset = raw.start } })
-                else
-                    try buf.appendSlice(targetArg);
+                else {
+                    try buf.ensureTotalCapacity(buf.items.len + targetArg.len);
+                    for (targetArg) |arg| {
+                        var copy = arg;
+                        if (copy.id.isMacroIdentifier())
+                            copy.id = .IdentifierFromParam
+                        else if (copy.id == .HashHash)
+                            copy.id = .HashHashFromParam;
+
+                        buf.appendAssumeCapacity(copy);
+                    }
+                }
             },
             else => try buf.append(tokenFromRaw(raw)),
         }
@@ -782,13 +792,13 @@ fn expandFunc(pp: *Preprocessor, source: *ExpandBuffer, startIdx: *usize, macro:
     tokenIdx = 0;
     while (tokenIdx < buf.items.len) : (tokenIdx += 1) {
         switch (buf.items[tokenIdx].id) {
+            .HashHashFromParam => buf.items[tokenIdx].id = .HashHash,
             .HashHash => {
-                // TODO ## originating from args should not be concatenated
                 const prev = buf.items[tokenIdx - 1];
                 const next = buf.items[tokenIdx + 1];
 
                 buf.items[tokenIdx - 1] = try pp.pasteTokens(prev, next);
-                std.mem.copyBackwards(Token, buf.items[tokenIdx..], buf.items[tokenIdx + 2 ..]);
+                std.mem.copy(Token, buf.items[tokenIdx..], buf.items[tokenIdx + 2 ..]);
                 buf.items.len -= 2;
                 tokenIdx -= 1;
             },
@@ -796,19 +806,23 @@ fn expandFunc(pp: *Preprocessor, source: *ExpandBuffer, startIdx: *usize, macro:
         }
     }
 
-    // TODO
     // 4. Expand tokens from parameters
-    // tok_i = 0;
-    // while (tok_i < expanded.items.len) : (tok_i += 1) {
-    // }
+    tokenIdx = 0;
+    while (tokenIdx < buf.items.len) {
+        const token = &buf.items[tokenIdx];
+        switch (token.id) {
+            .EmptyArg => _ = buf.orderedRemove(tokenIdx),
+            .IdentifierFromParam => {
+                token.id = RawToken.keywords.get(pp.expandedSlice(token.*)) orelse .Identifier;
+                try pp.expandExtra(&buf, &tokenIdx);
+            },
+            else => tokenIdx += 1,
+        }
+    }
 
     // 5. Expand resulting tokens
     tokenIdx = 0;
     while (tokenIdx < buf.items.len) {
-        if (buf.items[tokenIdx].id == .EmptyArg) {
-            _ = buf.orderedRemove(tokenIdx);
-            continue;
-        }
         if (buf.items[tokenIdx].id.isMacroIdentifier()) {
             try pp.expandExtra(&buf, &tokenIdx);
         } else {
@@ -821,15 +835,20 @@ fn expandFunc(pp: *Preprocessor, source: *ExpandBuffer, startIdx: *usize, macro:
 
     // Move tokens after the call out of the way.
     const inputLen = args.len + 3; // +3 for identifier, ( and )
-    if (inputLen >= buf.items.len) {
+
+    if (inputLen == buf.items.len) {
+        // TOOD
+    } else if (inputLen > buf.items.len) {
         std.mem.copy(Token, source.items[startIdx.* + buf.items.len ..], source.items[startIdx.* + inputLen ..]);
         source.items.len -= inputLen - buf.items.len;
     } else {
-        try source.ensureTotalCapacity(source.items.len + buf.items.len - inputLen);
+        const newLen = source.items.len + buf.items.len - inputLen;
+        try source.ensureTotalCapacity(newLen);
         const start_len = source.items.len;
-        source.items.len = source.capacity;
+        source.items.len = newLen;
         std.mem.copyBackwards(Token, source.items[startIdx.* + buf.items.len ..], source.items[startIdx.* + inputLen .. start_len]);
     }
+
     // Insert resulting tokens to the source
     std.mem.copy(Token, source.items[startIdx.*..], buf.items);
     startIdx.* += buf.items.len;
@@ -1194,9 +1213,7 @@ pub fn prettyPrintTokens(pp: *Preprocessor, w: anytype) !void {
             // next was expanded from a macro
             try w.writeByte(' ');
         } else if (next.loc.id == cur.loc.id) {
-            const source = pp.compilation.getSource(cur.loc.id).buffer;
-            const curEnd = cur.loc.byteOffset + slice.len;
-            try pp.printInBetween(source[curEnd..next.loc.byteOffset], w);
+            try w.writeByte(' ');
         } else {
             // next was included from another file
             try w.writeByte('\n');
@@ -1367,7 +1384,20 @@ test "function macro expansion" {
         \\#define XCAT(a,b) CAT(a,b)
         \\#define CALL(fn) fn(HE,LLO)
         \\CAT(HE, LLO)
-        \\//XCAT(HE, LLO) TODO HI_THERE
+        \\XCAT(HE, LLO)
         \\CALL(CAT)
-    , "\"HI THERE\" \"HI THERE\"");
+    , "\"HI THERE\" HI_THERE \"HI THERE\"");
+}
+
+test "X macro" {
+    expectStr(
+        \\#define X(a) Foo_ ## a = a,
+        \\enum Foo {
+        \\X(1)
+        \\X(2)
+        \\X(3)
+        \\X(4)
+        \\X(5)
+        \\};
+    , "enum Foo { Foo_1 = 1 , Foo_2 = 2 , Foo_3 = 3 , Foo_4 = 4 , Foo_5 = 5 , } ;");
 }
