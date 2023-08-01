@@ -17,6 +17,8 @@ sources: std.StringArrayHashMap(Source),
 diag: Diagnostics,
 includeDirs: std.ArrayList([]const u8),
 systemIncludeDirs: std.ArrayList([]const u8),
+outputName: ?[]const u8 = null,
+onlyPreprocess: bool = false,
 
 pub fn init(gpa: Allocator) Compilation {
     return .{

@@ -1258,7 +1258,8 @@ fn expectTokens(buffer: []const u8, expectedTokens: []const TokenType) void {
     defer pp.deinit();
 
     pp.preprocess(source) catch unreachable;
-    std.testing.expect(comp.renderErrors() == 0) catch std.debug.print("nothing TODO", .{});
+    comp.renderErrors();
+    std.testing.expect(comp.diag.errors == 0) catch std.debug.print("nothing TODO", .{});
 
     for (expectedTokens, 0..) |expectedTokenId, i| {
         const actual = pp.tokens.items(.id)[i];
@@ -1287,7 +1288,8 @@ fn expectStr(buffer: []const u8, expected: []const u8) void {
     defer pp.deinit();
 
     pp.preprocess(source) catch unreachable;
-    std.testing.expect(comp.renderErrors() == 0) catch std.debug.print("nothing TODO", .{});
+    comp.renderErrors();
+    std.testing.expect(comp.diag.errors == 0) catch std.debug.print("nothing TODO", .{});
 
     var actual = std.ArrayList(u8).init(std.testing.allocator);
     defer actual.deinit();
@@ -1400,4 +1402,15 @@ test "X macro" {
         \\X(5)
         \\};
     , "enum Foo { Foo_1 = 1 , Foo_2 = 2 , Foo_3 = 3 , Foo_4 = 4 , Foo_5 = 5 , } ;");
+}
+
+test "var args macro functions" {
+    expectStr(
+        \\#define foo(a,...) #__VA_ARGS__
+        \\foo(1,2,3,4,5,6)
+        \\
+        \\#define bar(a,...) bar __VA_ARGS__
+        \\#define baz(a,...) baz bar(__VA_ARGS__)
+        \\baz(1,2,3,4)
+    , "\"2 , 3 , 4 , 5 , 6\" baz bar 3 , 4");
 }
