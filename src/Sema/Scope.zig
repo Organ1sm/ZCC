@@ -1,10 +1,10 @@
 const std = @import("std");
 const AST = @import("../AST/AST.zig");
 const Parser = @import("../Parser/Parser.zig");
+const Result = @import("../Parser/Result.zig");
 
 const TokenIndex = AST.TokenIndex;
 const NodeIndex = AST.NodeIndex;
-const Result = Parser.Result;
 
 pub const Scope = union(enum) {
     typedef: Symbol,

@@ -26,6 +26,8 @@ pub const Message = struct {
             actual: u32,
         },
 
+        unsigned: u64,
+        signed: i64,
         none: void,
     };
 };
@@ -129,7 +131,8 @@ pub const Tag = enum {
     previous_label,
     undeclared_label,
     case_not_in_switch,
-    duplicate_switch_case,
+    duplicate_switch_case_signed,
+    duplicate_switch_case_unsigned,
     multiple_default,
     previous_case,
     expected_arguments,
@@ -148,6 +151,8 @@ pub const Tag = enum {
     qualifier_non_outernmost_array,
     unterminated_macro_arg_list,
     unknown_warning,
+    overflow_unsigned,
+    overflow_signed,
 };
 
 list: std.ArrayList(Message),
@@ -417,7 +422,8 @@ pub fn render(comp: *Compilation) void {
             .previous_label => m.print("previous definition of label '{s}' was here", .{msg.extra.str}),
             .undeclared_label => m.print("use of undeclared label '{s}'", .{msg.extra.str}),
             .case_not_in_switch => m.print("'{s}' statement not in a switch statement", .{msg.extra.str}),
-            .duplicate_switch_case => m.write("duplicate case value"),
+            .duplicate_switch_case_signed => m.print("duplicate case value '{d}'", .{msg.extra.signed}),
+            .duplicate_switch_case_unsigned => m.print("duplicate case value '{d}'", .{msg.extra.unsigned}),
             .multiple_default => m.write("multiple default cases in the same switch"),
             .previous_case => m.write("previous case defined here"),
             .expected_arguments, .expected_arguments_old => m.print("expected {d} argument(s) got {d}", .{ msg.extra.arguments.expected, msg.extra.arguments.actual }),
@@ -435,6 +441,8 @@ pub fn render(comp: *Compilation) void {
             .qualifier_non_outernmost_array => m.write("type qualifier used in non-outernmost array type"),
             .unterminated_macro_arg_list => m.write("unterminated function macro argument list"),
             .unknown_warning => m.print("unknown warning '{s}'", .{msg.extra.str}),
+            .overflow_signed => m.print("overflow in expression; result is'{d}'", .{msg.extra.signed}),
+            .overflow_unsigned => m.print("overflow in expression; result is '{d}'", .{msg.extra.unsigned}),
         }
 
         m.end(lcs);
@@ -545,7 +553,8 @@ fn tagKind(diag: *Diagnostics, tag: Tag) Kind {
         .duplicate_label,
         .undeclared_label,
         .case_not_in_switch,
-        .duplicate_switch_case,
+        .duplicate_switch_case_signed,
+        .duplicate_switch_case_unsigned,
         .multiple_default,
         .expected_arguments,
         .expected_at_least_arguments,
@@ -574,6 +583,8 @@ fn tagKind(diag: *Diagnostics, tag: Tag) Kind {
         .invalid_old_style_params,
         .expected_arguments_old,
         .useless_static,
+        .overflow_unsigned,
+        .overflow_signed,
         => .warning,
 
         .unsupported_pragma => diag.options.@"unsupported-pragma",
