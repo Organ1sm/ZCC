@@ -558,16 +558,7 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
             try w.print("name: " ++ NAME ++ "{s}\n" ++ RESET, .{tree.tokSlice(tree.nodes.items(.first)[node])});
         },
 
-        .Int32Literal => {
-            try w.writeByteNTimes(' ', level + 1);
-            if (tree.nodes.items(.type)[node].isUnsignedInt(tree.comp)) {
-                try w.print("value: " ++ LITERAL ++ "{d}\n" ++ RESET, .{tree.nodes.items(.first)});
-            } else {
-                try w.print("value: " ++ LITERAL ++ "{d}\n" ++ RESET, .{@as(i32, @bitCast(tree.nodes.items(.first)[node]))});
-            }
-        },
-
-        .Int64Literal => {
+        .IntLiteral => {
             try w.writeByteNTimes(' ', level + 1);
             const parts: [2]u32 = .{ tree.nodes.items(.first)[node], tree.nodes.items(.second)[node] };
             if (tree.nodes.items(.type)[node].isUnsignedInt(tree.comp)) {

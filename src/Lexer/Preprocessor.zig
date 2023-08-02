@@ -585,6 +585,7 @@ fn expandMacro(pp: *Preprocessor, lexer: *Lexer, raw: RawToken) Error!void {
             try buffer.append(tokenFromRaw(raw));
             try buffer.append(tokenFromRaw(lp));
 
+            var parens: u32 = 0;
             while (true) {
                 const token = lexer.next();
                 switch (token.id) {
@@ -593,13 +594,18 @@ fn expandMacro(pp: *Preprocessor, lexer: *Lexer, raw: RawToken) Error!void {
                         try pp.err(token, .unterminated_macro_arg_list);
                         return;
                     },
+                    .LParen => parens += 1,
                     .RParen => {
-                        try buffer.append(tokenFromRaw(token));
-                        break;
+                        if (parens == 0) {
+                            try buffer.append(tokenFromRaw(token));
+                            break;
+                        }
+                        parens -= 1;
                     },
 
-                    else => try buffer.append(tokenFromRaw(token)),
+                    else => {},
                 }
+                try buffer.append(tokenFromRaw(token));
             }
 
             var startIdx: usize = 0;
@@ -703,11 +709,19 @@ fn expandFunc(pp: *Preprocessor, source: *ExpandBuffer, startIdx: *usize, macro:
 
     // collect the arguments.
     // `args_count` starts with 1 since whitespace counts as an argument.
-    var argsCount: u32 = 1;
+    var argsCount: u32 = 0;
+    var parens: u32 = 0;
     const args = for (source.items[lparenIdx + 1 ..], 0..) |tok, i| {
         switch (tok.id) {
-            .Comma => argsCount += 1,
-            .RParen => break source.items[lparenIdx + 1 ..][0..i],
+            .Comma => if (parens == 0) {
+                if (argsCount == 0) argsCount = 2 else argsCount += 1;
+            },
+
+            .LParen => parens += 1,
+            .RParen => {
+                if (parens == 0) break source.items[lparenIdx + 1 ..][0..i];
+                parens -= 1;
+            },
             else => {},
         }
     } else {
@@ -715,6 +729,9 @@ fn expandFunc(pp: *Preprocessor, source: *ExpandBuffer, startIdx: *usize, macro:
         startIdx.* += 1;
         return;
     };
+
+    if (argsCount == 0 and args.len != 0)
+        argsCount = 1;
 
     // Validate argument count.
     const extra = Diagnostics.Message.Extra{ .arguments = .{ .expected = @as(u32, @intCast(macro.params.len)), .actual = argsCount } };
@@ -869,12 +886,20 @@ fn getArgSlice(args: []const Token, index: u32) []const Token {
     // TODO this is a mess
     var commasSeen: usize = 0;
     var i: usize = 0;
+    var parens: u32 = 0;
     while (i < args.len) : (i += 1) {
+        switch (args[i].id) {
+            .LParen => parens += 1,
+            .RParen => parens -= 1,
+            else => if (parens != 0) continue,
+        }
+
         if (args[i].id == .Comma) {
             if (index == 0) return args[0..i];
             commasSeen += 1;
             continue;
         }
+
         if (commasSeen == index) for (args[i..], 0..) |a_2, j| {
             if (a_2.id == .Comma) {
                 return args[i..][0..j];
@@ -889,8 +914,14 @@ fn getVarArgSlice(args: []const Token, index: usize) []const Token {
     if (index == 0) return args;
     // TODO this is a mess
     var commasSeen: usize = 0;
+    var parens: u32 = 0;
     var i: usize = 0;
     while (i < args.len) : (i += 1) {
+        switch (args[i].id) {
+            .LParen => parens += 1,
+            .RParen => parens -= 1,
+            else => if (parens != 0) continue,
+        }
         if (args[i].id == .Comma) commasSeen += 1;
         if (commasSeen == index) return args[i + 1 ..];
     }
