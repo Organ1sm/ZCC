@@ -74,5 +74,6 @@ pub const Token = struct {
         .{ "error", .KeywordError },
         .{ "pragma", .KeywordPragma },
         .{ "line", .KeywordLine },
+        .{ "__VA_ARGS__", .KeywordVarArgs },
     });
 };
