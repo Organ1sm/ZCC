@@ -33,89 +33,54 @@ currDeclList: *NodeList,
 labels: std.ArrayList(Label),
 labelCount: u32 = 0,
 
-pub const Result = union(enum) {
-    none,
-    bool: bool,
-    char: i16,
-    u8: u8,
-    i8: i8,
-    u16: u16,
-    i16: i16,
-    u32: u32,
-    i32: i32,
-    u64: u64,
-    i64: i64,
-    lVal: NodeIndex,
-    node: NodeIndex,
+pub const Result = struct {
+    ty: Type = .{ .specifier = .Int },
+    data: union(enum) {
+        none,
+        unsigned: u64,
+        signed: i64,
+        lVal: NodeIndex,
+        node: NodeIndex,
+    } = .none,
 
     pub fn getBool(res: Result) bool {
-        return switch (res) {
-            .bool => |v| v,
-            .u8 => |v| v != 0,
-            .i8 => |v| v != 0,
-            .u16 => |v| v != 0,
-            .i16, .char => |v| v != 0,
-            .u32 => |v| v != 0,
-            .i32 => |v| v != 0,
-            .u64 => |v| v != 0,
-            .i64 => |v| v != 0,
+        return switch (res.data) {
+            .signed => |v| v != 0,
+            .unsigned => |v| v != 0,
 
             .node, .none, .lVal => unreachable,
         };
     }
 
     fn expect(res: Result, p: *Parser) Error!void {
-        if (res == .none) {
+        if (res.data == .none) {
             try p.errToken(.expected_expr, p.index);
             return error.ParsingFailed;
         }
     }
 
     fn node(p: *Parser, n: AST.Node) !Result {
-        return Result{ .node = try p.addNode(n) };
+        const index = try p.addNode(n);
+        return Result{ .ty = n.type, .data = .{ .lVal = index } };
     }
 
     fn leftValue(p: *Parser, n: AST.Node) !Result {
-        return Result{ .lVal = try p.addNode(n) };
-    }
-
-    fn ty(res: Result, p: *Parser) Type {
-        const intIs32Bits = (Type{ .specifier = .Int }).sizeof(p.pp.compilation) == 4;
-        return switch (res) {
-            .none => unreachable,
-            .node, .lVal => |n| p.nodes.items(.type)[n],
-            .bool => .{ .specifier = .Bool },
-            .char => .{ .specifier = .Char },
-            .u8 => .{ .specifier = .UChar },
-            .i8 => .{ .specifier = .SChar },
-            .u16 => .{ .specifier = .UShort },
-            .i16 => .{ .specifier = .Short },
-            .u32 => .{ .specifier = if (intIs32Bits) .UInt else .ULong },
-            .i32 => .{ .specifier = if (intIs32Bits) .Int else .Long },
-            .u64 => .{ .specifier = .ULongLong },
-            .i64 => .{ .specifier = .LongLong },
-        };
+        const index = try p.addNode(n);
+        return Result{ .ty = n.type, .data = .{ .lVal = index } };
     }
 
     fn toNode(res: Result, p: *Parser) !NodeIndex {
         var parts: [2]TokenIndex = undefined;
-        switch (res) {
+        switch (res.data) {
             .none => return 0,
             .node, .lVal => |n| return n,
-            .bool => |v| parts[0] = @intFromBool(v),
-            .u8 => |v| parts[0] = v,
-            .i8 => |v| parts[0] = @as(u32, @bitCast(@as(i32, v))),
-            .u16 => |v| parts[0] = v,
-            .i16, .char => |v| parts[0] = @as(u32, @bitCast(@as(i32, v))),
-            .u32 => |v| parts[0] = v,
-            .i32 => |v| parts[0] = @as(u32, @bitCast(v)),
-            .u64 => |v| parts = @as([2]TokenIndex, @bitCast(v)),
-            .i64 => |v| parts = @as([2]TokenIndex, @bitCast(v)),
+            .signed => |v| parts = @as([2]TokenIndex, @bitCast(v)),
+            .unsigned => |v| parts = @as([2]TokenIndex, @bitCast(v)),
         }
 
         return p.addNode(.{
-            .tag = if (res == .u64 or res == .i64) .Int64Literal else .Int32Literal,
-            .type = res.ty(p),
+            .tag = .IntLiteral,
+            .type = res.ty,
             .first = parts[0],
             .second = parts[1],
         });
@@ -123,7 +88,17 @@ pub const Result = union(enum) {
 
     fn coerce(res: Result, p: *Parser, destType: Type) !Result {
         var casted = res;
-        var curType = res.ty(p);
+        var curType = res.ty;
+
+        if (casted.data == .lVal) {
+            curType.qual.@"const" = false;
+            casted = try node(p, .{
+                .tag = .LValueToRValue,
+                .type = curType,
+                .first = try casted.toNode(p),
+            });
+        }
+
         if (destType.specifier == .Pointer and curType.isArray()) {
             casted = try node(p, .{
                 .tag = .ArrayToPointer,
@@ -134,56 +109,36 @@ pub const Result = union(enum) {
         return casted;
     }
 
+    /// Return true if both are constants
+    fn adjustTypes(a: *Result, b: *Result, p: *Parser) !bool {
+        const aIsUnsigned = a.ty.isUnsignedInt(p.pp.compilation);
+        const bIsUnsigned = b.ty.isUnsignedInt(p.pp.compilation);
+
+        if (aIsUnsigned != bIsUnsigned) {}
+
+        return (a.data == .unsigned or a.data == .signed) and (b.data == .unsigned or b.data == .signed);
+    }
+
     pub fn hash(res: Result) u64 {
         var val: i64 = undefined;
-        switch (res) {
-            .bool => |v| val = @intFromBool(v),
-            .u8 => |v| val = v,
-            .i8 => |v| val = v,
-            .u16 => |v| val = v,
-            .i16, .char => |v| val = v,
-            .u32 => |v| val = v,
-            .i32 => |v| val = v,
-            .u64 => |v| val = @as(i64, @bitCast(v)), // doesn't matter we only want a hash
-            .i64 => |v| val = v,
+        switch (res.data) {
+            .unsigned => |v| val = @as(i64, @bitCast(v)), // doesn't matter we only want a hash
+            .signed => |v| val = v,
             .none, .node, .lVal => unreachable,
         }
         return std.hash.Wyhash.hash(0, std.mem.asBytes(&val));
     }
 
     pub fn eql(a: Result, b: Result) bool {
-        var aVal: i64 = undefined;
-        switch (a) {
-            .bool => |v| aVal = @intFromBool(v),
-            .u8 => |v| aVal = v,
-            .i8 => |v| aVal = v,
-            .u16 => |v| aVal = v,
-            .i16, .char => |v| aVal = v,
-            .u32 => |v| aVal = v,
-            .i32 => |v| aVal = v,
-            .u64 => |v| {
-                if (v == @as(u63, @truncate(v))) aVal = @as(u63, @truncate(v)) else @panic("eql a_val u64");
-            },
-            .i64 => |v| aVal = v,
-            .none, .node, .lVal => unreachable,
-        }
+        return a.compare(.eq, b);
+    }
 
-        var bVal: i64 = undefined;
-        switch (b) {
-            .bool => |v| bVal = @intFromBool(v),
-            .u8 => |v| bVal = v,
-            .i8 => |v| bVal = v,
-            .u16 => |v| bVal = v,
-            .i16, .char => |v| bVal = v,
-            .u32 => |v| bVal = v,
-            .i32 => |v| bVal = v,
-            .u64 => |v| {
-                if (v == @as(u63, @truncate(v))) bVal = @as(u63, @truncate(v)) else @panic("eql b_val u64");
-            },
-            .i64 => |v| bVal = v,
+    pub fn compare(a: Result, op: std.math.CompareOperator, b: Result) bool {
+        switch (a.data) {
+            .unsigned => |val| return std.math.compare(val, op, b.data.unsigned),
+            .signed => |val| return std.math.compare(val, op, b.data.signed),
             .none, .node, .lVal => unreachable,
         }
-        return aVal == bVal;
     }
 };
 
@@ -1071,7 +1026,7 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: Declarator
             gotQuals = try p.typeQual(&resType);
 
         var star = p.eat(.Asterisk);
-        const size = if (star) |_| Result{ .none = {} } else try p.assignExpr();
+        const size = if (star) |_| Result{} else try p.assignExpr();
 
         try p.expectClosing(lb, .RBracket);
 
@@ -1095,7 +1050,7 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: Declarator
         if (static) |_|
             try size.expect(p);
 
-        switch (size) {
+        switch (size.data) {
             .none => if (star) |_| {
                 const elemType = try p.arena.create(Type);
                 resType.data = .{ .subType = elemType };
@@ -1117,36 +1072,21 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: Declarator
                 if (static) |some| try p.errToken(.useless_static, some);
             },
 
-            else => {
+            .unsigned => |v| {
                 const arrayType = try p.arena.create(Type.Array);
+                arrayType.len = v;
                 resType.data = .{ .array = arrayType };
-                resType.specifier = if (static != null) .StaticArray else .Array;
+                resType.specifier = .Array;
+            },
 
-                var negative = false;
-                switch (size) {
-                    .u8 => |v| arrayType.len = v,
-                    .u16 => |v| arrayType.len = v,
-                    .u32 => |v| arrayType.len = v,
-                    .u64 => |v| arrayType.len = v,
-                    .i8 => |v| {
-                        if (v < 0) negative = true;
-                        arrayType.len = @as(u8, @bitCast(v));
-                    },
-                    .i16, .char => |v| {
-                        if (v < 0) negative = true;
-                        arrayType.len = @as(u16, @bitCast(v));
-                    },
-                    .i32 => |v| {
-                        if (v < 0) negative = true;
-                        arrayType.len = @as(u32, @bitCast(v));
-                    },
-                    .i64 => |v| {
-                        if (v < 0) negative = true;
-                        arrayType.len = @as(u64, @bitCast(v));
-                    },
-                    else => unreachable,
-                }
-                if (negative) try p.errToken(.negative_array_size, lb);
+            .signed => |v| {
+                if (v < 0)
+                    try p.errToken(.negative_array_size, lb);
+
+                const arrayType = try p.arena.create(Type.Array);
+                arrayType.len = @as(u64, @bitCast(v));
+                resType.data = .{ .array = arrayType };
+                resType.specifier = .Array;
             },
         }
 
@@ -1416,13 +1356,13 @@ fn stmt(p: *Parser) Error!NodeIndex {
         const e = try p.expr();
         _ = try p.expectToken(.Semicolon);
 
-        const first = if (e == .none) 0 else try e.toNode(p);
-        return try p.addNode(.{ .tag = .ReturnStmt, .first = first });
+        const result = try e.toNode(p);
+        return try p.addNode(.{ .tag = .ReturnStmt, .first = result });
     }
 
     const exprStart = p.index;
     const e = try p.expr();
-    if (e == .none) {
+    if (e.data != .none) {
         _ = try p.expectToken(.Semicolon);
         const exprNode = try e.toNode(p);
         try p.maybeWarnUnused(exprNode, exprStart);
@@ -1486,7 +1426,7 @@ fn parseForStmt(p: *Parser) Error!NodeIndex {
 
     // for-init
     const initStart = p.index;
-    const init = if (!gotDecl) try p.expr() else Result{ .none = {} };
+    const init = if (!gotDecl) try p.expr() else Result{};
     const initNode = try init.toNode(p);
     try p.maybeWarnUnused(initNode, initStart);
 
@@ -1517,7 +1457,7 @@ fn parseForStmt(p: *Parser) Error!NodeIndex {
             .first = start,
             .second = end,
         });
-    } else if (init == .none and cond == .none and incr == .none) {
+    } else if (init.data == .none and cond.data == .none and incr.data == .none) {
         return try p.addNode(.{
             .tag = .ForEverStmt,
             .first = body,
@@ -1902,7 +1842,7 @@ fn conditionalExpr(p: *Parser) Error!Result {
     _ = try p.expectToken(.Colon);
     const elseExpr = try p.conditionalExpr();
 
-    if (p.wantConst or cond != .node)
+    if (cond.data == .signed or cond.data == .unsigned)
         return if (cond.getBool()) thenExpr else elseExpr;
 
     return p.todo("ast");
@@ -1914,8 +1854,8 @@ fn logicalOrExpr(p: *Parser) Error!Result {
     while (p.eat(.PipePipe)) |_| {
         const rhs = try p.logicalAndExpr();
 
-        if (p.wantConst or (lhs != .node and rhs != .node)) {
-            lhs = Result{ .i32 = @intFromBool(lhs.getBool() or rhs.getBool()) }; //TODO: result has int type
+        if ((lhs.data == .unsigned or lhs.data == .signed) and (rhs.data == .unsigned or rhs.data == .signed)) {
+            lhs = Result{ .data = .{ .signed = @intFromBool(lhs.getBool() or rhs.getBool()) } };
         } else {
             return p.todo("ast");
         }
@@ -1930,8 +1870,8 @@ fn logicalAndExpr(p: *Parser) Error!Result {
     while (p.eat(.AmpersandAmpersand)) |_| {
         const rhs = try p.orExpr();
 
-        if (p.wantConst or (lhs != .node and rhs != .node)) {
-            lhs = Result{ .bool = lhs.getBool() and rhs.getBool() };
+        if ((lhs.data == .unsigned or lhs.data == .signed) and (rhs.data == .unsigned or rhs.data == .signed)) {
+            lhs = Result{ .data = .{ .signed = @intFromBool(lhs.getBool() or rhs.getBool()) } };
         } else return p.todo("ast");
     }
     return lhs;
@@ -1941,10 +1881,14 @@ fn logicalAndExpr(p: *Parser) Error!Result {
 fn orExpr(p: *Parser) Error!Result {
     var lhs = try p.xorExpr();
     while (p.eat(.Pipe)) |_| {
-        const rhs = try p.xorExpr();
+        var rhs = try p.xorExpr();
 
-        if (p.wantConst or (lhs != .node and rhs != .node)) {
-            return p.todo("or constExpr");
+        if (try lhs.adjustTypes(&rhs, p)) {
+            lhs.data = switch (lhs.data) {
+                .unsigned => |v| .{ .unsigned = v | rhs.data.unsigned },
+                .signed => |v| .{ .signed = v | rhs.data.signed },
+                else => unreachable,
+            };
         } else return p.todo("ast");
     }
     return lhs;
@@ -1954,10 +1898,14 @@ fn orExpr(p: *Parser) Error!Result {
 fn xorExpr(p: *Parser) Error!Result {
     var lhs = try p.andExpr();
     while (p.eat(.Caret)) |_| {
-        const rhs = try p.andExpr();
+        var rhs = try p.andExpr();
 
-        if (p.wantConst or (lhs != .node and rhs != .node)) {
-            return p.todo("xor constExpr");
+        if (try lhs.adjustTypes(&rhs, p)) {
+            lhs.data = switch (lhs.data) {
+                .unsigned => |v| .{ .unsigned = v ^ rhs.data.unsigned },
+                .signed => |v| .{ .signed = v ^ rhs.data.signed },
+                else => unreachable,
+            };
         } else return p.todo("ast");
     }
     return lhs;
@@ -1967,10 +1915,14 @@ fn xorExpr(p: *Parser) Error!Result {
 fn andExpr(p: *Parser) Error!Result {
     var lhs = try p.eqExpr();
     while (p.eat(.Ampersand)) |_| {
-        const rhs = try p.eqExpr();
+        var rhs = try p.eqExpr();
 
-        if (p.wantConst or (lhs != .node and rhs != .node)) {
-            return p.todo("and constExpr");
+        if (try lhs.adjustTypes(&rhs, p)) {
+            lhs.data = switch (lhs.data) {
+                .unsigned => |v| .{ .unsigned = v & rhs.data.unsigned },
+                .signed => |v| .{ .signed = v & rhs.data.signed },
+                else => unreachable,
+            };
         } else return p.todo("ast");
     }
     return lhs;
@@ -1984,10 +1936,15 @@ fn eqExpr(p: *Parser) Error!Result {
         const ne = eq orelse p.eat(.BangEqual);
 
         if (ne == null) break;
-        const rhs = try p.compExpr();
+        var rhs = try p.compExpr();
 
-        if (p.wantConst or (lhs != .node and rhs != .node)) {
-            return p.todo("equality constExpr");
+        if (try lhs.adjustTypes(&rhs, p)) {
+            const res = if (eq != null)
+                lhs.compare(.eq, rhs)
+            else
+                lhs.compare(.neq, rhs);
+
+            lhs = Result{ .data = .{ .signed = @intFromBool(res) } };
         }
 
         return p.todo("ast");
@@ -1997,36 +1954,56 @@ fn eqExpr(p: *Parser) Error!Result {
 
 /// compExpr : shiftExpr (('<' | '<=' | '>' | '>=') shiftExpr)*
 fn compExpr(p: *Parser) Error!Result {
-    const lhs = try p.shiftExpr();
+    var lhs = try p.shiftExpr();
     while (true) {
         const lt = p.eat(.AngleBracketLeft);
         const le = lt orelse p.eat(.AngleBracketLeftEqual);
         const gt = le orelse p.eat(.AngleBracketRight);
         const ge = gt orelse p.eat(.AngleBracketRightEqual);
         if (ge == null) break;
-        const rhs = try p.shiftExpr();
+        var rhs = try p.shiftExpr();
 
-        if (p.wantConst or (lhs != .node and rhs != .node)) {
-            return p.todo("comp constExpr");
-        }
-
-        return p.todo("ast");
+        if (try lhs.adjustTypes(&rhs, p)) {
+            const res = if (lt != null)
+                lhs.compare(.lt, rhs)
+            else if (le != null)
+                lhs.compare(.lte, rhs)
+            else if (gt != null)
+                lhs.compare(.gt, rhs)
+            else
+                lhs.compare(.gte, rhs);
+            lhs = Result{ .data = .{ .signed = @intFromBool(res) } };
+        } else return p.todo("ast");
     }
+
     return lhs;
 }
 
 /// shiftExpr : addExpr (('<<' | '>>') addExpr)*
 fn shiftExpr(p: *Parser) Error!Result {
-    const lhs = try p.addExpr();
+    var lhs = try p.addExpr();
     while (true) {
         const shl = p.eat(.AngleBracketAngleBracketLeft);
         const shr = shl orelse p.eat(.AngleBracketAngleBracketRight);
         if (shr == null) break;
-        const rhs = try p.addExpr();
+        var rhs = try p.addExpr();
 
-        if (p.wantConst or (lhs != .node and rhs != .node)) {
-            return p.todo("shift constExpr");
-        }
+        if (try lhs.adjustTypes(&rhs, p)) {
+            // TODO overflow
+            if (shl != null) {
+                lhs.data = switch (lhs.data) {
+                    .unsigned => |v| .{ .unsigned = v << @as(u6, @intCast(rhs.data.unsigned)) },
+                    .signed => |v| .{ .signed = v << @as(u6, @intCast(rhs.data.signed)) },
+                    else => unreachable,
+                };
+            } else {
+                lhs.data = switch (lhs.data) {
+                    .unsigned => |v| .{ .unsigned = v >> @as(u6, @intCast(rhs.data.unsigned)) },
+                    .signed => |v| .{ .signed = v >> @as(u6, @intCast(rhs.data.signed)) },
+                    else => unreachable,
+                };
+            }
+        } else return p.todo("ast");
 
         return p.todo("ast");
     }
@@ -2035,35 +2012,65 @@ fn shiftExpr(p: *Parser) Error!Result {
 
 /// addExpr : mulExpr (('+' | '-') mulExpr)*
 fn addExpr(p: *Parser) Error!Result {
-    const lhs = try p.mulExpr();
+    var lhs = try p.mulExpr();
     while (true) {
         const plus = p.eat(.Plus);
         const minus = plus orelse p.eat(.Minus);
         if (minus == null) break;
-        const rhs = try p.mulExpr();
+        var rhs = try p.mulExpr();
 
-        if (p.wantConst or (lhs != .node and rhs != .node)) {
-            return p.todo("shift constExpr");
-        }
-        return p.todo("ast");
+        if (try lhs.adjustTypes(&rhs, p)) {
+            // TODO overflow
+            if (plus != null) {
+                lhs.data = switch (lhs.data) {
+                    .unsigned => |v| .{ .unsigned = v - rhs.data.unsigned },
+                    .signed => |v| .{ .signed = v - rhs.data.signed },
+                    else => unreachable,
+                };
+            } else {
+                lhs.data = switch (lhs.data) {
+                    .unsigned => |v| .{ .unsigned = v - rhs.data.unsigned },
+                    .signed => |v| .{ .signed = v - rhs.data.signed },
+                    else => unreachable,
+                };
+            }
+        } else return p.todo("ast");
     }
     return lhs;
 }
 
 /// mulExpr : castExpr (('*' | '/' | '%') castExpr)*´
 fn mulExpr(p: *Parser) Error!Result {
-    const lhs = try p.castExpr();
+    var lhs = try p.castExpr();
     while (true) {
         const mul = p.eat(.Plus);
         const div = mul orelse p.eat(.Slash);
         const percent = div orelse p.eat(.Percent);
         if (percent == null) break;
-        const rhs = try p.castExpr();
+        var rhs = try p.castExpr();
 
-        if (p.wantConst or (lhs != .node and rhs != .node)) {
-            return p.todo("mul constExpr");
-        }
-        return p.todo("ast");
+        if (try lhs.adjustTypes(&rhs, p)) {
+            // TODO overflow
+            if (mul != null) {
+                lhs.data = switch (lhs.data) {
+                    .unsigned => |v| .{ .unsigned = v * rhs.data.unsigned },
+                    .signed => |v| .{ .signed = v * rhs.data.signed },
+                    else => unreachable,
+                };
+            } else if (div != null) {
+                lhs.data = switch (lhs.data) {
+                    .unsigned => |v| .{ .unsigned = v / rhs.data.unsigned },
+                    .signed => |v| .{ .signed = @divFloor(v, rhs.data.signed) },
+                    else => unreachable,
+                };
+            } else {
+                lhs.data = switch (lhs.data) {
+                    .unsigned => |v| .{ .unsigned = v % rhs.data.unsigned },
+                    .signed => |v| .{ .signed = @rem(v, rhs.data.signed) },
+                    else => unreachable,
+                };
+            }
+        } else return p.todo("ast");
     }
     return lhs;
 }
@@ -2102,8 +2109,8 @@ fn unaryExpr(p: *Parser) Error!Result {
         .Bang => {
             p.index += 1;
             const lhs = try p.unaryExpr();
-            if (p.wantConst or lhs != .node) {
-                return Result{ .bool = !lhs.getBool() };
+            if (lhs.data == .unsigned or lhs.data == .signed) {
+                return Result{ .data = .{ .signed = @intFromBool(!lhs.getBool()) } };
             }
             return p.todo("ast");
         },
@@ -2112,7 +2119,7 @@ fn unaryExpr(p: *Parser) Error!Result {
             var lhs = try p.primaryExpr();
             while (true) {
                 const suffix = try p.suffixExpr(lhs);
-                if (suffix == .none) break;
+                if (suffix.data == .none) break;
                 lhs = suffix;
             }
             return lhs;
@@ -2133,9 +2140,8 @@ fn suffixExpr(p: *Parser, lhs: Result) Error!Result {
         .LParen => {
             const lParen = p.index;
             p.index += 1;
-            const lhsType = lhs.ty(p);
-            const ty = lhsType.isCallable() orelse {
-                try p.errStr(.not_callable, lParen, TypeBuilder.fromType(lhsType).toString());
+            const ty = lhs.ty.isCallable() orelse {
+                try p.errStr(.not_callable, lParen, TypeBuilder.fromType(lhs.ty).toString());
                 return error.ParsingFailed;
             };
 
@@ -2211,7 +2217,7 @@ fn suffixExpr(p: *Parser, lhs: Result) Error!Result {
         .PlusPlus => return p.todo("post inc"),
         .MinusMinus => return p.todo("post dec"),
 
-        else => return Result.none,
+        else => return Result{},
     }
 }
 
@@ -2425,12 +2431,12 @@ fn primaryExpr(p: *Parser) Error!Result {
 
         .Zero => {
             p.index += 1;
-            return Result{ .u32 = 0 };
+            return Result{ .data = .{ .signed = 0 } };
         },
 
         .One => {
             p.index += 1;
-            return Result{ .u32 = 1 };
+            return Result{ .data = .{ .signed = 1 } };
         },
 
         .IntegerLiteral,
@@ -2489,7 +2495,7 @@ fn primaryExpr(p: *Parser) Error!Result {
             return p.todo("generic");
         },
 
-        else => return Result{ .none = {} },
+        else => return Result{},
     }
 }
 
@@ -2507,16 +2513,16 @@ fn parseInt(p: *Parser, base: u8, slice: []const u8, specs: []const Type.Specifi
 
         if (isUnsigned) {
             switch (tySize) {
-                2 => if (wrappedParse(u16, base, slice)) |r| return Result{ .u16 = r },
-                4 => if (wrappedParse(u32, base, slice)) |r| return Result{ .u32 = r },
-                8 => if (wrappedParse(u64, base, slice)) |r| return Result{ .u64 = r },
+                2 => if (wrappedParse(u16, base, slice)) |r| return Result{ .ty = ty, .data = .{ .unsigned = r } },
+                4 => if (wrappedParse(u32, base, slice)) |r| return Result{ .ty = ty, .data = .{ .unsigned = r } },
+                8 => if (wrappedParse(u64, base, slice)) |r| return Result{ .ty = ty, .data = .{ .unsigned = r } },
                 else => unreachable,
             }
         } else {
             switch (tySize) {
-                2 => if (wrappedParse(i16, base, slice)) |r| return Result{ .i16 = r },
-                4 => if (wrappedParse(i32, base, slice)) |r| return Result{ .i32 = r },
-                8 => if (wrappedParse(i64, base, slice)) |r| return Result{ .i64 = r },
+                2 => if (wrappedParse(i16, base, slice)) |r| return Result{ .ty = ty, .data = .{ .signed = r } },
+                4 => if (wrappedParse(i32, base, slice)) |r| return Result{ .ty = ty, .data = .{ .signed = r } },
+                8 => if (wrappedParse(i64, base, slice)) |r| return Result{ .ty = ty, .data = .{ .signed = r } },
                 else => unreachable,
             }
         }
