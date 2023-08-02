@@ -11,6 +11,7 @@ const TypeBuilder = @import("../AST/TypeBuilder.zig").Builder;
 const Diagnostics = @import("../Basic/Diagnostics.zig");
 const DeclSpec = @import("../AST/DeclSpec.zig");
 const Scope = @import("../Sema/Scope.zig").Scope;
+const Result = @import("Result.zig");
 const Token = AST.Token;
 const TokenIndex = AST.TokenIndex;
 const NodeIndex = AST.NodeIndex;
@@ -32,115 +33,6 @@ inFunc: bool = false,
 currDeclList: *NodeList,
 labels: std.ArrayList(Label),
 labelCount: u32 = 0,
-
-pub const Result = struct {
-    ty: Type = .{ .specifier = .Int },
-    data: union(enum) {
-        none,
-        unsigned: u64,
-        signed: i64,
-        lVal: NodeIndex,
-        node: NodeIndex,
-    } = .none,
-
-    pub fn getBool(res: Result) bool {
-        return switch (res.data) {
-            .signed => |v| v != 0,
-            .unsigned => |v| v != 0,
-
-            .node, .none, .lVal => unreachable,
-        };
-    }
-
-    fn expect(res: Result, p: *Parser) Error!void {
-        if (res.data == .none) {
-            try p.errToken(.expected_expr, p.index);
-            return error.ParsingFailed;
-        }
-    }
-
-    fn node(p: *Parser, n: AST.Node) !Result {
-        const index = try p.addNode(n);
-        return Result{ .ty = n.type, .data = .{ .lVal = index } };
-    }
-
-    fn leftValue(p: *Parser, n: AST.Node) !Result {
-        const index = try p.addNode(n);
-        return Result{ .ty = n.type, .data = .{ .lVal = index } };
-    }
-
-    fn toNode(res: Result, p: *Parser) !NodeIndex {
-        var parts: [2]TokenIndex = undefined;
-        switch (res.data) {
-            .none => return 0,
-            .node, .lVal => |n| return n,
-            .signed => |v| parts = @as([2]TokenIndex, @bitCast(v)),
-            .unsigned => |v| parts = @as([2]TokenIndex, @bitCast(v)),
-        }
-
-        return p.addNode(.{
-            .tag = .IntLiteral,
-            .type = res.ty,
-            .first = parts[0],
-            .second = parts[1],
-        });
-    }
-
-    fn coerce(res: Result, p: *Parser, destType: Type) !Result {
-        var casted = res;
-        var curType = res.ty;
-
-        if (casted.data == .lVal) {
-            curType.qual.@"const" = false;
-            casted = try node(p, .{
-                .tag = .LValueToRValue,
-                .type = curType,
-                .first = try casted.toNode(p),
-            });
-        }
-
-        if (destType.specifier == .Pointer and curType.isArray()) {
-            casted = try node(p, .{
-                .tag = .ArrayToPointer,
-                .type = destType,
-                .first = try casted.toNode(p),
-            });
-        }
-        return casted;
-    }
-
-    /// Return true if both are constants
-    fn adjustTypes(a: *Result, b: *Result, p: *Parser) !bool {
-        const aIsUnsigned = a.ty.isUnsignedInt(p.pp.compilation);
-        const bIsUnsigned = b.ty.isUnsignedInt(p.pp.compilation);
-
-        if (aIsUnsigned != bIsUnsigned) {}
-
-        return (a.data == .unsigned or a.data == .signed) and (b.data == .unsigned or b.data == .signed);
-    }
-
-    pub fn hash(res: Result) u64 {
-        var val: i64 = undefined;
-        switch (res.data) {
-            .unsigned => |v| val = @as(i64, @bitCast(v)), // doesn't matter we only want a hash
-            .signed => |v| val = v,
-            .none, .node, .lVal => unreachable,
-        }
-        return std.hash.Wyhash.hash(0, std.mem.asBytes(&val));
-    }
-
-    pub fn eql(a: Result, b: Result) bool {
-        return a.compare(.eq, b);
-    }
-
-    pub fn compare(a: Result, op: std.math.CompareOperator, b: Result) bool {
-        switch (a.data) {
-            .unsigned => |val| return std.math.compare(val, op, b.data.unsigned),
-            .signed => |val| return std.math.compare(val, op, b.data.signed),
-            .none, .node, .lVal => unreachable,
-        }
-    }
-};
 
 const Label = union(enum) {
     unresolvedGoto: TokenIndex,
@@ -174,8 +66,8 @@ fn expectToken(p: *Parser, expected: TokenType) Error!TokenIndex {
             p.index,
             .{
                 .tokenId = .{
-                    .expected = actual,
-                    .actual = expected,
+                    .expected = expected,
+                    .actual = actual,
                 },
             },
         );
@@ -256,7 +148,7 @@ pub fn todo(p: *Parser, msg: []const u8) Error {
     return error.ParsingFailed;
 }
 
-fn addNode(p: *Parser, node: AST.Node) Allocator.Error!NodeIndex {
+pub fn addNode(p: *Parser, node: AST.Node) Allocator.Error!NodeIndex {
     const res = p.nodes.len;
     try p.nodes.append(p.pp.compilation.gpa, node);
 
@@ -1557,7 +1449,11 @@ fn parseCaseStmt(p: *Parser, caseToken: u32) Error!?NodeIndex {
     if (p.findSwitch()) |some| {
         const gop = try some.cases.getOrPut(val);
         if (gop.found_existing) {
-            try p.errToken(.duplicate_switch_case, caseToken);
+            switch (val.data) {
+                .unsigned => |v| try p.errExtra(.duplicate_switch_case_unsigned, caseToken, .{ .unsigned = v }),
+                .signed => |v| try p.errExtra(.duplicate_switch_case_signed, caseToken, .{ .signed = v }),
+                else => unreachable,
+            }
             try p.errToken(.previous_case, gop.value_ptr.token);
         } else {
             gop.value_ptr.* = .{
@@ -2020,19 +1916,10 @@ fn addExpr(p: *Parser) Error!Result {
         var rhs = try p.mulExpr();
 
         if (try lhs.adjustTypes(&rhs, p)) {
-            // TODO overflow
             if (plus != null) {
-                lhs.data = switch (lhs.data) {
-                    .unsigned => |v| .{ .unsigned = v - rhs.data.unsigned },
-                    .signed => |v| .{ .signed = v - rhs.data.signed },
-                    else => unreachable,
-                };
+                try lhs.add(plus.?, rhs, p);
             } else {
-                lhs.data = switch (lhs.data) {
-                    .unsigned => |v| .{ .unsigned = v - rhs.data.unsigned },
-                    .signed => |v| .{ .signed = v - rhs.data.signed },
-                    else => unreachable,
-                };
+                try lhs.sub(minus.?, rhs, p);
             }
         } else return p.todo("ast");
     }
@@ -2043,20 +1930,16 @@ fn addExpr(p: *Parser) Error!Result {
 fn mulExpr(p: *Parser) Error!Result {
     var lhs = try p.castExpr();
     while (true) {
-        const mul = p.eat(.Plus);
+        const mul = p.eat(.Asterisk);
         const div = mul orelse p.eat(.Slash);
         const percent = div orelse p.eat(.Percent);
         if (percent == null) break;
         var rhs = try p.castExpr();
 
         if (try lhs.adjustTypes(&rhs, p)) {
-            // TODO overflow
+            // TODO divide by 0
             if (mul != null) {
-                lhs.data = switch (lhs.data) {
-                    .unsigned => |v| .{ .unsigned = v * rhs.data.unsigned },
-                    .signed => |v| .{ .signed = v * rhs.data.signed },
-                    else => unreachable,
-                };
+                try lhs.mul(mul.?, rhs, p);
             } else if (div != null) {
                 lhs.data = switch (lhs.data) {
                     .unsigned => |v| .{ .unsigned = v / rhs.data.unsigned },
@@ -2101,8 +1984,31 @@ fn unaryExpr(p: *Parser) Error!Result {
     switch (p.getCurrToken()) {
         .Ampersand => return p.todo("unaryExpr ampersand"),
         .Asterisk => return p.todo("unaryExpr asterisk"),
-        .Plus => return p.todo("unaryExpr plus"),
-        .Minus => return p.todo("unaryExpr minus"),
+        .Plus => {
+            p.index += 1;
+            // TODO upcast to int / validate arithmetic type
+            return p.castExpr();
+        },
+        .Minus => {
+            p.index += 1;
+            var operand = try p.castExpr();
+            // TODO upcast to int / validate arithmetic type
+            const size = operand.ty.sizeof(p.pp.compilation);
+            switch (operand.data) {
+                .unsigned => |*v| switch (size) {
+                    1, 2, 4 => v.* = @truncate(0 -% v.*),
+                    8 => v.* = 0 -% v.*,
+                    else => unreachable,
+                },
+                .signed => |*v| switch (size) {
+                    1, 2, 4 => v.* = @truncate(0 -% v.*),
+                    8 => v.* = 0 -% v.*,
+                    else => unreachable,
+                },
+                else => return p.todo("ast"),
+            }
+            return operand;
+        },
         .PlusPlus => return p.todo("unary inc"),
         .MinusMinus => return p.todo("unary dec"),
         .Tilde => return p.todo("unaryExpr tilde"),
