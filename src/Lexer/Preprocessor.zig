@@ -80,6 +80,7 @@ pub fn deinit(pp: *Preprocessor) void {
     pp.generated.deinit();
     pp.pragmaOnce.deinit();
     pp.tokenBuffer.deinit();
+    pp.charBuffer.deinit();
     pp.expansionLog.deinit();
 }
 
@@ -703,10 +704,10 @@ fn expandFunc(pp: *Preprocessor, source: *ExpandBuffer, startIdx: *usize, macro:
     // collect the arguments.
     // `args_count` starts with 1 since whitespace counts as an argument.
     var argsCount: u32 = 1;
-    const args = for (source.items[lparenIdx..], 0..) |tok, i| {
+    const args = for (source.items[lparenIdx + 1 ..], 0..) |tok, i| {
         switch (tok.id) {
             .Comma => argsCount += 1,
-            .RParen => break source.items[lparenIdx + 1 .. i + 1],
+            .RParen => break source.items[lparenIdx + 1 ..][0..i],
             else => {},
         }
     } else {
@@ -721,7 +722,9 @@ fn expandFunc(pp: *Preprocessor, source: *ExpandBuffer, startIdx: *usize, macro:
         try pp.compilation.diag.add(.{ .tag = .expected_at_least_arguments, .loc = nameTK.loc, .extra = extra });
         startIdx.* += 1;
         return;
-    } else if (argsCount != macro.params.len) {
+    }
+
+    if (!macro.varArgs and argsCount != macro.params.len) {
         try pp.compilation.diag.add(.{ .tag = .expected_arguments, .loc = nameTK.loc, .extra = extra });
         startIdx.* += 1;
         return;
@@ -736,8 +739,12 @@ fn expandFunc(pp: *Preprocessor, source: *ExpandBuffer, startIdx: *usize, macro:
     while (tokenIdx < macro.tokens.len) : (tokenIdx += 1) {
         const raw = macro.tokens[tokenIdx];
         switch (raw.id) {
-            .StringifyParam => {
-                const targetArg = argSlice(args, raw.end);
+            .StringifyParam, .StringifyVarArgs => {
+                const targetArg = if (raw.id == .StringifyVarArgs)
+                    getVarArgSlice(args, macro.params.len)
+                else
+                    getArgSlice(args, raw.end);
+
                 pp.charBuffer.items.len = 0; // Safe since we can only be stringifying one parameter at a time.
 
                 // TODO pretty print these
@@ -765,9 +772,12 @@ fn expandFunc(pp: *Preprocessor, source: *ExpandBuffer, startIdx: *usize, macro:
                 });
             },
 
-            .MacroParam => {
-                const targetArg = argSlice(args, raw.end);
-                // TODO mark originating from params
+            .MacroParam, .KeywordVarArgs => {
+                const targetArg = if (raw.id == .KeywordVarArgs)
+                    getVarArgSlice(args, macro.params.len)
+                else
+                    getArgSlice(args, raw.end);
+
                 if (targetArg.len == 0)
                     // This is needed so that we can properly do token pasting.
                     try buf.append(.{ .id = .EmptyArg, .loc = .{ .id = raw.source, .byteOffset = raw.start } })
@@ -855,7 +865,7 @@ fn expandFunc(pp: *Preprocessor, source: *ExpandBuffer, startIdx: *usize, macro:
 }
 
 // get argument at index from a list of tokens.
-fn argSlice(args: []const Token, index: u32) []const Token {
+fn getArgSlice(args: []const Token, index: u32) []const Token {
     // TODO this is a mess
     var commasSeen: usize = 0;
     var i: usize = 0;
@@ -872,6 +882,19 @@ fn argSlice(args: []const Token, index: u32) []const Token {
         } else return args[i..];
     } else return args[i..];
     unreachable;
+}
+
+/// Get var args from after index.
+fn getVarArgSlice(args: []const Token, index: usize) []const Token {
+    if (index == 0) return args;
+    // TODO this is a mess
+    var commasSeen: usize = 0;
+    var i: usize = 0;
+    while (i < args.len) : (i += 1) {
+        if (args[i].id == .Comma) commasSeen += 1;
+        if (commasSeen == index) return args[i + 1 ..];
+    }
+    return args[i..];
 }
 
 // TODO there are like 5 tokSlice functions, can we combine them somehow.
@@ -1062,6 +1085,12 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: RawToken, lParen: Raw
             .Hash => {
                 const param = lexer.next();
                 blk: {
+                    if (varArgs and param.id == .KeywordVarArgs) {
+                        token.id = .StringifyVarArgs;
+                        try pp.tokenBuffer.append(token);
+                        continue :tokenLoop;
+                    }
+
                     if (!param.id.isMacroIdentifier())
                         break :blk;
 
@@ -1095,7 +1124,9 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: RawToken, lParen: Raw
             },
 
             else => {
-                if (token.id.isMacroIdentifier()) {
+                if (varArgs and token.id == .KeywordVarArgs) {
+                    // do nothing
+                } else if (token.id.isMacroIdentifier()) {
                     token.id.simplifyMacroKeyword();
                     const s = pp.tokSliceSafe(token);
                     for (params.items, 0..) |param, i| {
