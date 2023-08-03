@@ -2355,9 +2355,7 @@ fn primaryExpr(p: *Parser) Error!Result {
             const curToken = p.getCurrToken();
             var slice = p.tokSlice(p.index);
 
-            p.index += 1;
             var base: u8 = 10;
-
             if (std.mem.startsWith(u8, slice, "0x") or std.mem.startsWith(u8, slice, "0X")) {
                 slice = slice[2..];
                 base = 16;
@@ -2375,24 +2373,55 @@ fn primaryExpr(p: *Parser) Error!Result {
                 else => {},
             }
 
+            var value: u64 = 0;
+            var overflow = false;
+            for (slice) |ch| {
+                const digit: u64 = switch (ch) {
+                    '0'...'9' => ch - '0',
+                    'A'...'Z' => ch - 'A' + 10,
+                    'a'...'z' => ch - 'a' + 10,
+                    else => unreachable,
+                };
+
+                if (value != 0) {
+                    const mulOV = @mulWithOverflow(value, base);
+                    if (mulOV[1] != 0)
+                        overflow = true;
+
+                    value = mulOV[0];
+                }
+
+                const addOV = @addWithOverflow(value, digit);
+                if (addOV[1] != 0)
+                    overflow = true;
+                value = addOV[0];
+            }
+
+            if (overflow) {
+                try p.err(.int_literal_too_big);
+                return Result{ .ty = .{ .specifier = .ULongLong }, .data = .{ .unsigned = value } };
+            }
+
+            p.index += 1;
+
             if (base == 10) {
                 switch (curToken) {
-                    .IntegerLiteral => return p.parseInt(base, slice, &.{ .Int, .Long, .LongLong }),
-                    .IntegerLiteral_U => return p.parseInt(base, slice, &.{ .UInt, .ULong, .ULongLong }),
-                    .IntegerLiteral_L => return p.parseInt(base, slice, &.{ .Long, .LongLong }),
-                    .IntegerLiteral_LU => return p.parseInt(base, slice, &.{ .ULong, .ULongLong }),
-                    .IntegerLiteral_LL => return p.parseInt(base, slice, &.{.LongLong}),
-                    .IntegerLiteral_LLU => return p.parseInt(base, slice, &.{.ULongLong}),
+                    .IntegerLiteral => return p.castInt(value, &.{ .Int, .Long, .LongLong }),
+                    .IntegerLiteral_U => return p.castInt(value, &.{ .UInt, .ULong, .ULongLong }),
+                    .IntegerLiteral_L => return p.castInt(value, &.{ .Long, .LongLong }),
+                    .IntegerLiteral_LU => return p.castInt(value, &.{ .ULong, .ULongLong }),
+                    .IntegerLiteral_LL => return p.castInt(value, &.{.LongLong}),
+                    .IntegerLiteral_LLU => return p.castInt(value, &.{.ULongLong}),
                     else => unreachable,
                 }
             } else {
                 switch (curToken) {
-                    .IntegerLiteral => return p.parseInt(base, slice, &.{ .Int, .UInt, .Long, .ULong, .LongLong, .ULongLong }),
-                    .IntegerLiteral_U => return p.parseInt(base, slice, &.{ .UInt, .ULong, .ULongLong }),
-                    .IntegerLiteral_L => return p.parseInt(base, slice, &.{ .Long, .ULong, .LongLong, .ULongLong }),
-                    .IntegerLiteral_LU => return p.parseInt(base, slice, &.{ .ULong, .ULongLong }),
-                    .IntegerLiteral_LL => return p.parseInt(base, slice, &.{ .LongLong, .ULongLong }),
-                    .IntegerLiteral_LLU => return p.parseInt(base, slice, &.{.ULongLong}),
+                    .IntegerLiteral => return p.castInt(value, &.{ .Int, .UInt, .Long, .ULong, .LongLong, .ULongLong }),
+                    .IntegerLiteral_U => return p.castInt(value, &.{ .UInt, .ULong, .ULongLong }),
+                    .IntegerLiteral_L => return p.castInt(value, &.{ .Long, .ULong, .LongLong, .ULongLong }),
+                    .IntegerLiteral_LU => return p.castInt(value, &.{ .ULong, .ULongLong }),
+                    .IntegerLiteral_LL => return p.castInt(value, &.{ .LongLong, .ULongLong }),
+                    .IntegerLiteral_LLU => return p.castInt(value, &.{.ULongLong}),
                     else => unreachable,
                 }
             }
@@ -2405,13 +2434,7 @@ fn primaryExpr(p: *Parser) Error!Result {
     }
 }
 
-fn parseInt(p: *Parser, base: u8, slice: []const u8, specs: []const Type.Specifier) Error!Result {
-    const wrappedParse = struct {
-        fn func(comptime T: type, b: u8, s: []const u8) ?T {
-            return std.fmt.parseInt(T, s, b) catch return null;
-        }
-    }.func;
-
+fn castInt(p: *Parser, val: u64, specs: []const Type.Specifier) Error!Result {
     for (specs) |spec| {
         const ty = Type{ .specifier = spec };
         const isUnsigned = ty.isUnsignedInt(p.pp.compilation);
@@ -2419,20 +2442,20 @@ fn parseInt(p: *Parser, base: u8, slice: []const u8, specs: []const Type.Specifi
 
         if (isUnsigned) {
             switch (tySize) {
-                2 => if (wrappedParse(u16, base, slice)) |r| return Result{ .ty = ty, .data = .{ .unsigned = r } },
-                4 => if (wrappedParse(u32, base, slice)) |r| return Result{ .ty = ty, .data = .{ .unsigned = r } },
-                8 => if (wrappedParse(u64, base, slice)) |r| return Result{ .ty = ty, .data = .{ .unsigned = r } },
+                2 => if (val < std.math.maxInt(u16)) return Result{ .ty = ty, .data = .{ .unsigned = val } },
+                4 => if (val < std.math.maxInt(u32)) return Result{ .ty = ty, .data = .{ .unsigned = val } },
+                8 => if (val < std.math.maxInt(u64)) return Result{ .ty = ty, .data = .{ .unsigned = val } },
                 else => unreachable,
             }
         } else {
             switch (tySize) {
-                2 => if (wrappedParse(i16, base, slice)) |r| return Result{ .ty = ty, .data = .{ .signed = r } },
-                4 => if (wrappedParse(i32, base, slice)) |r| return Result{ .ty = ty, .data = .{ .signed = r } },
-                8 => if (wrappedParse(i64, base, slice)) |r| return Result{ .ty = ty, .data = .{ .signed = r } },
+                2 => if (val < std.math.maxInt(i16)) return Result{ .ty = ty, .data = .{ .signed = @as(i16, @intCast(val)) } },
+                4 => if (val < std.math.maxInt(i32)) return Result{ .ty = ty, .data = .{ .signed = @as(i32, @intCast(val)) } },
+                8 => if (val < std.math.maxInt(i64)) return Result{ .ty = ty, .data = .{ .signed = @as(i64, @intCast(val)) } },
                 else => unreachable,
             }
         }
     }
 
-    return p.todo("huge integer constants");
+    return Result{ .ty = .{ .specifier = .ULongLong }, .data = .{ .unsigned = val } };
 }
