@@ -153,6 +153,7 @@ pub const Tag = enum {
     unknown_warning,
     overflow_unsigned,
     overflow_signed,
+    int_literal_too_big,
 };
 
 list: std.ArrayList(Message),
@@ -443,6 +444,7 @@ pub fn render(comp: *Compilation) void {
             .unknown_warning => m.print("unknown warning '{s}'", .{msg.extra.str}),
             .overflow_signed => m.print("overflow in expression; result is'{d}'", .{msg.extra.signed}),
             .overflow_unsigned => m.print("overflow in expression; result is '{d}'", .{msg.extra.unsigned}),
+            .int_literal_too_big => m.write("integer literal is too large to be represented in any integer type"),
         }
 
         m.end(lcs);
@@ -569,6 +571,7 @@ fn tagKind(diag: *Diagnostics, tag: Tag) Kind {
         .static_non_outernmost_array,
         .qualifier_non_outernmost_array,
         .unterminated_macro_arg_list,
+        .int_literal_too_big,
         => .@"error",
 
         .to_match_paren,
