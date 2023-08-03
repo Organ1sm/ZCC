@@ -281,8 +281,7 @@ pub fn preprocess(pp: *Preprocessor, source: Source) Error!void {
                     .Eof => {
                         if (ifLevel != 0)
                             try pp.err(directive, .unterminated_conditional_directive);
-
-                        return pp.tokens.append(pp.compilation.gpa, tokenFromRaw(directive));
+                        return;
                     },
                     else => {
                         try pp.err(token, .invalid_preprocessing_directive);
@@ -295,8 +294,7 @@ pub fn preprocess(pp: *Preprocessor, source: Source) Error!void {
             .Eof => {
                 if (ifLevel != 0)
                     try pp.err(token, .unterminated_conditional_directive);
-
-                return pp.tokens.append(pp.compilation.gpa, tokenFromRaw(token));
+                return;
             },
 
             else => {
@@ -1197,7 +1195,6 @@ fn include(pp: *Preprocessor, lexer: *Lexer) Error!void {
         return;
 
     try pp.preprocess(newSource);
-    pp.tokens.len -= 1; // remove eof
 }
 
 fn findIncludeSource(pp: *Preprocessor, lexer: *Lexer) !Source {
