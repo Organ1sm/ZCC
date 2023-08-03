@@ -42,8 +42,12 @@ pub const Token = struct {
 pub const Node = struct {
     tag: AstTag,
     type: Type = .{ .specifier = .Void },
-    first: NodeIndex = 0,
-    second: NodeIndex = 0,
+    data: Data = .{},
+
+    pub const Data = struct {
+        first: NodeIndex = 0,
+        second: NodeIndex = 0,
+    };
 
     pub const List = std.MultiArrayList(Node);
 };
@@ -230,6 +234,9 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
     try tree.nodes.items(.type)[node].dump(tree, w);
     try w.writeAll("'\n" ++ RESET);
 
+    const data = tree.nodes.items(.data)[node];
+    const range = tree.nodes.items(.data)[node];
+
     switch (tag) {
         .Invalid => unreachable,
 
@@ -243,7 +250,7 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
         .NoreturnInlineStaticFnProto,
         => {
             try w.writeByteNTimes(' ', level + half);
-            try w.print("name: " ++ NAME ++ "{s}\n" ++ RESET, .{tree.tokSlice(tree.nodes.items(.first)[node])});
+            try w.print("name: " ++ NAME ++ "{s}\n" ++ RESET, .{tree.tokSlice(tree.nodes.items(.data)[node].first)});
         },
 
         .FnDef,
@@ -256,16 +263,14 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
         .NoreturnInlineStaticFnDef,
         => {
             try w.writeByteNTimes(' ', level + half);
-            try w.print("name: " ++ NAME ++ "{s}\n" ++ RESET, .{tree.tokSlice(tree.nodes.items(.first)[node])});
+            try w.print("name: " ++ NAME ++ "{s}\n" ++ RESET, .{tree.tokSlice(data.first)});
             try w.writeByteNTimes(' ', level + half);
             try w.writeAll("body:\n");
-            try tree.dumpNode(tree.nodes.items(.second)[node], level + delta, w);
+            try tree.dumpNode(data.second, level + delta, w);
         },
 
         .CompoundStmt => {
-            const start = tree.nodes.items(.first)[node];
-            const end = tree.nodes.items(.second)[node];
-            for (tree.data[start..end], 0..) |stmt, i| {
+            for (tree.data[range.first..range.second], 0..) |stmt, i| {
                 if (i != 0)
                     try w.writeByte('\n');
                 try tree.dumpNode(stmt, level + delta, w);
@@ -273,68 +278,65 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
         },
 
         .CompoundStmtTwo => {
-            const first = tree.nodes.items(.first)[node];
-            if (first != 0) try tree.dumpNode(first, level + delta, w);
-            const second = tree.nodes.items(.second)[node];
-            if (second != 0) try tree.dumpNode(second, level + delta, w);
+            if (data.first != 0) try tree.dumpNode(data.first, level + delta, w);
+            if (data.second != 0) try tree.dumpNode(data.second, level + delta, w);
         },
 
         .LabeledStmt => {
             try w.writeByteNTimes(' ', level + half);
-            try w.print("label: " ++ LITERAL ++ "{s}\n" ++ RESET, .{tree.tokSlice(tree.nodes.items(.first)[node])});
-            const stmt = tree.nodes.items(.second)[node];
-            if (stmt != 0) {
+            try w.print("label: " ++ LITERAL ++ "{s}\n" ++ RESET, .{tree.tokSlice(data.first)});
+            if (data.second != 0) {
                 try w.writeByteNTimes(' ', level + half);
                 try w.writeAll("stmt:\n");
-                try tree.dumpNode(stmt, level + delta, w);
+                try tree.dumpNode(data.second, level + delta, w);
             }
         },
 
         .IfThenElseStmt => {
             try w.writeByteNTimes(' ', level + half);
             try w.writeAll("cond:\n");
-            try tree.dumpNode(tree.nodes.items(.first)[node], level + delta, w);
+            try tree.dumpNode(data.first, level + delta, w);
 
-            const second = tree.nodes.items(.second)[node];
             try w.writeByteNTimes(' ', level + half);
             try w.writeAll("then:\n");
-            try tree.dumpNode(tree.data[second], level + delta, w);
+            try tree.dumpNode(tree.data[data.second], level + delta, w);
 
             try w.writeByteNTimes(' ', level + half);
             try w.writeAll("else:\n");
-            try tree.dumpNode(tree.data[second + 1], level + delta, w);
+            try tree.dumpNode(tree.data[data.second + 1], level + delta, w);
         },
 
         .IfElseStmt => {
             try w.writeByteNTimes(' ', level + half);
             try w.writeAll("cond:\n");
-            try tree.dumpNode(tree.nodes.items(.first)[node], level + delta, w);
+            try tree.dumpNode(data.first, level + delta, w);
 
             try w.writeByteNTimes(' ', level + half);
             try w.writeAll("else:\n");
-            try tree.dumpNode(tree.nodes.items(.second)[node], level + delta, w);
+            try tree.dumpNode(data.second, level + delta, w);
         },
 
         .IfThenStmt => {
             try w.writeByteNTimes(' ', level + half);
             try w.writeAll("cond:\n");
-            try tree.dumpNode(tree.nodes.items(.first)[node], level + delta, w);
+            try tree.dumpNode(data.first, level + delta, w);
 
-            const then = tree.nodes.items(.second)[node];
+            const then = data.second;
             if (then != 0) {
                 try w.writeByteNTimes(' ', level + half);
                 try w.writeAll("then:\n");
                 try tree.dumpNode(then, level + delta, w);
             }
         },
+
         .GotoStmt => {
             try w.writeByteNTimes(' ', level + half);
-            try w.print("label: " ++ LITERAL ++ "{s}\n" ++ RESET, .{tree.tokSlice(tree.nodes.items(.first)[node])});
+            try w.print("label: " ++ LITERAL ++ "{s}\n" ++ RESET, .{tree.tokSlice(data.first)});
         },
 
         .ContinueStmt, .BreakStmt => {},
         .ReturnStmt => {
-            const expr = tree.nodes.items(.first)[node];
+            const expr = data.first;
             if (expr != 0) {
                 try w.writeByteNTimes(' ', level + half);
                 try w.writeAll("expr:\n");
@@ -343,9 +345,7 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
         },
 
         .ForDeclStmt => {
-            const start = tree.nodes.items(.first)[node];
-            const end = tree.nodes.items(.second)[node];
-            const items = tree.data[start..end];
+            const items = tree.data[range.first..range.second];
             const decls = items[0 .. items.len - 3];
 
             try w.writeByteNTimes(' ', level + half);
@@ -377,10 +377,19 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
             }
         },
 
-        .ForStmt => {
-            const start = tree.data[tree.nodes.items(.first)[node]..];
+        .ForEverStmt => {
+            const body = data.first;
+            if (body != 0) {
+                try w.writeByteNTimes(' ', level + half);
+                try w.writeAll("body:\n");
+                try tree.dumpNode(body, level + delta, w);
+            }
+        },
 
+        .ForStmt => {
+            const start = tree.data[data.first..];
             const init = start[0];
+
             if (init != 0) {
                 try w.writeByteNTimes(' ', level + half);
                 try w.writeAll("init:\n");
@@ -401,7 +410,7 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
                 try tree.dumpNode(incr, level + delta, w);
             }
 
-            const body = tree.nodes.items(.second)[node];
+            const body = data.second;
             if (body != 0) {
                 try w.writeByteNTimes(' ', level + half);
                 try w.writeAll("body:\n");
@@ -412,9 +421,9 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
         .SwitchStmt, .WhileStmt, .DoWhileStmt => {
             try w.writeByteNTimes(' ', level + half);
             try w.writeAll("cond:\n");
-            try tree.dumpNode(tree.nodes.items(.first)[node], level + delta, w);
+            try tree.dumpNode(data.first, level + delta, w);
 
-            const body = tree.nodes.items(.second)[node];
+            const body = data.second;
             if (body != 0) {
                 try w.writeByteNTimes(' ', level + half);
                 try w.writeAll("body:\n");
@@ -425,8 +434,9 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
         .CaseStmt => {
             try w.writeByteNTimes(' ', level + half);
             try w.writeAll("value:\n");
-            try tree.dumpNode(tree.nodes.items(.first)[node], level + delta, w);
-            const stmt = tree.nodes.items(.second)[node];
+            try tree.dumpNode(data.first, level + delta, w);
+
+            const stmt = data.second;
             if (stmt != 0) {
                 try w.writeByteNTimes(' ', level + half);
                 try w.writeAll("stmt:\n");
@@ -435,7 +445,7 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
         },
 
         .DefaultStmt => {
-            const stmt = tree.nodes.items(.first)[node];
+            const stmt = data.first;
             if (stmt != 0) {
                 try w.writeByteNTimes(' ', level + half);
                 try w.writeAll("stmt:\n");
@@ -453,8 +463,9 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
         .TypeDef,
         => {
             try w.writeByteNTimes(' ', level + half);
-            try w.print("name: " ++ LITERAL ++ "\"{s}\"\n" ++ RESET, .{tree.tokSlice(tree.nodes.items(.first)[node])});
-            const init = tree.nodes.items(.second)[node];
+            try w.print("name: " ++ LITERAL ++ "\"{s}\"\n" ++ RESET, .{tree.tokSlice(data.first)});
+
+            const init = data.second;
             if (init != 0) {
                 try w.writeByteNTimes(' ', level + half);
                 try w.writeAll("init:\n");
@@ -463,31 +474,28 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
         },
 
         .StringLiteralExpr => {
-            const start = tree.nodes.items(.first)[node];
-            const ptr: [*]const u8 = @ptrFromInt(@as(usize, @bitCast(tree.data[start..][0..2].*)));
-            const len = tree.nodes.items(.second)[node];
+            const ptr: [*]const u8 = @ptrFromInt(@as(usize, @bitCast(tree.data[data.first..][0..2].*)));
 
             try w.writeByteNTimes(' ', level + half);
-            try w.print("data: " ++ LITERAL ++ "{s}\n" ++ RESET, .{ptr[0 .. len - 1]});
+            try w.print("data: " ++ LITERAL ++ "{s}\n" ++ RESET, .{ptr[0 .. data.second - 1]});
         },
 
         .CallExpr => {
-            const start = tree.nodes.items(.first)[node];
-            const end = tree.nodes.items(.second)[node];
             try w.writeByteNTimes(' ', level + half);
             try w.writeAll("lhs:\n");
-            try tree.dumpNode(tree.data[start], level + delta, w);
+            try tree.dumpNode(tree.data[range.first], level + delta, w);
 
             try w.writeByteNTimes(' ', level + half);
             try w.writeAll("args:\n");
-            for (tree.data[start + 1 .. end]) |stmt| try tree.dumpNode(stmt, level + delta, w);
+            for (tree.data[range.first + 1 .. range.second]) |stmt| try tree.dumpNode(stmt, level + delta, w);
         },
 
         .CallExprOne => {
             try w.writeByteNTimes(' ', level + half);
             try w.writeAll("lhs:\n");
-            try tree.dumpNode(tree.nodes.items(.first)[node], level + delta, w);
-            const arg = tree.nodes.items(.second)[node];
+            try tree.dumpNode(data.first, level + delta, w);
+
+            const arg = data.second;
             if (arg != 0) {
                 try w.writeByteNTimes(' ', level + half);
                 try w.writeAll("arg:\n");
@@ -529,10 +537,10 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
         => {
             try w.writeByteNTimes(' ', level + 1);
             try w.writeAll("lhs:\n");
-            try tree.dumpNode(tree.nodes.items(.first)[node], level + delta, w);
+            try tree.dumpNode(data.first, level + delta, w);
             try w.writeByteNTimes(' ', level + 1);
             try w.writeAll("rhs:\n");
-            try tree.dumpNode(tree.nodes.items(.second)[node], level + delta, w);
+            try tree.dumpNode(data.second, level + delta, w);
         },
 
         .CastExpr,
@@ -550,17 +558,17 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
         => {
             try w.writeByteNTimes(' ', level + 1);
             try w.writeAll("operand:\n");
-            try tree.dumpNode(tree.nodes.items(.first)[node], level + delta, w);
+            try tree.dumpNode(data.first, level + delta, w);
         },
 
         .DeclRefExpr => {
             try w.writeByteNTimes(' ', level + 1);
-            try w.print("name: " ++ NAME ++ "{s}\n" ++ RESET, .{tree.tokSlice(tree.nodes.items(.first)[node])});
+            try w.print("name: " ++ NAME ++ "{s}\n" ++ RESET, .{tree.tokSlice(data.first)});
         },
 
         .IntLiteral => {
             try w.writeByteNTimes(' ', level + 1);
-            const parts: [2]u32 = .{ tree.nodes.items(.first)[node], tree.nodes.items(.second)[node] };
+            const parts: [2]u32 = .{ data.first, data.second };
             if (tree.nodes.items(.type)[node].isUnsignedInt(tree.comp)) {
                 try w.print("value: " ++ LITERAL ++ "{d}\n" ++ RESET, .{@as(u64, @bitCast(parts))});
             } else {
@@ -570,12 +578,12 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
 
         .FloatLiteral => {
             try w.writeByteNTimes(' ', level + 1);
-            try w.print("value: " ++ LITERAL ++ "{d}\n" ++ RESET, .{@as(f32, @bitCast(tree.nodes.items(.first)[node]))});
+            try w.print("value: " ++ LITERAL ++ "{d}\n" ++ RESET, .{@as(f32, @bitCast(data.first))});
         },
 
         .DoubleLiteral => {
             try w.writeByteNTimes(' ', level + 1);
-            const parts: [2]u32 = .{ tree.nodes.items(.first)[node], tree.nodes.items(.second)[node] };
+            const parts: [2]u32 = .{data.first, data.second};
             try w.print("value: " ++ LITERAL ++ "{d}\n" ++ RESET, .{@as(f64, @bitCast(parts))});
         },
 

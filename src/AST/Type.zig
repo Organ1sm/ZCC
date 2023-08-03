@@ -217,7 +217,7 @@ pub fn dump(ty: Type, tree: Tree, w: anytype) @TypeOf(w).Error!void {
             try w.writeAll("fn (");
             for (ty.data.func.paramTypes, 0..) |param, i| {
                 if (i != 0) try w.writeAll(", ");
-                const nameToken = tree.nodes.items(.first)[param];
+                const nameToken = tree.nodes.items(.data)[param].first;
                 if (tree.tokens.items(.id)[nameToken] == .Identifier) {
                     try w.print("{s}: ", .{tree.tokSlice(nameToken)});
                 }
