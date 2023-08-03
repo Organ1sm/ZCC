@@ -438,7 +438,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
         const node = try p.addNode(.{
             .type = initD.d.type,
             .tag = try declSpec.validateFnDef(p),
-            .first = initD.d.name,
+            .data = .{ .first = initD.d.name },
         });
         try p.scopes.append(.{ .symbol = .{
             .name = p.tokSlice(initD.d.name),
@@ -447,7 +447,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
         } });
 
         const body = try p.compoundStmt();
-        p.nodes.items(.second)[node] = body.?;
+        p.nodes.items(.data)[node].second = body.?;
 
         // check gotos
         if (inFunction) {
@@ -473,8 +473,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
         const node = try p.addNode(.{
             .type = initD.d.type,
             .tag = try declSpec.validate(p, initD.d.type, initD.initializer != 0),
-            .first = initD.d.name,
-            .second = initD.initializer,
+            .data = .{ .first = initD.d.name, .second = initD.initializer },
         });
         try p.currDeclList.append(node);
 
@@ -1015,7 +1014,7 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: Declarator
                 const param = try p.addNode(.{
                     .tag = .ParamDecl,
                     .type = .{ .specifier = .Int },
-                    .first = try p.expectToken(.Identifier),
+                    .data = .{ .first = try p.expectToken(.Identifier) },
                 });
                 try params.append(param);
 
@@ -1121,7 +1120,7 @@ fn paramDecls(p: *Parser) Error!?[]NodeIndex {
         const param = try p.addNode(.{
             .tag = try paramDeclSpec.validateParam(p),
             .type = paramType,
-            .first = nameToken,
+            .data = .{ .first = nameToken },
         });
         try params.append(param);
 
@@ -1224,7 +1223,7 @@ fn stmt(p: *Parser) Error!NodeIndex {
         _ = try p.expectToken(.Semicolon);
         return try p.addNode(.{
             .tag = .GotoStmt,
-            .first = nameToken,
+            .data = .{ .first = nameToken },
         });
     }
 
@@ -1249,7 +1248,7 @@ fn stmt(p: *Parser) Error!NodeIndex {
         _ = try p.expectToken(.Semicolon);
 
         const result = try e.toNode(p);
-        return try p.addNode(.{ .tag = .ReturnStmt, .first = result });
+        return try p.addNode(.{ .tag = .ReturnStmt, .data = .{ .first = result } });
     }
 
     const exprStart = p.index;
@@ -1286,19 +1285,19 @@ fn parseIfStmt(p: *Parser) Error!NodeIndex {
     if (then != 0 and elseTK != 0) {
         return try p.addNode(.{
             .tag = .IfThenElseStmt,
-            .first = condNode,
-            .second = (try p.addList(&.{ then, elseTK })).start,
+            .data = .{
+                .first = condNode,
+                .second = (try p.addList(&.{ then, elseTK })).start,
+            },
         });
     } else if (then == 0 and elseTK != 0) {
         return try p.addNode(.{
             .tag = .IfElseStmt,
-            .first = condNode,
-            .second = elseTK,
+            .data = .{ .first = condNode, .second = elseTK },
         });
     } else return try p.addNode(.{
         .tag = .IfThenStmt,
-        .first = condNode,
-        .second = elseTK,
+        .data = .{ .first = condNode, .second = elseTK },
     });
 }
 
@@ -1346,20 +1345,18 @@ fn parseForStmt(p: *Parser) Error!NodeIndex {
 
         return try p.addNode(.{
             .tag = .ForDeclStmt,
-            .first = start,
-            .second = end,
+            .data = .{ .first = start, .second = end },
         });
     } else if (init.data == .none and cond.data == .none and incr.data == .none) {
         return try p.addNode(.{
             .tag = .ForEverStmt,
-            .first = body,
+            .data = .{ .first = body },
         });
     } else {
         const range = try p.addList(&.{ initNode, condNode, incrNode });
         return try p.addNode(.{
             .tag = .ForStmt,
-            .first = range.start,
-            .second = body,
+            .data = .{ .first = range.start, .second = body },
         });
     }
 }
@@ -1380,8 +1377,7 @@ fn parseWhileStmt(p: *Parser) Error!NodeIndex {
 
     return try p.addNode(.{
         .tag = .WhileStmt,
-        .first = condNode,
-        .second = body,
+        .data = .{ .first = condNode, .second = body },
     });
 }
 
@@ -1404,8 +1400,7 @@ fn parseDoWhileStmt(p: *Parser) Error!NodeIndex {
     _ = try p.expectToken(.Semicolon);
     return try p.addNode(.{
         .tag = .WhileStmt,
-        .first = condNode,
-        .second = body,
+        .data = .{ .first = condNode, .second = body },
     });
 }
 
@@ -1430,8 +1425,7 @@ fn parseSwitchStmt(p: *Parser) Error!NodeIndex {
 
     return try p.addNode(.{
         .tag = .SwitchStmt,
-        .first = condNode,
-        .second = body,
+        .data = .{ .first = condNode, .second = body },
     });
 }
 
@@ -1442,8 +1436,10 @@ fn parseCaseStmt(p: *Parser, caseToken: u32) Error!?NodeIndex {
     const s = try p.stmt();
     const node = try p.addNode(.{
         .tag = .CaseStmt,
-        .first = try val.toNode(p),
-        .second = s,
+        .data = .{
+            .first = try val.toNode(p),
+            .second = s,
+        },
     });
 
     if (p.findSwitch()) |some| {
@@ -1473,7 +1469,7 @@ fn parseDefaultStmt(p: *Parser, defaultToken: u32) Error!?NodeIndex {
 
     const node = try p.addNode(.{
         .tag = .DefaultStmt,
-        .first = s,
+        .data = .{ .first = s },
     });
 
     if (p.findSwitch()) |some| {
@@ -1492,6 +1488,7 @@ fn parseDefaultStmt(p: *Parser, defaultToken: u32) Error!?NodeIndex {
 
     return node;
 }
+
 fn maybeWarnUnused(p: *Parser, node: NodeIndex, exprStart: TokenIndex) Error!void {
     switch (p.nodes.items(.tag)[node]) {
         .Invalid,
@@ -1539,8 +1536,7 @@ fn labeledStmt(p: *Parser) Error!?NodeIndex {
 
         return try p.addNode(.{
             .tag = .LabeledStmt,
-            .first = nameToken,
-            .second = try p.stmt(),
+            .data = .{ .first = nameToken, .second = try p.stmt() },
         });
     } else if (p.eat(.KeywordCase)) |case| {
         return p.parseCaseStmt(case);
@@ -1606,19 +1602,23 @@ fn compoundStmt(p: *Parser) Error!?NodeIndex {
         0 => return try p.addNode(.{ .tag = .CompoundStmtTwo }),
         1 => return try p.addNode(.{
             .tag = .CompoundStmtTwo,
-            .first = statements.items[0],
+            .data = .{ .first = statements.items[0] },
         }),
         2 => return try p.addNode(.{
             .tag = .CompoundStmtTwo,
-            .first = statements.items[0],
-            .second = statements.items[1],
+            .data = .{
+                .first = statements.items[0],
+                .second = statements.items[1],
+            },
         }),
         else => {
             const range = try p.addList(statements.items);
             return try p.addNode(.{
                 .tag = .CompoundStmt,
-                .first = range.start,
-                .second = range.end,
+                .data = .{
+                    .first = range.start,
+                    .second = range.end,
+                },
             });
         },
     }
@@ -1628,7 +1628,7 @@ fn nodeIsNoreturn(p: *Parser, node: NodeIndex) bool {
     switch (p.nodes.items(.tag)[node]) {
         .BreakStmt, .ContinueStmt, .ReturnStmt => return true,
         .IfThenElseStmt => {
-            const data = p.data.items[p.nodes.items(.second)[node]..];
+            const data = p.data.items[p.nodes.items(.data)[node].second..];
             return p.nodeIsNoreturn(data[0]) and p.nodeIsNoreturn(data[1]);
         },
         else => return false,
@@ -2098,13 +2098,15 @@ fn suffixExpr(p: *Parser, lhs: Result) Error!Result {
                 0 => return try Result.node(p, .{
                     .tag = .CallExprOne,
                     .type = ty.data.func.returnType,
-                    .first = try lhs.toNode(p),
+                    .data = .{ .first = try lhs.toNode(p) },
                 }),
                 1 => return try Result.node(p, .{
                     .tag = .CallExprOne,
                     .type = ty.data.func.returnType,
-                    .first = try lhs.toNode(p),
-                    .second = args.items[0],
+                    .data = .{
+                        .first = try lhs.toNode(p),
+                        .second = args.items[0],
+                    },
                 }),
                 else => {
                     try p.data.append(try lhs.toNode(p));
@@ -2112,8 +2114,10 @@ fn suffixExpr(p: *Parser, lhs: Result) Error!Result {
                     return try Result.node(p, .{
                         .tag = .CallExpr,
                         .type = ty.data.func.returnType,
-                        .first = range.start - 1,
-                        .second = range.end,
+                        .data = .{
+                            .first = range.start - 1,
+                            .second = range.end,
+                        },
                     });
                 },
             }
@@ -2164,7 +2168,7 @@ fn primaryExpr(p: *Parser) Error!Result {
                     const node = try p.addNode(.{
                         .type = ty,
                         .tag = .FnProto,
-                        .first = nameToken,
+                        .data = .{ .first = nameToken },
                     });
 
                     try p.currDeclList.append(node);
@@ -2177,8 +2181,7 @@ fn primaryExpr(p: *Parser) Error!Result {
                     return try Result.leftValue(p, .{
                         .tag = .DeclRefExpr,
                         .type = ty,
-                        .first = nameToken,
-                        .second = node,
+                        .data = .{ .first = nameToken, .second = node },
                     });
                 }
                 try p.errStr(.undeclared_identifier, nameToken, p.tokSlice(nameToken));
@@ -2196,8 +2199,7 @@ fn primaryExpr(p: *Parser) Error!Result {
                     return try Result.leftValue(p, .{
                         .tag = .DeclRefExpr,
                         .type = p.nodes.items(.type)[s.node],
-                        .first = nameToken,
-                        .second = s.node,
+                        .data = .{ .first = nameToken, .second = s.node },
                     });
                 },
                 else => unreachable,
@@ -2308,8 +2310,7 @@ fn primaryExpr(p: *Parser) Error!Result {
                     .specifier = .Array,
                     .data = .{ .array = arrayType },
                 },
-                .first = ptrLoc,
-                .second = @intCast(str.len),
+                .data = .{ .first = ptrLoc, .second = @intCast(str.len) },
             });
         },
 

@@ -56,8 +56,7 @@ pub fn toNode(res: Result, p: *Parser) !NodeIndex {
     return p.addNode(.{
         .tag = .IntLiteral,
         .type = res.ty,
-        .first = parts[0],
-        .second = parts[1],
+        .data = .{ .first = parts[0], .second = parts[1] },
     });
 }
 
@@ -70,7 +69,7 @@ pub fn coerce(res: Result, p: *Parser, destType: Type) !Result {
         casted = try node(p, .{
             .tag = .LValueToRValue,
             .type = curType,
-            .first = try casted.toNode(p),
+            .data = .{ .first = try casted.toNode(p) },
         });
     }
 
@@ -78,7 +77,7 @@ pub fn coerce(res: Result, p: *Parser, destType: Type) !Result {
         casted = try node(p, .{
             .tag = .ArrayToPointer,
             .type = destType,
-            .first = try casted.toNode(p),
+            .data = .{ .first = try casted.toNode(p) },
         });
     }
     return casted;
