@@ -48,6 +48,8 @@ const usage =
     \\ 
     \\Feature Options:
     \\  -E                      Only run the preprocessor
+    \\  -D <macro>=<value>      Define <macro> to <value> (defaults to 1)
+    \\  -U <macro>              Undefine <macro>
     \\  -fcolor-diagnostics     Enable colors in diagnostics
     \\  -fno-color-diagnostics  Disable colors in diagnostics
     \\  -I <dir>                Add directory to include search path
@@ -65,7 +67,12 @@ fn handleArgs(comp: *Compilation, args: [][]const u8) !void {
     try comp.systemIncludeDirs.append("/usr/include");
 
     var sourceFiles = std.ArrayList(Source).init(comp.gpa);
-    defer sourceFiles.deinit();
+    var macroBuffer = std.ArrayList(u8).init(comp.gpa);
+
+    defer {
+        sourceFiles.deinit();
+        macroBuffer.deinit();
+    }
 
     const stdOut = std.io.getStdOut().writer();
     var i: usize = 1;
@@ -80,6 +87,34 @@ fn handleArgs(comp: *Compilation, args: [][]const u8) !void {
                 return stdOut.writeAll(@import("Basic/Info.zig").VersionStr ++ "\n") catch |err| {
                     return comp.diag.fatalNoSrc("{s} when trying to print version", .{@errorName(err)});
                 };
+            } else if (std.mem.startsWith(u8, arg, "-D")) {
+                var macro = arg["-D".len..];
+                if (macro.len == 0) {
+                    i += 1;
+                    if (i >= args.len)
+                        return comp.diag.fatalNoSrc("expected argument after -D", .{});
+
+                    macro = args[i];
+                }
+
+                var value: []const u8 = "1";
+                if (std.mem.indexOfScalar(u8, macro, '=')) |some| {
+                    value = macro[some + 1 ..];
+                    macro = macro[0..some];
+                }
+
+                try macroBuffer.writer().print("#define {s} {s}\n", .{ macro, value });
+            } else if (std.mem.startsWith(u8, arg, "-U")) {
+                var macro = arg["-U".len..];
+                if (macro.len == 0) {
+                    i += 1;
+                    if (i >= args.len)
+                        return comp.diag.fatalNoSrc("expected argument after -U", .{});
+
+                    macro = args[i];
+                }
+
+                try macroBuffer.writer().print("#undef {s} \n", .{macro});
             } else if (std.mem.eql(u8, arg, "-E")) {
                 comp.onlyPreprocess = true;
             } else if (std.mem.eql(u8, arg, "-fcolor-diagnostics")) {
@@ -145,27 +180,53 @@ fn handleArgs(comp: *Compilation, args: [][]const u8) !void {
         return comp.diag.fatalNoSrc("cannot specify -o when generating multiple output files", .{});
     }
 
+    const builtinMacros = try comp.generateBuiltinMacros();
+    const userDefinedMacros = blk: {
+        const dupedPath = try comp.gpa.dupe(u8, "<command line>");
+        errdefer comp.gpa.free(dupedPath);
+
+        const contents = try macroBuffer.toOwnedSlice();
+        errdefer comp.gpa.free(contents);
+
+        const source = Source{
+            .id = @enumFromInt(@as(u32, @intCast(comp.sources.count() + 2))),
+            .path = dupedPath,
+            .buffer = contents,
+        };
+        try comp.sources.put(dupedPath, source);
+        break :blk source;
+    };
+
     for (sourceFiles.items) |source| {
-        processSource(comp, source) catch |e| switch (e) {
+        processSource(comp, source, builtinMacros, userDefinedMacros) catch |e| switch (e) {
             error.OutOfMemory => return error.OutOfMemory,
             error.FatalError => {},
         };
-
-        comp.renderErrors();
     }
 }
 
-fn processSource(comp: *Compilation, source: Source) !void {
+fn processSource(comp: *Compilation, source: Source, builtinMacro: Source, userDefinedMacros: Source) !void {
     var pp = Preprocessor.init(comp);
     defer pp.deinit();
 
+    try pp.preprocess(builtinMacro);
+    try pp.preprocess(userDefinedMacros);
     try pp.preprocess(source);
+
+    try pp.tokens.append(pp.compilation.gpa, .{
+        .id = .Eof,
+        .loc = .{
+            .id = source.id,
+            .byteOffset = @intCast(source.buffer.len),
+        },
+    });
+
     if (comp.onlyPreprocess) {
         comp.renderErrors();
 
         const file = if (comp.outputName) |some|
             std.fs.cwd().createFile(some, .{}) catch |err|
-                return comp.diag.fatalNoSrc("{s} when trying to print tokens", .{@errorName(err)})
+                return comp.diag.fatalNoSrc("{s} when trying to create output file", .{@errorName(err)})
         else
             std.io.getStdOut();
         defer if (comp.outputName != null) file.close();
