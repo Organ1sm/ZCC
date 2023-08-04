@@ -57,7 +57,7 @@ charBuffer: std.ArrayList(u8),
 
 // It is safe to have pointers to entries of defines since it
 // cannot be modified while we are expanding a macro.
-expansionLog: std.AutoHashMap(DefineMap.Entry, void),
+expansionLog: std.AutoHashMap(*Macro, void),
 includeDepth: u8 = 0,
 
 pub fn init(comp: *Compilation) Preprocessor {
@@ -69,7 +69,7 @@ pub fn init(comp: *Compilation) Preprocessor {
         .pragmaOnce = std.AutoHashMap(Source.ID, void).init(comp.gpa),
         .tokenBuffer = RawTokenList.init(comp.gpa),
         .charBuffer = std.ArrayList(u8).init(comp.gpa),
-        .expansionLog = std.AutoHashMap(DefineMap.Entry, void).init(comp.gpa),
+        .expansionLog = std.AutoHashMap(*Macro, void).init(comp.gpa),
     };
 }
 
@@ -542,7 +542,7 @@ fn skipToNewLine(lexer: *Lexer) void {
 const ExpandBuffer = std.ArrayList(Token);
 
 fn expandMacro(pp: *Preprocessor, lexer: *Lexer, raw: RawToken) Error!void {
-    if (pp.defines.getEntry(pp.tokSliceSafe(raw))) |some| switch (some.value_ptr.*) {
+    if (pp.defines.getPtr(pp.tokSliceSafe(raw))) |some| switch (some.*) {
         .empty => return,
         .self => {},
         .simple => {
@@ -637,7 +637,7 @@ fn markExpandedFrom(pp: *Preprocessor, token: *Token, loc: Source.Location) !voi
 
 /// Try to expand a macro in the `source` buffer at `start_index`.
 fn expandExtra(pp: *Preprocessor, source: *ExpandBuffer, start: *usize) Error!void {
-    if (pp.defines.getEntry(pp.expandedSlice(source.items[start.*]))) |some| {
+    if (pp.defines.getPtr(pp.expandedSlice(source.items[start.*]))) |some| {
         if (pp.expansionLog.get(some)) |_| {
             // If we have already expanded this macro, do not recursively expand it.
             start.* += 1;
@@ -647,7 +647,7 @@ fn expandExtra(pp: *Preprocessor, source: *ExpandBuffer, start: *usize) Error!vo
         // Mark that we have seen this macro.
         try pp.expansionLog.putNoClobber(some, {});
 
-        switch (some.value_ptr.*) {
+        switch (some.*) {
             .empty => _ = source.orderedRemove(start.*), // Simply remove the token.
             .self => start.* += 1, // Just go over the token.
             .simple => |macro| {
@@ -1281,8 +1281,7 @@ pub fn prettyPrintTokens(pp: *Preprocessor, w: anytype) !void {
     }
 }
 
-fn printInBetween(pp: *Preprocessor, slice: []const u8, w: anytype) !void {
-    _ = pp;
+fn printInBetween(slice: []const u8, w: anytype) !void {
     var inBetween = slice;
     while (true) {
         if (std.mem.indexOfScalar(u8, inBetween, '#') orelse std.mem.indexOf(u8, inBetween, "//")) |some| {
@@ -1300,7 +1299,7 @@ fn printInBetween(pp: *Preprocessor, slice: []const u8, w: anytype) !void {
     try w.writeAll(inBetween);
 }
 
-fn expectTokens(buffer: []const u8, expectedTokens: []const TokenType) void {
+fn expectTokens(buffer: []const u8, expectedTokens: []const TokenType) !void {
     var comp = Compilation.init(std.testing.allocator);
     defer comp.deinit();
 
@@ -1310,27 +1309,26 @@ fn expectTokens(buffer: []const u8, expectedTokens: []const TokenType) void {
         .path = "<test-buffer>",
     };
 
-    comp.sources.putNoClobber(source.path, source) catch unreachable;
+    try comp.sources.putNoClobber(source.path, source);
     defer comp.sources.clearAndFree();
 
     var pp = Preprocessor.init(&comp);
     defer pp.deinit();
 
-    pp.preprocess(source) catch unreachable;
+    try pp.preprocess(source);
     comp.renderErrors();
-    std.testing.expect(comp.diag.errors == 0) catch std.debug.print("nothing TODO", .{});
+    try std.testing.expect(comp.diag.errors == 0);
 
     for (expectedTokens, 0..) |expectedTokenId, i| {
         const actual = pp.tokens.items(.id)[i];
         if (!std.meta.eql(actual, expectedTokenId)) {
-            std.debug.panic("expected {s}, found {s}\n", .{ @tagName(expectedTokenId), @tagName(actual) });
+            std.debug.print("expected {s}, found {s}\n", .{ @tagName(expectedTokenId), @tagName(actual) });
+            return error.TokensDoNotEqual;
         }
     }
-    const lastToken = pp.tokens.items(.id)[expectedTokens.len];
-    std.testing.expect(lastToken == .Eof) catch std.debug.print("", .{});
 }
 
-fn expectStr(buffer: []const u8, expected: []const u8) void {
+fn expectStr(buffer: []const u8, expected: []const u8) !void {
     var comp = Compilation.init(std.testing.allocator);
     defer comp.deinit();
 
@@ -1340,32 +1338,26 @@ fn expectStr(buffer: []const u8, expected: []const u8) void {
         .path = "<test-buf>",
     };
 
-    comp.sources.putNoClobber(source.path, source) catch unreachable;
+    try comp.sources.putNoClobber(source.path, source);
     defer comp.sources.clearAndFree();
 
     var pp = Preprocessor.init(&comp);
     defer pp.deinit();
 
-    pp.preprocess(source) catch unreachable;
+    try pp.preprocess(source);
+    try pp.tokens.append(comp.gpa, .{ .id = .Eof, .loc = undefined });
     comp.renderErrors();
-    std.testing.expect(comp.diag.errors == 0) catch std.debug.print("nothing TODO", .{});
+    try std.testing.expect(comp.diag.errors == 0);
 
     var actual = std.ArrayList(u8).init(std.testing.allocator);
     defer actual.deinit();
 
-    for (pp.tokens.items(.id), 0..) |id, i| {
-        if (id == .Eof) break;
-
-        if (i != 0) actual.append(' ') catch unreachable;
-
-        actual.appendSlice(pp.expandedSlice(pp.tokens.get(i))) catch unreachable;
-    }
-
-    std.testing.expectEqualStrings(expected, actual.items) catch std.debug.print("nothing TODO", .{});
+    try pp.prettyPrintTokens(actual.writer());
+    try std.testing.expectEqualStrings(expected, actual.items);
 }
 
 test "ifdef" {
-    expectTokens(
+    try expectTokens(
         \\#define FOO
         \\#ifdef FOO
         \\long
@@ -1374,7 +1366,7 @@ test "ifdef" {
         \\#endif
     , &.{.KeywordLong});
 
-    expectTokens(
+    try expectTokens(
         \\#define BAR
         \\#ifdef FOO
         \\long
@@ -1385,59 +1377,59 @@ test "ifdef" {
 }
 
 test "define undefine" {
-    expectTokens(
+    try expectTokens(
         \\#define FOO 1
         \\#undef FOO
     , &.{});
 }
 
 test "recursive object macro" {
-    expectStr(
+    try expectStr(
         \\#define y x
         \\#define x y
         \\x
-    , "x");
+    , "x\n");
 
-    expectStr(
+    try expectStr(
         \\#define x x
         \\x
-    , "x");
+    , "x\n");
 }
 
 test "object macro expansion" {
-    expectTokens(
+    try expectTokens(
         \\#define x a
         \\x
         \\#define a 1
         \\x
     , &.{ .Identifier, .IntegerLiteral });
-    expectTokens(
+    try expectTokens(
         \\#define x define
         \\x
     , &.{.Identifier});
 }
 
 test "object macro token pasting" {
-    expectStr(
+    try expectStr(
         \\#define x a##1
         \\x
         \\#define a 1
         \\x
-    , "a1 a1");
+    , "a1 a1\n");
 }
 
 test "#if constant expression" {
-    expectStr(
+    try expectStr(
         \\#if defined FOO
         \\void
         \\#elif !defined(BAR)
         \\long
         \\#endif
-    , "long");
+    , "long\n");
 }
 
 test "function macro expansion" {
-    expectStr(
+    try expectStr(
         \\#define HE HI
         \\#define LLO _THERE
         \\#define HELLO "HI THERE"
@@ -1447,11 +1439,11 @@ test "function macro expansion" {
         \\CAT(HE, LLO)
         \\XCAT(HE, LLO)
         \\CALL(CAT)
-    , "\"HI THERE\" HI_THERE \"HI THERE\"");
+    , "\"HI THERE\" HI_THERE \"HI THERE\"\n");
 }
 
 test "X macro" {
-    expectStr(
+    try expectStr(
         \\#define X(a) Foo_ ## a = a,
         \\enum Foo {
         \\X(1)
@@ -1460,16 +1452,16 @@ test "X macro" {
         \\X(4)
         \\X(5)
         \\};
-    , "enum Foo { Foo_1 = 1 , Foo_2 = 2 , Foo_3 = 3 , Foo_4 = 4 , Foo_5 = 5 , } ;");
+    , "enum Foo { Foo_1 = 1 , Foo_2 = 2 , Foo_3 = 3 , Foo_4 = 4 , Foo_5 = 5 , } ;\n");
 }
 
 test "var args macro functions" {
-    expectStr(
+    try expectStr(
         \\#define foo(a,...) #__VA_ARGS__
         \\foo(1,2,3,4,5,6)
         \\
         \\#define bar(a,...) bar __VA_ARGS__
         \\#define baz(a,...) baz bar(__VA_ARGS__)
         \\baz(1,2,3,4)
-    , "\"2 , 3 , 4 , 5 , 6\" baz bar 3 , 4");
+    , "\"2 , 3 , 4 , 5 , 6\" baz bar 3 , 4\n");
 }
