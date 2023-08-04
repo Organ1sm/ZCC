@@ -2299,7 +2299,8 @@ fn primaryExpr(p: *Parser) Error!Result {
             try builder.append(0);
             const str = try p.arena.dupe(u8, builder.items);
             const ptrLoc = @as(u32, @intCast(p.data.items.len));
-            try p.data.appendSlice(&@as([2]u32, @bitCast(@intFromPtr(str.ptr))));
+            const ptr_val = @as([2]u32, @bitCast(@intFromPtr(str.ptr)));
+            try p.data.appendSlice(&ptr_val);
 
             const arrayType = try p.arena.create(Type.Array);
             arrayType.* = .{ .elem = .{ .specifier = .Char }, .len = str.len };
