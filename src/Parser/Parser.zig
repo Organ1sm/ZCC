@@ -33,6 +33,7 @@ inFunc: bool = false,
 currDeclList: *NodeList,
 labels: std.ArrayList(Label),
 labelCount: u32 = 0,
+strings: std.ArrayList(u8),
 
 const Label = union(enum) {
     unresolvedGoto: TokenIndex,
@@ -149,10 +150,13 @@ pub fn todo(p: *Parser, msg: []const u8) Error {
 }
 
 pub fn addNode(p: *Parser, node: AST.Node) Allocator.Error!NodeIndex {
+    if (p.wantConst)
+        return .none;
+
     const res = p.nodes.len;
     try p.nodes.append(p.pp.compilation.gpa, node);
 
-    return @intCast(res);
+    return @enumFromInt(@as(u32, @intCast(res)));
 }
 
 const Range = struct { start: u32, end: u32 };
@@ -206,7 +210,7 @@ fn inLoopOrSwitch(p: *Parser) bool {
     return false;
 }
 
-fn findLabel(p: *Parser, name: []const u8) ?NodeIndex {
+fn findLabel(p: *Parser, name: []const u8) ?TokenIndex {
     for (p.labels.items) |item| {
         switch (item) {
             .label => |l| if (std.mem.eql(u8, p.tokSlice(l), name)) return l,
@@ -261,14 +265,16 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
         .scopes = std.ArrayList(Scope).init(pp.compilation.gpa),
         .data = NodeList.init(pp.compilation.gpa),
         .labels = std.ArrayList(Label).init(pp.compilation.gpa),
+        .strings = std.ArrayList(u8).init(pp.compilation.gpa),
     };
     defer p.scopes.deinit();
     defer p.data.deinit();
     defer p.labels.deinit();
 
     errdefer p.nodes.deinit(pp.compilation.gpa);
+    errdefer p.strings.deinit();
 
-    _ = try p.addNode(.{ .tag = .Invalid, .type = undefined });
+    _ = try p.addNode(.{ .tag = .Invalid, .type = undefined, .data = undefined });
 
     while (p.eat(.Eof) == null) {
         if (p.staticAssert() catch |er| switch (er) {
@@ -302,6 +308,7 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
         .nodes = p.nodes.toOwnedSlice(),
         .data = data,
         .rootDecls = try rootDecls.toOwnedSlice(),
+        .strings = try p.strings.toOwnedSlice(),
     };
 }
 
@@ -384,7 +391,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
     };
 
     // check for funtion definition
-    if (initD.d.funcDeclarator != null and initD.initializer == 0 and initD.d.type.isFunc()) fndef: {
+    if (initD.d.funcDeclarator != null and initD.initializer == .none and initD.d.type.isFunc()) fndef: {
         switch (p.getCurrToken()) {
             .Comma, .Semicolon => break :fndef,
             .LBrace => {},
@@ -438,7 +445,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
         const node = try p.addNode(.{
             .type = initD.d.type,
             .tag = try declSpec.validateFnDef(p),
-            .data = .{ .first = initD.d.name },
+            .data = .{ .Declaration = .{ .name = initD.d.name } },
         });
         try p.scopes.append(.{ .symbol = .{
             .name = p.tokSlice(initD.d.name),
@@ -447,7 +454,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
         } });
 
         const body = try p.compoundStmt();
-        p.nodes.items(.data)[node].second = body.?;
+        p.nodes.items(.data)[@intFromEnum(node)].Declaration.node = body.?;
 
         // check gotos
         if (inFunction) {
@@ -472,8 +479,8 @@ fn parseDeclaration(p: *Parser) Error!bool {
 
         const node = try p.addNode(.{
             .type = initD.d.type,
-            .tag = try declSpec.validate(p, initD.d.type, initD.initializer != 0),
-            .data = .{ .first = initD.d.name, .second = initD.initializer },
+            .tag = try declSpec.validate(p, initD.d.type, initD.initializer != .none),
+            .data = .{ .Declaration = .{ .name = initD.d.name, .node = initD.initializer } },
         });
         try p.currDeclList.append(node);
 
@@ -629,7 +636,7 @@ fn declSpecifier(p: *Parser) Error!?DeclSpec {
     return d;
 }
 
-const InitDeclarator = struct { d: Declarator, initializer: NodeIndex = 0 };
+const InitDeclarator = struct { d: Declarator, initializer: NodeIndex = .none };
 
 /// initDeclarator : declarator ('=' initializer)?
 fn initDeclarator(p: *Parser, declSpec: *DeclSpec) Error!?InitDeclarator {
@@ -647,7 +654,7 @@ fn initDeclarator(p: *Parser, declSpec: *DeclSpec) Error!?InitDeclarator {
         const init = try p.initializer();
         const casted = try init.coerce(p, initD.d.type);
 
-        initD.initializer = try casted.toNode(p);
+        initD.initializer = casted.node;
     }
 
     return initD;
@@ -693,19 +700,19 @@ fn typeSpec(p: *Parser, ty: *TypeBuilder, completeType: *Type) Error!bool {
 
             .KeywordAtomic => return p.todo("atomic types"),
             .KeywordEnum => {
-                try ty.combine(p, .{ .Enum = 0 });
+                try ty.combine(p, .{ .Enum = .none });
                 ty.kind.Enum = try p.enumSpec();
                 continue;
             },
 
             .KeywordStruct => {
-                try ty.combine(p, .{ .Struct = 0 });
+                try ty.combine(p, .{ .Struct = .none });
                 ty.kind.Struct = try p.recordSpec();
                 continue;
             },
 
             .KeywordUnion => {
-                try ty.combine(p, .{ .Union = 0 });
+                try ty.combine(p, .{ .Union = .none });
                 ty.kind.Union = try p.recordSpec();
                 continue;
             },
@@ -726,7 +733,7 @@ fn typeSpec(p: *Parser, ty: *TypeBuilder, completeType: *Type) Error!bool {
 
             .Identifier => {
                 const typedef = p.findTypedef(p.tokSlice(p.index)) orelse break;
-                const newSpec = TypeBuilder.fromType(p.nodes.items(.type)[typedef.node]);
+                const newSpec = TypeBuilder.fromType(p.nodes.items(.type)[@intFromEnum(typedef.node)]);
 
                 const errStart = p.pp.compilation.diag.list.items.len;
                 ty.combine(p, newSpec) catch {
@@ -941,8 +948,19 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: Declarator
         if (static) |_|
             try size.expect(p);
 
-        switch (size.data) {
-            .none => if (star) |_| {
+        switch (size.value) {
+            .unavailable => if (size.node != .none) {
+                if (!p.inFunc and kind != .param)
+                    try p.errToken(.variable_len_array_file_scope, lb);
+
+                const vlaType = try p.arena.create(Type.VLA);
+                vlaType.expr = size.node;
+                resType.data = .{ .vla = vlaType };
+                resType.specifier = .VariableLenArray;
+
+                if (static) |some|
+                    try p.errToken(.useless_static, some);
+            } else if (star) |_| {
                 const elemType = try p.arena.create(Type);
                 resType.data = .{ .subType = elemType };
                 resType.specifier = .UnspecifiedVariableLenArray;
@@ -951,16 +969,6 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: Declarator
                 arrayType.len = 0;
                 resType.data = .{ .array = arrayType };
                 resType.specifier = .IncompleteArray;
-            },
-
-            .lVal, .node => |n| {
-                if (!p.inFunc and kind != .param) try p.errToken(.variable_len_array_file_scope, lb);
-                const vlaType = try p.arena.create(Type.VLA);
-                vlaType.expr = n;
-                resType.data = .{ .vla = vlaType };
-                resType.specifier = .VariableLenArray;
-
-                if (static) |some| try p.errToken(.useless_static, some);
             },
 
             .unsigned => |v| {
@@ -1014,7 +1022,7 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: Declarator
                 const param = try p.addNode(.{
                     .tag = .ParamDecl,
                     .type = .{ .specifier = .Int },
-                    .data = .{ .first = try p.expectToken(.Identifier) },
+                    .data = .{ .Declaration = .{ .name = try p.expectToken(.Identifier) } },
                 });
                 try params.append(param);
 
@@ -1120,7 +1128,7 @@ fn paramDecls(p: *Parser) Error!?[]NodeIndex {
         const param = try p.addNode(.{
             .tag = try paramDeclSpec.validateParam(p),
             .type = paramType,
-            .data = .{ .first = nameToken },
+            .data = .{ .Declaration = .{ .name = nameToken } },
         });
         try params.append(param);
 
@@ -1223,7 +1231,7 @@ fn stmt(p: *Parser) Error!NodeIndex {
         _ = try p.expectToken(.Semicolon);
         return try p.addNode(.{
             .tag = .GotoStmt,
-            .data = .{ .first = nameToken },
+            .data = .{ .DeclarationRef = nameToken },
         });
     }
 
@@ -1232,7 +1240,7 @@ fn stmt(p: *Parser) Error!NodeIndex {
             try p.errToken(.continue_not_in_loop, cont);
         _ = try p.expectToken(.Semicolon);
 
-        return try p.addNode(.{ .tag = .ContinueStmt });
+        return try p.addNode(.{ .tag = .ContinueStmt, .data = undefined });
     }
 
     if (p.eat(.KeywordBreak)) |br| {
@@ -1240,28 +1248,26 @@ fn stmt(p: *Parser) Error!NodeIndex {
             try p.errToken(.break_not_in_loop_or_switch, br);
 
         _ = try p.expectToken(.Semicolon);
-        return try p.addNode(.{ .tag = .BreakStmt });
+        return try p.addNode(.{ .tag = .BreakStmt, .data = undefined });
     }
 
     if (p.eat(.KeywordReturn)) |_| {
         const e = try p.expr();
         _ = try p.expectToken(.Semicolon);
 
-        const result = try e.toNode(p);
-        return try p.addNode(.{ .tag = .ReturnStmt, .data = .{ .first = result } });
+        return try p.addNode(.{ .tag = .ReturnStmt, .data = .{ .UnaryExpr = e.node } });
     }
 
     const exprStart = p.index;
     const e = try p.expr();
-    if (e.data != .none) {
+    if (e.node != .none) {
         _ = try p.expectToken(.Semicolon);
-        const exprNode = try e.toNode(p);
-        try p.maybeWarnUnused(exprNode, exprStart);
-        return exprNode;
+        try p.maybeWarnUnused(e.node, exprStart);
+        return e.node;
     }
 
     if (p.eat(.Semicolon)) |_|
-        return @as(NodeIndex, 0);
+        return .none;
 
     try p.err(.expected_stmt);
     return error.ParsingFailed;
@@ -1276,28 +1282,26 @@ fn parseIfStmt(p: *Parser) Error!NodeIndex {
 
     try cond.expect(p);
 
-    const condNode = try cond.toNode(p);
     try p.expectClosing(lp, .RParen);
 
     const then = try p.stmt();
-    const elseTK = if (p.eat(.KeywordElse)) |_| try p.stmt() else 0;
+    const elseTK = if (p.eat(.KeywordElse)) |_| try p.stmt() else .none;
 
-    if (then != 0 and elseTK != 0) {
-        return try p.addNode(.{
-            .tag = .IfThenElseStmt,
-            .data = .{
-                .first = condNode,
-                .second = (try p.addList(&.{ then, elseTK })).start,
+    if (then != .none and elseTK != .none) {
+        return try p.addNode(.{ .tag = .IfThenElseStmt, .data = .{
+            .If3 = .{
+                .cond = cond.node,
+                .body = (try p.addList(&.{ then, elseTK })).start,
             },
-        });
-    } else if (then == 0 and elseTK != 0) {
+        } });
+    } else if (then == .none and elseTK != .none) {
         return try p.addNode(.{
             .tag = .IfElseStmt,
-            .data = .{ .first = condNode, .second = elseTK },
+            .data = .{ .BinaryExpr = .{ .lhs = cond.node, .rhs = elseTK } },
         });
     } else return try p.addNode(.{
         .tag = .IfThenStmt,
-        .data = .{ .first = condNode, .second = elseTK },
+        .data = .{ .BinaryExpr = .{ .lhs = cond.node, .rhs = then } },
     });
 }
 
@@ -1318,22 +1322,19 @@ fn parseForStmt(p: *Parser) Error!NodeIndex {
     // for-init
     const initStart = p.index;
     const init = if (!gotDecl) try p.expr() else Result{};
-    const initNode = try init.toNode(p);
-    try p.maybeWarnUnused(initNode, initStart);
+    try p.maybeWarnUnused(init.node, initStart);
 
     if (!gotDecl)
         _ = try p.expectToken(.Semicolon);
 
     // cond
     const cond = try p.expr();
-    const condNode = try cond.toNode(p);
     _ = try p.expectToken(.Semicolon);
 
     // increment
     const incrStart = p.index;
     const incr = try p.expr();
-    const incrNode = try incr.toNode(p);
-    try p.maybeWarnUnused(incrNode, incrStart);
+    try p.maybeWarnUnused(incr.node, incrStart);
     try p.expectClosing(lp, .RParen);
 
     try p.scopes.append(.loop);
@@ -1341,22 +1342,22 @@ fn parseForStmt(p: *Parser) Error!NodeIndex {
 
     if (gotDecl) {
         const start = (try p.addList(decls.items)).start;
-        const end = (try p.addList(&.{ condNode, incrNode, body })).end;
+        const end = (try p.addList(&.{ cond.node, incr.node, body })).end;
 
         return try p.addNode(.{
             .tag = .ForDeclStmt,
-            .data = .{ .first = start, .second = end },
+            .data = .{ .range = .{ .start = start, .end = end } },
         });
-    } else if (init.data == .none and cond.data == .none and incr.data == .none) {
+    } else if (init.node == .none and cond.node == .none and incr.node == .none) {
         return try p.addNode(.{
             .tag = .ForEverStmt,
-            .data = .{ .first = body },
+            .data = .{ .UnaryExpr = body },
         });
     } else {
-        const range = try p.addList(&.{ initNode, condNode, incrNode });
+        const range = try p.addList(&.{ init.node, cond.node, incr.node });
         return try p.addNode(.{
             .tag = .ForStmt,
-            .data = .{ .first = range.start, .second = body },
+            .data = .{ .range = .{ .start = range.start, .end = range.end } },
         });
     }
 }
@@ -1369,7 +1370,6 @@ fn parseWhileStmt(p: *Parser) Error!NodeIndex {
     const cond = try p.expr();
 
     try cond.expect(p);
-    const condNode = try cond.toNode(p);
     try p.expectClosing(lp, .RParen);
 
     try p.scopes.append(.loop);
@@ -1377,7 +1377,7 @@ fn parseWhileStmt(p: *Parser) Error!NodeIndex {
 
     return try p.addNode(.{
         .tag = .WhileStmt,
-        .data = .{ .first = condNode, .second = body },
+        .data = .{ .BinaryExpr = .{ .rhs = cond.node, .lhs = body } },
     });
 }
 
@@ -1394,13 +1394,12 @@ fn parseDoWhileStmt(p: *Parser) Error!NodeIndex {
     const cond = try p.expr();
 
     try cond.expect(p);
-    const condNode = try cond.toNode(p);
     try p.expectClosing(lp, .RParen);
 
     _ = try p.expectToken(.Semicolon);
     return try p.addNode(.{
         .tag = .WhileStmt,
-        .data = .{ .first = condNode, .second = body },
+        .data = .{ .BinaryExpr = .{ .rhs = cond.node, .lhs = body } },
     });
 }
 
@@ -1412,7 +1411,6 @@ fn parseSwitchStmt(p: *Parser) Error!NodeIndex {
     const cond = try p.expr();
 
     try cond.expect(p);
-    const condNode = try cond.toNode(p);
     try p.expectClosing(lp, .RParen);
 
     var switchScope = Scope.Switch{
@@ -1425,7 +1423,7 @@ fn parseSwitchStmt(p: *Parser) Error!NodeIndex {
 
     return try p.addNode(.{
         .tag = .SwitchStmt,
-        .data = .{ .first = condNode, .second = body },
+        .data = .{ .BinaryExpr = .{ .rhs = cond.node, .lhs = body } },
     });
 }
 
@@ -1436,16 +1434,16 @@ fn parseCaseStmt(p: *Parser, caseToken: u32) Error!?NodeIndex {
     const s = try p.stmt();
     const node = try p.addNode(.{
         .tag = .CaseStmt,
-        .data = .{
-            .first = try val.toNode(p),
-            .second = s,
-        },
+        .data = .{ .BinaryExpr = .{
+            .lhs = val.node,
+            .rhs = s,
+        } },
     });
 
     if (p.findSwitch()) |some| {
         const gop = try some.cases.getOrPut(val);
         if (gop.found_existing) {
-            switch (val.data) {
+            switch (val.value) {
                 .unsigned => |v| try p.errExtra(.duplicate_switch_case_unsigned, caseToken, .{ .unsigned = v }),
                 .signed => |v| try p.errExtra(.duplicate_switch_case_signed, caseToken, .{ .signed = v }),
                 else => unreachable,
@@ -1469,7 +1467,7 @@ fn parseDefaultStmt(p: *Parser, defaultToken: u32) Error!?NodeIndex {
 
     const node = try p.addNode(.{
         .tag = .DefaultStmt,
-        .data = .{ .first = s },
+        .data = .{ .UnaryExpr = s },
     });
 
     if (p.findSwitch()) |some| {
@@ -1490,7 +1488,7 @@ fn parseDefaultStmt(p: *Parser, defaultToken: u32) Error!?NodeIndex {
 }
 
 fn maybeWarnUnused(p: *Parser, node: NodeIndex, exprStart: TokenIndex) Error!void {
-    switch (p.nodes.items(.tag)[node]) {
+    switch (p.nodes.items(.tag)[@intFromEnum(node)]) {
         .Invalid,
         .AssignExpr,
         .MulAssignExpr,
@@ -1503,11 +1501,13 @@ fn maybeWarnUnused(p: *Parser, node: NodeIndex, exprStart: TokenIndex) Error!voi
         .AndAssignExpr,
         .XorAssignExpr,
         .OrAssignExpr, //
-        .CallExpr,
         .CallExprOne,
-        => {},
-        else => try p.errToken(.unused_value, exprStart),
+        => return,
+
+        .CastExpr => if (p.nodes.items(.type)[@intFromEnum(node)].specifier == .Void) return,
+        else => {},
     }
+    try p.errToken(.unused_value, exprStart);
 }
 
 /// labeledStmt
@@ -1536,7 +1536,7 @@ fn labeledStmt(p: *Parser) Error!?NodeIndex {
 
         return try p.addNode(.{
             .tag = .LabeledStmt,
-            .data = .{ .first = nameToken, .second = try p.stmt() },
+            .data = .{ .Declaration = .{ .name = nameToken, .node = try p.stmt() } },
         });
     } else if (p.eat(.KeywordCase)) |case| {
         return p.parseCaseStmt(case);
@@ -1584,7 +1584,7 @@ fn compoundStmt(p: *Parser) Error!?NodeIndex {
             else => |e| return e,
         };
 
-        if (s == 0) continue;
+        if (s == .none) continue;
         try statements.append(s);
 
         if (noreturnIdx == null and p.nodeIsNoreturn(s)) {
@@ -1599,36 +1599,38 @@ fn compoundStmt(p: *Parser) Error!?NodeIndex {
     }
 
     switch (statements.items.len) {
-        0 => return try p.addNode(.{ .tag = .CompoundStmtTwo }),
+        0 => return try p.addNode(.{ .tag = .CompoundStmtTwo, .data = .{ .BinaryExpr = .{ .lhs = .none, .rhs = .none } } }),
         1 => return try p.addNode(.{
             .tag = .CompoundStmtTwo,
-            .data = .{ .first = statements.items[0] },
+            .data = .{ .BinaryExpr = .{ .lhs = statements.items[0], .rhs = .none } },
         }),
         2 => return try p.addNode(.{
             .tag = .CompoundStmtTwo,
             .data = .{
-                .first = statements.items[0],
-                .second = statements.items[1],
+                .BinaryExpr = .{
+                    .lhs = statements.items[0],
+                    .rhs = statements.items[1],
+                },
             },
         }),
         else => {
             const range = try p.addList(statements.items);
             return try p.addNode(.{
                 .tag = .CompoundStmt,
-                .data = .{
-                    .first = range.start,
-                    .second = range.end,
-                },
+                .data = .{ .range = .{
+                    .start = range.start,
+                    .end = range.end,
+                } },
             });
         },
     }
 }
 
 fn nodeIsNoreturn(p: *Parser, node: NodeIndex) bool {
-    switch (p.nodes.items(.tag)[node]) {
+    switch (p.nodes.items(.tag)[@intFromEnum(node)]) {
         .BreakStmt, .ContinueStmt, .ReturnStmt => return true,
         .IfThenElseStmt => {
-            const data = p.data.items[p.nodes.items(.data)[node].second..];
+            const data = p.data.items[p.nodes.items(.data)[@intFromEnum(node)].If3.body..];
             return p.nodeIsNoreturn(data[0]) and p.nodeIsNoreturn(data[1]);
         },
         else => return false,
@@ -1699,6 +1701,20 @@ fn nextStmt(p: *Parser, lBrace: TokenIndex) !void {
 //       Expr       //
 /////////////////////
 
+pub fn macroExpr(p: *Parser) Compilation.Error!bool {
+    p.wantConst = true;
+    const res = p.conditionalExpr() catch |e| switch (e) {
+        error.OutOfMemory => return error.OutOfMemory,
+        error.FatalError => return error.FatalError,
+        error.ParsingFailed => return false,
+    };
+    if (res.value == .unavailable) {
+        try p.errToken(.expected_expr, p.index);
+        return false;
+    }
+    return res.getBool();
+}
+
 /// expr : assignExpr (',' assignExpr)*
 fn expr(p: *Parser) Error!Result {
     var lhs = try p.assignExpr();
@@ -1717,7 +1733,7 @@ fn assignExpr(p: *Parser) Error!Result {
 }
 
 /// constExpr : conditionalExpr
-pub fn constExpr(p: *Parser) Error!Result {
+fn constExpr(p: *Parser) Error!Result {
     const saved_const = p.wantConst;
     defer p.wantConst = saved_const;
     p.wantConst = true;
@@ -1738,7 +1754,7 @@ fn conditionalExpr(p: *Parser) Error!Result {
     _ = try p.expectToken(.Colon);
     const elseExpr = try p.conditionalExpr();
 
-    if (cond.data == .signed or cond.data == .unsigned)
+    if (cond.value != .unavailable)
         return if (cond.getBool()) thenExpr else elseExpr;
 
     return p.todo("ast");
@@ -1750,11 +1766,12 @@ fn logicalOrExpr(p: *Parser) Error!Result {
     while (p.eat(.PipePipe)) |_| {
         const rhs = try p.logicalAndExpr();
 
-        if ((lhs.data == .unsigned or lhs.data == .signed) and (rhs.data == .unsigned or rhs.data == .signed)) {
-            lhs = Result{ .data = .{ .signed = @intFromBool(lhs.getBool() or rhs.getBool()) } };
-        } else {
-            return p.todo("ast");
+        if (lhs.value != .unavailable and rhs.value != .unavailable) {
+            lhs.value = .{ .signed = @intFromBool(lhs.getBool() or rhs.getBool()) };
         }
+
+        lhs.ty = .{ .specifier = .Int };
+        try lhs.bin(p, .BoolOrExpr, rhs);
     }
 
     return lhs;
@@ -1766,9 +1783,12 @@ fn logicalAndExpr(p: *Parser) Error!Result {
     while (p.eat(.AmpersandAmpersand)) |_| {
         const rhs = try p.orExpr();
 
-        if ((lhs.data == .unsigned or lhs.data == .signed) and (rhs.data == .unsigned or rhs.data == .signed)) {
-            lhs = Result{ .data = .{ .signed = @intFromBool(lhs.getBool() or rhs.getBool()) } };
-        } else return p.todo("ast");
+        if (lhs.value != .unavailable and rhs.value != .unavailable) {
+            lhs.value = .{ .signed = @intFromBool(lhs.getBool() or rhs.getBool()) };
+        }
+
+        lhs.ty = .{ .specifier = .Int };
+        try lhs.bin(p, .BoolAndExpr, rhs);
     }
     return lhs;
 }
@@ -1780,12 +1800,14 @@ fn orExpr(p: *Parser) Error!Result {
         var rhs = try p.xorExpr();
 
         if (try lhs.adjustTypes(&rhs, p)) {
-            lhs.data = switch (lhs.data) {
-                .unsigned => |v| .{ .unsigned = v | rhs.data.unsigned },
-                .signed => |v| .{ .signed = v | rhs.data.signed },
+            lhs.value = switch (lhs.value) {
+                .unsigned => |v| .{ .unsigned = v | rhs.value.unsigned },
+                .signed => |v| .{ .signed = v | rhs.value.signed },
                 else => unreachable,
             };
-        } else return p.todo("ast");
+        }
+
+        try lhs.bin(p, .BitOrExpr, rhs);
     }
     return lhs;
 }
@@ -1797,12 +1819,14 @@ fn xorExpr(p: *Parser) Error!Result {
         var rhs = try p.andExpr();
 
         if (try lhs.adjustTypes(&rhs, p)) {
-            lhs.data = switch (lhs.data) {
-                .unsigned => |v| .{ .unsigned = v ^ rhs.data.unsigned },
-                .signed => |v| .{ .signed = v ^ rhs.data.signed },
+            lhs.value = switch (lhs.value) {
+                .unsigned => |v| .{ .unsigned = v ^ rhs.value.unsigned },
+                .signed => |v| .{ .signed = v ^ rhs.value.signed },
                 else => unreachable,
             };
-        } else return p.todo("ast");
+        }
+
+        try lhs.bin(p, .BitXorExpr, rhs);
     }
     return lhs;
 }
@@ -1814,12 +1838,14 @@ fn andExpr(p: *Parser) Error!Result {
         var rhs = try p.eqExpr();
 
         if (try lhs.adjustTypes(&rhs, p)) {
-            lhs.data = switch (lhs.data) {
-                .unsigned => |v| .{ .unsigned = v & rhs.data.unsigned },
-                .signed => |v| .{ .signed = v & rhs.data.signed },
+            lhs.value = switch (lhs.value) {
+                .unsigned => |v| .{ .unsigned = v & rhs.value.unsigned },
+                .signed => |v| .{ .signed = v & rhs.value.signed },
                 else => unreachable,
             };
-        } else return p.todo("ast");
+        }
+
+        try lhs.bin(p, .BitAndExpr, rhs);
     }
     return lhs;
 }
@@ -1840,10 +1866,11 @@ fn eqExpr(p: *Parser) Error!Result {
             else
                 lhs.compare(.neq, rhs);
 
-            lhs = Result{ .data = .{ .signed = @intFromBool(res) } };
+            lhs.value = .{ .signed = @intFromBool(res) };
         }
 
-        return p.todo("ast");
+        lhs.ty = .{ .specifier = .Int };
+        try lhs.bin(p, if (eq != null) .EqualExpr else .NotEqualExpr, rhs);
     }
     return lhs;
 }
@@ -1868,8 +1895,18 @@ fn compExpr(p: *Parser) Error!Result {
                 lhs.compare(.gt, rhs)
             else
                 lhs.compare(.gte, rhs);
-            lhs = Result{ .data = .{ .signed = @intFromBool(res) } };
-        } else return p.todo("ast");
+            lhs.value = .{ .signed = @intFromBool(res) };
+        }
+
+        lhs.ty = .{ .specifier = .Int };
+        try lhs.bin(p, if (lt != null)
+            .LessThanExpr
+        else if (le != null)
+            AstTag.LessThanEqualExpr
+        else if (gt != null)
+            AstTag.GreaterThanExpr
+        else
+            AstTag.GreaterThanEqualExpr, rhs);
     }
 
     return lhs;
@@ -1887,21 +1924,21 @@ fn shiftExpr(p: *Parser) Error!Result {
         if (try lhs.adjustTypes(&rhs, p)) {
             // TODO overflow
             if (shl != null) {
-                lhs.data = switch (lhs.data) {
-                    .unsigned => |v| .{ .unsigned = v << @as(u6, @intCast(rhs.data.unsigned)) },
-                    .signed => |v| .{ .signed = v << @as(u6, @intCast(rhs.data.signed)) },
+                lhs.value = switch (lhs.value) {
+                    .unsigned => |v| .{ .unsigned = v << @as(u6, @intCast(rhs.value.unsigned)) },
+                    .signed => |v| .{ .signed = v << @as(u6, @intCast(rhs.value.signed)) },
                     else => unreachable,
                 };
             } else {
-                lhs.data = switch (lhs.data) {
-                    .unsigned => |v| .{ .unsigned = v >> @as(u6, @intCast(rhs.data.unsigned)) },
-                    .signed => |v| .{ .signed = v >> @as(u6, @intCast(rhs.data.signed)) },
+                lhs.value = switch (lhs.value) {
+                    .unsigned => |v| .{ .unsigned = v >> @as(u6, @intCast(rhs.value.unsigned)) },
+                    .signed => |v| .{ .signed = v >> @as(u6, @intCast(rhs.value.signed)) },
                     else => unreachable,
                 };
             }
-        } else return p.todo("ast");
+        }
 
-        return p.todo("ast");
+        try lhs.bin(p, if (shl != null) .ShlExpr else .ShrExpr, rhs);
     }
     return lhs;
 }
@@ -1921,7 +1958,9 @@ fn addExpr(p: *Parser) Error!Result {
             } else {
                 try lhs.sub(minus.?, rhs, p);
             }
-        } else return p.todo("ast");
+        }
+
+        try lhs.bin(p, if (plus != null) .AddExpr else .SubExpr, rhs);
     }
     return lhs;
 }
@@ -1941,34 +1980,40 @@ fn mulExpr(p: *Parser) Error!Result {
             if (mul != null) {
                 try lhs.mul(mul.?, rhs, p);
             } else if (div != null) {
-                lhs.data = switch (lhs.data) {
-                    .unsigned => |v| .{ .unsigned = v / rhs.data.unsigned },
-                    .signed => |v| .{ .signed = @divFloor(v, rhs.data.signed) },
+                lhs.value = switch (lhs.value) {
+                    .unsigned => |v| .{ .unsigned = v / rhs.value.unsigned },
+                    .signed => |v| .{ .signed = @divFloor(v, rhs.value.signed) },
                     else => unreachable,
                 };
             } else {
-                lhs.data = switch (lhs.data) {
-                    .unsigned => |v| .{ .unsigned = v % rhs.data.unsigned },
-                    .signed => |v| .{ .signed = @rem(v, rhs.data.signed) },
+                lhs.value = switch (lhs.value) {
+                    .unsigned => |v| .{ .unsigned = v % rhs.value.unsigned },
+                    .signed => |v| .{ .signed = @rem(v, rhs.value.signed) },
                     else => unreachable,
                 };
             }
-        } else return p.todo("ast");
+        }
+
+        try lhs.bin(p, if (mul != null)
+            .MulExpr
+        else if (div != null)
+            AstTag.DivExpr
+        else
+            AstTag.ModExpr, rhs);
     }
     return lhs;
 }
 
 /// castExpr :  ( '(' type_name ')' )* unaryExpr
 fn castExpr(p: *Parser) Error!Result {
-    while (p.eat(.LParen)) |lp| {
-        const ty = (try p.typeName()) orelse {
-            p.index += 1;
-            break;
-        };
-        _ = ty;
-        try p.expectClosing(lp, .RParen);
-
-        return p.todo("cast");
+    if (p.eat(.LParen)) |lp| {
+        if (try p.typeName()) |ty| {
+            try p.expectClosing(lp, .RParen);
+            var operand = try p.castExpr();
+            operand.ty = ty;
+            return operand.un(p, .CastExpr);
+        }
+        p.index -= 1;
     }
 
     return p.unaryExpr();
@@ -1994,7 +2039,7 @@ fn unaryExpr(p: *Parser) Error!Result {
             var operand = try p.castExpr();
             // TODO upcast to int / validate arithmetic type
             const size = operand.ty.sizeof(p.pp.compilation);
-            switch (operand.data) {
+            switch (operand.value) {
                 .unsigned => |*v| switch (size) {
                     1, 2, 4 => v.* = @truncate(0 -% v.*),
                     8 => v.* = 0 -% v.*,
@@ -2005,27 +2050,30 @@ fn unaryExpr(p: *Parser) Error!Result {
                     8 => v.* = 0 -% v.*,
                     else => unreachable,
                 },
-                else => return p.todo("ast"),
+                else => {},
             }
-            return operand;
+            return operand.un(p, .NegateExpr);
         },
         .PlusPlus => return p.todo("unary inc"),
         .MinusMinus => return p.todo("unary dec"),
         .Tilde => return p.todo("unaryExpr tilde"),
         .Bang => {
             p.index += 1;
-            const lhs = try p.unaryExpr();
-            if (lhs.data == .unsigned or lhs.data == .signed) {
-                return Result{ .data = .{ .signed = @intFromBool(!lhs.getBool()) } };
+            var operand = try p.unaryExpr();
+            if (operand.value != .unavailable) {
+                operand.value = .{ .signed = @intFromBool(!operand.getBool()) };
             }
-            return p.todo("ast");
+
+            operand.ty = .{ .specifier = .Int };
+            return operand.un(p, .BoolNotExpr);
         },
         .KeywordSizeof => return p.todo("unaryExpr sizeof"),
+        .KeywordAlignof => return p.todo("unExpr alignof"),
         else => {
             var lhs = try p.primaryExpr();
             while (true) {
                 const suffix = try p.suffixExpr(lhs);
-                if (suffix.data == .none) break;
+                if (suffix.node == .none) break;
                 lhs = suffix;
             }
             return lhs;
@@ -2066,13 +2114,13 @@ fn suffixExpr(p: *Parser, lhs: Result) Error!Result {
                     try arg.expect(p);
 
                     if (args.items.len < paramTypes.len) {
-                        const paramType = p.nodes.items(.type)[paramTypes[args.items.len]];
+                        const paramType = p.nodes.items(.type)[@intFromEnum(paramTypes[args.items.len])];
                         const casted = try arg.coerce(p, paramType);
 
-                        try args.append(try casted.toNode(p));
+                        try args.append(casted.node);
                     } else {
                         // TODO: coerce to var args passable type
-                        try args.append(try arg.toNode(p));
+                        try args.append(arg.node);
                     }
 
                     _ = p.eat(.Comma) orelse break;
@@ -2094,33 +2142,36 @@ fn suffixExpr(p: *Parser, lhs: Result) Error!Result {
                 try p.errExtra(.expected_at_least_arguments, firstAfter, extra);
             }
 
+            var res: Result = .{ .ty = ty.data.func.returnType };
             switch (args.items.len) {
-                0 => return try Result.node(p, .{
+                0 => res.node = try p.addNode(.{
                     .tag = .CallExprOne,
-                    .type = ty.data.func.returnType,
-                    .data = .{ .first = try lhs.toNode(p) },
+                    .type = res.ty,
+                    .data = .{ .BinaryExpr = .{ .lhs = lhs.node, .rhs = .none } },
                 }),
-                1 => return try Result.node(p, .{
+                1 => res.node = try p.addNode(.{
                     .tag = .CallExprOne,
-                    .type = ty.data.func.returnType,
-                    .data = .{
-                        .first = try lhs.toNode(p),
-                        .second = args.items[0],
-                    },
+                    .type = res.ty,
+                    .data = .{ .BinaryExpr = .{
+                        .lhs = lhs.node,
+                        .rhs = args.items[0],
+                    } },
                 }),
                 else => {
-                    try p.data.append(try lhs.toNode(p));
+                    try p.data.append(lhs.node);
                     const range = try p.addList(args.items);
-                    return try Result.node(p, .{
+                    res.node = try p.addNode(.{
                         .tag = .CallExpr,
                         .type = ty.data.func.returnType,
-                        .data = .{
-                            .first = range.start - 1,
-                            .second = range.end,
-                        },
+                        .data = .{ .range = .{
+                            .start = range.start - 1,
+                            .end = range.end,
+                        } },
                     });
                 },
             }
+
+            return res;
         },
         .Period => return p.todo("member access"),
         .Arrow => return p.todo("member access pointer"),
@@ -2168,7 +2219,7 @@ fn primaryExpr(p: *Parser) Error!Result {
                     const node = try p.addNode(.{
                         .type = ty,
                         .tag = .FnProto,
-                        .data = .{ .first = nameToken },
+                        .data = .{ .Declaration = .{ .name = nameToken } },
                     });
 
                     try p.currDeclList.append(node);
@@ -2178,11 +2229,10 @@ fn primaryExpr(p: *Parser) Error!Result {
                         .nameToken = nameToken,
                     } });
 
-                    return try Result.leftValue(p, .{
-                        .tag = .DeclRefExpr,
-                        .type = ty,
-                        .data = .{ .first = nameToken, .second = node },
-                    });
+                    return Result{
+                        .ty = ty,
+                        .node = try p.addNode(.{ .tag = .DeclRefExpr, .type = ty, .data = .{ .DeclarationRef = nameToken } }),
+                    };
                 }
                 try p.errStr(.undeclared_identifier, nameToken, p.tokSlice(nameToken));
                 return error.ParsingFailed;
@@ -2196,11 +2246,14 @@ fn primaryExpr(p: *Parser) Error!Result {
                         try p.err(.expected_integer_constant_expr);
                         return error.ParsingFailed;
                     }
-                    return try Result.leftValue(p, .{
-                        .tag = .DeclRefExpr,
-                        .type = p.nodes.items(.type)[s.node],
-                        .data = .{ .first = nameToken, .second = s.node },
-                    });
+                    const ty = p.nodes.items(.type)[@intFromEnum(s.node)];
+                    return Result{
+                        .node = try p.addNode(.{
+                            .tag = .DeclRefExpr,
+                            .type = ty,
+                            .data = .{ .Declaration = .{ .name = nameToken, .node = s.node } },
+                        }),
+                    };
                 },
                 else => unreachable,
             }
@@ -2259,14 +2312,13 @@ fn primaryExpr(p: *Parser) Error!Result {
             if (width.? != 8)
                 return p.todo("non utf-8 strings");
 
-            var builder = std.ArrayList(u8).init(p.pp.compilation.gpa);
-            defer builder.deinit();
+            const index = p.strings.items.len;
 
             while (start < p.index) : (start += 1) {
                 var slice = p.tokSlice(start);
                 slice = slice[std.mem.indexOf(u8, slice, "\"").? + 1 .. slice.len - 1];
 
-                try builder.ensureTotalCapacity(slice.len);
+                try p.strings.ensureTotalCapacity(slice.len);
                 var i: u32 = 0;
                 while (i < slice.len) : (i += 1) {
                     switch (slice[i]) {
@@ -2275,15 +2327,15 @@ fn primaryExpr(p: *Parser) Error!Result {
                             switch (slice[i]) {
                                 '\n' => i += 1,
                                 '\r' => i += 2,
-                                '\'', '\"', '\\', '?' => |c| builder.appendAssumeCapacity(c),
-                                'n' => builder.appendAssumeCapacity('\n'),
-                                'r' => builder.appendAssumeCapacity('\r'),
-                                't' => builder.appendAssumeCapacity('\t'),
-                                'a' => builder.appendAssumeCapacity(0x07),
-                                'b' => builder.appendAssumeCapacity(0x08),
-                                'e' => builder.appendAssumeCapacity(0x1B),
-                                'f' => builder.appendAssumeCapacity(0x0C),
-                                'v' => builder.appendAssumeCapacity(0x0B),
+                                '\'', '\"', '\\', '?' => |c| p.strings.appendAssumeCapacity(c),
+                                'n' => p.strings.appendAssumeCapacity('\n'),
+                                'r' => p.strings.appendAssumeCapacity('\r'),
+                                't' => p.strings.appendAssumeCapacity('\t'),
+                                'a' => p.strings.appendAssumeCapacity(0x07),
+                                'b' => p.strings.appendAssumeCapacity(0x08),
+                                'e' => p.strings.appendAssumeCapacity(0x1B),
+                                'f' => p.strings.appendAssumeCapacity(0x0C),
+                                'v' => p.strings.appendAssumeCapacity(0x0B),
                                 'x' => return p.todo("hex escape"),
                                 'u' => return p.todo("u escape"),
                                 'U' => return p.todo("U escape"),
@@ -2291,28 +2343,31 @@ fn primaryExpr(p: *Parser) Error!Result {
                                 else => unreachable,
                             }
                         },
-                        else => |c| builder.appendAssumeCapacity(c),
+                        else => |c| p.strings.appendAssumeCapacity(c),
                     }
                 }
             }
 
-            try builder.append(0);
-            const str = try p.arena.dupe(u8, builder.items);
-            const ptrLoc = @as(u32, @intCast(p.data.items.len));
-            const ptr_val = @as([2]u32, @bitCast(@intFromPtr(str.ptr)));
-            try p.data.appendSlice(&ptr_val);
+            try p.strings.append(0);
+            const len = p.strings.items.len - index;
 
             const arrayType = try p.arena.create(Type.Array);
-            arrayType.* = .{ .elem = .{ .specifier = .Char }, .len = str.len };
+            arrayType.* = .{ .elem = .{ .specifier = .Char }, .len = len };
 
-            return try Result.node(p, .{
-                .tag = .StringLiteralExpr,
-                .type = .{
+            var res: Result = .{
+                .ty = .{
                     .specifier = .Array,
                     .data = .{ .array = arrayType },
                 },
-                .data = .{ .first = ptrLoc, .second = @intCast(str.len) },
+            };
+
+            res.node = try p.addNode(.{
+                .tag = .StringLiteralExpr,
+                .type = res.ty,
+                .data = .{ .String = .{ .index = @as(u32, @intCast(index)), .len = @as(u32, @intCast(len)) } },
             });
+
+            return res;
         },
 
         .CharLiteral,
@@ -2339,12 +2394,16 @@ fn primaryExpr(p: *Parser) Error!Result {
 
         .Zero => {
             p.index += 1;
-            return Result{ .data = .{ .signed = 0 } };
+            var res: Result = .{ .value = .{ .signed = 0 } };
+            res.node = try p.addNode(.{ .tag = .IntLiteral, .type = res.ty, .data = .{ .Int = 0 } });
+            return res;
         },
 
         .One => {
             p.index += 1;
-            return Result{ .data = .{ .signed = 1 } };
+            var res: Result = .{ .value = .{ .signed = 0 } };
+            res.node = try p.addNode(.{ .tag = .IntLiteral, .type = res.ty, .data = .{ .Int = 0 } });
+            return res;
         },
 
         .IntegerLiteral,
@@ -2356,6 +2415,8 @@ fn primaryExpr(p: *Parser) Error!Result {
         => {
             const curToken = p.getCurrToken();
             var slice = p.tokSlice(p.index);
+
+            defer p.index += 1;
 
             var base: u8 = 10;
             if (std.mem.startsWith(u8, slice, "0x") or std.mem.startsWith(u8, slice, "0X")) {
@@ -2401,10 +2462,10 @@ fn primaryExpr(p: *Parser) Error!Result {
 
             if (overflow) {
                 try p.err(.int_literal_too_big);
-                return Result{ .ty = .{ .specifier = .ULongLong }, .data = .{ .unsigned = value } };
+                var res: Result = .{ .ty = .{ .specifier = .ULongLong }, .value = .{ .unsigned = value } };
+                res.node = try p.addNode(.{ .tag = .IntLiteral, .type = res.ty, .data = .{ .Int = value } });
+                return res;
             }
-
-            p.index += 1;
 
             if (base == 10) {
                 switch (curToken) {
@@ -2437,27 +2498,34 @@ fn primaryExpr(p: *Parser) Error!Result {
 }
 
 fn castInt(p: *Parser, val: u64, specs: []const Type.Specifier) Error!Result {
+    var res: Result = .{};
     for (specs) |spec| {
         const ty = Type{ .specifier = spec };
         const isUnsigned = ty.isUnsignedInt(p.pp.compilation);
         const tySize = ty.sizeof(p.pp.compilation);
+        res.ty = ty;
 
         if (isUnsigned) {
+            res.value = .{ .unsigned = val };
             switch (tySize) {
-                2 => if (val < std.math.maxInt(u16)) return Result{ .ty = ty, .data = .{ .unsigned = val } },
-                4 => if (val < std.math.maxInt(u32)) return Result{ .ty = ty, .data = .{ .unsigned = val } },
-                8 => if (val < std.math.maxInt(u64)) return Result{ .ty = ty, .data = .{ .unsigned = val } },
+                2 => if (val < std.math.maxInt(u16)) break,
+                4 => if (val < std.math.maxInt(u32)) break,
+                8 => if (val < std.math.maxInt(u64)) break,
                 else => unreachable,
             }
         } else {
+            res.value = .{ .signed = @as(i64, @bitCast(val)) };
             switch (tySize) {
-                2 => if (val < std.math.maxInt(i16)) return Result{ .ty = ty, .data = .{ .signed = @as(i16, @intCast(val)) } },
-                4 => if (val < std.math.maxInt(i32)) return Result{ .ty = ty, .data = .{ .signed = @as(i32, @intCast(val)) } },
-                8 => if (val < std.math.maxInt(i64)) return Result{ .ty = ty, .data = .{ .signed = @as(i64, @intCast(val)) } },
+                2 => if (val < std.math.maxInt(i16)) break,
+                4 => if (val < std.math.maxInt(i32)) break,
+                8 => if (val < std.math.maxInt(i64)) break,
                 else => unreachable,
             }
         }
+    } else {
+        res.ty = .{ .specifier = .ULongLong };
     }
 
-    return Result{ .ty = .{ .specifier = .ULongLong }, .data = .{ .unsigned = val } };
+    res.node = try p.addNode(.{ .tag = .IntLiteral, .type = res.ty, .data = .{ .Int = val } });
+    return res;
 }

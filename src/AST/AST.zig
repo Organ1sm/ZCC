@@ -9,7 +9,7 @@ const AstTag = @import("AstTag.zig").Tag;
 const AST = @This();
 
 pub const TokenIndex = u32;
-pub const NodeIndex = u32;
+pub const NodeIndex = enum(u32) { none, _ };
 
 comp: *Compilation,
 arena: std.heap.ArenaAllocator,
@@ -18,10 +18,12 @@ tokens: Token.List.Slice,
 nodes: Node.List.Slice,
 data: []const NodeIndex,
 rootDecls: []const NodeIndex,
+strings: []const u8,
 
 pub fn deinit(tree: *AST) void {
     tree.comp.gpa.free(tree.rootDecls);
     tree.comp.gpa.free(tree.data);
+    tree.comp.gpa.free(tree.strings);
     tree.nodes.deinit(tree.comp.gpa);
     tree.arena.deinit();
 }
@@ -42,11 +44,57 @@ pub const Token = struct {
 pub const Node = struct {
     tag: AstTag,
     type: Type = .{ .specifier = .Void },
-    data: Data = .{},
+    data: Data,
 
-    pub const Data = struct {
-        first: NodeIndex = 0,
-        second: NodeIndex = 0,
+    pub const Data = union {
+        Declaration: struct { name: TokenIndex, node: NodeIndex = .none },
+        DeclarationRef: TokenIndex,
+
+        range: struct { start: u32, end: u32 },
+
+        If3: struct { cond: NodeIndex, body: u32 },
+
+        String: struct { index: u32, len: u32 },
+
+        UnaryExpr: NodeIndex,
+
+        BinaryExpr: struct { lhs: NodeIndex, rhs: NodeIndex },
+
+        Int: u64,
+        Float: f32,
+        Double: f64,
+
+        pub fn forDecl(data: Data, tree: AST) struct {
+            decls: []const NodeIndex,
+            cond: NodeIndex,
+            incr: NodeIndex,
+            body: NodeIndex,
+        } {
+            const items = tree.data[data.range.start..data.range.end];
+
+            return .{
+                .decls = items[0 .. items.len - 3],
+                .cond = items[items.len - 3],
+                .incr = items[items.len - 2],
+                .body = items[items.len - 1],
+            };
+        }
+
+        pub fn forStmt(data: Data, tree: AST) struct {
+            init: NodeIndex,
+            cond: NodeIndex,
+            incr: NodeIndex,
+            body: NodeIndex,
+        } {
+            const items = tree.data[data.If3.body..];
+
+            return .{
+                .init = items[0],
+                .cond = items[1],
+                .incr = items[2],
+                .body = data.If3.cond,
+            };
+        }
     };
 
     pub const List = std.MultiArrayList(Node);
@@ -71,147 +119,6 @@ pub fn tokSlice(tree: AST, index: TokenIndex) []const u8 {
     return lexer.buffer[token.start..token.end];
 }
 
-pub const Declaration = struct {
-    pub const FnProto = struct {
-        name: []const u8,
-        ty: Type,
-        isStatic: bool,
-        isInline: bool,
-        definition: ?*FnDef,
-    };
-
-    pub const FnDef = struct {
-        name: []const u8,
-        ty: Type,
-        isStatic: bool,
-        isInline: bool,
-        body: NodeIndex,
-    };
-
-    pub const Param = struct {
-        nameToken: TokenIndex,
-        ty: Type,
-    };
-
-    pub const Var = struct {
-        name: []const u8,
-        ty: Type,
-        storageClass: enum {
-            none,
-            static,
-            @"extern",
-            register,
-        },
-        isThreadlocal: bool,
-        init: ?NodeIndex,
-    };
-
-    pub const Typedef = struct {
-        name: []const u8,
-        ty: Type,
-    };
-
-    pub const RecordForward = struct {
-        name: []const u8,
-        definition: ?*Record,
-    };
-
-    pub const Record = struct {
-        // identifier or keyword_struct/union if anonymous
-        nameToken: TokenIndex,
-        fields: []Field,
-    };
-
-    pub const Field = struct {
-        // identifier or keyword_struct/union if anonymous
-        name: TokenIndex,
-        ty: Type,
-        // TODO bit field stuff
-    };
-
-    pub const EnumForward = struct {
-        name: []const u8,
-        definition: ?*Enum,
-    };
-
-    pub const Enum = struct {
-        // identifier or keyword_enum if anonymous
-        tagType: Type,
-        nameToken: TokenIndex,
-    };
-};
-
-pub const Statement = struct {
-    pub const Labeled = struct {
-        label: []const u8,
-        stmt: NodeIndex,
-    };
-
-    pub const Compound = struct {
-        stmts: NodeIndex,
-    };
-
-    pub const If = struct {
-        cond: NodeIndex,
-        then: NodeIndex,
-        @"else": NodeIndex,
-    };
-
-    pub const Switch = struct { cond: NodeIndex, stmt: NodeIndex };
-
-    pub const While = struct {
-        cond: NodeIndex,
-        stmt: NodeIndex,
-    };
-
-    pub const For = struct {
-        init: NodeIndex,
-        cond: NodeIndex,
-        inc: NodeIndex,
-        stmt: NodeIndex,
-    };
-
-    pub const Goto = struct {
-        label: []const u8,
-    };
-
-    pub const Return = struct {
-        stmt: NodeIndex,
-    };
-};
-
-pub const Expression = struct {
-    pub const Float = f32;
-    pub const Double = f64;
-
-    pub const String = struct {
-        tokens: []TokenIndex,
-    };
-
-    // pub const Number = struct {
-    //     ty: Type,
-
-    // };
-
-    pub const BinOp = struct {
-        ty: Type,
-        lhs: NodeIndex,
-        rhs: NodeIndex,
-    };
-
-    pub const UnaryOp = struct {
-        ty: Type,
-        operand: NodeIndex,
-    };
-
-    pub const Conditional = struct {
-        ty: Type,
-        cond: NodeIndex,
-        then: NodeIndex,
-        @"else": NodeIndex,
-    };
-};
-
 pub fn dump(tree: AST, writer: anytype) @TypeOf(writer).Error!void {
     for (tree.rootDecls) |i| {
         try tree.dumpNode(i, 0, writer);
@@ -228,14 +135,16 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
     const LITERAL = "\x1b[32;1m";
     const RESET = "\x1b[0m";
 
-    const tag = tree.nodes.items(.tag)[node];
+    std.debug.assert(node != .none);
+
+    const tag = tree.nodes.items(.tag)[@intFromEnum(node)];
+    const data = tree.nodes.items(.data)[@intFromEnum(node)];
+    const ty = tree.nodes.items(.type)[@intFromEnum(node)];
+
     try w.writeByteNTimes(' ', level);
     try w.print(TAG ++ "{s}: " ++ TYPE ++ "'", .{@tagName(tag)});
-    try tree.nodes.items(.type)[node].dump(tree, w);
+    try ty.dump(tree, w);
     try w.writeAll("'\n" ++ RESET);
-
-    const data = tree.nodes.items(.data)[node];
-    const range = tree.nodes.items(.data)[node];
 
     switch (tag) {
         .Invalid => unreachable,
@@ -250,7 +159,7 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
         .NoreturnInlineStaticFnProto,
         => {
             try w.writeByteNTimes(' ', level + half);
-            try w.print("name: " ++ NAME ++ "{s}\n" ++ RESET, .{tree.tokSlice(tree.nodes.items(.data)[node].first)});
+            try w.print("name: " ++ NAME ++ "{s}\n" ++ RESET, .{tree.tokSlice(data.Declaration.name)});
         },
 
         .FnDef,
@@ -263,14 +172,14 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
         .NoreturnInlineStaticFnDef,
         => {
             try w.writeByteNTimes(' ', level + half);
-            try w.print("name: " ++ NAME ++ "{s}\n" ++ RESET, .{tree.tokSlice(data.first)});
+            try w.print("name: " ++ NAME ++ "{s}\n" ++ RESET, .{tree.tokSlice(data.Declaration.name)});
             try w.writeByteNTimes(' ', level + half);
             try w.writeAll("body:\n");
-            try tree.dumpNode(data.second, level + delta, w);
+            try tree.dumpNode(data.Declaration.node, level + delta, w);
         },
 
         .CompoundStmt => {
-            for (tree.data[range.first..range.second], 0..) |stmt, i| {
+            for (tree.data[data.range.start..data.range.end], 0..) |stmt, i| {
                 if (i != 0)
                     try w.writeByte('\n');
                 try tree.dumpNode(stmt, level + delta, w);
@@ -278,178 +187,164 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
         },
 
         .CompoundStmtTwo => {
-            if (data.first != 0) try tree.dumpNode(data.first, level + delta, w);
-            if (data.second != 0) try tree.dumpNode(data.second, level + delta, w);
+            if (data.BinaryExpr.lhs != .none) try tree.dumpNode(data.BinaryExpr.lhs, level + delta, w);
+            if (data.BinaryExpr.rhs != .none) try tree.dumpNode(data.BinaryExpr.rhs, level + delta, w);
         },
 
         .LabeledStmt => {
             try w.writeByteNTimes(' ', level + half);
-            try w.print("label: " ++ LITERAL ++ "{s}\n" ++ RESET, .{tree.tokSlice(data.first)});
-            if (data.second != 0) {
+            try w.print("label: " ++ LITERAL ++ "{s}\n" ++ RESET, .{tree.tokSlice(data.Declaration.name)});
+            if (data.Declaration.node != .none) {
                 try w.writeByteNTimes(' ', level + half);
                 try w.writeAll("stmt:\n");
-                try tree.dumpNode(data.second, level + delta, w);
+                try tree.dumpNode(data.Declaration.node, level + delta, w);
             }
         },
 
         .IfThenElseStmt => {
             try w.writeByteNTimes(' ', level + half);
             try w.writeAll("cond:\n");
-            try tree.dumpNode(data.first, level + delta, w);
+            try tree.dumpNode(data.If3.cond, level + delta, w);
 
             try w.writeByteNTimes(' ', level + half);
             try w.writeAll("then:\n");
-            try tree.dumpNode(tree.data[data.second], level + delta, w);
+            try tree.dumpNode(tree.data[data.If3.body], level + delta, w);
 
             try w.writeByteNTimes(' ', level + half);
             try w.writeAll("else:\n");
-            try tree.dumpNode(tree.data[data.second + 1], level + delta, w);
+            try tree.dumpNode(tree.data[data.If3.body + 1], level + delta, w);
         },
 
         .IfElseStmt => {
             try w.writeByteNTimes(' ', level + half);
             try w.writeAll("cond:\n");
-            try tree.dumpNode(data.first, level + delta, w);
+            try tree.dumpNode(data.BinaryExpr.lhs, level + delta, w);
 
             try w.writeByteNTimes(' ', level + half);
             try w.writeAll("else:\n");
-            try tree.dumpNode(data.second, level + delta, w);
+            try tree.dumpNode(data.BinaryExpr.rhs, level + delta, w);
         },
 
         .IfThenStmt => {
             try w.writeByteNTimes(' ', level + half);
             try w.writeAll("cond:\n");
-            try tree.dumpNode(data.first, level + delta, w);
+            try tree.dumpNode(data.BinaryExpr.lhs, level + delta, w);
 
-            const then = data.second;
-            if (then != 0) {
+            if (data.BinaryExpr.rhs != .none) {
                 try w.writeByteNTimes(' ', level + half);
                 try w.writeAll("then:\n");
-                try tree.dumpNode(then, level + delta, w);
+                try tree.dumpNode(data.BinaryExpr.rhs, level + delta, w);
             }
         },
 
         .GotoStmt => {
             try w.writeByteNTimes(' ', level + half);
-            try w.print("label: " ++ LITERAL ++ "{s}\n" ++ RESET, .{tree.tokSlice(data.first)});
+            try w.print("label: " ++ LITERAL ++ "{s}\n" ++ RESET, .{tree.tokSlice(data.DeclarationRef)});
         },
 
         .ContinueStmt, .BreakStmt => {},
         .ReturnStmt => {
-            const expr = data.first;
-            if (expr != 0) {
+            if (data.UnaryExpr != .none) {
                 try w.writeByteNTimes(' ', level + half);
                 try w.writeAll("expr:\n");
-                try tree.dumpNode(expr, level + delta, w);
+                try tree.dumpNode(data.UnaryExpr, level + delta, w);
             }
         },
 
         .ForDeclStmt => {
-            const items = tree.data[range.first..range.second];
-            const decls = items[0 .. items.len - 3];
+            const forDecl = data.forDecl(tree);
 
             try w.writeByteNTimes(' ', level + half);
             try w.writeAll("decl:\n");
-            for (decls) |decl| {
+            for (forDecl.decls) |decl| {
                 try tree.dumpNode(decl, level + delta, w);
                 try w.writeByte('\n');
             }
 
-            const cond = items[items.len - 3];
-            if (cond != 0) {
+            if (forDecl.cond != .none) {
                 try w.writeByteNTimes(' ', level + half);
                 try w.writeAll("cond:\n");
-                try tree.dumpNode(cond, level + delta, w);
+                try tree.dumpNode(forDecl.cond, level + delta, w);
             }
 
-            const incr = items[items.len - 2];
-            if (incr != 0) {
+            if (forDecl.incr != .none) {
                 try w.writeByteNTimes(' ', level + half);
                 try w.writeAll("incr:\n");
-                try tree.dumpNode(incr, level + delta, w);
+                try tree.dumpNode(forDecl.incr, level + delta, w);
             }
 
-            const body = items[items.len - 1];
-            if (body != 0) {
+            if (forDecl.body != .none) {
                 try w.writeByteNTimes(' ', level + half);
                 try w.writeAll("body:\n");
-                try tree.dumpNode(body, level + delta, w);
+                try tree.dumpNode(forDecl.body, level + delta, w);
             }
         },
 
         .ForEverStmt => {
-            const body = data.first;
-            if (body != 0) {
+            if (data.UnaryExpr != .none) {
                 try w.writeByteNTimes(' ', level + half);
                 try w.writeAll("body:\n");
-                try tree.dumpNode(body, level + delta, w);
+                try tree.dumpNode(data.UnaryExpr, level + delta, w);
             }
         },
 
         .ForStmt => {
-            const start = tree.data[data.first..];
-            const init = start[0];
+            const forStmt = data.forStmt(tree);
 
-            if (init != 0) {
+            if (forStmt.init != .none) {
                 try w.writeByteNTimes(' ', level + half);
                 try w.writeAll("init:\n");
-                try tree.dumpNode(init, level + delta, w);
+                try tree.dumpNode(forStmt.init, level + delta, w);
             }
 
-            const cond = start[1];
-            if (cond != 0) {
+            if (forStmt.cond != .none) {
                 try w.writeByteNTimes(' ', level + half);
                 try w.writeAll("cond:\n");
-                try tree.dumpNode(cond, level + delta, w);
+                try tree.dumpNode(forStmt.cond, level + delta, w);
             }
 
-            const incr = start[2];
-            if (incr != 0) {
+            if (forStmt.incr != .none) {
                 try w.writeByteNTimes(' ', level + half);
                 try w.writeAll("incr:\n");
-                try tree.dumpNode(incr, level + delta, w);
+                try tree.dumpNode(forStmt.incr, level + delta, w);
             }
 
-            const body = data.second;
-            if (body != 0) {
+            if (forStmt.body != .none) {
                 try w.writeByteNTimes(' ', level + half);
                 try w.writeAll("body:\n");
-                try tree.dumpNode(body, level + delta, w);
+                try tree.dumpNode(forStmt.body, level + delta, w);
             }
         },
 
         .SwitchStmt, .WhileStmt, .DoWhileStmt => {
             try w.writeByteNTimes(' ', level + half);
             try w.writeAll("cond:\n");
-            try tree.dumpNode(data.first, level + delta, w);
+            try tree.dumpNode(data.BinaryExpr.lhs, level + delta, w);
 
-            const body = data.second;
-            if (body != 0) {
+            if (data.BinaryExpr.rhs != .none) {
                 try w.writeByteNTimes(' ', level + half);
                 try w.writeAll("body:\n");
-                try tree.dumpNode(body, level + delta, w);
+                try tree.dumpNode(data.BinaryExpr.rhs, level + delta, w);
             }
         },
 
         .CaseStmt => {
             try w.writeByteNTimes(' ', level + half);
             try w.writeAll("value:\n");
-            try tree.dumpNode(data.first, level + delta, w);
+            try tree.dumpNode(data.BinaryExpr.lhs, level + delta, w);
 
-            const stmt = data.second;
-            if (stmt != 0) {
+            if (data.BinaryExpr.rhs != .none) {
                 try w.writeByteNTimes(' ', level + half);
                 try w.writeAll("stmt:\n");
-                try tree.dumpNode(stmt, level + delta, w);
+                try tree.dumpNode(data.BinaryExpr.rhs, level + delta, w);
             }
         },
 
         .DefaultStmt => {
-            const stmt = data.first;
-            if (stmt != 0) {
+            if (data.UnaryExpr != .none) {
                 try w.writeByteNTimes(' ', level + half);
                 try w.writeAll("stmt:\n");
-                try tree.dumpNode(stmt, level + delta, w);
+                try tree.dumpNode(data.UnaryExpr, level + delta, w);
             }
         },
 
@@ -463,40 +358,37 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
         .TypeDef,
         => {
             try w.writeByteNTimes(' ', level + half);
-            try w.print("name: " ++ LITERAL ++ "\"{s}\"\n" ++ RESET, .{tree.tokSlice(data.first)});
+            try w.print("name: " ++ LITERAL ++ "\"{s}\"\n" ++ RESET, .{tree.tokSlice(data.Declaration.name)});
 
-            const init = data.second;
-            if (init != 0) {
+            if (data.Declaration.node != .none) {
                 try w.writeByteNTimes(' ', level + half);
                 try w.writeAll("init:\n");
-                try tree.dumpNode(init, level + delta, w);
+                try tree.dumpNode(data.Declaration.node, level + delta, w);
             }
         },
 
         .StringLiteralExpr => {
-            const ptr: [*]const u8 = @ptrFromInt(@as(usize, @bitCast(tree.data[data.first..][0..2].*)));
-
             try w.writeByteNTimes(' ', level + half);
-            try w.print("data: " ++ LITERAL ++ "{s}\n" ++ RESET, .{ptr[0 .. data.second - 1]});
+            try w.print("data: " ++ LITERAL ++ "{s}\n" ++ RESET, .{tree.strings[data.String.index..][0..data.String.len]});
         },
 
         .CallExpr => {
             try w.writeByteNTimes(' ', level + half);
             try w.writeAll("lhs:\n");
-            try tree.dumpNode(tree.data[range.first], level + delta, w);
+            try tree.dumpNode(tree.data[data.range.start], level + delta, w);
 
             try w.writeByteNTimes(' ', level + half);
             try w.writeAll("args:\n");
-            for (tree.data[range.first + 1 .. range.second]) |stmt| try tree.dumpNode(stmt, level + delta, w);
+            for (tree.data[data.range.start + 1 .. data.range.end]) |arg| try tree.dumpNode(arg, level + delta, w);
         },
 
         .CallExprOne => {
             try w.writeByteNTimes(' ', level + half);
             try w.writeAll("lhs:\n");
-            try tree.dumpNode(data.first, level + delta, w);
+            try tree.dumpNode(data.BinaryExpr.lhs, level + delta, w);
 
-            const arg = data.second;
-            if (arg != 0) {
+            const arg = data.BinaryExpr.rhs;
+            if (arg != .none) {
                 try w.writeByteNTimes(' ', level + half);
                 try w.writeAll("arg:\n");
                 try tree.dumpNode(arg, level + delta, w);
@@ -537,10 +429,10 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
         => {
             try w.writeByteNTimes(' ', level + 1);
             try w.writeAll("lhs:\n");
-            try tree.dumpNode(data.first, level + delta, w);
+            try tree.dumpNode(data.BinaryExpr.lhs, level + delta, w);
             try w.writeByteNTimes(' ', level + 1);
             try w.writeAll("rhs:\n");
-            try tree.dumpNode(data.second, level + delta, w);
+            try tree.dumpNode(data.BinaryExpr.rhs, level + delta, w);
         },
 
         .CastExpr,
@@ -558,33 +450,27 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
         => {
             try w.writeByteNTimes(' ', level + 1);
             try w.writeAll("operand:\n");
-            try tree.dumpNode(data.first, level + delta, w);
+            try tree.dumpNode(data.UnaryExpr, level + delta, w);
         },
 
         .DeclRefExpr => {
             try w.writeByteNTimes(' ', level + 1);
-            try w.print("name: " ++ NAME ++ "{s}\n" ++ RESET, .{tree.tokSlice(data.first)});
+            try w.print("name: " ++ NAME ++ "{s}\n" ++ RESET, .{tree.tokSlice(data.DeclarationRef)});
         },
 
         .IntLiteral => {
             try w.writeByteNTimes(' ', level + 1);
-            const parts: [2]u32 = .{ data.first, data.second };
-            if (tree.nodes.items(.type)[node].isUnsignedInt(tree.comp)) {
-                try w.print("value: " ++ LITERAL ++ "{d}\n" ++ RESET, .{@as(u64, @bitCast(parts))});
-            } else {
-                try w.print("value: " ++ LITERAL ++ "{d}\n" ++ RESET, .{@as(i64, @bitCast(parts))});
-            }
+            try w.print("value: " ++ LITERAL ++ "{d}\n" ++ RESET, .{data.Int});
         },
 
         .FloatLiteral => {
             try w.writeByteNTimes(' ', level + 1);
-            try w.print("value: " ++ LITERAL ++ "{d}\n" ++ RESET, .{@as(f32, @bitCast(data.first))});
+            try w.print("value: " ++ LITERAL ++ "{d}\n" ++ RESET, .{data.Float});
         },
 
         .DoubleLiteral => {
             try w.writeByteNTimes(' ', level + 1);
-            const parts: [2]u32 = .{data.first, data.second};
-            try w.print("value: " ++ LITERAL ++ "{d}\n" ++ RESET, .{@as(f64, @bitCast(parts))});
+            try w.print("value: " ++ LITERAL ++ "{d}\n" ++ RESET, .{data.Double});
         },
 
         else => {},
