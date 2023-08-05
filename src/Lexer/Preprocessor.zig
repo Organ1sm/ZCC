@@ -457,14 +457,10 @@ fn expr(pp: *Preprocessor, lexer: *Lexer) Error!bool {
         .scopes = undefined,
         .data = undefined,
         .labels = undefined,
+        .strings = undefined,
     };
 
-    const res = parser.constExpr() catch |e| switch (e) {
-        error.OutOfMemory => return error.OutOfMemory,
-        error.FatalError => return error.FatalError,
-        error.ParsingFailed => return false,
-    };
-    return res.getBool();
+    return parser.macroExpr();
 }
 
 fn skip(pp: *Preprocessor, lexer: *Lexer, cont: enum { untilElse, untilEndIf, untilEndIfSeenElse }) Error!void {

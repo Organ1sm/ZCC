@@ -217,12 +217,12 @@ pub fn dump(ty: Type, tree: Tree, w: anytype) @TypeOf(w).Error!void {
             try w.writeAll("fn (");
             for (ty.data.func.paramTypes, 0..) |param, i| {
                 if (i != 0) try w.writeAll(", ");
-                const nameToken = tree.nodes.items(.data)[param].first;
+                const nameToken = tree.nodes.items(.data)[@intFromEnum(param)].Declaration.name;
                 if (tree.tokens.items(.id)[nameToken] == .Identifier) {
                     try w.print("{s}: ", .{tree.tokSlice(nameToken)});
                 }
 
-                try tree.nodes.items(.type)[param].dump(tree, w);
+                try tree.nodes.items(.type)[@intFromEnum(param)].dump(tree, w);
             }
 
             if (ty.specifier != .Func) {
