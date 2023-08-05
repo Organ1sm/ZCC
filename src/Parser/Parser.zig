@@ -34,6 +34,7 @@ currDeclList: *NodeList,
 labels: std.ArrayList(Label),
 labelCount: u32 = 0,
 strings: std.ArrayList(u8),
+valueMap: AST.ValueMap,
 
 const Label = union(enum) {
     unresolvedGoto: TokenIndex,
@@ -266,13 +267,20 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
         .data = NodeList.init(pp.compilation.gpa),
         .labels = std.ArrayList(Label).init(pp.compilation.gpa),
         .strings = std.ArrayList(u8).init(pp.compilation.gpa),
+        .valueMap = AST.ValueMap.init(pp.compilation.gpa),
     };
-    defer p.scopes.deinit();
-    defer p.data.deinit();
-    defer p.labels.deinit();
 
-    errdefer p.nodes.deinit(pp.compilation.gpa);
-    errdefer p.strings.deinit();
+    defer {
+        p.scopes.deinit();
+        p.data.deinit();
+        p.labels.deinit();
+    }
+
+    errdefer {
+        p.nodes.deinit(pp.compilation.gpa);
+        p.strings.deinit();
+        p.valueMap.deinit();
+    }
 
     _ = try p.addNode(.{ .tag = .Invalid, .type = undefined, .data = undefined });
 
@@ -309,6 +317,7 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
         .data = data,
         .rootDecls = try rootDecls.toOwnedSlice(),
         .strings = try p.strings.toOwnedSlice(),
+        .valueMap = p.valueMap,
     };
 }
 
