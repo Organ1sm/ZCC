@@ -83,7 +83,28 @@ pub fn adjustTypes(a: *Result, b: *Result, p: *Parser) !bool {
 
     if (aIsUnsigned != bIsUnsigned) {}
 
-    return a.value != .unavailable and b.value != .unavailable;
+    if (a.value != .unavailable and b.value != .unavailable)
+        return true;
+
+    try a.saveValue(p);
+    try b.saveValue(p);
+    return false;
+}
+
+fn saveValue(res: Result, p: *Parser) !void {
+    std.debug.assert(!p.wantConst);
+    if (res.value == .unavailable) return;
+
+    switch (p.nodes.items(.tag)[@intFromEnum(res.node)]) {
+        .IntLiteral => return,
+        else => {},
+    }
+
+    switch (res.value) {
+        .unsigned => |v| try p.valueMap.put(res.node, v),
+        .signed => |v| try p.valueMap.put(res.node, @as(u64, @bitCast(v))),
+        .unavailable => {},
+    }
 }
 
 pub fn hash(res: Result) u64 {

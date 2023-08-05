@@ -458,6 +458,7 @@ fn expr(pp: *Preprocessor, lexer: *Lexer) Error!bool {
         .data = undefined,
         .labels = undefined,
         .strings = undefined,
+        .valueMap = undefined,
     };
 
     return parser.macroExpr();
