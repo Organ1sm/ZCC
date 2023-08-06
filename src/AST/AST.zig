@@ -103,6 +103,34 @@ pub const Node = struct {
     pub const List = std.MultiArrayList(Node);
 };
 
+pub fn isLValue(nodes: Node.List.Slice, node: NodeIndex) bool {
+    switch (nodes.items(.tag)[@intFromEnum(node)]) {
+        .CompoundLiteralExpr,
+        .StringLiteralExpr,
+        .MemberAccessPtrExpr,
+        .ArrayAccessExpr,
+        .DeclRefExpr,
+        => return true,
+
+        .DerefExpr => {
+            const data = nodes.items(.data)[@intFromEnum(node)];
+            return !nodes.items(.type)[@intFromEnum(data.UnaryExpr)].isFunc();
+        },
+
+        .MemberAccessExpr => {
+            const data = nodes.items(.data)[@intFromEnum(node)];
+            return isLValue(nodes, data.BinaryExpr.lhs);
+        },
+
+        .ParenExpr => {
+            const data = nodes.items(.data)[@intFromEnum(node)];
+            return isLValue(nodes, data.UnaryExpr);
+        },
+
+        else => return false,
+    }
+}
+
 pub fn tokSlice(tree: AST, index: TokenIndex) []const u8 {
     if (tree.tokens.items(.id)[index].lexeMe()) |some|
         return some;
@@ -136,6 +164,7 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
     const TAG = "\x1b[36;1m";
     const NAME = "\x1b[91;1m";
     const LITERAL = "\x1b[32;1m";
+    const ATTRIBUTE = "\x1b[93;1m";
     const RESET = "\x1b[0m";
 
     std.debug.assert(node != .none);
@@ -155,6 +184,10 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
             try w.print(LITERAL ++ " (value: {d})" ++ RESET, .{@as(i64, @bitCast(value))});
     }
     try w.writeAll("\n" ++ RESET);
+
+    if (isLValue(tree.nodes, node)) {
+        try w.writeAll(ATTRIBUTE ++ " lvalue");
+    }
 
     switch (tag) {
         .Invalid => unreachable,
@@ -456,7 +489,9 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
         .PreDecExpr,
         .PostIncExpr,
         .PostDecExpr,
+        .ParenExpr,
         .ArrayToPointer,
+        .LValueToRValue,
         => {
             try w.writeByteNTimes(' ', level + 1);
             try w.writeAll("operand:\n");

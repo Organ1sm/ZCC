@@ -200,6 +200,8 @@ pub const Tag = enum(u8) {
     PostIncExpr,
     /// lhs--
     PostDecExpr,
+    /// (lhs)
+    ParenExpr,
     /// lhs is a TokenIndex of the identifier
     DeclRefExpr,
     /// integer literal with 64bit, split in first and second

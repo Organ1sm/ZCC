@@ -43,9 +43,8 @@ pub fn bin(lhs: *Result, p: *Parser, tag: AstTag, rhs: Result) !void {
 }
 
 pub fn un(operand: *Result, p: *Parser, tag: AstTag) Error!Result {
-    _ = tag;
     operand.node = try p.addNode(.{
-        .tag = .CastExpr,
+        .tag = tag,
         .type = operand.ty,
         .data = .{ .UnaryExpr = operand.node },
     });
@@ -85,7 +84,7 @@ pub fn adjustTypes(a: *Result, b: *Result, p: *Parser) !bool {
 
     if (aIsUnsigned != bIsUnsigned) {}
 
-    if (p.noEval) 
+    if (p.noEval)
         return false;
     if (a.value != .unavailable and b.value != .unavailable)
         return true;
