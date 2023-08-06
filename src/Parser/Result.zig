@@ -27,6 +27,7 @@ pub fn getBool(res: Result) bool {
 }
 
 pub fn expect(res: Result, p: *Parser) Error!void {
+    try res.saveValue(p);
     if (res.node == .none) {
         try p.errToken(.expected_expr, p.index);
         return error.ParsingFailed;
@@ -77,12 +78,15 @@ pub fn coerce(res: Result, p: *Parser, destType: Type) !Result {
 }
 
 /// Return true if both are same type
+/// Adjust types for binary operation, returns true if the result can and should be evaluated.
 pub fn adjustTypes(a: *Result, b: *Result, p: *Parser) !bool {
     const aIsUnsigned = a.ty.isUnsignedInt(p.pp.compilation);
     const bIsUnsigned = b.ty.isUnsignedInt(p.pp.compilation);
 
     if (aIsUnsigned != bIsUnsigned) {}
 
+    if (p.noEval) 
+        return false;
     if (a.value != .unavailable and b.value != .unavailable)
         return true;
 
@@ -92,7 +96,7 @@ pub fn adjustTypes(a: *Result, b: *Result, p: *Parser) !bool {
 }
 
 fn saveValue(res: Result, p: *Parser) !void {
-    std.debug.assert(!p.wantConst);
+    std.debug.assert(!p.inMacro);
     if (res.value == .unavailable) return;
 
     switch (p.nodes.items(.tag)[@intFromEnum(res.node)]) {
