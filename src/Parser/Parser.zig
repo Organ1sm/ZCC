@@ -1662,6 +1662,7 @@ fn nextStmt(p: *Parser, lBrace: TokenIndex) !void {
                 parens -= 1;
             },
 
+            .Semicolon,
             .KeywordFor,
             .KeywordWhile,
             .KeywordDo,
@@ -1726,9 +1727,15 @@ pub fn macroExpr(p: *Parser) Compilation.Error!bool {
 
 /// expr : assignExpr (',' assignExpr)*
 fn expr(p: *Parser) Error!Result {
+    var exprStartIdx = p.index;
     var lhs = try p.assignExpr();
     while (p.eat(.Comma)) |_| {
-        return p.todo("comma operator");
+        try p.maybeWarnUnused(lhs.node, exprStartIdx);
+        exprStartIdx = p.index;
+
+        const rhs = try p.assignExpr();
+        lhs.value = rhs.value;
+        try lhs.bin(p, .CommaExpr, rhs);
     }
 
     return lhs;
@@ -2064,13 +2071,56 @@ fn castExpr(p: *Parser) Error!Result {
 ///  | keyword_alignof '(' type_name ')'
 fn unaryExpr(p: *Parser) Error!Result {
     switch (p.getCurrToken()) {
-        .Ampersand => return p.todo("unaryExpr ampersand"),
-        .Asterisk => return p.todo("unaryExpr asterisk"),
+        .Ampersand => {
+            const ampersand = p.index;
+            p.index += 1;
+
+            var operand = try p.castExpr();
+
+            if (!AST.isLValue(p.nodes.slice(), operand.node)) {
+                try p.errToken(.addr_of_rvalue, ampersand);
+                return error.ParsingFailed;
+            }
+
+            const elemType = try p.arena.create(Type);
+            elemType.* = operand.ty;
+            operand.ty = Type{
+                .specifier = .Pointer,
+                .data = .{ .subType = elemType },
+            };
+
+            return operand.un(p, .AddrOfExpr);
+        },
+
+        .Asterisk => {
+            const asterisk = p.index;
+            p.index += 1;
+            var operand = try p.castExpr();
+
+            switch (operand.ty.specifier) {
+                .Pointer => {
+                    operand.ty = operand.ty.data.subType.*;
+                },
+
+                .Array, .StaticArray => {
+                    operand.ty = operand.ty.data.array.elem;
+                },
+
+                .Func, .VarArgsFunc, .OldStyleFunc => {},
+                else => {
+                    try p.errToken(.indirection_ptr, asterisk);
+                    return error.ParsingFailed;
+                },
+            }
+            return operand.un(p, .DerefExpr);
+        },
+
         .Plus => {
             p.index += 1;
             // TODO upcast to int / validate arithmetic type
             return p.castExpr();
         },
+
         .Minus => {
             p.index += 1;
             var operand = try p.castExpr();
@@ -2234,9 +2284,9 @@ fn suffixExpr(p: *Parser, lhs: Result) Error!Result {
 ////  | keyword_default ':' assignExpr
 fn primaryExpr(p: *Parser) Error!Result {
     if (p.eat(.LParen)) |lp| {
-        const e = try p.expr();
+        var e = try p.expr();
         try p.expectClosing(lp, .RParen);
-        return e;
+        return e.un(p, .ParenExpr);
     }
 
     switch (p.getCurrToken()) {
@@ -2279,12 +2329,9 @@ fn primaryExpr(p: *Parser) Error!Result {
                 .enumeration => |e| return e.value,
                 .symbol => |s| {
                     // TODO actually check type
-                    if (p.inMacro) {
-                        try p.err(.expected_integer_constant_expr);
-                        return error.ParsingFailed;
-                    }
                     const ty = p.nodes.items(.type)[@intFromEnum(s.node)];
                     return Result{
+                        .ty = ty,
                         .node = try p.addNode(.{
                             .tag = .DeclRefExpr,
                             .type = ty,
