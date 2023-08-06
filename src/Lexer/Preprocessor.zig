@@ -453,6 +453,7 @@ fn expr(pp: *Preprocessor, lexer: *Lexer) Error!bool {
         .tokenIds = pp.tokens.items(.id),
         .index = @intCast(start),
         .arena = pp.arena.allocator(),
+        .inMacro = true,
         .currDeclList = undefined,
         .scopes = undefined,
         .data = undefined,

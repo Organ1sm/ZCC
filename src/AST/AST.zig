@@ -211,7 +211,7 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
             }
         },
 
-        .IfThenElseStmt => {
+        .CondExpr, .IfThenElseStmt => {
             try w.writeByteNTimes(' ', level + half);
             try w.writeAll("cond:\n");
             try tree.dumpNode(data.If3.cond, level + delta, w);

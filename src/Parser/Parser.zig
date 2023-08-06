@@ -28,7 +28,8 @@ nodes: AST.Node.List = .{},
 data: NodeList,
 scopes: std.ArrayList(Scope),
 index: u32 = 0,
-wantConst: bool = false,
+noEval: bool = false,
+inMacro: bool = false,
 inFunc: bool = false,
 currDeclList: *NodeList,
 labels: std.ArrayList(Label),
@@ -151,7 +152,7 @@ pub fn todo(p: *Parser, msg: []const u8) Error {
 }
 
 pub fn addNode(p: *Parser, node: AST.Node) Allocator.Error!NodeIndex {
-    if (p.wantConst)
+    if (p.inMacro)
         return .none;
 
     const res = p.nodes.len;
@@ -1711,7 +1712,6 @@ fn nextStmt(p: *Parser, lBrace: TokenIndex) !void {
 /////////////////////
 
 pub fn macroExpr(p: *Parser) Compilation.Error!bool {
-    p.wantConst = true;
     const res = p.conditionalExpr() catch |e| switch (e) {
         error.OutOfMemory => return error.OutOfMemory,
         error.FatalError => return error.FatalError,
@@ -1743,10 +1743,6 @@ fn assignExpr(p: *Parser) Error!Result {
 
 /// constExpr : conditionalExpr
 fn constExpr(p: *Parser) Error!Result {
-    const saved_const = p.wantConst;
-    defer p.wantConst = saved_const;
-    p.wantConst = true;
-
     const res = try p.conditionalExpr();
     try res.expect(p);
 
@@ -1755,26 +1751,53 @@ fn constExpr(p: *Parser) Error!Result {
 
 /// conditionalExpr : logicalOrExpr ('?' expression? ':' conditionalExpr)?
 fn conditionalExpr(p: *Parser) Error!Result {
-    const cond = try p.logicalOrExpr();
+    var cond = try p.logicalOrExpr();
     if (p.eat(.QuestionMark) == null)
         return cond;
+    const savedEval = p.noEval;
 
-    const thenExpr = try p.expr();
+    // Depending on the value of the condition, avoid  evaluating unreachable
+    const thenExpr = blk: {
+        defer p.noEval = savedEval;
+        if (cond.value != .unavailable and !cond.getBool())
+            p.noEval = true;
+
+        break :blk try p.expr();
+    };
+
     _ = try p.expectToken(.Colon);
-    const elseExpr = try p.conditionalExpr();
+
+    const elseExpr = blk: {
+        defer p.noEval = savedEval;
+        if (cond.value != .unavailable and cond.getBool())
+            p.noEval = true;
+
+        break :blk try p.conditionalExpr();
+    };
 
     if (cond.value != .unavailable)
-        return if (cond.getBool()) thenExpr else elseExpr;
+        cond.value = if (cond.getBool()) thenExpr.value else elseExpr.value;
 
-    return p.todo("ast");
+    cond.node = try p.addNode(.{
+        .tag = .CondExpr,
+        .type = thenExpr.ty,
+        .data = .{ .If3 = .{ .cond = cond.node, .body = (try p.addList(&.{ thenExpr.node, elseExpr.node })).start } },
+    });
+
+    return cond;
 }
 
 /// logicalOrExpr : logicalAndExpr ('||' logicalAndExpr)*
 fn logicalOrExpr(p: *Parser) Error!Result {
     var lhs = try p.logicalAndExpr();
-    while (p.eat(.PipePipe)) |_| {
-        const rhs = try p.logicalAndExpr();
+    const savedEval = p.noEval;
+    defer p.noEval = savedEval;
 
+    while (p.eat(.PipePipe)) |_| {
+        if (lhs.value != .unavailable and lhs.getBool())
+            p.noEval = true;
+
+        const rhs = try p.logicalAndExpr();
         if (lhs.value != .unavailable and rhs.value != .unavailable) {
             lhs.value = .{ .signed = @intFromBool(lhs.getBool() or rhs.getBool()) };
         }
@@ -1789,9 +1812,14 @@ fn logicalOrExpr(p: *Parser) Error!Result {
 /// logicalAndExpr : orExpr ('&&' orExpr)*
 fn logicalAndExpr(p: *Parser) Error!Result {
     var lhs = try p.orExpr();
-    while (p.eat(.AmpersandAmpersand)) |_| {
-        const rhs = try p.orExpr();
+    const savedEval = p.noEval;
+    defer p.noEval = savedEval;
 
+    while (p.eat(.AmpersandAmpersand)) |_| {
+        if (lhs.value != .unavailable and lhs.getBool())
+            p.noEval = true;
+
+        const rhs = try p.orExpr();
         if (lhs.value != .unavailable and rhs.value != .unavailable) {
             lhs.value = .{ .signed = @intFromBool(lhs.getBool() or rhs.getBool()) };
         }
@@ -2251,7 +2279,7 @@ fn primaryExpr(p: *Parser) Error!Result {
                 .enumeration => |e| return e.value,
                 .symbol => |s| {
                     // TODO actually check type
-                    if (p.wantConst) {
+                    if (p.inMacro) {
                         try p.err(.expected_integer_constant_expr);
                         return error.ParsingFailed;
                     }
@@ -2274,11 +2302,6 @@ fn primaryExpr(p: *Parser) Error!Result {
         .StringLiteralUTF_32,
         .StringLiteralWide,
         => {
-            if (p.wantConst) {
-                try p.err(.expected_integer_constant_expr);
-                return error.ParsingFailed;
-            }
-
             var start = p.index;
             var width: ?u8 = null;
 
@@ -2384,21 +2407,14 @@ fn primaryExpr(p: *Parser) Error!Result {
         .CharLiteralUTF_32,
         .CharLiteralWide,
         => {
-            if (p.wantConst) {
-                return p.todo("char literals");
-            }
-            return p.todo("ast");
+            return p.todo("char literals");
         },
 
         .FloatLiteral,
         .FloatLiteral_F,
         .FloatLiteral_L,
         => {
-            if (p.wantConst) {
-                try p.err(.expected_integer_constant_expr);
-                return error.ParsingFailed;
-            }
-            return p.todo("ast");
+            return p.todo("float literals");
         },
 
         .Zero => {
@@ -2517,17 +2533,17 @@ fn castInt(p: *Parser, val: u64, specs: []const Type.Specifier) Error!Result {
         if (isUnsigned) {
             res.value = .{ .unsigned = val };
             switch (tySize) {
-                2 => if (val < std.math.maxInt(u16)) break,
-                4 => if (val < std.math.maxInt(u32)) break,
-                8 => if (val < std.math.maxInt(u64)) break,
+                2 => if (val <= std.math.maxInt(u16)) break,
+                4 => if (val <= std.math.maxInt(u32)) break,
+                8 => if (val <= std.math.maxInt(u64)) break,
                 else => unreachable,
             }
         } else {
             res.value = .{ .signed = @as(i64, @bitCast(val)) };
             switch (tySize) {
-                2 => if (val < std.math.maxInt(i16)) break,
-                4 => if (val < std.math.maxInt(i32)) break,
-                8 => if (val < std.math.maxInt(i64)) break,
+                2 => if (val <= std.math.maxInt(i16)) break,
+                4 => if (val <= std.math.maxInt(i32)) break,
+                8 => if (val <= std.math.maxInt(i64)) break,
                 else => unreachable,
             }
         }
