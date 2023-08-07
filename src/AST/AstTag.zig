@@ -126,11 +126,11 @@ pub const Tag = enum(u8) {
     /// lhs >>= rhs
     ShrAssignExpr,
     /// lhs &= rhs
-    AndAssignExpr,
+    BitAndAssignExpr,
     /// lhs ^= rhs
-    XorAssignExpr,
+    BitXorAssignExpr,
     /// lhs |= rhs
-    OrAssignExpr,
+    BitOrAssignExpr,
     /// lhs || rhs
     BoolOrExpr,
     /// lhs && rhs

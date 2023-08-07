@@ -1508,9 +1508,9 @@ fn maybeWarnUnused(p: *Parser, node: NodeIndex, exprStart: TokenIndex) Error!voi
         .SubAssignExpr,
         .ShlAssignExpr,
         .ShrAssignExpr,
-        .AndAssignExpr,
-        .XorAssignExpr,
-        .OrAssignExpr, //
+        .BitAndAssignExpr,
+        .BitXorAssignExpr,
+        .BitOrAssignExpr, //
         .CallExprOne,
         => return,
 
@@ -1745,7 +1745,54 @@ fn expr(p: *Parser) Error!Result {
 ///  : conditionalExpr
 ///  | unaryExpr ('=' | '*=' | '/=' | '%=' | '+=' | '-=' | '<<=' | '>>=' | '&=' | '^=' | '|=') assignExpr
 fn assignExpr(p: *Parser) Error!Result {
-    return p.conditionalExpr();
+    var lhs = p.conditionalExpr();
+
+    const index = p.index;
+    const eq = p.eat(.Equal);
+    const mul = eq orelse p.eat(.AsteriskEqual);
+    const div = mul orelse p.eat(.SlashEqual);
+    const mod = div orelse p.eat(.PercentEqual);
+    const add = mod orelse p.eat(.PlusEqual);
+    const sub = add orelse p.eat(.MinusEqual);
+    const shl = sub orelse p.eat(.AngleBracketAngleBracketLeftEqual);
+    const shr = shl orelse p.eat(.AngleBracketAngleBracketRightEqual);
+    const bitAnd = shr orelse p.eat(.AmpersandEqual);
+    const bitXor = bitAnd orelse p.eat(.CaretEqual);
+    const bitOr = bitXor orelse p.eat(.PipeEqual);
+
+    if (bitOr == null)
+        return lhs;
+
+    if (!AST.isLValue(p.nodes.slice(), lhs.node)) {
+        try p.errToken(.not_assignable, index);
+        return error.ParsingFailed;
+    }
+
+    var rhs = try p.assignExpr();
+    try lhs.bin(p, if (eq != null)
+        .AssignExpr
+    else if (mul != null)
+        AstTag.MulAssignExpr
+    else if (div != null)
+        AstTag.DivAssignExpr
+    else if (mod != null)
+        AstTag.ModAssignExpr
+    else if (add != null)
+        AstTag.AddAssignExpr
+    else if (sub != null)
+        AstTag.SubAssignExpr
+    else if (shl != null)
+        AstTag.ShlAssignExpr
+    else if (shr != null)
+        AstTag.ShrAssignExpr
+    else if (bitAnd != null)
+        AstTag.BitAndAssignExpr
+    else if (bitXor != null)
+        AstTag.BitXorAssignExpr
+    else
+        AstTag.BitOrAssignExpr, rhs);
+
+    return lhs;
 }
 
 /// constExpr : conditionalExpr
