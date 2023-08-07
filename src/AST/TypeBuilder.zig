@@ -65,9 +65,9 @@ pub const Builder = struct {
         IncompleteArray: *Type.Array,
         VariableLenArray: *Type.VLA,
 
-        Struct: NodeIndex,
-        Union: NodeIndex,
-        Enum: NodeIndex,
+        Struct,
+        Union,
+        Enum: *Type.Enum,
 
         pub fn toString(spec: Kind) []const u8 {
             return switch (spec) {
@@ -226,21 +226,19 @@ pub const Builder = struct {
                 return;
             },
 
-            Kind.Struct => |data| {
+            Kind.Struct => {
                 ty.specifier = .Struct;
-                ty.data = .{ .node = data };
                 return;
             },
 
-            Kind.Union => |data| {
+            Kind.Union => {
                 ty.specifier = .Union;
-                ty.data = .{ .node = data };
                 return;
             },
 
             Kind.Enum => |data| {
                 ty.specifier = .Enum;
-                ty.data = .{ .node = data };
+                ty.data = .{ .@"enum" = data };
                 return;
             },
         };
@@ -453,9 +451,9 @@ pub const Builder = struct {
             .StaticArray => .{ .StaticArray = ty.data.array },
             .IncompleteArray => .{ .IncompleteArray = ty.data.array },
             .VariableLenArray => .{ .VariableLenArray = ty.data.vla },
-            .Struct => .{ .Struct = ty.data.node },
-            .Union => .{ .Union = ty.data.node },
-            .Enum => .{ .Enum = ty.data.node },
+            .Struct => .{ .Struct = {} },
+            .Union => .{ .Union = {} },
+            .Enum => .{ .Enum = ty.data.@"enum" },
         };
     }
 };

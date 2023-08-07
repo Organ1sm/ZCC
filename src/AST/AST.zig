@@ -410,6 +410,14 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
             }
         },
 
+        .EnumDef => {
+            for (ty.data.@"enum".fields) |field| {
+                try w.writeByteNTimes(' ', level + half);
+                try w.print(NAME ++ "{s}:\n" ++ RESET, .{tree.tokSlice(field.name)});
+                if (field.node != .none) try tree.dumpNode(field.node, level + delta, w);
+            }
+        },
+
         .StringLiteralExpr => {
             try w.writeByteNTimes(' ', level + half);
             try w.print("data: " ++ LITERAL ++ "{s}\n" ++ RESET, .{tree.strings[data.String.index..][0..data.String.len]});
@@ -501,6 +509,11 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
         .DeclRefExpr => {
             try w.writeByteNTimes(' ', level + 1);
             try w.print("name: " ++ NAME ++ "{s}\n" ++ RESET, .{tree.tokSlice(data.Declaration.name)});
+        },
+
+        .EnumerationRef => {
+            try w.writeByteNTimes(' ', level + 1);
+            try w.print("name: " ++ NAME ++ "{s}\n" ++ RESET, .{tree.tokSlice(data.DeclarationRef)});
         },
 
         .IntLiteral => {
