@@ -184,8 +184,8 @@ pub fn combine(inner: *Type, outer: Type, p: *Parser, sourceToken: TokenIndex) P
 
             if (inner.data.array.elem.hasIncompleteSize()) return p.errToken(.array_incomplete_elem, sourceToken);
             if (inner.data.array.elem.isFunc()) return p.errToken(.array_func_elem, sourceToken);
-            if (inner.data.array.elem.specifier == .StaticArray and inner.isArray()) return p.errToken(.static_non_outernmost_array, sourceToken);
-            if (inner.data.array.elem.qual.any() and inner.isArray()) return p.errToken(.qualifier_non_outernmost_array, sourceToken);
+            if (inner.data.array.elem.specifier == .StaticArray and inner.isArray()) return p.errToken(.static_non_outermost_array, sourceToken);
+            if (inner.data.array.elem.qual.any() and inner.isArray()) return p.errToken(.qualifier_non_outermost_array, sourceToken);
         },
 
         .VariableLenArray, .UnspecifiedVariableLenArray => return p.errStr(.todo, sourceToken, "combine array"),

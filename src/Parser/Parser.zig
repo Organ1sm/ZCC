@@ -2070,15 +2070,14 @@ fn castExpr(p: *Parser) Error!Result {
 ///  | keyword_sizeof '(' type_name ')'
 ///  | keyword_alignof '(' type_name ')'
 fn unaryExpr(p: *Parser) Error!Result {
-    switch (p.getCurrToken()) {
+    const index = p.index;
+    switch (p.tokenIds[index]) {
         .Ampersand => {
-            const ampersand = p.index;
             p.index += 1;
 
             var operand = try p.castExpr();
-
             if (!AST.isLValue(p.nodes.slice(), operand.node)) {
-                try p.errToken(.addr_of_rvalue, ampersand);
+                try p.errToken(.addr_of_rvalue, index);
                 return error.ParsingFailed;
             }
 
@@ -2093,7 +2092,6 @@ fn unaryExpr(p: *Parser) Error!Result {
         },
 
         .Asterisk => {
-            const asterisk = p.index;
             p.index += 1;
             var operand = try p.castExpr();
 
@@ -2108,7 +2106,7 @@ fn unaryExpr(p: *Parser) Error!Result {
 
                 .Func, .VarArgsFunc, .OldStyleFunc => {},
                 else => {
-                    try p.errToken(.indirection_ptr, asterisk);
+                    try p.errToken(.indirection_ptr, index);
                     return error.ParsingFailed;
                 },
             }
@@ -2137,13 +2135,58 @@ fn unaryExpr(p: *Parser) Error!Result {
                     8 => v.* = 0 -% v.*,
                     else => unreachable,
                 },
-                else => {},
+                .unavailable => {},
             }
             return operand.un(p, .NegateExpr);
         },
-        .PlusPlus => return p.todo("unary inc"),
-        .MinusMinus => return p.todo("unary dec"),
-        .Tilde => return p.todo("unaryExpr tilde"),
+
+        .PlusPlus => {
+            p.index += 1;
+            var operand = try p.castExpr();
+            if (!AST.isLValue(p.nodes.slice(), operand.node)) {
+                try p.errToken(.not_assignable, index);
+                return error.ParsingFailed;
+            }
+
+            switch (operand.value) {
+                .unsigned => |*v| v.* += 1,
+                .signed => |*v| v.* += 1,
+                .unavailable => {},
+            }
+
+            return operand.un(p, .PreIncExpr);
+        },
+
+        .MinusMinus => {
+            p.index += 1;
+            var operand = try p.castExpr();
+            if (!AST.isLValue(p.nodes.slice(), operand.node)) {
+                try p.errToken(.not_assignable, index);
+                return error.ParsingFailed;
+            }
+
+            switch (operand.value) {
+                .unsigned => |*v| v.* -= 1,
+                .signed => |*v| v.* -= 1,
+                .unavailable => {},
+            }
+
+            return operand.un(p, .PreDecExpr);
+        },
+
+        .Tilde => {
+            p.index += 1;
+            var operand = try p.unaryExpr();
+
+            switch (operand.value) {
+                .unsigned => |*v| v.* = ~v.*,
+                .signed => |*v| v.* = ~v.*,
+                .unavailable => {},
+            }
+
+            return operand.un(p, .BoolNotExpr);
+        },
+
         .Bang => {
             p.index += 1;
             var operand = try p.unaryExpr();
@@ -2262,8 +2305,29 @@ fn suffixExpr(p: *Parser, lhs: Result) Error!Result {
         },
         .Period => return p.todo("member access"),
         .Arrow => return p.todo("member access pointer"),
-        .PlusPlus => return p.todo("post inc"),
-        .MinusMinus => return p.todo("post dec"),
+        .PlusPlus => {
+            defer p.index += 1;
+
+            var operand = lhs;
+            if (!AST.isLValue(p.nodes.slice(), operand.node)) {
+                try p.err(.not_assignable);
+                return error.ParsingFailed;
+            }
+
+            return operand.un(p, .PostIncExpr);
+        },
+
+        .MinusMinus => {
+            defer p.index += 1;
+
+            var operand = lhs;
+            if (!AST.isLValue(p.nodes.slice(), operand.node)) {
+                try p.err(.not_assignable);
+                return error.ParsingFailed;
+            }
+
+            return operand.un(p, .PostDecExpr);
+        },
 
         else => return Result{},
     }

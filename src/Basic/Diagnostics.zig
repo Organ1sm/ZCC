@@ -147,8 +147,8 @@ pub const Tag = enum {
     negative_array_size,
     array_incomplete_elem,
     array_func_elem,
-    static_non_outernmost_array,
-    qualifier_non_outernmost_array,
+    static_non_outermost_array,
+    qualifier_non_outermost_array,
     unterminated_macro_arg_list,
     unknown_warning,
     overflow_unsigned,
@@ -156,6 +156,7 @@ pub const Tag = enum {
     int_literal_too_big,
     indirection_ptr,
     addr_of_rvalue,
+    not_assignable,
 };
 
 list: std.ArrayList(Message),
@@ -440,8 +441,8 @@ pub fn render(comp: *Compilation) void {
             .negative_array_size => m.write("array size must be 0 or greater"),
             .array_incomplete_elem => m.write("array has incomplete element type"),
             .array_func_elem => m.write("arrays cannot have functions as their element type"),
-            .static_non_outernmost_array => m.write("'static' used in non-outernmost array type"),
-            .qualifier_non_outernmost_array => m.write("type qualifier used in non-outernmost array type"),
+            .static_non_outermost_array => m.write("'static' used in non-outernmost array type"),
+            .qualifier_non_outermost_array => m.write("type qualifier used in non-outernmost array type"),
             .unterminated_macro_arg_list => m.write("unterminated function macro argument list"),
             .unknown_warning => m.print("unknown warning '{s}'", .{msg.extra.str}),
             .overflow_signed => m.print("overflow in expression; result is'{d}'", .{msg.extra.signed}),
@@ -449,6 +450,7 @@ pub fn render(comp: *Compilation) void {
             .int_literal_too_big => m.write("integer literal is too large to be represented in any integer type"),
             .indirection_ptr => m.write("indirection requires pointer operand"),
             .addr_of_rvalue => m.write("cannot take the address of an rvalue"),
+            .not_assignable => m.write("expression is not assignable"),
         }
 
         m.end(lcs);
@@ -572,12 +574,13 @@ fn tagKind(diag: *Diagnostics, tag: Tag) Kind {
         .negative_array_size,
         .array_incomplete_elem,
         .array_func_elem,
-        .static_non_outernmost_array,
-        .qualifier_non_outernmost_array,
+        .static_non_outermost_array,
+        .qualifier_non_outermost_array,
         .unterminated_macro_arg_list,
         .int_literal_too_big,
         .indirection_ptr,
         .addr_of_rvalue,
+        .not_assignable,
         => .@"error",
 
         .to_match_paren,
