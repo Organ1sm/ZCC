@@ -179,7 +179,6 @@ pub const Tag = enum(u8) {
     NegateExpr,
     /// ~lhs
     BitNotExpr,
-
     /// !lhs
     BoolNotExpr,
     /// ++lhs
