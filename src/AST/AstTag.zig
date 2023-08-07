@@ -44,12 +44,7 @@ pub const Tag = enum(u8) {
     // typdef declaration
     TypeDef,
 
-    // container type forward declarations
-    StructForward,
-    UnionForward,
-    EnumForawrd,
-
-    // container type definitions
+    // container definitions
     StructDef,
     UnionDef,
     EnumDef,
@@ -201,15 +196,17 @@ pub const Tag = enum(u8) {
     PostDecExpr,
     /// (lhs)
     ParenExpr,
-    /// lhs is a TokenIndex of the identifier
+    /// DeclarationRef
     DeclRefExpr,
-    /// integer literal with 64bit, split in first and second
+    /// Enumeration Ref
+    EnumerationRef,
+    /// integer literal, always unsigned
     IntLiteral,
-    /// f32 literal stored in node.first
+    /// f32 literal
     FloatLiteral,
-    /// f64 literal stored in node.first and node.second
+    /// f64 literal
     DoubleLiteral,
-    /// data[first][0..second]
+    /// tree.string[index][0..len]
     StringLiteralExpr,
     /// TODO
     CompoundLiteralExpr,

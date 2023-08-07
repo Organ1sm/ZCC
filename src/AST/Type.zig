@@ -9,6 +9,19 @@ const Type = @This();
 const NodeIndex = Tree.NodeIndex;
 const TokenIndex = Tree.TokenIndex;
 
+data: union {
+    subType: *Type,
+    func: *Function,
+    array: *Array,
+    vla: *VLA,
+    @"enum": *Enum,
+    none: void,
+} = .{ .none = {} },
+
+qual: Qualifiers = .{},
+specifier: Specifier,
+alignment: u32 = 0,
+
 pub const Qualifiers = packed struct {
     @"const": bool = false,
     atomic: bool = false,
@@ -42,18 +55,16 @@ pub const VLA = struct {
     elem: Type,
 };
 
-data: union {
-    subType: *Type,
-    func: *Function,
-    array: *Array,
-    vla: *VLA,
-    node: NodeIndex,
-    none: void,
-} = .{ .none = {} },
+pub const Enum = struct {
+    name: []const u8,
+    tagType: Type,
+    fields: []Field,
 
-qual: Qualifiers = .{},
-specifier: Specifier,
-alignment: u32 = 0,
+    pub const Field = struct {
+        name: TokenIndex,
+        node: NodeIndex,
+    };
+};
 
 pub const Specifier = enum {
     Void,
@@ -102,9 +113,11 @@ pub const Specifier = enum {
     IncompleteArray,
     VariableLenArray,
 
-    // data.node
+    // data.record
     Struct,
     Union,
+
+    // data.enum
     Enum,
 };
 
@@ -134,6 +147,13 @@ pub fn isUnsignedInt(ty: Type, comp: *Compilation) bool {
     _ = comp;
     return switch (ty.specifier) {
         .UChar, .UShort, .UInt, .ULong, .ULongLong => return true,
+        else => false,
+    };
+}
+
+pub fn isEnumOrRecord(ty: Type) bool {
+    return switch (ty.specifier) {
+        .Enum, .Struct, .Union => true,
         else => false,
     };
 }
@@ -244,6 +264,10 @@ pub fn dump(ty: Type, tree: Tree, w: anytype) @TypeOf(w).Error!void {
         .IncompleteArray => {
             try w.writeAll("[]");
             try ty.data.array.elem.dump(tree, w);
+        },
+
+        .Enum => {
+            try w.print("enum {s}", .{ty.data.@"enum".name});
         },
 
         else => {
