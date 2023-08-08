@@ -300,7 +300,7 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
     _ = try p.addNode(.{ .tag = .Invalid, .type = undefined, .data = undefined });
 
     while (p.eat(.Eof) == null) {
-        if (p.staticAssert() catch |er| switch (er) {
+        if (p.parseStaticAssert() catch |er| switch (er) {
             error.ParsingFailed => {
                 p.nextExternDecl();
                 continue;
@@ -405,6 +405,9 @@ fn parseDeclaration(p: *Parser) Error!bool {
     };
 
     var initD = (try p.initDeclarator(&declSpec)) orelse {
+        // eat ';'
+        _ = try p.expectToken(.Semicolon);
+
         if (declSpec.type.specifier == .Enum)
             return true;
 
@@ -413,9 +416,6 @@ fn parseDeclaration(p: *Parser) Error!bool {
             return true;
         }
         try p.errToken(.missing_declaration, firstTokenIndex);
-
-        // eat ';'
-        _ = try p.expectToken(.Semicolon);
 
         return true;
     };
@@ -542,34 +542,54 @@ fn parseDeclaration(p: *Parser) Error!bool {
 }
 
 /// staticAssert : keyword_static_assert '(' constExpr ',' STRING_LITERAL ')' ';'
-fn staticAssert(p: *Parser) Error!bool {
+fn parseStaticAssert(p: *Parser) Error!bool {
     const curToken = p.eat(.KeywordStaticAssert) orelse return false;
-
-    const lParen = try p.expectToken(.LParen);
-    var start = p.index;
+    const lp = try p.expectToken(.LParen);
     const res = try p.constExpr();
-    const end = p.index;
 
     _ = try p.expectToken(.Comma);
-    // TODO: reslove the string literal.
-    const str = try p.expectToken(.StringLiteral);
-    try p.expectClosing(lParen, .RParen);
+    const str = switch (p.getCurrToken()) {
+        .StringLiteral,
+        .StringLiteralUTF_8,
+        .StringLiteralUTF_16,
+        .StringLiteralUTF_32,
+        .StringLiteralWide,
+        => try p.parseStringLiteral(),
+
+        else => {
+            try p.err(.expected_str_literal);
+            return error.ParsingFailed;
+        },
+    };
+
+    try p.expectClosing(lp, .RParen);
+    _ = try p.expectToken(.Semicolon);
 
     if (!res.getBool()) {
         var msg = std.ArrayList(u8).init(p.pp.compilation.gpa);
         defer msg.deinit();
 
-        try msg.append('\'');
-        while (start < end) {
-            try msg.appendSlice(p.tokSlice(start));
-            start += 1;
-            if (start != end) try msg.append(' ');
-        }
+        const data = p.nodes.items(.data)[@intFromEnum(str.node)].String;
+        try AST.dumpString(
+            p.strings.items[data.index..][0..data.len],
+            p.nodes.items(.tag)[@intFromEnum(str.node)],
+            msg.writer(),
+        );
 
-        try msg.appendSlice("' ");
-        try msg.appendSlice(p.tokSlice(str));
         try p.errStr(.static_assert_failure, curToken, try p.pp.arena.allocator().dupe(u8, msg.items));
     }
+
+    const node = try p.addNode(.{
+        .tag = .StaticAssert,
+        .data = .{
+            .BinaryExpr = .{
+                .lhs = res.node,
+                .rhs = str.node,
+            },
+        },
+    });
+
+    try p.currDeclList.append(node);
 
     return true;
 }
@@ -855,26 +875,12 @@ fn enumSpec(p: *Parser) Error!*Type.Enum {
             try p.errToken(.previous_definition, prev.nameToken);
         }
     }
-    var tagType: Type = .{ .specifier = .Int };
-
-    var fields = std.ArrayList(Type.Enum.Field).init(p.pp.compilation.gpa);
-    defer fields.deinit();
-
-    while (try p.enumerator()) |field| {
-        try fields.append(field);
-        if (p.eat(.Comma) == null) break;
-    }
-
-    if (fields.items.len == 0)
-        try p.err(.empty_enum);
-
-    try p.expectClosing(lb, .RBrace);
 
     const enumType = try p.arena.create(Type.Enum);
     enumType.* = .{
         .name = if (maybeID) |ident| p.tokSlice(ident) else try p.getAnonymousName(enumTK),
-        .tagType = tagType,
-        .fields = try p.arena.dupe(Type.Enum.Field, fields.items),
+        .tagType = .{ .specifier = .Void }, // void means incomplete
+        .fields = &.{},
     };
 
     const node = try p.addNode(.{
@@ -895,6 +901,18 @@ fn enumSpec(p: *Parser) Error!*Type.Enum {
             .nameToken = ident,
         } });
     }
+
+    var fields = std.ArrayList(Type.Enum.Field).init(p.pp.compilation.gpa);
+    defer fields.deinit();
+
+    while (try p.enumerator()) |field| {
+        try fields.append(field);
+        if (p.eat(.Comma) == null) break;
+    }
+    if (fields.items.len == 0) try p.err(.empty_enum);
+
+    try p.expectClosing(lb, .RBrace);
+    enumType.fields = try p.arena.dupe(Type.Enum.Field, fields.items);
     return enumType;
 }
 
@@ -1682,7 +1700,7 @@ fn compoundStmt(p: *Parser) Error!?NodeIndex {
     var noreturnLabelCount: u32 = 0;
 
     while (p.eat(.RBrace) == null) {
-        if (p.staticAssert() catch |er| switch (er) {
+        if (p.parseStaticAssert() catch |er| switch (er) {
             error.ParsingFailed => {
                 try p.nextStmt(lBrace);
                 continue;
@@ -2553,9 +2571,9 @@ fn primaryExpr(p: *Parser) Error!Result {
                     //TODO  actually check type
                     var res = e.value;
                     res.node = try p.addNode(.{
-                        .tag =  .EnumerationRef,
+                        .tag = .EnumerationRef,
                         .type = res.ty,
-                        .data = .{.DeclarationRef = nameToken},
+                        .data = .{ .DeclarationRef = nameToken },
                     });
 
                     return res;
@@ -2582,106 +2600,7 @@ fn primaryExpr(p: *Parser) Error!Result {
         .StringLiteralUTF_16,
         .StringLiteralUTF_32,
         .StringLiteralWide,
-        => {
-            var start = p.index;
-            var width: ?u8 = null;
-
-            while (true) {
-                switch (p.getCurrToken()) {
-                    .StringLiteral => {},
-                    .StringLiteralUTF_8 => if (width) |some| {
-                        if (some != 8) try p.err(.unsupported_str_cat);
-                    } else {
-                        width = 8;
-                    },
-
-                    .StringLiteralUTF_16 => if (width) |some| {
-                        if (some != 16) try p.err(.unsupported_str_cat);
-                    } else {
-                        width = 16;
-                    },
-
-                    .StringLiteralUTF_32 => if (width) |some| {
-                        if (some != 32) try p.err(.unsupported_str_cat);
-                    } else {
-                        width = 32;
-                    },
-
-                    .StringLiteralWide => if (width) |some| {
-                        if (some != 1) try p.err(.unsupported_str_cat);
-                    } else {
-                        width = 1;
-                    },
-
-                    else => break,
-                }
-
-                p.index += 1;
-            }
-
-            if (width == null)
-                width = 8;
-
-            if (width.? != 8)
-                return p.todo("non utf-8 strings");
-
-            const index = p.strings.items.len;
-
-            while (start < p.index) : (start += 1) {
-                var slice = p.tokSlice(start);
-                slice = slice[std.mem.indexOf(u8, slice, "\"").? + 1 .. slice.len - 1];
-
-                try p.strings.ensureTotalCapacity(slice.len);
-                var i: u32 = 0;
-                while (i < slice.len) : (i += 1) {
-                    switch (slice[i]) {
-                        '\\' => {
-                            i += 1;
-                            switch (slice[i]) {
-                                '\n' => i += 1,
-                                '\r' => i += 2,
-                                '\'', '\"', '\\', '?' => |c| p.strings.appendAssumeCapacity(c),
-                                'n' => p.strings.appendAssumeCapacity('\n'),
-                                'r' => p.strings.appendAssumeCapacity('\r'),
-                                't' => p.strings.appendAssumeCapacity('\t'),
-                                'a' => p.strings.appendAssumeCapacity(0x07),
-                                'b' => p.strings.appendAssumeCapacity(0x08),
-                                'e' => p.strings.appendAssumeCapacity(0x1B),
-                                'f' => p.strings.appendAssumeCapacity(0x0C),
-                                'v' => p.strings.appendAssumeCapacity(0x0B),
-                                'x' => return p.todo("hex escape"),
-                                'u' => return p.todo("u escape"),
-                                'U' => return p.todo("U escape"),
-                                '0'...'7' => return p.todo("octal escape"),
-                                else => unreachable,
-                            }
-                        },
-                        else => |c| p.strings.appendAssumeCapacity(c),
-                    }
-                }
-            }
-
-            try p.strings.append(0);
-            const len = p.strings.items.len - index;
-
-            const arrayType = try p.arena.create(Type.Array);
-            arrayType.* = .{ .elem = .{ .specifier = .Char }, .len = len };
-
-            var res: Result = .{
-                .ty = .{
-                    .specifier = .Array,
-                    .data = .{ .array = arrayType },
-                },
-            };
-
-            res.node = try p.addNode(.{
-                .tag = .StringLiteralExpr,
-                .type = res.ty,
-                .data = .{ .String = .{ .index = @as(u32, @intCast(index)), .len = @as(u32, @intCast(len)) } },
-            });
-
-            return res;
-        },
+        => return p.parseStringLiteral(),
 
         .CharLiteral,
         .CharLiteralUTF_16,
@@ -2833,5 +2752,106 @@ fn castInt(p: *Parser, val: u64, specs: []const Type.Specifier) Error!Result {
     }
 
     res.node = try p.addNode(.{ .tag = .IntLiteral, .type = res.ty, .data = .{ .Int = val } });
+    return res;
+}
+
+fn parseStringLiteral(p: *Parser) Error!Result {
+    var start = p.index;
+    var width: ?u8 = null;
+
+    while (true) {
+        switch (p.getCurrToken()) {
+            .StringLiteral => {},
+            .StringLiteralUTF_8 => if (width) |some| {
+                if (some != 8) try p.err(.unsupported_str_cat);
+            } else {
+                width = 8;
+            },
+
+            .StringLiteralUTF_16 => if (width) |some| {
+                if (some != 16) try p.err(.unsupported_str_cat);
+            } else {
+                width = 16;
+            },
+
+            .StringLiteralUTF_32 => if (width) |some| {
+                if (some != 32) try p.err(.unsupported_str_cat);
+            } else {
+                width = 32;
+            },
+
+            .StringLiteralWide => if (width) |some| {
+                if (some != 1) try p.err(.unsupported_str_cat);
+            } else {
+                width = 1;
+            },
+
+            else => break,
+        }
+
+        p.index += 1;
+    }
+
+    if (width == null)
+        width = 8;
+
+    if (width.? != 8)
+        return p.todo("non utf-8 strings");
+
+    const index = p.strings.items.len;
+
+    while (start < p.index) : (start += 1) {
+        var slice = p.tokSlice(start);
+        slice = slice[std.mem.indexOf(u8, slice, "\"").? + 1 .. slice.len - 1];
+
+        try p.strings.ensureTotalCapacity(slice.len);
+        var i: u32 = 0;
+        while (i < slice.len) : (i += 1) {
+            switch (slice[i]) {
+                '\\' => {
+                    i += 1;
+                    switch (slice[i]) {
+                        '\n' => i += 1,
+                        '\r' => i += 2,
+                        '\'', '\"', '\\', '?' => |c| p.strings.appendAssumeCapacity(c),
+                        'n' => p.strings.appendAssumeCapacity('\n'),
+                        'r' => p.strings.appendAssumeCapacity('\r'),
+                        't' => p.strings.appendAssumeCapacity('\t'),
+                        'a' => p.strings.appendAssumeCapacity(0x07),
+                        'b' => p.strings.appendAssumeCapacity(0x08),
+                        'e' => p.strings.appendAssumeCapacity(0x1B),
+                        'f' => p.strings.appendAssumeCapacity(0x0C),
+                        'v' => p.strings.appendAssumeCapacity(0x0B),
+                        'x' => return p.todo("hex escape"),
+                        'u' => return p.todo("u escape"),
+                        'U' => return p.todo("U escape"),
+                        '0'...'7' => return p.todo("octal escape"),
+                        else => unreachable,
+                    }
+                },
+                else => |c| p.strings.appendAssumeCapacity(c),
+            }
+        }
+    }
+
+    try p.strings.append(0);
+    const len = p.strings.items.len - index;
+
+    const arrayType = try p.arena.create(Type.Array);
+    arrayType.* = .{ .elem = .{ .specifier = .Char }, .len = len };
+
+    var res: Result = .{
+        .ty = .{
+            .specifier = .Array,
+            .data = .{ .array = arrayType },
+        },
+    };
+
+    res.node = try p.addNode(.{
+        .tag = .StringLiteralExpr,
+        .type = res.ty,
+        .data = .{ .String = .{ .index = @as(u32, @intCast(index)), .len = @as(u32, @intCast(len)) } },
+    });
+
     return res;
 }

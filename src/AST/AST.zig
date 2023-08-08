@@ -131,6 +131,13 @@ pub fn isLValue(nodes: Node.List.Slice, node: NodeIndex) bool {
     }
 }
 
+pub fn dumpString(bytes: []const u8, tag: AstTag, writer: anytype) !void {
+    switch (tag) {
+        .StringLiteralExpr => try writer.print("\"{}\"", .{std.zig.fmtEscapes(bytes)}),
+        else => unreachable,
+    }
+}
+
 pub fn tokSlice(tree: AST, index: TokenIndex) []const u8 {
     if (tree.tokens.items(.id)[index].lexeMe()) |some|
         return some;
@@ -191,6 +198,15 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
 
     switch (tag) {
         .Invalid => unreachable,
+
+        .StaticAssert => {
+            try w.writeByteNTimes(' ', level + 1);
+            try w.writeAll("condition:\n");
+            try tree.dumpNode(data.BinaryExpr.lhs, level + delta, w);
+            try w.writeByteNTimes(' ', level + 1);
+            try w.writeAll("diagnostic:\n");
+            try tree.dumpNode(data.BinaryExpr.rhs, level + delta, w);
+        },
 
         .FnProto,
         .StaticFnProto,
@@ -420,7 +436,9 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
 
         .StringLiteralExpr => {
             try w.writeByteNTimes(' ', level + half);
-            try w.print("data: " ++ LITERAL ++ "{s}\n" ++ RESET, .{tree.strings[data.String.index..][0..data.String.len]});
+            try w.writeAll("data: " ++ LITERAL);
+            try dumpString(tree.strings[data.String.index..][0..data.String.len], tag, w);
+            try w.writeAll("\n" ++ RESET);
         },
 
         .CallExpr => {

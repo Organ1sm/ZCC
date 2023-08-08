@@ -8,6 +8,9 @@ pub const Tag = enum(u8) {
 
     // ====== Decl ======
 
+    // _Static_assert
+    StaticAssert,
+
     // function prototype
     FnProto,
     StaticFnProto,
