@@ -13,7 +13,11 @@ pub fn build(b: *std.Build) void {
     // Standard optimization options allow the person running `zig build` to select
     // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall. Here we do not
     // set a preferred release mode, allowing the user to decide how to optimize.
-    const optimize = b.standardOptimizeOption(.{});
+    const mode = b.standardOptimizeOption(.{});
+
+    const zccModule = b.addModule("zcc", .{
+        .source_file = .{ .path = "src/zcc.zig" },
+    });
 
     const exe = b.addExecutable(.{
         .name = "ZCC",
@@ -21,7 +25,7 @@ pub fn build(b: *std.Build) void {
         // complicated build scripts, this could be a generated file.
         .root_source_file = .{ .path = "src/main.zig" },
         .target = target,
-        .optimize = optimize,
+        .optimize = mode,
     });
 
     // This declares intent for the executable to be installed into the
@@ -57,7 +61,7 @@ pub fn build(b: *std.Build) void {
     const unit_tests = b.addTest(.{
         .root_source_file = .{ .path = "src/main.zig" },
         .target = target,
-        .optimize = optimize,
+        .optimize = mode,
     });
 
     const run_unit_tests = b.addRunArtifact(unit_tests);
@@ -65,6 +69,18 @@ pub fn build(b: *std.Build) void {
     // Similar to creating the run step earlier, this exposes a `test` step to
     // the `zig build --help` menu, providing a way for the user to request
     // running the unit tests.
-    const test_step = b.step("test", "Run unit tests");
+    const test_step = b.step("test", "Run all tests");
     test_step.dependOn(&run_unit_tests.step);
+
+    const integration_tests = b.addExecutable(.{
+        .name = "test-runner",
+        .root_source_file = .{ .path = "test/test_runner.zig" },
+    });
+    integration_tests.addModule("zcc", zccModule);
+
+    const integration_test_runner = b.addRunArtifact(integration_tests);
+    integration_test_runner.addArg(b.pathFromRoot("test/cases/preprocess"));
+    integration_test_runner.addArg(b.zig_exe);
+
+    test_step.dependOn(&integration_test_runner.step);
 }

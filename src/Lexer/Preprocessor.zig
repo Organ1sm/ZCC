@@ -307,7 +307,7 @@ pub fn preprocess(pp: *Preprocessor, source: Source) Error!void {
     }
 }
 
-fn tokSliceSafe(pp: *Preprocessor, token: RawToken) []const u8 {
+pub fn tokSliceSafe(pp: *Preprocessor, token: RawToken) []const u8 {
     if (token.id.lexeMe()) |some| return some;
 
     std.debug.assert(token.source != .generated);
@@ -1352,114 +1352,4 @@ fn expectStr(buffer: []const u8, expected: []const u8) !void {
 
     try pp.prettyPrintTokens(actual.writer());
     try std.testing.expectEqualStrings(expected, actual.items);
-}
-
-test "ifdef" {
-    try expectTokens(
-        \\#define FOO
-        \\#ifdef FOO
-        \\long
-        \\#else
-        \\int
-        \\#endif
-    , &.{.KeywordLong});
-
-    try expectTokens(
-        \\#define BAR
-        \\#ifdef FOO
-        \\long
-        \\#else
-        \\int
-        \\#endif
-    , &.{.KeywordInt});
-}
-
-test "define undefine" {
-    try expectTokens(
-        \\#define FOO 1
-        \\#undef FOO
-    , &.{});
-}
-
-test "recursive object macro" {
-    try expectStr(
-        \\#define y x
-        \\#define x y
-        \\x
-    , "x\n");
-
-    try expectStr(
-        \\#define x x
-        \\x
-    , "x\n");
-}
-
-test "object macro expansion" {
-    try expectTokens(
-        \\#define x a
-        \\x
-        \\#define a 1
-        \\x
-    , &.{ .Identifier, .IntegerLiteral });
-    try expectTokens(
-        \\#define x define
-        \\x
-    , &.{.Identifier});
-}
-
-test "object macro token pasting" {
-    try expectStr(
-        \\#define x a##1
-        \\x
-        \\#define a 1
-        \\x
-    , "a1 a1\n");
-}
-
-test "#if constant expression" {
-    try expectStr(
-        \\#if defined FOO
-        \\void
-        \\#elif !defined(BAR)
-        \\long
-        \\#endif
-    , "long\n");
-}
-
-test "function macro expansion" {
-    try expectStr(
-        \\#define HE HI
-        \\#define LLO _THERE
-        \\#define HELLO "HI THERE"
-        \\#define CAT(a,b) a##b
-        \\#define XCAT(a,b) CAT(a,b)
-        \\#define CALL(fn) fn(HE,LLO)
-        \\CAT(HE, LLO)
-        \\XCAT(HE, LLO)
-        \\CALL(CAT)
-    , "\"HI THERE\" HI_THERE \"HI THERE\"\n");
-}
-
-test "X macro" {
-    try expectStr(
-        \\#define X(a) Foo_ ## a = a,
-        \\enum Foo {
-        \\X(1)
-        \\X(2)
-        \\X(3)
-        \\X(4)
-        \\X(5)
-        \\};
-    , "enum Foo { Foo_1 = 1 , Foo_2 = 2 , Foo_3 = 3 , Foo_4 = 4 , Foo_5 = 5 , } ;\n");
-}
-
-test "var args macro functions" {
-    try expectStr(
-        \\#define foo(a,...) #__VA_ARGS__
-        \\foo(1,2,3,4,5,6)
-        \\
-        \\#define bar(a,...) bar __VA_ARGS__
-        \\#define baz(a,...) baz bar(__VA_ARGS__)
-        \\baz(1,2,3,4)
-    , "\"2 , 3 , 4 , 5 , 6\" baz bar 3 , 4\n");
 }
