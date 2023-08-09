@@ -189,9 +189,9 @@ pub const Tag = enum(u8) {
     CallExprOne,
     /// data[0](data[1..])
     CallExpr,
-    /// lhs.rhs rhs is a TokenIndex of the identifier
+    /// lhs.member
     MemberAccessExpr,
-    /// lhs->rhs rhs is a TokenIndex of the identifier
+    /// lhs->member
     MemberAccessPtrExpr,
     /// lhs++
     PostIncExpr,
@@ -211,8 +211,22 @@ pub const Tag = enum(u8) {
     DoubleLiteral,
     /// tree.string[index][0..len]
     StringLiteralExpr,
-    /// TODO
+
+    /// ====== Initializer expressions ======
+    /// { lhs, rhs }
+    CompoundInitializerTwoExpr,
+    /// { range }
+    CompoundInitializerExpr,
+    /// (ty){ lhs, rhs }
+    CompoundLiteralTwoExpr,
+    /// (ty){ range }
     CompoundLiteralExpr,
+    /// lhs = rhs
+    InitializerItemExpr,
+    /// lhs?[rhs]
+    ArrayDesignatorExpr,
+    /// lhs?.name
+    MemberDesignatorExpr,
 
     // implicit casts ///
     /// convert T[] to T*

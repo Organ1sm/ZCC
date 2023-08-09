@@ -44,6 +44,7 @@ pub const Token = struct {
     pub const List = std.MultiArrayList(Token);
 };
 
+pub const Range = struct { start: u32, end: u32 };
 pub const Node = struct {
     tag: AstTag,
     type: Type = .{ .specifier = .Void },
@@ -53,7 +54,7 @@ pub const Node = struct {
         Declaration: struct { name: TokenIndex, node: NodeIndex = .none },
         DeclarationRef: TokenIndex,
 
-        range: struct { start: u32, end: u32 },
+        range: Range,
 
         If3: struct { cond: NodeIndex, body: u32 },
 
@@ -62,6 +63,8 @@ pub const Node = struct {
         UnaryExpr: NodeIndex,
 
         BinaryExpr: struct { lhs: NodeIndex, rhs: NodeIndex },
+
+        Member: struct { lhs: NodeIndex, name: TokenIndex },
 
         Int: u64,
         Float: f32,
@@ -119,7 +122,7 @@ pub fn isLValue(nodes: Node.List.Slice, node: NodeIndex) bool {
 
         .MemberAccessExpr => {
             const data = nodes.items(.data)[@intFromEnum(node)];
-            return isLValue(nodes, data.BinaryExpr.lhs);
+            return isLValue(nodes, data.Member.lhs);
         },
 
         .ParenExpr => {
@@ -237,7 +240,7 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
             try tree.dumpNode(data.Declaration.node, level + delta, w);
         },
 
-        .CompoundStmt => {
+        .CompoundStmt, .CompoundInitializerExpr, .CompoundLiteralExpr => {
             for (tree.data[data.range.start..data.range.end], 0..) |stmt, i| {
                 if (i != 0)
                     try w.writeByte('\n');
@@ -245,7 +248,7 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
             }
         },
 
-        .CompoundStmtTwo => {
+        .CompoundStmtTwo, .CompoundInitializerTwoExpr, .CompoundLiteralTwoExpr => {
             if (data.BinaryExpr.lhs != .none) try tree.dumpNode(data.BinaryExpr.lhs, level + delta, w);
             if (data.BinaryExpr.rhs != .none) try tree.dumpNode(data.BinaryExpr.rhs, level + delta, w);
         },
@@ -547,6 +550,38 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
         .DoubleLiteral => {
             try w.writeByteNTimes(' ', level + 1);
             try w.print("value: " ++ LITERAL ++ "{d}\n" ++ RESET, .{data.Double});
+        },
+
+        .MemberAccessExpr, .MemberAccessPtrExpr, .MemberDesignatorExpr => {
+            if (data.Member.lhs != .none) {
+                try w.writeByteNTimes(' ', level + 1);
+                try w.writeAll("lhs:\n");
+                try tree.dumpNode(data.Member.lhs, level + delta, w);
+            }
+            try w.writeByteNTimes(' ', level + 1);
+            try w.print("name: " ++ NAME ++ "{s}\n" ++ RESET, .{tree.tokSlice(data.Member.name)});
+        },
+
+        .ArrayAccessExpr, .ArrayDesignatorExpr => {
+            if (data.BinaryExpr.lhs != .none) {
+                try w.writeByteNTimes(' ', level + 1);
+                try w.writeAll("lhs:\n");
+                try tree.dumpNode(data.BinaryExpr.lhs, level + delta, w);
+            }
+            try w.writeByteNTimes(' ', level + 1);
+            try w.writeAll("index:\n");
+            try tree.dumpNode(data.BinaryExpr.rhs, level + delta, w);
+        },
+
+        .InitializerItemExpr => {
+            if (data.BinaryExpr.lhs != .none) {
+                try w.writeByteNTimes(' ', level + 1);
+                try w.writeAll("designator:\n");
+                try tree.dumpNode(data.BinaryExpr.lhs, level + delta, w);
+            }
+            try w.writeByteNTimes(' ', level + 1);
+            try w.writeAll("initializer:\n");
+            try tree.dumpNode(data.BinaryExpr.rhs, level + delta, w);
         },
 
         else => {},
