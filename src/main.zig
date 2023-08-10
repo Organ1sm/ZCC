@@ -84,7 +84,7 @@ fn handleArgs(comp: *Compilation, args: [][]const u8) !void {
                     return comp.diag.fatalNoSrc("{s} when trying to print usage", .{@errorName(err)});
                 };
             } else if (std.mem.eql(u8, arg, "-v") or std.mem.eql(u8, arg, "--version")) {
-                return stdOut.writeAll(@import("Basic/Info.zig").VersionStr ++ "\n") catch |err| {
+                return stdOut.writeAll(@import("zcc.zig").VersionStr ++ "\n") catch |err| {
                     return comp.diag.fatalNoSrc("{s} when trying to print version", .{@errorName(err)});
                 };
             } else if (std.mem.startsWith(u8, arg, "-D")) {
