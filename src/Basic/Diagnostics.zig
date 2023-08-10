@@ -32,7 +32,7 @@ pub const Message = struct {
     };
 };
 
-const Kind = enum { @"fatal error", @"error", note, warning, off };
+pub const Kind = enum { @"fatal error", @"error", note, warning, off };
 
 const Options = struct {
     @"unsupported-pragma": Kind = .warning,
@@ -323,6 +323,10 @@ pub fn render(comp: *Compilation) void {
     var m = MsgWriter.init(comp.diag.color);
     defer m.deinit();
 
+    renderExtra(comp, &m);
+}
+
+pub fn renderExtra(comp: *Compilation, m: anytype) void {
     var errors: u32 = 0;
     var warnings: u32 = 0;
     for (comp.diag.list.items) |msg| {

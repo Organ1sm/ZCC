@@ -1,5 +1,6 @@
 const std = @import("std");
 pub const Compilation = @import("Basic/Compilation.zig");
+pub const Diagnostics = @import("Basic/Diagnostics.zig");
 pub const Parser = @import("Parser/Parser.zig");
 pub const Preprocessor = @import("Lexer/Preprocessor.zig");
 pub const Source = @import("Basic/Source.zig");

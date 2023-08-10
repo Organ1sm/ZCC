@@ -20,7 +20,7 @@ pub fn build(b: *std.Build) void {
     });
 
     const exe = b.addExecutable(.{
-        .name = "ZCC",
+        .name = "Zcc",
         // In this case the main source file is merely a path, however, in more
         // complicated build scripts, this could be a generated file.
         .root_source_file = .{ .path = "src/main.zig" },
@@ -56,6 +56,12 @@ pub fn build(b: *std.Build) void {
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
 
+    // Similar to creating the run step earlier, this exposes a `test` step to
+    // the `zig build --help` menu, providing a way for the user to request
+    // running the unit tests.
+    const test_step = b.step("test", "Run all tests");
+    test_step.dependOn(&exe.step);
+
     // Creates a step for unit testing. This only builds the test executable
     // but does not run it.
     const unit_tests = b.addTest(.{
@@ -63,13 +69,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = mode,
     });
-
     const run_unit_tests = b.addRunArtifact(unit_tests);
-
-    // Similar to creating the run step earlier, this exposes a `test` step to
-    // the `zig build --help` menu, providing a way for the user to request
-    // running the unit tests.
-    const test_step = b.step("test", "Run all tests");
     test_step.dependOn(&run_unit_tests.step);
 
     const integration_tests = b.addExecutable(.{
@@ -80,7 +80,7 @@ pub fn build(b: *std.Build) void {
 
     const integration_test_runner = b.addRunArtifact(integration_tests);
     integration_test_runner.addArg(b.pathFromRoot("test/cases/preprocess"));
-    integration_test_runner.addArg(b.zig_exe);
 
+    b.installArtifact(integration_tests);
     test_step.dependOn(&integration_test_runner.step);
 }
