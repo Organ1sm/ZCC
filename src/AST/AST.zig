@@ -185,7 +185,7 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
 
     try w.writeByteNTimes(' ', level);
     try w.print(TAG ++ "{s}: " ++ TYPE ++ "'", .{@tagName(tag)});
-    try ty.dump(tree, w);
+    try ty.dump(w);
     try w.writeAll("'");
     if (tree.valueMap.get(node)) |value| {
         if (ty.isUnsignedInt(tree.comp))
@@ -240,7 +240,13 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
             try tree.dumpNode(data.Declaration.node, level + delta, w);
         },
 
-        .CompoundStmt, .CompoundInitializerExpr, .CompoundLiteralExpr => {
+        .CompoundStmt,
+        .CompoundInitializerExpr,
+        .CompoundLiteralExpr,
+        .EnumDecl,
+        .StructDecl,
+        .UnionDecl,
+        => {
             for (tree.data[data.range.start..data.range.end], 0..) |stmt, i| {
                 if (i != 0)
                     try w.writeByte('\n');
@@ -248,7 +254,13 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
             }
         },
 
-        .CompoundStmtTwo, .CompoundInitializerTwoExpr, .CompoundLiteralTwoExpr => {
+        .CompoundStmtTwo,
+        .CompoundInitializerExprTwo,
+        .CompoundLiteralExprTwo,
+        .EnumDeclTwo,
+        .StructDeclTwo,
+        .UnionDeclTwo,
+        => {
             if (data.BinaryExpr.lhs != .none) try tree.dumpNode(data.BinaryExpr.lhs, level + delta, w);
             if (data.BinaryExpr.rhs != .none) try tree.dumpNode(data.BinaryExpr.rhs, level + delta, w);
         },
@@ -429,12 +441,30 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
             }
         },
 
-        .EnumDef => {
-            for (ty.data.@"enum".fields) |field| {
+        .EnumFieldDecl => {
+            try w.writeByteNTimes(' ', level + half);
+            try w.print("name: " ++ NAME ++ "{s}\n" ++ RESET, .{tree.tokSlice(data.Declaration.name)});
+            if (data.Declaration.node != .none) {
                 try w.writeByteNTimes(' ', level + half);
-                try w.print(NAME ++ "{s}:\n" ++ RESET, .{tree.tokSlice(field.name)});
-                if (field.node != .none) try tree.dumpNode(field.node, level + delta, w);
+                try w.writeAll("value:\n");
+                try tree.dumpNode(data.Declaration.node, level + delta, w);
             }
+        },
+
+        .RecordFieldDecl => {
+            try w.writeByteNTimes(' ', level + half);
+            try w.print("name: " ++ NAME ++ "{s}\n" ++ RESET, .{tree.tokSlice(data.Declaration.name)});
+            if (data.Declaration.node != .none) {
+                try w.writeByteNTimes(' ', level + half);
+                try w.writeAll("bits:\n");
+                try tree.dumpNode(data.Declaration.node, level + delta, w);
+            }
+        },
+
+        .UnnamedBitFieldDecl => {
+            try w.writeByteNTimes(' ', level + half);
+            try w.writeAll("bits:\n");
+            try tree.dumpNode(data.UnaryExpr, level + delta, w);
         },
 
         .StringLiteralExpr => {

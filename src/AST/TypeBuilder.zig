@@ -65,8 +65,8 @@ pub const Builder = struct {
         IncompleteArray: *Type.Array,
         VariableLenArray: *Type.VLA,
 
-        Struct,
-        Union,
+        Struct: *Type.Record,
+        Union: *Type.Record,
         Enum: *Type.Enum,
 
         pub fn toString(spec: Kind) []const u8 {
@@ -226,13 +226,15 @@ pub const Builder = struct {
                 return;
             },
 
-            Kind.Struct => {
+            Kind.Struct => |data| {
                 ty.specifier = .Struct;
+                ty.data = .{ .record = data };
                 return;
             },
 
-            Kind.Union => {
+            Kind.Union => |data| {
                 ty.specifier = .Union;
+                ty.data = .{ .record = data };
                 return;
             },
 
@@ -451,8 +453,8 @@ pub const Builder = struct {
             .StaticArray => .{ .StaticArray = ty.data.array },
             .IncompleteArray => .{ .IncompleteArray = ty.data.array },
             .VariableLenArray => .{ .VariableLenArray = ty.data.vla },
-            .Struct => .{ .Struct = {} },
-            .Union => .{ .Union = {} },
+            .Struct => .{ .Struct = ty.data.record },
+            .Union => .{ .Union = ty.data.record },
             .Enum => .{ .Enum = ty.data.@"enum" },
         };
     }
