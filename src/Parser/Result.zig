@@ -26,6 +26,14 @@ pub fn getBool(res: Result) bool {
     };
 }
 
+pub fn asU64(res: Result) u64 {
+    return switch (res.value) {
+        .signed => |v| @as(u64, @bitCast(v)),
+        .unsigned => |v| v,
+        .unavailable => unreachable,
+    };
+}
+
 pub fn expect(res: Result, p: *Parser) Error!void {
     try res.saveValue(p);
     if (res.node == .none) {

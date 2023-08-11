@@ -15,6 +15,7 @@ data: union {
     array: *Array,
     vla: *VLA,
     @"enum": *Enum,
+    record: *Record,
     none: void,
 } = .{ .none = {} },
 
@@ -42,7 +43,13 @@ pub const Qualifiers = packed struct {
 
 pub const Function = struct {
     returnType: Type,
-    paramTypes: []NodeIndex,
+    params: []Param,
+
+    pub const Param = struct {
+        name: []const u8,
+        ty: Type,
+        register: bool,
+    };
 };
 
 pub const Array = struct {
@@ -61,8 +68,22 @@ pub const Enum = struct {
     fields: []Field,
 
     pub const Field = struct {
-        name: TokenIndex,
-        node: NodeIndex,
+        name: []const u8,
+        ty: Type,
+        value: u64,
+    };
+};
+
+pub const Record = struct {
+    name: []const u8,
+    fields: []Field,
+    size: u32,
+    alignment: u32,
+
+    pub const Field = struct {
+        name: []const u8,
+        ty: Type,
+        bitWidth: u32,
     };
 };
 
@@ -219,55 +240,62 @@ pub fn combine(inner: *Type, outer: Type, p: *Parser, sourceToken: TokenIndex) P
     }
 }
 
-pub fn dump(ty: Type, tree: Tree, w: anytype) @TypeOf(w).Error!void {
+pub fn dump(ty: Type, w: anytype) @TypeOf(w).Error!void {
     try ty.qual.dump(w);
     switch (ty.specifier) {
         .Pointer => {
             try w.writeAll("*");
-            try ty.data.subType.dump(tree, w);
+            try ty.data.subType.dump(w);
         },
 
         .Atomic => {
             try w.writeAll("_Atomic");
-            try ty.data.subType.dump(tree, w);
+            try ty.data.subType.dump(w);
             try w.writeAll(")");
         },
 
         .Func, .VarArgsFunc, .OldStyleFunc => {
             try w.writeAll("fn (");
-            for (ty.data.func.paramTypes, 0..) |param, i| {
+            for (ty.data.func.params, 0..) |param, i| {
                 if (i != 0) try w.writeAll(", ");
-                const nameToken = tree.nodes.items(.data)[@intFromEnum(param)].Declaration.name;
-                if (tree.tokens.items(.id)[nameToken] == .Identifier) {
-                    try w.print("{s}: ", .{tree.tokSlice(nameToken)});
-                }
+                if (param.register)
+                    try w.writeAll("register ");
 
-                try tree.nodes.items(.type)[@intFromEnum(param)].dump(tree, w);
+                try w.print("{s}: ", .{param.name});
+                try param.ty.dump(w);
             }
 
             if (ty.specifier != .Func) {
-                if (ty.data.func.paramTypes.len != 0) try w.writeAll(", ");
+                if (ty.data.func.params.len != 0) try w.writeAll(", ");
                 try w.writeAll("...");
             }
 
             try w.writeAll(") ");
-            try ty.data.func.returnType.dump(tree, w);
+            try ty.data.func.returnType.dump(w);
         },
 
         .Array, .StaticArray => {
             try w.writeAll("[");
             if (ty.specifier == .StaticArray) try w.writeAll("static ");
             try w.print("{d}]", .{ty.data.array.len});
-            try ty.data.array.elem.dump(tree, w);
+            try ty.data.array.elem.dump(w);
         },
 
         .IncompleteArray => {
             try w.writeAll("[]");
-            try ty.data.array.elem.dump(tree, w);
+            try ty.data.array.elem.dump(w);
         },
 
         .Enum => {
             try w.print("enum {s}", .{ty.data.@"enum".name});
+        },
+
+        .Struct => {
+            try w.print("struct {s}", .{ty.data.record.name});
+        },
+
+        .Union => {
+            try w.print("union {s}", .{ty.data.record.name});
         },
 
         else => {

@@ -47,10 +47,26 @@ pub const Tag = enum(u8) {
     // typdef declaration
     TypeDef,
 
-    // container definitions
-    StructDef,
-    UnionDef,
-    EnumDef,
+    // container declarations
+    /// { lhs; rhs; }
+    StructDeclTwo,
+    /// { lhs; rhs; }
+    UnionDeclTwo,
+    /// { lhs, rhs, }
+    EnumDeclTwo,
+    /// { range }
+    StructDecl,
+    /// { range }
+    UnionDecl,
+    /// { range }
+    EnumDecl,
+
+    /// name = node
+    EnumFieldDecl,
+    /// ty name : node
+    RecordFieldDecl,
+    /// ty : un
+    UnnamedBitFieldDecl,
 
     // ====== Stmt ======
     LabeledStmt,
@@ -214,11 +230,11 @@ pub const Tag = enum(u8) {
 
     /// ====== Initializer expressions ======
     /// { lhs, rhs }
-    CompoundInitializerTwoExpr,
+    CompoundInitializerExprTwo,
     /// { range }
     CompoundInitializerExpr,
     /// (ty){ lhs, rhs }
-    CompoundLiteralTwoExpr,
+    CompoundLiteralExprTwo,
     /// (ty){ range }
     CompoundLiteralExpr,
     /// lhs = rhs
