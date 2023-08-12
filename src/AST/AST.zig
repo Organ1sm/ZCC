@@ -559,7 +559,7 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
 
         .DeclRefExpr => {
             try w.writeByteNTimes(' ', level + 1);
-            try w.print("name: " ++ NAME ++ "{s}\n" ++ RESET, .{tree.tokSlice(data.Declaration.name)});
+            try w.print("name: " ++ NAME ++ "{s}\n" ++ RESET, .{tree.tokSlice(data.DeclarationRef)});
         },
 
         .EnumerationRef => {

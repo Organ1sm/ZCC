@@ -163,6 +163,7 @@ pub const Tag = enum {
     previous_definition,
     expected_identifier,
     expected_str_literal,
+    parameter_missing,
 };
 
 list: std.ArrayList(Message),
@@ -211,8 +212,8 @@ const MsgWriter = struct {
         if (builtin.os.tag == .windows or !m.color) {
             m.print("{s}:{d}:{d}: ", .{ path, lcs.line, lcs.col });
         } else {
-            const WHITE = "\x1b[37;1m";
-            m.print(WHITE ++ "{s}:{d}:{d}: ", .{ path, lcs.line, lcs.col });
+            const BOLD = "\x1b[0m\x1b[1m";
+            m.print(BOLD ++ "{s}:{d}:{d}: ", .{ path, lcs.line, lcs.col });
         }
     }
 
@@ -223,13 +224,13 @@ const MsgWriter = struct {
             const PURPLE = "\x1b[35;1m";
             const CYAN = "\x1b[36;1m";
             const RED = "\x1b[31;1m";
-            const WHITE = "\x1b[37;1m";
+            const BOLD = "\x1b[0m\x1b[1m";
 
             const msgKindStr = switch (kind) {
-                .@"fatal error" => RED ++ "fatal error: " ++ WHITE,
-                .@"error" => RED ++ "error: " ++ WHITE,
-                .note => CYAN ++ "note: " ++ WHITE,
-                .warning => PURPLE ++ "warning: " ++ WHITE,
+                .@"fatal error" => RED ++ "fatal error: " ++ BOLD,
+                .@"error" => RED ++ "error: " ++ BOLD,
+                .note => CYAN ++ "note: " ++ BOLD,
+                .warning => PURPLE ++ "warning: " ++ BOLD,
                 .off => unreachable,
             };
 
@@ -308,10 +309,10 @@ pub fn fatalNoSrc(diag: *Diagnostics, comptime fmt: []const u8, args: anytype) C
         std.debug.print("fatal error: " ++ fmt ++ "\n", args);
     } else {
         const RED = "\x1b[31;1m";
-        const WHITE = "\x1b[37;1m";
         const RESET = "\x1b[0m";
+        const BOLD = RESET ++ "\x1b[1m";
 
-        std.debug.print(RED ++ "fatal error: " ++ WHITE ++ fmt ++ "\n" ++ RESET, args);
+        std.debug.print(RED ++ "fatal error: " ++ BOLD ++ fmt ++ "\n" ++ RESET, args);
     }
     return error.FatalError;
 }
@@ -467,6 +468,7 @@ pub fn renderExtra(comp: *Compilation, m: anytype) void {
             .previous_definition => m.write("previous definition is here"),
             .expected_identifier => m.write("expected identifier"),
             .expected_str_literal => m.write("expected string literal for diagnostic message in static_assert"),
+            .parameter_missing => m.print("parameter named '{s}' is missing", .{msg.extra.str}),
         }
 
         m.end(lcs);
@@ -602,6 +604,7 @@ fn tagKind(diag: *Diagnostics, tag: Tag) Kind {
         .redefinition,
         .expected_identifier,
         .expected_str_literal,
+        .parameter_missing,
         => .@"error",
 
         .to_match_paren,

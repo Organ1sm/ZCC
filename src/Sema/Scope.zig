@@ -1,7 +1,9 @@
 const std = @import("std");
 const AST = @import("../AST/AST.zig");
+const Type = @import("../AST/Type.zig");
 const Parser = @import("../Parser/Parser.zig");
 const Result = @import("../Parser/Result.zig");
+
 
 const TokenIndex = AST.TokenIndex;
 const NodeIndex = AST.NodeIndex;
@@ -18,7 +20,7 @@ pub const Scope = union(enum) {
 
     pub const Symbol = struct {
         name: []const u8,
-        node: NodeIndex,
+        type: Type,
         nameToken: TokenIndex,
     };
 

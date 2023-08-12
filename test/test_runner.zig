@@ -35,6 +35,9 @@ pub fn main() !void {
 
         var it = casesDir.iterate();
         while (try it.next()) |entry| {
+            if (entry.kind == .directory)
+                continue;
+
             if (entry.kind != .file) {
                 print("skipping non file entry '{s}'\n", .{entry.name});
                 continue;
@@ -95,6 +98,7 @@ pub fn main() !void {
         defer caseNode.end();
         progress.refresh();
 
+        comp.diag.errors = 0;
         var pp = zcc.Preprocessor.init(&comp);
         defer pp.deinit();
 
@@ -136,6 +140,7 @@ pub fn main() !void {
             };
 
             if (pp.tokens.len - 1 != expected_tokens.len) {
+                failCount += 1;
                 print(
                     "EXPECTED_TOKENS count differs: expected {d} found {d}\n",
                     .{ expected_tokens.len, pp.tokens.len - 1 },
@@ -213,13 +218,14 @@ pub fn main() !void {
         }
 
         comp.renderErrors();
-
         if (comp.diag.errors != 0) failCount += 1 else passCount += 1;
     }
 
     root_node.end();
-    if (passCount == cases.items.len) {
+    if (passCount == cases.items.len and skipCount == 0) {
         print("All {d} tests passed.\n\n", .{passCount});
+    } else if (failCount == 0) {
+        print("{d} passed; {d} failed.\n\n", .{ passCount, skipCount });
     } else {
         print("{d} passed; {d} failed.\n\n", .{ passCount, failCount });
         std.process.exit(1);

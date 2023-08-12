@@ -79,7 +79,7 @@ pub fn build(b: *std.Build) void {
     integration_tests.addModule("zcc", zccModule);
 
     const integration_test_runner = b.addRunArtifact(integration_tests);
-    integration_test_runner.addArg(b.pathFromRoot("test/cases/preprocess"));
+    integration_test_runner.addArg(b.pathFromRoot("test/cases"));
 
     b.installArtifact(integration_tests);
     test_step.dependOn(&integration_test_runner.step);
