@@ -648,7 +648,7 @@ fn declSpecifier(p: *Parser) Error!?DeclSpec {
 
     const start = p.index;
     while (true) {
-        if (try p.typeSpec(&spec, &d.type))
+        if (try p.parseTypeSpec(&spec, &d.type))
             continue;
 
         const token = p.getCurrToken();
@@ -768,11 +768,13 @@ fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec) Error!?InitDeclarator {
 ///  | enumSpec
 ///  | typedef  // IDENTIFIER
 /// atomicTypeSpec : keyword_atomic '(' typeName ')'
-/// alignSpec : keyword_alignas '(' typeName ')'
-fn typeSpec(p: *Parser, ty: *TypeBuilder, completeType: *Type) Error!bool {
+/// alignSpec
+///   : keyword_alignas '(' typeName ')'
+///   | keyword_alignas '(' constExpr ')'
+fn parseTypeSpec(p: *Parser, ty: *TypeBuilder, completeType: *Type) Error!bool {
     const start = p.index;
     while (true) {
-        if (try p.typeQual(completeType)) {
+        if (try p.parseTypeQual(completeType)) {
             continue;
         }
 
@@ -789,7 +791,38 @@ fn typeSpec(p: *Parser, ty: *TypeBuilder, completeType: *Type) Error!bool {
             .KeywordDouble => try ty.combine(p, .Double),
             .KeywordComplex => try ty.combine(p, .Complex),
 
-            .KeywordAtomic => return p.todo("atomic types"),
+            .KeywordAtomic => {
+                const atomicToken = p.index;
+                p.index += 1;
+                const lp = p.eat(.LParen) orelse {
+                    // _Atomic qualifier not _Atomic(typeName)
+                    p.index = atomicToken;
+                    break;
+                };
+                const innerType = (try p.typeName()) orelse {
+                    try p.err(.expected_type);
+                    return error.ParsingFailed;
+                };
+
+                try p.expectClosing(lp, .RParen);
+
+                const newSpec = TypeBuilder.fromType(innerType);
+
+                // combine() uses p.index for error reporting
+                const cur = p.index;
+                defer p.index = cur;
+                p.index = atomicToken;
+                try ty.combine(p, newSpec);
+
+                if (completeType.qual.atomic)
+                    try p.errStr(.duplicate_declspec, atomicToken, "atomic")
+                else
+                    completeType.qual.atomic = true;
+
+                // TODO check that the type can be atomic
+                continue;
+            },
+
             .KeywordEnum => {
                 try ty.combine(p, .{ .Enum = undefined });
                 ty.kind.Enum = try p.enumSpec();
@@ -812,14 +845,19 @@ fn typeSpec(p: *Parser, ty: *TypeBuilder, completeType: *Type) Error!bool {
                 if (completeType.alignment != 0)
                     try p.errStr(.duplicate_declspec, p.index, "alignment");
 
+                p.index += 1;
+
                 const lp = try p.expectToken(.LParen);
-                const otherType = (try p.typeName()) orelse {
-                    try p.err(.expected_type);
-                    return error.ParsingFailed;
-                };
+                if (try p.typeName()) |inner_ty| {
+                    completeType.alignment = inner_ty.alignment;
+                } else {
+                    const res = try p.constExpr();
+                    // TODO more validation here
+                    completeType.alignment = @as(u32, @intCast(res.asU64()));
+                }
 
                 try p.expectClosing(lp, .RParen);
-                completeType.alignment = otherType.alignment;
+                continue;
             },
 
             .Identifier => {
@@ -1015,7 +1053,7 @@ fn specQual(p: *Parser) Error!?Type {
     var spec: TypeBuilder = .{};
     var ty: Type = .{ .specifier = undefined };
 
-    if (try p.typeSpec(&spec, &ty)) {
+    if (try p.parseTypeSpec(&spec, &ty)) {
         try spec.finish(p, &ty);
         return ty;
     }
@@ -1157,7 +1195,7 @@ fn enumerator(p: *Parser) Error!?EnumFieldAndNode {
 }
 /// atomicTypeSpec : keyword_atomic '(' typeName ')'
 /// typeQual : keyword_const | keyword_restrict | keyword_volatile | keyword_atomic
-fn typeQual(p: *Parser, ty: *Type) Error!bool {
+fn parseTypeQual(p: *Parser, ty: *Type) Error!bool {
     var any = false;
 
     while (true) {
@@ -1190,6 +1228,8 @@ fn typeQual(p: *Parser, ty: *Type) Error!bool {
             },
 
             .KeywordAtomic => {
+                // _Atomic(typeName) instead of just _Atomic
+                if (p.tokenIds[p.index + 1] == .LParen) break;
                 if (ty.qual.atomic)
                     try p.errStr(.duplicate_declspec, p.index, "atomic")
                 else
@@ -1268,11 +1308,11 @@ fn declarator(p: *Parser, baseType: Type, kind: DeclaratorKind) Error!?Declarato
 fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: DeclaratorKind) Error!Type {
     if (p.eat(.LBracket)) |lb| {
         var resType = Type{ .specifier = .Pointer };
-        var gotQuals = try p.typeQual(&resType);
+        var gotQuals = try p.parseTypeQual(&resType);
         var static = p.eat(.KeywordStatic);
 
         if (static != null and !gotQuals)
-            gotQuals = try p.typeQual(&resType);
+            gotQuals = try p.parseTypeQual(&resType);
 
         var star = p.eat(.Asterisk);
         const size = if (star) |_| Result{} else try p.assignExpr();
@@ -1409,7 +1449,7 @@ fn pointer(p: *Parser, baseType: Type) Error!Type {
             .specifier = .Pointer,
             .data = .{ .subType = elemType },
         };
-        _ = try p.typeQual(&ty);
+        _ = try p.parseTypeQual(&ty);
     }
 
     return ty;
@@ -1501,7 +1541,7 @@ fn typeName(p: *Parser) Error!?Type {
             try p.errToken(.invalid_old_style_params, tokenIdx);
 
         return some.type;
-    } else return null;
+    } else return ty;
 }
 
 /// initializer

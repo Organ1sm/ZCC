@@ -114,7 +114,6 @@ pub const Specifier = enum {
 
     // data.SubType
     Pointer,
-    Atomic,
     UnspecifiedVariableLenArray,
 
     // data.func
@@ -200,16 +199,29 @@ pub fn sizeof(ty: Type, comp: *Compilation) u64 {
         .Char, .SChar, .UChar => 1,
         .Short, .UShort => 2,
         .Int, .UInt => 4,
-        .Long, .ULong, .LongLong, .ULongLong => 8,
+        .Long, .ULong, .LongLong, .ULongLong => switch (comp.target.os.tag) {
+            .linux,
+            .macos,
+            .freebsd,
+            .netbsd,
+            .dragonfly,
+            .openbsd,
+            .wasi,
+            .emscripten,
+            => comp.target.ptrBitWidth() >> 3,
+
+            .windows, .uefi => 32,
+
+            else => 32,
+        },
         .Float => 4,
         .Double => 8,
         .LongDouble => 16,
         .ComplexFloat => 8,
         .ComplexDouble => 16,
         .ComplexLongDouble => 32,
-        .Pointer => 8,
-        .Atomic => return ty.data.subType.sizeof(comp),
-        .Array, .StaticArray => return ty.data.subType.sizeof(comp) * ty.data.array.len,
+        .Pointer, .StaticArray => comp.target.ptrBitWidth() >> 3,
+        .Array => return ty.data.subType.sizeof(comp) * ty.data.array.len,
         .Struct => @panic("TODO"),
         .Union => @panic("TODO"),
         .Enum => @panic("TODO"),
@@ -249,12 +261,6 @@ pub fn dump(ty: Type, w: anytype) @TypeOf(w).Error!void {
         .Pointer => {
             try w.writeAll("*");
             try ty.data.subType.dump(w);
-        },
-
-        .Atomic => {
-            try w.writeAll("_Atomic");
-            try ty.data.subType.dump(w);
-            try w.writeAll(")");
         },
 
         .Func, .VarArgsFunc, .OldStyleFunc => {
@@ -307,10 +313,11 @@ pub fn dump(ty: Type, w: anytype) @TypeOf(w).Error!void {
                 try dumpRecord(ty.data.record, w);
         },
 
-        else => {
-            try w.writeAll(Builder.fromType(ty).toString());
-        },
+        else => try w.writeAll(Builder.fromType(ty).toString()),
     }
+
+    if (ty.alignment != 0)
+        try w.print(" _Alignas({d})", .{ty.alignment});
 }
 
 fn dumpEnum(@"enum": *Enum, w: anytype) @TypeOf(w).Error!void {

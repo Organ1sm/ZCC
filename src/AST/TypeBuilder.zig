@@ -55,7 +55,6 @@ pub const Builder = struct {
         ComplexLongDouble,
 
         Pointer: *Type,
-        Atomic: *Type,
         UnspecifiedVariableLenArray: *Type,
         Func: *Type.Function,
         VarArgsFunc: *Type.Function,
@@ -117,7 +116,6 @@ pub const Builder = struct {
                 Kind.ComplexLongDouble => "_Complex long double",
 
                 Kind.Pointer => "pointer",
-                Kind.Atomic => "atomic",
                 Kind.Func, Kind.VarArgsFunc, Kind.OldStyleFunc => "function",
                 Kind.Array, Kind.StaticArray, Kind.UnspecifiedVariableLenArray, Kind.VariableLenArray, Kind.IncompleteArray => "array",
                 Kind.Struct => "struct",
@@ -164,12 +162,6 @@ pub const Builder = struct {
             Kind.Complex, Kind.ComplexLong => {
                 try p.errExtra(.type_is_invalid, p.index, .{ .str = spec.kind.toString() });
                 return error.ParsingFailed;
-            },
-
-            Kind.Atomic => |data| {
-                ty.specifier = .Atomic;
-                ty.data = .{ .subType = data };
-                return;
             },
 
             Kind.Pointer => |data| {
@@ -277,7 +269,6 @@ pub const Builder = struct {
                 else => return spec.cannotCombine(p),
             },
 
-            Kind.Atomic => return p.todo("atomic type"),
             Kind.Signed => spec.kind = switch (spec.kind) {
                 Kind.None => Kind.Signed,
                 Kind.Char => Kind.SChar,
@@ -444,7 +435,6 @@ pub const Builder = struct {
             .ComplexLongDouble => Kind.ComplexLongDouble,
 
             .Pointer => .{ .Pointer = ty.data.subType },
-            .Atomic => .{ .Atomic = ty.data.subType },
             .UnspecifiedVariableLenArray => .{ .UnspecifiedVariableLenArray = ty.data.subType },
             .Func => .{ .Func = ty.data.func },
             .VarArgsFunc => .{ .VarArgsFunc = ty.data.func },
