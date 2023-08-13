@@ -240,6 +240,9 @@ pub fn combine(inner: *Type, outer: Type, p: *Parser, sourceToken: TokenIndex) P
     }
 }
 
+/// Useful for debugging, too noisy to be enabled by default.
+const DumpDetailedContainers = false;
+
 pub fn dump(ty: Type, w: anytype) @TypeOf(w).Error!void {
     try ty.qual.dump(w);
     switch (ty.specifier) {
@@ -288,18 +291,42 @@ pub fn dump(ty: Type, w: anytype) @TypeOf(w).Error!void {
 
         .Enum => {
             try w.print("enum {s}", .{ty.data.@"enum".name});
+            if (DumpDetailedContainers)
+                try dumpEnum(ty.data.@"enum", w);
         },
 
         .Struct => {
             try w.print("struct {s}", .{ty.data.record.name});
+            if (DumpDetailedContainers)
+                try dumpRecord(ty.data.record, w);
         },
 
         .Union => {
             try w.print("union {s}", .{ty.data.record.name});
+            if (DumpDetailedContainers)
+                try dumpRecord(ty.data.record, w);
         },
 
         else => {
             try w.writeAll(Builder.fromType(ty).toString());
         },
     }
+}
+
+fn dumpEnum(@"enum": *Enum, w: anytype) @TypeOf(w).Error!void {
+    try w.writeAll(" {");
+    for (@"enum".fields) |field| {
+        try w.print(" {s} = {d},", .{ field.name, field.value });
+    }
+    try w.writeAll(" }");
+}
+
+fn dumpRecord(record: *Record, w: anytype) @TypeOf(w).Error!void {
+    try w.writeAll(" {");
+    for (record.fields) |field| {
+        try w.writeByte(' ');
+        try field.ty.dump(w);
+        try w.print(" {s}: {d};", .{ field.name, field.bit_width });
+    }
+    try w.writeAll(" }");
 }

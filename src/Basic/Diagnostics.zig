@@ -45,6 +45,7 @@ const Options = struct {
     @"unused-value": Kind = .warning,
     @"unreachable-code": Kind = .warning,
     @"unknown-warning-option": Kind = .warning,
+    @"empty-struct": Kind = .off,
 };
 
 pub const Tag = enum {
@@ -164,6 +165,8 @@ pub const Tag = enum {
     expected_identifier,
     expected_str_literal,
     parameter_missing,
+    empty_record,
+    wrong_tag,
 };
 
 list: std.ArrayList(Message),
@@ -469,6 +472,8 @@ pub fn renderExtra(comp: *Compilation, m: anytype) void {
             .expected_identifier => m.write("expected identifier"),
             .expected_str_literal => m.write("expected string literal for diagnostic message in static_assert"),
             .parameter_missing => m.print("parameter named '{s}' is missing", .{msg.extra.str}),
+            .empty_record => m.print("empty {s} is a GNU extension", .{msg.extra.str}),
+            .wrong_tag => m.print("use of '{s}' with tag type that does not match previous definition", .{msg.extra.str}),
         }
 
         m.end(lcs);
@@ -605,6 +610,7 @@ fn tagKind(diag: *Diagnostics, tag: Tag) Kind {
         .expected_identifier,
         .expected_str_literal,
         .parameter_missing,
+        .wrong_tag,
         => .@"error",
 
         .to_match_paren,
@@ -634,6 +640,7 @@ fn tagKind(diag: *Diagnostics, tag: Tag) Kind {
         .unused_value => diag.options.@"unused-value",
         .unreachable_code => diag.options.@"unreachable-code",
         .unknown_warning => diag.options.@"unknown-warning-option",
+        .empty_record => diag.options.@"empty-struct",
     };
 
     if (kind == .@"error" and diag.fatalErrors)
