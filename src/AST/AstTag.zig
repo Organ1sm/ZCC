@@ -31,10 +31,6 @@ pub const Tag = enum(u8) {
     NoreturnInlineFnDef,
     NoreturnInlineStaticFnDef,
 
-    // parameter
-    ParamDecl,
-    RegisterParamDecl,
-
     // variable declaration
     Var,
     ExternVar,
@@ -64,9 +60,8 @@ pub const Tag = enum(u8) {
     /// name = node
     EnumFieldDecl,
     /// ty name : node
+    /// name == 0 means unnamed
     RecordFieldDecl,
-    /// ty : un
-    UnnamedBitFieldDecl,
 
     // ====== Stmt ======
     LabeledStmt,

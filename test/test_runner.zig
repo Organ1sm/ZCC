@@ -225,7 +225,7 @@ pub fn main() !void {
     if (passCount == cases.items.len and skipCount == 0) {
         print("All {d} tests passed.\n\n", .{passCount});
     } else if (failCount == 0) {
-        print("{d} passed; {d} failed.\n\n", .{ passCount, skipCount });
+        print("{d} passed; {d} skipped.\n\n", .{ passCount, skipCount });
     } else {
         print("{d} passed; {d} failed.\n\n", .{ passCount, failCount });
         std.process.exit(1);

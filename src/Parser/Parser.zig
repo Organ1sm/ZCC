@@ -250,14 +250,31 @@ fn findSymbol(p: *Parser, nameToken: TokenIndex) ?Scope {
     return null;
 }
 
-fn findEnum(p: *Parser, nameToken: TokenIndex) ?Scope.Symbol {
+fn findTag(p: *Parser, kind: TokenType, nameToken: TokenIndex) !?Scope.Symbol {
     const name = p.tokSlice(nameToken);
     var i = p.scopes.items.len;
     while (i > 0) {
         i -= 1;
         const sym = p.scopes.items[i];
         switch (sym) {
-            .@"enum" => |e| if (std.mem.eql(u8, e.name, name)) return e,
+            .@"enum" => |e| if (std.mem.eql(u8, e.name, name)) {
+                if (kind == .KeywordEnum) return e;
+                try p.errStr(.wrong_tag, nameToken, name);
+                try p.errToken(.previous_definition, e.nameToken);
+                return null;
+            },
+            .@"struct" => |s| if (std.mem.eql(u8, s.name, name)) {
+                if (kind == .KeywordStruct) return s;
+                try p.errStr(.wrong_tag, nameToken, name);
+                try p.errToken(.previous_definition, s.nameToken);
+                return null;
+            },
+            .@"union" => |u| if (std.mem.eql(u8, u.name, name)) {
+                if (kind == .KeywordUnion) return u;
+                try p.errStr(.wrong_tag, nameToken, name);
+                try p.errToken(.previous_definition, u.nameToken);
+                return null;
+            },
             else => {},
         }
     }
@@ -834,10 +851,18 @@ fn getAnonymousName(p: *Parser, kindToken: TokenIndex) ![]const u8 {
     const source = p.pp.compilation.getSource(loc.id);
     const lcs = source.lineColString(loc.byteOffset);
 
+    const kindStr = switch (p.tokenIds[kindToken]) {
+        .KeywordStruct,
+        .KeywordUnion,
+        .KeywordEnum,
+        => p.tokSlice(kindToken),
+        else => "record field",
+    };
+
     return std.fmt.allocPrint(
         p.arena,
         "(anonymous {s} at {s}:{d}:{d})",
-        .{ p.tokSlice(kindToken), source.path, lcs.line, lcs.col },
+        .{ kindStr, source.path, lcs.line, lcs.col },
     );
 }
 
@@ -845,21 +870,144 @@ fn getAnonymousName(p: *Parser, kindToken: TokenIndex) ![]const u8 {
 ///  : (keyword_struct | keyword_union) IDENTIFIER? { recordDecl* }
 ///  | (keyword_struct | keyword_union) IDENTIFIER
 fn recordSpec(p: *Parser) Error!*Type.Record {
-    _ = p.getCurrToken();
+    const kindToken = p.index;
+    const isStruct = p.tokenIds[kindToken] == .KeywordStruct;
     p.index += 1;
+    const maybeIdent = p.eat(.Identifier);
+    const lb = p.eat(.LBrace) orelse {
+        const ident = maybeIdent orelse {
+            try p.err(.ident_or_l_brace);
+            return error.ParsingFailed;
+        };
 
-    return p.todo("recordSpec");
+        // check if this is a referense to a previous type
+        if (try p.findTag(p.tokenIds[kindToken], ident)) |prev| {
+            return prev.type.data.record;
+        }
+
+        return p.todo("record forward declaration");
+    };
+
+    // check if this is a redefinition
+    if (maybeIdent) |ident| {
+        if (try p.findTag(p.tokenIds[kindToken], ident)) |prev| {
+            try p.errStr(.redefinition, ident, p.tokSlice(ident));
+            try p.errToken(.previous_definition, prev.nameToken);
+        }
+    }
+
+    // create the type
+    const recordType = try p.arena.create(Type.Record);
+    recordType.* = .{
+        .name = if (maybeIdent) |ident| p.tokSlice(ident) else try p.getAnonymousName(kindToken),
+        .size = 0, // TODO calculate
+        .alignment = 0, // TODO calculate
+        .fields = undefined,
+    };
+    const ty = Type{
+        .specifier = if (isStruct) .Struct else .Union,
+        .data = .{ .record = recordType },
+    };
+
+    // declare a symbol for the type
+    if (maybeIdent) |ident| {
+        const sym = Scope.Symbol{
+            .name = recordType.name,
+            .type = ty,
+            .nameToken = ident,
+        };
+        try p.scopes.append(if (isStruct) .{ .@"struct" = sym } else .{ .@"union" = sym });
+    }
+
+    var fields = std.ArrayList(Type.Record.Field).init(p.pp.compilation.gpa);
+    var fieldNodes = NodeList.init(p.pp.compilation.gpa);
+
+    defer {
+        fields.deinit();
+        fieldNodes.deinit();
+    }
+
+    {
+        // TODO this is kinda janky, look into using a global scratch buffer
+        const savedDecls = p.currDeclList;
+        defer p.currDeclList = savedDecls;
+        p.currDeclList = &fieldNodes;
+
+        try p.recordDecls(&fields);
+    }
+
+    if (fields.items.len == 0) try p.errStr(.empty_record, kindToken, p.tokSlice(kindToken));
+
+    try p.expectClosing(lb, .RBrace);
+    recordType.fields = try p.arena.dupe(Type.Record.Field, fields.items);
+
+    // finish by creating a node
+    var node: AST.Node = .{
+        .tag = if (isStruct) .StructDeclTwo else .UnionDeclTwo,
+        .type = ty,
+        .data = .{ .BinaryExpr = .{ .lhs = .none, .rhs = .none } },
+    };
+    switch (fieldNodes.items.len) {
+        0 => {},
+        1 => node.data = .{ .BinaryExpr = .{ .lhs = fieldNodes.items[0], .rhs = .none } },
+        2 => node.data = .{ .BinaryExpr = .{ .lhs = fieldNodes.items[0], .rhs = fieldNodes.items[1] } },
+        else => {
+            node.tag = if (isStruct) .StructDecl else .UnionDecl;
+            node.data = .{ .range = try p.addList(fieldNodes.items) };
+        },
+    }
+    try p.currDeclList.append(try p.addNode(node));
+    return recordType;
 }
 /// recordDecl
 ///  : specQual+ (recordDeclarator (',' recordDeclarator)*)? ;
 ///  | staticAssert
-fn recordDecl(p: *Parser) Error!NodeIndex {
-    return p.todo("recordDecl");
-}
-
 /// recordDeclarator : declarator (':' constExpr)?
-fn recordDeclarator(p: *Parser) Error!NodeIndex {
-    return p.todo("recordDeclarator");
+fn recordDecls(p: *Parser, fields: *std.ArrayList(Type.Record.Field)) Error!void {
+    while (true) {
+        if (try p.parseStaticAssert()) continue;
+        const baseType = (try p.specQual()) orelse return;
+
+        while (true) {
+            // 0 means unnamed
+            var nameToken: TokenIndex = 0;
+            var ty = baseType;
+            var bitsNode: NodeIndex = .none;
+            var bits: u32 = 0;
+            const first_tok = p.index;
+            if (try p.declarator(ty, .record)) |d| {
+                nameToken = d.name;
+                ty = d.type;
+            }
+            if (p.eat(.Colon)) |_| {
+                const res = try p.constExpr();
+                // TODO check using math.cast
+                switch (res.value) {
+                    .unsigned => |v| bits = @as(u32, @intCast(v)),
+                    .signed => |v| bits = @as(u32, @intCast(v)),
+                    .unavailable => unreachable,
+                }
+                bitsNode = res.node;
+            }
+            if (nameToken == 0 and bitsNode == .none) {
+                try p.err(.missing_declaration);
+            } else {
+                try fields.append(.{
+                    .name = if (nameToken != 0) p.tokSlice(nameToken) else try p.getAnonymousName(first_tok),
+                    .ty = ty,
+                    .bitWidth = bits,
+                });
+                const node = try p.addNode(.{
+                    .tag = .RecordFieldDecl,
+                    .type = ty,
+                    .data = .{ .Declaration = .{ .name = nameToken, .node = bitsNode } },
+                });
+                try p.currDeclList.append(node);
+            }
+            if (p.eat(.Comma) == null) break;
+        }
+        _ = try p.expectToken(.Semicolon);
+    }
 }
 
 // specQual : typeSpec | typeQual | alignSpec
@@ -888,18 +1036,22 @@ fn enumSpec(p: *Parser) Error!*Type.Enum {
             return error.ParsingFailed;
         };
 
-        if (p.findEnum(ident)) |prev| {
+        // check if this is a referense to a previous type
+        if (try p.findTag(.KeywordEnum, ident)) |prev| {
             return prev.type.data.@"enum";
         }
         return p.todo("enum forward declaration");
     };
+
+    // check if this is a redefinition.
     if (maybeID) |ident| {
-        if (p.findEnum(ident)) |prev| {
+        if (try p.findTag(.KeywordEnum, ident)) |prev| {
             try p.errStr(.redefinition, ident, p.tokSlice(ident));
             try p.errToken(.previous_definition, prev.nameToken);
         }
     }
 
+    // Create Type
     const enumType = try p.arena.create(Type.Enum);
     enumType.* = .{
         .name = if (maybeID) |ident| p.tokSlice(ident) else try p.getAnonymousName(enumTK),
@@ -911,14 +1063,6 @@ fn enumSpec(p: *Parser) Error!*Type.Enum {
         .specifier = .Enum,
         .data = .{ .@"enum" = enumType },
     };
-
-    const node = try p.addNode(.{
-        .type = ty,
-        .tag = .EnumDeclTwo,
-        .data = .{ .BinaryExpr = .{ .lhs = .none, .rhs = .none } },
-    });
-
-    try p.currDeclList.append(node);
 
     if (maybeID) |ident| {
         try p.scopes.append(.{ .@"enum" = .{
@@ -943,20 +1087,24 @@ fn enumSpec(p: *Parser) Error!*Type.Enum {
     try p.expectClosing(lb, .RBrace);
     enumType.fields = try p.arena.dupe(Type.Enum.Field, fields.items);
 
+    // finish by creating a node
+    var node: AST.Node = .{
+        .tag = .EnumDeclTwo,
+        .type = ty,
+        .data = .{ .BinaryExpr = .{ .lhs = .none, .rhs = .none } },
+    };
+
     switch (fieldNodes.items.len) {
         0 => {},
-        1 => p.nodes.items(.data)[@intFromEnum(node)] = .{
-            .BinaryExpr = .{ .lhs = fieldNodes.items[0], .rhs = .none },
-        },
-        2 => p.nodes.items(.data)[@intFromEnum(node)] = .{
-            .BinaryExpr = .{ .lhs = fieldNodes.items[0], .rhs = fieldNodes.items[1] },
-        },
+        1 => node.data = .{ .BinaryExpr = .{ .lhs = fieldNodes.items[0], .rhs = .none } },
+        2 => node.data = .{ .BinaryExpr = .{ .lhs = fieldNodes.items[0], .rhs = fieldNodes.items[1] } },
         else => {
-            p.nodes.items(.tag)[@intFromEnum(node)] = .EnumDecl;
-            p.nodes.items(.data)[@intFromEnum(node)] = .{ .range = try p.addList(fieldNodes.items) };
+            node.tag = .EnumDecl;
+            node.data = .{ .range = try p.addList(fieldNodes.items) };
         },
     }
 
+    try p.currDeclList.append(try p.addNode(node));
     return enumType;
 }
 
@@ -1064,7 +1212,7 @@ const Declarator = struct {
     oldTypeFunc: ?TokenIndex = null,
 };
 
-const DeclaratorKind = enum { normal, abstract, param };
+const DeclaratorKind = enum { normal, abstract, param, record };
 
 /// declarator: pointer? directDeclarator
 /// abstractDeclarator
@@ -1370,33 +1518,23 @@ fn initializer(p: *Parser, parenType: Type) Error!Result {
         }
         try p.expectClosing(lb, .RBrace);
 
-        return Result{
-            .node = switch (initializers.items.len) {
-                0 => try p.addNode(.{
-                    .tag = .CompoundInitializerExprTwo,
-                    .type = parenType,
-                    .data = .{ .BinaryExpr = .{ .lhs = .none, .rhs = .none } },
-                }),
-
-                1 => try p.addNode(.{
-                    .tag = .CompoundInitializerExprTwo,
-                    .type = parenType,
-                    .data = .{ .BinaryExpr = .{ .lhs = initializers.items[0], .rhs = .none } },
-                }),
-
-                2 => try p.addNode(.{
-                    .tag = .CompoundInitializerExprTwo,
-                    .type = parenType,
-                    .data = .{ .BinaryExpr = .{ .lhs = initializers.items[0], .rhs = initializers.items[1] } },
-                }),
-                else => try p.addNode(.{
-                    .tag = .CompoundInitializerExpr,
-                    .type = parenType,
-                    .data = .{ .range = try p.addList(initializers.items) },
-                }),
-            },
-            .ty = parenType,
+        var node: AST.Node = .{
+            .tag = .CompoundInitializerExprTwo,
+            .type = parenType,
+            .data = .{ .BinaryExpr = .{ .lhs = .none, .rhs = .none } },
         };
+
+        switch (initializers.items.len) {
+            0 => {},
+            1 => node.data = .{ .BinaryExpr = .{ .lhs = initializers.items[0], .rhs = .none } },
+            2 => node.data = .{ .BinaryExpr = .{ .lhs = initializers.items[0], .rhs = initializers.items[1] } },
+            else => {
+                node.tag = .CompoundInitializerExpr;
+                node.data = .{ .range = try p.addList(initializers.items) };
+            },
+        }
+
+        return Result{ .node = try p.addNode(node), .ty = parenType };
     }
 
     return p.assignExpr();
@@ -1866,28 +2004,22 @@ fn parseCompoundStmt(p: *Parser) Error!?NodeIndex {
             try p.errToken(.unreachable_code, some);
     }
 
+    var node: AST.Node = .{
+        .tag = .CompoundStmtTwo,
+        .data = .{ .BinaryExpr = .{ .lhs = .none, .rhs = .none } },
+    };
+
     switch (statements.items.len) {
-        0 => return try p.addNode(.{ .tag = .CompoundStmtTwo, .data = .{ .BinaryExpr = .{ .lhs = .none, .rhs = .none } } }),
-        1 => return try p.addNode(.{
-            .tag = .CompoundStmtTwo,
-            .data = .{ .BinaryExpr = .{ .lhs = statements.items[0], .rhs = .none } },
-        }),
-        2 => return try p.addNode(.{
-            .tag = .CompoundStmtTwo,
-            .data = .{
-                .BinaryExpr = .{
-                    .lhs = statements.items[0],
-                    .rhs = statements.items[1],
-                },
-            },
-        }),
+        0 => {},
+        1 => node.data = .{ .BinaryExpr = .{ .lhs = statements.items[0], .rhs = .none } },
+        2 => node.data = .{ .BinaryExpr = .{ .lhs = statements.items[0], .rhs = statements.items[1] } },
         else => {
-            return try p.addNode(.{
-                .tag = .CompoundStmt,
-                .data = .{ .range = try p.addList(statements.items) },
-            });
+            node.tag = .CompoundStmt;
+            node.data = .{ .range = try p.addList(statements.items) };
         },
     }
+
+    return try p.addNode(node);
 }
 
 fn nodeIsNoreturn(p: *Parser, node: NodeIndex) bool {
@@ -2368,31 +2500,21 @@ fn parseCastExpr(p: *Parser) Error!Result {
                 }
                 try p.expectClosing(lb, .RBrace);
 
-                return Result{
-                    .ty = ty,
-                    .node = switch (initializers.items.len) {
-                        0 => try p.addNode(.{
-                            .tag = .CompoundLiteralExprTwo,
-                            .type = ty,
-                            .data = .{ .BinaryExpr = .{ .lhs = .none, .rhs = .none } },
-                        }),
-                        1 => try p.addNode(.{
-                            .tag = .CompoundLiteralExprTwo,
-                            .type = ty,
-                            .data = .{ .BinaryExpr = .{ .lhs = initializers.items[0], .rhs = .none } },
-                        }),
-                        2 => try p.addNode(.{
-                            .tag = .CompoundLiteralExprTwo,
-                            .type = ty,
-                            .data = .{ .BinaryExpr = .{ .lhs = initializers.items[0], .rhs = initializers.items[1] } },
-                        }),
-                        else => try p.addNode(.{
-                            .tag = .CompoundLiteralExpr,
-                            .type = ty,
-                            .data = .{ .range = try p.addList(initializers.items) },
-                        }),
-                    },
+                var node: AST.Node = .{
+                    .tag = .CompoundLiteralExprTwo,
+                    .type = ty,
+                    .data = .{ .BinaryExpr = .{ .lhs = .none, .rhs = .none } },
                 };
+                switch (initializers.items.len) {
+                    0 => {},
+                    1 => node.data = .{ .BinaryExpr = .{ .lhs = initializers.items[0], .rhs = .none } },
+                    2 => node.data = .{ .BinaryExpr = .{ .lhs = initializers.items[0], .rhs = initializers.items[1] } },
+                    else => {
+                        node.tag = .CompoundLiteralExpr;
+                        node.data = .{ .range = try p.addList(initializers.items) };
+                    },
+                }
+                return Result{ .node = try p.addNode(node), .ty = ty };
             }
             var operand = try p.parseCastExpr();
             operand.ty = ty;
@@ -2623,32 +2745,21 @@ fn suffixExpr(p: *Parser, lhs: Result) Error!Result {
                 try p.errExtra(.expected_at_least_arguments, firstAfter, extra);
             }
 
-            var res: Result = .{ .ty = ty.data.func.returnType };
+            var callNode: AST.Node = .{
+                .tag = .CallExprOne,
+                .type = ty.data.func.returnType,
+                .data = .{ .BinaryExpr = .{ .lhs = lhs.node, .rhs = .none } },
+            };
             switch (args.items.len) {
-                0 => res.node = try p.addNode(.{
-                    .tag = .CallExprOne,
-                    .type = res.ty,
-                    .data = .{ .BinaryExpr = .{ .lhs = lhs.node, .rhs = .none } },
-                }),
-                1 => res.node = try p.addNode(.{
-                    .tag = .CallExprOne,
-                    .type = res.ty,
-                    .data = .{ .BinaryExpr = .{
-                        .lhs = lhs.node,
-                        .rhs = args.items[0],
-                    } },
-                }),
+                0 => {},
+                1 => callNode.data.BinaryExpr.rhs = args.items[0],
                 else => {
+                    callNode.tag = .CallExpr;
                     try p.data.append(lhs.node);
-                    res.node = try p.addNode(.{
-                        .tag = .CallExpr,
-                        .type = ty.data.func.returnType,
-                        .data = .{ .range = try p.addList(args.items) },
-                    });
+                    callNode.data = .{ .range = try p.addList(args.items) };
                 },
             }
-
-            return res;
+            return Result{ .node = try p.addNode(callNode), .ty = callNode.type };
         },
 
         .Period => {

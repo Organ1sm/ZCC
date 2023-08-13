@@ -452,19 +452,16 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
         },
 
         .RecordFieldDecl => {
-            try w.writeByteNTimes(' ', level + half);
-            try w.print("name: " ++ NAME ++ "{s}\n" ++ RESET, .{tree.tokSlice(data.Declaration.name)});
+            if (data.Declaration.name != 0) {
+                try w.writeByteNTimes(' ', level + half);
+                try w.print("name: " ++ NAME ++ "{s}\n" ++ RESET, .{tree.tokSlice(data.Declaration.name)});
+            }
+
             if (data.Declaration.node != .none) {
                 try w.writeByteNTimes(' ', level + half);
                 try w.writeAll("bits:\n");
                 try tree.dumpNode(data.Declaration.node, level + delta, w);
             }
-        },
-
-        .UnnamedBitFieldDecl => {
-            try w.writeByteNTimes(' ', level + half);
-            try w.writeAll("bits:\n");
-            try tree.dumpNode(data.UnaryExpr, level + delta, w);
         },
 
         .StringLiteralExpr => {
@@ -613,7 +610,5 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
             try w.writeAll("initializer:\n");
             try tree.dumpNode(data.BinaryExpr.rhs, level + delta, w);
         },
-
-        else => {},
     }
 }
