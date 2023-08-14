@@ -1200,7 +1200,10 @@ fn parseTypeQual(p: *Parser, ty: *Type) Error!bool {
 
     while (true) {
         switch (p.getCurrToken()) {
-            .KeywordRestrict => {
+            .KeywordRestrict,
+            .KeywordGccRestrict1,
+            .KeywordGccRestrict2,
+            => {
                 if (ty.specifier != .Pointer)
                     try p.errExtra(
                         .restrict_non_pointer,
@@ -1213,14 +1216,20 @@ fn parseTypeQual(p: *Parser, ty: *Type) Error!bool {
                     ty.qual.restrict = true;
             },
 
-            .KeywordConst => {
+            .KeywordConst,
+            .KeywordGccConst1,
+            .KeywordGccConst2,
+            => {
                 if (ty.qual.@"const")
                     try p.errStr(.duplicate_declspec, p.index, "const")
                 else
                     ty.qual.@"const" = true;
             },
 
-            .KeywordVolatile => {
+            .KeywordVolatile,
+            .KeywordGccVolatile1,
+            .KeywordGccVolatile2,
+            => {
                 if (ty.qual.@"volatile")
                     try p.errStr(.duplicate_declspec, p.index, "volatile")
                 else

@@ -159,6 +159,14 @@ pub const TokenType = enum(u8) {
     KeywordStaticAssert,
     KeywordThreadLocal,
 
+    // GCC keywords
+    KeywordGccConst1,
+    KeywordGccConst2,
+    KeywordGccVolatile1,
+    KeywordGccVolatile2,
+    KeywordGccRestrict1,
+    KeywordGccRestrict2,
+
     // Preprocessor directives
     KeywordInclude,
     KeywordDefine,
@@ -393,6 +401,13 @@ pub const TokenType = enum(u8) {
             .KeywordStaticAssert => "_Static_assert",
             .KeywordThreadLocal => "_Thread_local",
 
+            .KeywordGccConst1 => "__const",
+            .KeywordGccConst2 => "__const__",
+            .KeywordGccVolatile1 => "__volatile",
+            .KeywordGccVolatile2 => "__volatile__",
+            .KeywordGccRestrict1 => "__restrict",
+            .KeywordGccRestrict2 => "__restrict__",
+
             .KeywordInclude => "include",
             .KeywordDefine => "define",
             .KeywordDefined => "defined",
@@ -404,7 +419,7 @@ pub const TokenType = enum(u8) {
             .KeywordError => "error",
             .KeywordPragma => "pragma",
             .KeywordLine => "line",
-            .KeywordVarArgs =>"__VA_ARGS__",
+            .KeywordVarArgs => "__VA_ARGS__",
         };
     }
 

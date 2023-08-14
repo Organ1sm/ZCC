@@ -75,5 +75,13 @@ pub const Token = struct {
         .{ "pragma", .KeywordPragma },
         .{ "line", .KeywordLine },
         .{ "__VA_ARGS__", .KeywordVarArgs },
+
+        // gcc keywords
+        .{ "__const", .KeywordGccConst1 },
+        .{ "__const__", .KeywordGccConst2 },
+        .{ "__volatile", .KeywordGccVolatile1 },
+        .{ "__volatile__", .KeywordGccVolatile2 },
+        .{ "__restrict", .KeywordGccRestrict1 },
+        .{ "__restrict__", .KeywordGccRestrict2 },
     });
 };
