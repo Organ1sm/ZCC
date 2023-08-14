@@ -2572,7 +2572,7 @@ fn parseCastExpr(p: *Parser) Error!Result {
         p.index -= 1;
     }
 
-    return p.unaryExpr();
+    return p.parseUnaryExpr();
 }
 
 /// unaryExpr
@@ -2581,7 +2581,7 @@ fn parseCastExpr(p: *Parser) Error!Result {
 ///  | keyword_sizeof unaryExpr
 ///  | keyword_sizeof '(' type_name ')'
 ///  | keyword_alignof '(' type_name ')'
-fn unaryExpr(p: *Parser) Error!Result {
+fn parseUnaryExpr(p: *Parser) Error!Result {
     const index = p.index;
     switch (p.tokenIds[index]) {
         .Ampersand => {
@@ -2688,7 +2688,7 @@ fn unaryExpr(p: *Parser) Error!Result {
 
         .Tilde => {
             p.index += 1;
-            var operand = try p.unaryExpr();
+            var operand = try p.parseUnaryExpr();
 
             switch (operand.value) {
                 .unsigned => |*v| v.* = ~v.*,
@@ -2701,7 +2701,7 @@ fn unaryExpr(p: *Parser) Error!Result {
 
         .Bang => {
             p.index += 1;
-            var operand = try p.unaryExpr();
+            var operand = try p.parseUnaryExpr();
             if (operand.value != .unavailable) {
                 operand.value = .{ .signed = @intFromBool(!operand.getBool()) };
             }
@@ -2709,8 +2709,54 @@ fn unaryExpr(p: *Parser) Error!Result {
             operand.ty = .{ .specifier = .Int };
             return operand.un(p, .BoolNotExpr);
         },
-        .KeywordSizeof => return p.todo("unaryExpr sizeof"),
-        .KeywordAlignof => return p.todo("unExpr alignof"),
+        .KeywordSizeof => {
+            p.index += 1;
+            const expectedParen = p.index;
+            var res = Result{};
+            if (try p.typeName()) |ty| {
+                res.ty = ty;
+                try p.errToken(.expected_parens_around_typename, expectedParen);
+            } else if (p.eat(.LParen)) |lp| {
+                if (try p.typeName()) |ty| {
+                    res.ty = ty;
+                    try p.expectClosing(lp, .RParen);
+                } else {
+                    p.index = expectedParen;
+                    res = try p.parseUnaryExpr();
+                }
+            } else {
+                res = try p.parseUnaryExpr();
+            }
+
+            res.value = .{ .unsigned = res.ty.sizeof(p.pp.compilation) };
+            return res.un(p, .SizeOfExpr);
+        },
+
+        .KeywordAlignof, .KeywordGccAlignof1, .KeywordGccAlignof2 => {
+            p.index += 1;
+            const expectedParen = p.index;
+            var res = Result{};
+            if (try p.typeName()) |ty| {
+                res.ty = ty;
+                try p.errToken(.expected_parens_around_typename, expectedParen);
+            } else if (p.eat(.LParen)) |lp| {
+                if (try p.typeName()) |ty| {
+                    res.ty = ty;
+                    try p.expectClosing(lp, .RParen);
+                } else {
+                    p.index = expectedParen;
+                    res = try p.parseUnaryExpr();
+                    try p.errToken(.alignof_expr, expectedParen);
+                }
+            } else {
+                res = try p.parseUnaryExpr();
+                try p.errToken(.alignof_expr, expectedParen);
+            }
+
+            res.value = .{ .unsigned = res.ty.alignment };
+            return res.un(p, .AlignOfExpr);
+        },
+
         else => {
             var lhs = try p.primaryExpr();
             while (true) {

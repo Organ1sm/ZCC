@@ -83,5 +83,7 @@ pub const Token = struct {
         .{ "__volatile__", .KeywordGccVolatile2 },
         .{ "__restrict", .KeywordGccRestrict1 },
         .{ "__restrict__", .KeywordGccRestrict2 },
+        .{ "__alignof", .KeywordGccAlignof1 },
+        .{ "__alignof__", .KeywordGccAlignof2 },
     });
 };
