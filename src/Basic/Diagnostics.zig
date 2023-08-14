@@ -46,6 +46,7 @@ const Options = struct {
     @"unreachable-code": Kind = .warning,
     @"unknown-warning-option": Kind = .warning,
     @"empty-struct": Kind = .off,
+    @"gnu-alignof-expression": Kind = .warning,
 };
 
 pub const Tag = enum {
@@ -167,6 +168,8 @@ pub const Tag = enum {
     parameter_missing,
     empty_record,
     wrong_tag,
+    expected_parens_around_typename,
+    alignof_expr,
 };
 
 list: std.ArrayList(Message),
@@ -474,6 +477,8 @@ pub fn renderExtra(comp: *Compilation, m: anytype) void {
             .parameter_missing => m.print("parameter named '{s}' is missing", .{msg.extra.str}),
             .empty_record => m.print("empty {s} is a GNU extension", .{msg.extra.str}),
             .wrong_tag => m.print("use of '{s}' with tag type that does not match previous definition", .{msg.extra.str}),
+            .expected_parens_around_typename => m.write("expected parentheses around type name"),
+            .alignof_expr => m.write("'_Alignof' applied to an expression is a GNU extension"),
         }
 
         m.end(lcs);
@@ -611,6 +616,7 @@ fn tagKind(diag: *Diagnostics, tag: Tag) Kind {
         .expected_str_literal,
         .parameter_missing,
         .wrong_tag,
+        .expected_parens_around_typename,
         => .@"error",
 
         .to_match_paren,
@@ -641,6 +647,7 @@ fn tagKind(diag: *Diagnostics, tag: Tag) Kind {
         .unreachable_code => diag.options.@"unreachable-code",
         .unknown_warning => diag.options.@"unknown-warning-option",
         .empty_record => diag.options.@"empty-struct",
+        .alignof_expr => diag.options.@"gnu-alignof-expression",
     };
 
     if (kind == .@"error" and diag.fatalErrors)

@@ -222,6 +222,10 @@ pub const Tag = enum(u8) {
     DoubleLiteral,
     /// tree.string[index][0..len]
     StringLiteralExpr,
+    /// sizeof(un?)
+    SizeOfExpr,
+    /// _Alignof(un?)
+    AlignOfExpr,
 
     /// ====== Initializer expressions ======
     /// { lhs, rhs }

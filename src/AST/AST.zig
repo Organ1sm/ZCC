@@ -610,5 +610,15 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
             try w.writeAll("initializer:\n");
             try tree.dumpNode(data.BinaryExpr.rhs, level + delta, w);
         },
+
+        .SizeOfExpr,
+        .AlignOfExpr,
+        => {
+            if (data.UnaryExpr != .none) {
+                try w.writeByteNTimes(' ', level + 1);
+                try w.writeAll("expr:\n");
+                try tree.dumpNode(data.UnaryExpr, level + delta, w);
+            }
+        },
     }
 }

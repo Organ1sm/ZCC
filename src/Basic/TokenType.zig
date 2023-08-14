@@ -166,6 +166,8 @@ pub const TokenType = enum(u8) {
     KeywordGccVolatile2,
     KeywordGccRestrict1,
     KeywordGccRestrict2,
+    KeywordGccAlignof1,
+    KeywordGccAlignof2,
 
     // Preprocessor directives
     KeywordInclude,
@@ -407,6 +409,8 @@ pub const TokenType = enum(u8) {
             .KeywordGccVolatile2 => "__volatile__",
             .KeywordGccRestrict1 => "__restrict",
             .KeywordGccRestrict2 => "__restrict__",
+            .KeywordGccAlignof1 => "__alignof",
+            .KeywordGccAlignof2 => "__alignof__",
 
             .KeywordInclude => "include",
             .KeywordDefine => "define",
