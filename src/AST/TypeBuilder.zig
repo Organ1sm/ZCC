@@ -2,6 +2,7 @@ const Type = @import("Type.zig");
 const TokenIndex = @import("AST.zig").TokenIndex;
 const NodeIndex = @import("AST.zig").NodeIndex;
 const Parser = @import("../Parser/Parser.zig");
+const Compilation = @import("../Basic/Compilation.zig");
 
 const TypeBuilder = @This();
 
@@ -238,20 +239,18 @@ pub const Builder = struct {
         };
     }
 
-    pub fn cannotCombine(spec: Builder, p: *Parser) Parser.Error {
+    pub fn cannotCombine(spec: Builder, p: *Parser, sourceToken: TokenIndex) Compilation.Error!void {
         try p.errExtra(
             .cannot_combine_spec,
-            p.index,
+            sourceToken,
             .{ .str = spec.kind.toString() },
         );
 
         if (spec.typedef) |some|
             try p.errStr(.spec_from_typedef, some.token, some.spec);
-
-        return error.ParsingFailed;
     }
 
-    pub fn combine(spec: *Builder, p: *Parser, new: Kind) Parser.Error!void {
+    pub fn combine(spec: *Builder, p: *Parser, new: Kind, sourceToken: TokenIndex) Compilation.Error!void {
         switch (new) {
             Kind.Void,
             Kind.Bool,
@@ -266,7 +265,7 @@ pub const Builder = struct {
             Kind.VarArgsFunc,
             => switch (spec.kind) {
                 .None => spec.kind = new,
-                else => return spec.cannotCombine(p),
+                else => return spec.cannotCombine(p, sourceToken),
             },
 
             Kind.Signed => spec.kind = switch (spec.kind) {
@@ -289,7 +288,7 @@ pub const Builder = struct {
                 Kind.SLongLongInt,
                 => return p.errStr(.duplicate_declspec, p.index, "signed"),
 
-                else => return spec.cannotCombine(p),
+                else => return spec.cannotCombine(p, sourceToken),
             },
 
             Kind.Unsigned => spec.kind = switch (spec.kind) {
@@ -312,7 +311,7 @@ pub const Builder = struct {
                 Kind.ULongLongInt,
                 => return p.errStr(.duplicate_declspec, p.index, "unsigned"),
 
-                else => return spec.cannotCombine(p),
+                else => return spec.cannotCombine(p, sourceToken),
             },
 
             Kind.Char => spec.kind = switch (spec.kind) {
@@ -321,7 +320,7 @@ pub const Builder = struct {
                 Kind.Signed => Kind.SChar,
                 Kind.Char, Kind.SChar, Kind.UChar => return p.errStr(.duplicate_declspec, p.index, "char"),
 
-                else => return spec.cannotCombine(p),
+                else => return spec.cannotCombine(p, sourceToken),
             },
 
             Kind.Int => spec.kind = switch (spec.kind) {
@@ -352,7 +351,7 @@ pub const Builder = struct {
                 Kind.ULongLongInt,
                 => return p.errStr(.duplicate_declspec, p.index, "int"),
 
-                else => return spec.cannotCombine(p),
+                else => return spec.cannotCombine(p, sourceToken),
             },
 
             Kind.Long => spec.kind = switch (spec.kind) {
@@ -365,7 +364,7 @@ pub const Builder = struct {
                 Kind.ULong => Kind.ULongLong,
                 Kind.LongLong, Kind.ULongLong => return p.errStr(.duplicate_declspec, p.index, "long"),
 
-                else => return spec.cannotCombine(p),
+                else => return spec.cannotCombine(p, sourceToken),
             },
 
             Kind.Float => spec.kind = switch (spec.kind) {
@@ -373,7 +372,7 @@ pub const Builder = struct {
                 Kind.Complex => Kind.ComplexFloat,
 
                 Kind.ComplexFloat, Kind.Float => return p.errStr(.duplicate_declspec, p.index, "float"),
-                else => return spec.cannotCombine(p),
+                else => return spec.cannotCombine(p, sourceToken),
             },
 
             Kind.Double => spec.kind = switch (spec.kind) {
@@ -388,7 +387,7 @@ pub const Builder = struct {
                 Kind.Double,
                 => return p.errStr(.duplicate_declspec, p.index, "double"),
 
-                else => return spec.cannotCombine(p),
+                else => return spec.cannotCombine(p, sourceToken),
             },
 
             Kind.Complex => spec.kind = switch (spec.kind) {
@@ -405,7 +404,7 @@ pub const Builder = struct {
                 Kind.ComplexLongDouble,
                 => return p.errStr(.duplicate_declspec, p.index, "_Complex"),
 
-                else => return spec.cannotCombine(p),
+                else => return spec.cannotCombine(p, sourceToken),
             },
 
             else => unreachable,

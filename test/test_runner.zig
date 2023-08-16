@@ -178,6 +178,7 @@ pub fn main() !void {
         defer tree.deinit();
 
         if (pp.defines.get("EXPECTED_ERRORS")) |macro| {
+            const expectedCount = comp.diag.list.items.len;
             var m = MsgWriter.init(gpa);
             defer m.deinit();
 
@@ -186,6 +187,15 @@ pub fn main() !void {
             if (macro != .simple) {
                 failCount += 1;
                 progress.log("invalid EXPECTED_ERRORS {}\n", .{macro});
+                continue;
+            }
+
+            if (macro.simple.tokens.len != expectedCount) {
+                failCount += 1;
+                progress.log(
+                    "EXPECTED_ERRORS missing errors, expected {d} found {d}\n",
+                    .{ expectedCount, macro.simple.tokens.len },
+                );
                 continue;
             }
 

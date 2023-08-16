@@ -779,17 +779,17 @@ fn parseTypeSpec(p: *Parser, ty: *TypeBuilder, completeType: *Type) Error!bool {
         }
 
         switch (p.getCurrToken()) {
-            .KeywordVoid => try ty.combine(p, .Void),
-            .KeywordBool => try ty.combine(p, .Bool),
-            .KeywordChar => try ty.combine(p, .Char),
-            .KeywordShort => try ty.combine(p, .Short),
-            .KeywordInt => try ty.combine(p, .Int),
-            .KeywordLong => try ty.combine(p, .Long),
-            .KeywordSigned => try ty.combine(p, .Signed),
-            .KeywordUnsigned => try ty.combine(p, .Unsigned),
-            .KeywordFloat => try ty.combine(p, .Float),
-            .KeywordDouble => try ty.combine(p, .Double),
-            .KeywordComplex => try ty.combine(p, .Complex),
+            .KeywordVoid => try ty.combine(p, .Void, p.index),
+            .KeywordBool => try ty.combine(p, .Bool, p.index),
+            .KeywordChar => try ty.combine(p, .Char, p.index),
+            .KeywordShort => try ty.combine(p, .Short, p.index),
+            .KeywordInt => try ty.combine(p, .Int, p.index),
+            .KeywordLong => try ty.combine(p, .Long, p.index),
+            .KeywordSigned => try ty.combine(p, .Signed, p.index),
+            .KeywordUnsigned => try ty.combine(p, .Unsigned, p.index),
+            .KeywordFloat => try ty.combine(p, .Float, p.index),
+            .KeywordDouble => try ty.combine(p, .Double, p.index),
+            .KeywordComplex => try ty.combine(p, .Complex, p.index),
 
             .KeywordAtomic => {
                 const atomicToken = p.index;
@@ -807,12 +807,7 @@ fn parseTypeSpec(p: *Parser, ty: *TypeBuilder, completeType: *Type) Error!bool {
                 try p.expectClosing(lp, .RParen);
 
                 const newSpec = TypeBuilder.fromType(innerType);
-
-                // combine() uses p.index for error reporting
-                const cur = p.index;
-                defer p.index = cur;
-                p.index = atomicToken;
-                try ty.combine(p, newSpec);
+                try ty.combine(p, newSpec, atomicToken);
 
                 if (completeType.qual.atomic)
                     try p.errStr(.duplicate_declspec, atomicToken, "atomic")
@@ -824,19 +819,19 @@ fn parseTypeSpec(p: *Parser, ty: *TypeBuilder, completeType: *Type) Error!bool {
             },
 
             .KeywordEnum => {
-                try ty.combine(p, .{ .Enum = undefined });
+                try ty.combine(p, .{ .Enum = undefined }, p.index);
                 ty.kind.Enum = try p.enumSpec();
                 continue;
             },
 
             .KeywordStruct => {
-                try ty.combine(p, .{ .Struct = undefined });
+                try ty.combine(p, .{ .Struct = undefined }, p.index);
                 ty.kind.Struct = try p.recordSpec();
                 continue;
             },
 
             .KeywordUnion => {
-                try ty.combine(p, .{ .Union = undefined });
+                try ty.combine(p, .{ .Union = undefined }, p.index);
                 ty.kind.Union = try p.recordSpec();
                 continue;
             },
@@ -865,7 +860,7 @@ fn parseTypeSpec(p: *Parser, ty: *TypeBuilder, completeType: *Type) Error!bool {
                 const newSpec = TypeBuilder.fromType(typedef.type);
 
                 const errStart = p.pp.compilation.diag.list.items.len;
-                ty.combine(p, newSpec) catch {
+                ty.combine(p, newSpec, p.index) catch {
                     p.pp.compilation.diag.list.items.len = errStart;
                     break;
                 };
