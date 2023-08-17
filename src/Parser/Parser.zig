@@ -605,7 +605,7 @@ fn parseStaticAssert(p: *Parser) Error!bool {
     try p.expectClosing(lp, .RParen);
     _ = try p.expectToken(.Semicolon);
 
-    if (!res.getBool()) {
+    if (res.value != .unavailable and !res.getBool()) {
         var msg = std.ArrayList(u8).init(p.pp.compilation.gpa);
         defer msg.deinit();
 
@@ -819,20 +819,20 @@ fn parseTypeSpec(p: *Parser, ty: *TypeBuilder, completeType: *Type) Error!bool {
             },
 
             .KeywordEnum => {
-                try ty.combine(p, .{ .Enum = undefined }, p.index);
-                ty.kind.Enum = try p.enumSpec();
+                try ty.combine(p, .IncompleteEnum, p.index);
+                try p.parseEnumSpec(ty);
                 continue;
             },
 
             .KeywordStruct => {
-                try ty.combine(p, .{ .Struct = undefined }, p.index);
-                ty.kind.Struct = try p.recordSpec();
+                try ty.combine(p, .IncompleteStruct, p.index);
+                try p.parseRecordSpec(ty);
                 continue;
             },
 
             .KeywordUnion => {
-                try ty.combine(p, .{ .Union = undefined }, p.index);
-                ty.kind.Union = try p.recordSpec();
+                try ty.combine(p, .IncompleteUnion, p.index);
+                try p.parseRecordSpec(ty);
                 continue;
             },
 
@@ -902,7 +902,7 @@ fn getAnonymousName(p: *Parser, kindToken: TokenIndex) ![]const u8 {
 /// recordSpec
 ///  : (keyword_struct | keyword_union) IDENTIFIER? { recordDecl* }
 ///  | (keyword_struct | keyword_union) IDENTIFIER
-fn recordSpec(p: *Parser) Error!*Type.Record {
+fn parseRecordSpec(p: *Parser, tyBuilder: *TypeBuilder) Error!void {
     const kindToken = p.index;
     const isStruct = p.tokenIds[kindToken] == .KeywordStruct;
     p.index += 1;
@@ -915,10 +915,16 @@ fn recordSpec(p: *Parser) Error!*Type.Record {
 
         // check if this is a referense to a previous type
         if (try p.findTag(p.tokenIds[kindToken], ident)) |prev| {
-            return prev.type.data.record;
+            if (prev.type.specifier == .Union) {
+                tyBuilder.kind = .{ .Union = prev.type.data.record };
+            } else if (prev.type.specifier == .Struct) {
+                tyBuilder.kind = .{ .Struct = prev.type.data.record };
+            }
+        } else {
+            // this is a forward declaration
         }
 
-        return p.todo("record forward declaration");
+        return;
     };
 
     // check if this is a redefinition
@@ -929,26 +935,16 @@ fn recordSpec(p: *Parser) Error!*Type.Record {
         }
     }
 
-    // create the type
-    const recordType = try p.arena.create(Type.Record);
-    recordType.* = .{
-        .name = if (maybeIdent) |ident| p.tokSlice(ident) else try p.getAnonymousName(kindToken),
-        .size = 0, // TODO calculate
-        .alignment = 0, // TODO calculate
-        .fields = undefined,
-    };
-    const ty = Type{
-        .specifier = if (isStruct) .Struct else .Union,
-        .data = .{ .record = recordType },
-    };
-
     // declare a symbol for the type
+    const recordName = if (maybeIdent) |ident| p.tokSlice(ident) else try p.getAnonymousName(kindToken);
+    var symIndex: ?usize = null;
     if (maybeIdent) |ident| {
         const sym = Scope.Symbol{
-            .name = recordType.name,
-            .type = ty,
+            .name = recordName,
+            .type = .{ .specifier = if (isStruct) .IncompleteStruct else .IncompleteUnion },
             .nameToken = ident,
         };
+        symIndex = p.scopes.items.len;
         try p.scopes.append(if (isStruct) .{ .@"struct" = sym } else .{ .@"union" = sym });
     }
 
@@ -972,7 +968,24 @@ fn recordSpec(p: *Parser) Error!*Type.Record {
     if (fields.items.len == 0) try p.errStr(.empty_record, kindToken, p.tokSlice(kindToken));
 
     try p.expectClosing(lb, .RBrace);
-    recordType.fields = try p.arena.dupe(Type.Record.Field, fields.items);
+    // create the type
+    const recordType = try p.arena.create(Type.Record);
+    recordType.* = .{
+        .name = recordName,
+        .size = 0, // TODO calculate
+        .alignment = 0, // TODO calculate
+        .fields = try p.arena.dupe(Type.Record.Field, fields.items),
+    };
+    tyBuilder.kind = if (isStruct) .{ .Struct = recordType } else .{ .Union = recordType };
+    const ty = Type{
+        .specifier = if (isStruct) .Struct else .Union,
+        .data = .{ .record = recordType },
+    };
+    if (symIndex) |index| if (isStruct) {
+        p.scopes.items[index].@"struct".type = ty;
+    } else {
+        p.scopes.items[index].@"union".type = ty;
+    };
 
     // finish by creating a node
     var node: AST.Node = .{
@@ -989,8 +1002,8 @@ fn recordSpec(p: *Parser) Error!*Type.Record {
             node.data = .{ .range = try p.addList(fieldNodes.items) };
         },
     }
+
     try p.currDeclList.append(try p.addNode(node));
-    return recordType;
 }
 /// recordDecl
 ///  : specQual+ (recordDeclarator (',' recordDeclarator)*)? ;
@@ -1059,7 +1072,7 @@ fn specQual(p: *Parser) Error!?Type {
 /// enumSpec
 ///  : keyword_enum IDENTIFIER? { enumerator (',' enumerator)? ',') }
 ///  | keyword_enum IDENTIFIER
-fn enumSpec(p: *Parser) Error!*Type.Enum {
+fn parseEnumSpec(p: *Parser, tyBuilder: *TypeBuilder) Error!void {
     const enumTK = p.index;
     p.index += 1;
     const maybeID = p.eat(.Identifier);
@@ -1071,9 +1084,14 @@ fn enumSpec(p: *Parser) Error!*Type.Enum {
 
         // check if this is a referense to a previous type
         if (try p.findTag(.KeywordEnum, ident)) |prev| {
-            return prev.type.data.@"enum";
+            if (prev.type.specifier == .Enum) {
+                tyBuilder.kind = .{ .Enum = prev.type.data.@"enum" };
+            }
+        } else {
+            //forward declaration
         }
-        return p.todo("enum forward declaration");
+
+        return;
     };
 
     // check if this is a redefinition.
@@ -1092,6 +1110,7 @@ fn enumSpec(p: *Parser) Error!*Type.Enum {
         .fields = &.{},
     };
 
+    tyBuilder.kind = .{ .Enum = enumType };
     const ty = Type{
         .specifier = .Enum,
         .data = .{ .@"enum" = enumType },
@@ -1138,7 +1157,6 @@ fn enumSpec(p: *Parser) Error!*Type.Enum {
     }
 
     try p.currDeclList.append(try p.addNode(node));
-    return enumType;
 }
 
 const EnumFieldAndNode = struct { field: Type.Enum.Field, node: NodeIndex };
@@ -2630,7 +2648,7 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
             p.index += 1;
             var operand = try p.parseCastExpr();
             // TODO upcast to int / validate arithmetic type
-            const size = operand.ty.sizeof(p.pp.compilation);
+            const size = operand.ty.sizeof(p.pp.compilation).?;
             switch (operand.value) {
                 .unsigned => |*v| switch (size) {
                     1, 2, 4 => v.* = @truncate(0 -% v.*),
@@ -2704,6 +2722,7 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
             operand.ty = .{ .specifier = .Int };
             return operand.un(p, .BoolNotExpr);
         },
+
         .KeywordSizeof => {
             p.index += 1;
             const expectedParen = p.index;
@@ -2723,7 +2742,12 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
                 res = try p.parseUnaryExpr();
             }
 
-            res.value = .{ .unsigned = res.ty.sizeof(p.pp.compilation) };
+            if (res.ty.sizeof(p.pp.compilation)) |size| {
+                res.value = .{ .unsigned = size };
+            } else {
+                res.value = .unavailable;
+                try p.errStr(.invalid_sizeof, expectedParen, TypeBuilder.fromType(res.ty).toString());
+            }
             return res.un(p, .SizeOfExpr);
         },
 
@@ -3123,7 +3147,7 @@ fn castInt(p: *Parser, val: u64, specs: []const Type.Specifier) Error!Result {
     for (specs) |spec| {
         const ty = Type{ .specifier = spec };
         const isUnsigned = ty.isUnsignedInt(p.pp.compilation);
-        const tySize = ty.sizeof(p.pp.compilation);
+        const tySize = ty.sizeof(p.pp.compilation).?;
         res.ty = ty;
 
         if (isUnsigned) {

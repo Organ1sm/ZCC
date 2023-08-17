@@ -193,8 +193,13 @@ pub fn main() !void {
             if (macro.simple.tokens.len != expectedCount) {
                 failCount += 1;
                 progress.log(
-                    "EXPECTED_ERRORS missing errors, expected {d} found {d}\n",
-                    .{ expectedCount, macro.simple.tokens.len },
+                    \\EXPECTED_ERRORS missing errors, expected {d} found {d},
+                    \\=== actual output ===
+                    \\{s}
+                    \\
+                    \\
+                ,
+                    .{ expectedCount, macro.simple.tokens.len, m.buf.items},
                 );
                 continue;
             }
