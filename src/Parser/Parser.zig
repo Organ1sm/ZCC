@@ -2777,7 +2777,7 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
         },
 
         else => {
-            var lhs = try p.primaryExpr();
+            var lhs = try p.parsePrimaryExpr();
             while (true) {
                 const suffix = try p.suffixExpr(lhs);
                 if (suffix.node == .none) break;
@@ -2944,7 +2944,7 @@ fn suffixExpr(p: *Parser, lhs: Result) Error!Result {
 //// genericAssoc
 ////  : typeName ':' assignExpr
 ////  | keyword_default ':' assignExpr
-fn primaryExpr(p: *Parser) Error!Result {
+fn parsePrimaryExpr(p: *Parser) Error!Result {
     if (p.eat(.LParen)) |lp| {
         var e = try p.expr();
         try p.expectClosing(lp, .RParen);
@@ -3030,12 +3030,37 @@ fn primaryExpr(p: *Parser) Error!Result {
             return p.todo("char literals");
         },
 
-        .FloatLiteral,
-        .FloatLiteral_F,
-        .FloatLiteral_L,
-        => {
-            return p.todo("float literals");
+        .FloatLiteral => {
+            defer p.index += 1;
+            const ty = Type{ .specifier = .Double };
+            return Result{
+                .ty = ty,
+                .node = try p.addNode(
+                    .{
+                        .tag = .DoubleLiteral,
+                        .type = ty,
+                        .data = .{ .Double = try p.parseFloat(p.index, f64) },
+                    },
+                ),
+            };
         },
+
+        .FloatLiteral_F => {
+            defer p.index += 1;
+            const ty = Type{ .specifier = .Float };
+            return Result{
+                .ty = ty,
+                .node = try p.addNode(
+                    .{
+                        .tag = .FloatLiteral,
+                        .type = ty,
+                        .data = .{ .Float = try p.parseFloat(p.index, f32) },
+                    },
+                ),
+            };
+        },
+
+        .FloatLiteral_L => return p.todo("long double literals"),
 
         .Zero => {
             p.index += 1;
@@ -3140,6 +3165,16 @@ fn primaryExpr(p: *Parser) Error!Result {
 
         else => return Result{},
     }
+}
+
+fn parseFloat(p: *Parser, tok: TokenIndex, comptime T: type) Error!T {
+    var bytes = p.tokSlice(tok);
+    if (p.tokenIds[tok] != .FloatLiteral)
+        bytes = bytes[0 .. bytes.len - 1];
+
+    return std.fmt.parseFloat(T, bytes) catch |e| switch (e) {
+        error.InvalidCharacter => unreachable, // validated by Tokenizer
+    };
 }
 
 fn castInt(p: *Parser, val: u64, specs: []const Type.Specifier) Error!Result {
