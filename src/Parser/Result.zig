@@ -141,7 +141,7 @@ pub fn compare(a: Result, op: std.math.CompareOperator, b: Result) bool {
 }
 
 pub fn mul(a: *Result, token: TokenIndex, b: Result, p: *Parser) !void {
-    const size = a.ty.sizeof(p.pp.compilation);
+    const size = a.ty.sizeof(p.pp.compilation).?;
 
     var isOverflow = false;
     switch (a.value) {
@@ -189,7 +189,7 @@ pub fn mul(a: *Result, token: TokenIndex, b: Result, p: *Parser) !void {
 }
 
 pub fn add(a: *Result, tok: TokenIndex, b: Result, p: *Parser) !void {
-    const size = a.ty.sizeof(p.pp.compilation);
+    const size = a.ty.sizeof(p.pp.compilation).?;
     var isOverflow = false;
     switch (a.value) {
         .unsigned => |*v| {
@@ -238,7 +238,7 @@ pub fn add(a: *Result, tok: TokenIndex, b: Result, p: *Parser) !void {
 }
 
 pub fn sub(a: *Result, tok: TokenIndex, b: Result, p: *Parser) !void {
-    const size = a.ty.sizeof(p.pp.compilation);
+    const size = a.ty.sizeof(p.pp.compilation).?;
     var isOverflow = false;
     switch (a.value) {
         .unsigned => |*v| {

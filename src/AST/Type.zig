@@ -133,6 +133,10 @@ pub const Specifier = enum {
     IncompleteArray,
     VariableLenArray,
 
+    IncompleteStruct,
+    IncompleteUnion,
+    IncompleteEnum,
+
     // data.record
     Struct,
     Union,
@@ -191,14 +195,25 @@ pub fn hasIncompleteSize(ty: Type) bool {
 }
 
 /// Size of type as reported by sizeof
-pub fn sizeof(ty: Type, comp: *Compilation) u64 {
+pub fn sizeof(ty: Type, comp: *Compilation) ?u64 {
     // TODO get target from compilation
     return switch (ty.specifier) {
-        .VariableLenArray, .UnspecifiedVariableLenArray, .IncompleteArray => unreachable,
-        .Func, .VarArgsFunc, .OldStyleFunc, .Void, .Bool => 1,
+        .VariableLenArray,
+        .UnspecifiedVariableLenArray,
+        .IncompleteArray,
+        => unreachable,
+
+        .Func,
+        .VarArgsFunc,
+        .OldStyleFunc,
+        .Void,
+        .Bool,
+        => 1,
+
         .Char, .SChar, .UChar => 1,
         .Short, .UShort => 2,
         .Int, .UInt => 4,
+        
         .Long, .ULong, .LongLong, .ULongLong => switch (comp.target.os.tag) {
             .linux,
             .macos,
@@ -221,10 +236,14 @@ pub fn sizeof(ty: Type, comp: *Compilation) u64 {
         .ComplexDouble => 16,
         .ComplexLongDouble => 32,
         .Pointer, .StaticArray => comp.target.ptrBitWidth() >> 3,
-        .Array => return ty.data.subType.sizeof(comp) * ty.data.array.len,
-        .Struct => @panic("TODO"),
-        .Union => @panic("TODO"),
-        .Enum => @panic("TODO"),
+        .Array => ty.data.subType.sizeof(comp).? * ty.data.array.len,
+        .Struct, .Union => ty.data.record.size,
+        .Enum => ty.data.@"enum".tagType.sizeof(comp),
+
+        .IncompleteStruct,
+        .IncompleteUnion,
+        .IncompleteEnum,
+        => null,
     };
 }
 
