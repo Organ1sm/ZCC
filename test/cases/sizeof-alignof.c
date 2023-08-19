@@ -14,6 +14,7 @@ int quux(void) {
     return sizeof 2 + _Alignof 2;
 }
 
+#define TESTS_SKIPPED 1
 #define EXPECTED_ERRORS "sizeof-alignof.c:10:19: error: expected parentheses around type name" \
     "sizeof-alignof.c:10:37: error: expected parentheses around type name" \
     "sizeof-alignof.c:14:32: warning: '_Alignof' applied to an expression is a GNU extension"

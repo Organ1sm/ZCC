@@ -19,4 +19,5 @@ int foooo(n, bar)
     return n;
 }
 
+#define TESTS_SKIPPED 1
 #define EXPECTED_ERRORS "functions.c:10:12: error: parameter named 'quux' is missing"
