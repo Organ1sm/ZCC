@@ -454,12 +454,16 @@ fn expr(pp: *Preprocessor, lexer: *Lexer) Error!bool {
         .index = @intCast(start),
         .arena = pp.arena.allocator(),
         .inMacro = true,
-        .currDeclList = undefined,
         .scopes = undefined,
         .data = undefined,
         .labels = undefined,
         .strings = undefined,
         .valueMap = undefined,
+        .declBuffer = undefined,
+        .listBuffer = undefined,
+        .paramBuffer = undefined,
+        .enumBuffer = undefined,
+        .recordBuffer = undefined,
     };
 
     return parser.macroExpr();
