@@ -415,7 +415,10 @@ pub const Builder = struct {
                 else => return spec.cannotCombine(p, sourceToken),
             },
 
-            else => unreachable,
+            else => switch (spec.kind) {
+                .None => spec.kind = new,
+                else => return spec.cannotCombine(p, sourceToken),
+            },
         }
     }
 

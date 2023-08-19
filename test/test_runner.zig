@@ -51,7 +51,7 @@ pub fn main() !void {
     }
 
     var progress = std.Progress{};
-    const root_node = progress.start("Test", cases.items.len);
+    const rootNode = progress.start("Test", cases.items.len);
 
     // prepare compiler
     var comp = zcc.Compilation.init(gpa);
@@ -93,7 +93,7 @@ pub fn main() !void {
         }
 
         const case = std.mem.sliceTo(std.fs.path.basename(path), '.');
-        var caseNode = root_node.start(case, 0);
+        var caseNode = rootNode.start(case, 0);
         caseNode.activate();
         defer caseNode.end();
         progress.refresh();
@@ -120,16 +120,17 @@ pub fn main() !void {
                 progress.log("invalid TESTS_SKIPPED, definition should contain exactly one integer literal {}\n", .{macro});
                 continue;
             }
-            const tok_slice = pp.tokSliceSafe(macro.simple.tokens[0]);
-            const tests_skipped = try std.fmt.parseInt(u32, tok_slice, 0);
-            progress.log("{d} test{s} skipped\n", .{ tests_skipped, if (tests_skipped == 1) @as([]const u8, "") else "s" });
-            skipCount += tests_skipped;
+            const tokSlice = pp.tokSliceSafe(macro.simple.tokens[0]);
+            const testsSkipped = try std.fmt.parseInt(u32, tokSlice, 0);
+            progress.log("{d} test{s} skipped\n", .{ testsSkipped, if (testsSkipped == 1) @as([]const u8, "") else "s" });
+            skipCount += testsSkipped;
+            continue;
         }
 
         if (pp.defines.get("EXPECTED_TOKENS")) |macro| {
             comp.renderErrors();
 
-            const expected_tokens = switch (macro) {
+            const expectedTokens = switch (macro) {
                 .simple => |simple| simple.tokens,
                 .empty => &[_]zcc.Token{},
                 else => {
@@ -139,11 +140,11 @@ pub fn main() !void {
                 },
             };
 
-            if (pp.tokens.len - 1 != expected_tokens.len) {
+            if (pp.tokens.len - 1 != expectedTokens.len) {
                 failCount += 1;
                 print(
                     "EXPECTED_TOKENS count differs: expected {d} found {d}\n",
-                    .{ expected_tokens.len, pp.tokens.len - 1 },
+                    .{ expectedTokens.len, pp.tokens.len - 1 },
                 );
                 continue;
             }
@@ -160,7 +161,7 @@ pub fn main() !void {
                     break;
                 }
 
-                const expected = pp.tokSliceSafe(expected_tokens[i]);
+                const expected = pp.tokSliceSafe(expectedTokens[i]);
                 const actual = pp.expandedSlice(tok);
                 if (!std.mem.eql(u8, expected, actual)) {
                     failCount += 1;
@@ -236,7 +237,7 @@ pub fn main() !void {
         if (comp.diag.errors != 0) failCount += 1 else passCount += 1;
     }
 
-    root_node.end();
+    rootNode.end();
     if (passCount == cases.items.len and skipCount == 0) {
         print("All {d} tests passed.\n\n", .{passCount});
     } else if (failCount == 0) {

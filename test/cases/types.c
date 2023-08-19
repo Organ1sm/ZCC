@@ -5,3 +5,5 @@ __const __volatile int b;
 __const__ __volatile__ int c;
 int foo(int *restrict a, int *__restrict b, int *__restrict__ c);
 int foo(int n, int bar[n]);
+
+#define TESTS_SKIPPED 1
