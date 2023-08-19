@@ -182,6 +182,15 @@ pub fn isEnumOrRecord(ty: Type) bool {
     };
 }
 
+pub fn getElemType(ty: Type) Type {
+    return switch (ty.specifier) {
+        .Pointer, .UnspecifiedVariableLenArray => ty.data.subType.*,
+        .Array, .StaticArray, .IncompleteArray => ty.data.array.elem,
+        .VariableLenArray => ty.data.array.elem,
+        else => unreachable,
+    };
+}
+
 pub fn wideChar(p: *Parser) Type {
     _ = p;
     return .{ .specifier = .Int };
@@ -189,7 +198,13 @@ pub fn wideChar(p: *Parser) Type {
 
 pub fn hasIncompleteSize(ty: Type) bool {
     return switch (ty.specifier) {
-        .Void, .IncompleteArray => true,
+        .Void,
+        .IncompleteArray,
+        .IncompleteStruct,
+        .IncompleteUnion,
+        .IncompleteEnum,
+        => true,
+
         else => false,
     };
 }
@@ -213,7 +228,7 @@ pub fn sizeof(ty: Type, comp: *Compilation) ?u64 {
         .Char, .SChar, .UChar => 1,
         .Short, .UShort => 2,
         .Int, .UInt => 4,
-        
+
         .Long, .ULong, .LongLong, .ULongLong => switch (comp.target.os.tag) {
             .linux,
             .macos,
@@ -251,6 +266,8 @@ pub fn combine(inner: *Type, outer: Type, p: *Parser, sourceToken: TokenIndex) P
     switch (inner.specifier) {
         .Pointer => return inner.data.subType.combine(outer, p, sourceToken),
 
+        .UnspecifiedVariableLenArray => return p.todo("combine [*] array"),
+
         .Array, .StaticArray, .IncompleteArray => {
             try inner.data.array.elem.combine(outer, p, sourceToken);
 
@@ -260,7 +277,13 @@ pub fn combine(inner: *Type, outer: Type, p: *Parser, sourceToken: TokenIndex) P
             if (inner.data.array.elem.qual.any() and inner.isArray()) return p.errToken(.qualifier_non_outermost_array, sourceToken);
         },
 
-        .VariableLenArray, .UnspecifiedVariableLenArray => return p.errStr(.todo, sourceToken, "combine array"),
+        .VariableLenArray => {
+            try inner.data.vla.elem.combine(outer, p, sourceToken);
+
+            if (inner.data.vla.elem.hasIncompleteSize()) return p.errToken(.array_incomplete_elem, sourceToken);
+            if (inner.data.vla.elem.isFunc()) return p.errToken(.array_func_elem, sourceToken);
+            if (inner.data.vla.elem.qual.any() and inner.isArray()) return p.errToken(.qualifier_non_outermost_array, sourceToken);
+        },
 
         .Func, .VarArgsFunc, .OldStyleFunc => {
             try inner.data.func.returnType.combine(outer, p, sourceToken);
@@ -289,7 +312,8 @@ pub fn dump(ty: Type, w: anytype) @TypeOf(w).Error!void {
                 if (param.register)
                     try w.writeAll("register ");
 
-                try w.print("{s}: ", .{param.name});
+                if (param.name.len != 0)
+                    try w.print("{s}: ", .{param.name});
                 try param.ty.dump(w);
             }
 

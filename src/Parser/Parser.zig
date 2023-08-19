@@ -264,28 +264,37 @@ fn findSymbol(p: *Parser, nameToken: TokenIndex) ?Scope {
 fn findTag(p: *Parser, kind: TokenType, nameToken: TokenIndex) !?Scope.Symbol {
     const name = p.tokSlice(nameToken);
     var i = p.scopes.items.len;
+    var sawBlock = false;
     while (i > 0) {
         i -= 1;
         const sym = p.scopes.items[i];
         switch (sym) {
             .@"enum" => |e| if (std.mem.eql(u8, e.name, name)) {
                 if (kind == .KeywordEnum) return e;
+                if (sawBlock) return null;
                 try p.errStr(.wrong_tag, nameToken, name);
                 try p.errToken(.previous_definition, e.nameToken);
                 return null;
             },
+
             .@"struct" => |s| if (std.mem.eql(u8, s.name, name)) {
                 if (kind == .KeywordStruct) return s;
+                if (sawBlock) return null;
                 try p.errStr(.wrong_tag, nameToken, name);
                 try p.errToken(.previous_definition, s.nameToken);
                 return null;
             },
+
             .@"union" => |u| if (std.mem.eql(u8, u.name, name)) {
                 if (kind == .KeywordUnion) return u;
+                if (sawBlock) return null;
+
                 try p.errStr(.wrong_tag, nameToken, name);
                 try p.errToken(.previous_definition, u.nameToken);
                 return null;
             },
+
+            .block => sawBlock = true,
             else => {},
         }
     }
@@ -466,8 +475,23 @@ fn parseDeclaration(p: *Parser) Error!bool {
             },
         }
 
+        if (p.inFunc)
+            try p.err(.func_not_in_root);
+
+        const inFunction = p.inFunc;
+        p.inFunc = true;
+        defer p.inFunc = inFunction;
+
         // collect old style parameters
-        if (initD.d.oldTypeFunc != null and !p.inFunc) {
+        if (initD.d.oldTypeFunc != null) {
+            const paramBufferTop = p.paramBuffer.items.len;
+            const scopeTop = p.scopes.items.len;
+
+            defer {
+                p.paramBuffer.items.len = paramBufferTop;
+                p.scopes.items.len = scopeTop;
+            }
+
             initD.d.type.specifier = .Func;
             paramLoop: while (true) {
                 const paramDeclSpec = (try p.declSpecifier()) orelse break;
@@ -490,6 +514,14 @@ fn parseDeclaration(p: *Parser) Error!bool {
                             .specifier = .Pointer,
                             .data = .{ .subType = elemType },
                         };
+                    } else if (d.type.isArray()) {
+                        // param declared as arrays are converted to pointers
+                        const elemType = try p.arena.create(Type);
+                        elemType.* = d.type.getElemType();
+                        d.type = Type{
+                            .specifier = .Pointer,
+                            .data = .{ .subType = elemType },
+                        };
                     } else if (d.type.specifier == .Void) {
                         try p.errToken(.invalid_void_param, d.name);
                     }
@@ -506,6 +538,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
                         try p.errStr(.parameter_missing, d.name, name);
                     }
 
+                    try p.scopes.append(.{ .symbol = .{ .name = name, .nameToken = d.name, .type = d.type } });
                     if (p.eat(.Comma) == null) break;
                 }
 
@@ -522,12 +555,6 @@ fn parseDeclaration(p: *Parser) Error!bool {
                 },
             });
         }
-
-        if (p.inFunc) try p.err(.func_not_in_root);
-
-        const inFunction = p.inFunc;
-        p.inFunc = true;
-        defer p.inFunc = inFunction;
 
         const node = try p.addNode(.{
             .type = initD.d.type,
@@ -1511,6 +1538,13 @@ fn pointer(p: *Parser, baseType: Type) Error!Type {
 /// paramDecl : declSpec (declarator | abstractDeclarator)
 fn paramDecls(p: *Parser) Error!?[]Type.Function.Param {
     const paramBufferTop = p.paramBuffer.items.len;
+    const scopesTop = p.scopes.items.len;
+
+    defer {
+        p.paramBuffer.items.len = paramBufferTop;
+        p.scopes.items.len = scopesTop;
+    }
+
     defer p.paramBuffer.items.len = paramBufferTop;
     while (true) {
         const paramDeclSpec = if (try p.declSpecifier()) |some|
@@ -1526,15 +1560,20 @@ fn paramDecls(p: *Parser) Error!?[]Type.Function.Param {
             break :blk d;
         };
 
-        var nameToken = p.index;
+        var nameToken: TokenIndex = 0;
         var paramType = paramDeclSpec.type;
         if (try p.declarator(paramDeclSpec.type, .param)) |some| {
             if (some.oldTypeFunc) |tokenIdx|
                 try p.errToken(.invalid_old_style_params, tokenIdx);
 
-            // TODO: declare()
             nameToken = some.name;
             paramType = some.type;
+            if (some.name != 0)
+                try p.scopes.append(.{ .symbol = .{
+                    .name = p.tokSlice(some.name),
+                    .type = some.type,
+                    .nameToken = some.name,
+                } });
         }
 
         if (paramType.isFunc()) {
@@ -1545,6 +1584,11 @@ fn paramDecls(p: *Parser) Error!?[]Type.Function.Param {
                 .specifier = .Pointer,
                 .data = .{ .subType = elemType },
             };
+        } else if (paramType.isArray()) {
+            // params declared as array are converted to pointers
+            const elemType = try p.arena.create(Type);
+            elemType.* = paramType.getElemType();
+            paramType = Type{ .specifier = .Pointer, .data = .{ .subType = elemType } };
         } else if (paramType.specifier == .Void) {
             // validate void parameters
             if (p.paramBuffer.items.len == paramBufferTop) {
@@ -1562,14 +1606,12 @@ fn paramDecls(p: *Parser) Error!?[]Type.Function.Param {
             try p.err(.void_must_be_first_param);
 
             return error.ParsingFailed;
-        } else if (paramType.isArray()) {
-            // TODO : convert to pointer
         }
 
         try paramDeclSpec.validateParam(p, paramType);
 
         try p.paramBuffer.append(.{
-            .name = p.tokSlice(nameToken),
+            .name = if (nameToken == 0) "" else p.tokSlice(nameToken),
             .ty = paramType,
             .register = paramDeclSpec.storageClass == .register,
         });
@@ -2044,7 +2086,14 @@ fn parseCompoundStmt(p: *Parser) Error!?NodeIndex {
     const lBrace = p.eat(.LBrace) orelse return null;
 
     const declBufferTop = p.declBuffer.items.len;
-    defer p.declBuffer.items.len = declBufferTop;
+    const scopeTop = p.scopes.items.len;
+
+    defer {
+        p.declBuffer.items.len = declBufferTop;
+        p.scopes.items.len = scopeTop;
+    }
+
+    try p.scopes.append(.block);
 
     var noreturnIdx: ?TokenIndex = null;
     var noreturnLabelCount: u32 = 0;

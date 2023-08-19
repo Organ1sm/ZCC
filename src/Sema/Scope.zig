@@ -17,6 +17,7 @@ pub const Scope = union(enum) {
     enumeration: Enumeration,
     loop,
     @"switch": *Switch,
+    block,
 
     pub const Symbol = struct {
         name: []const u8,
