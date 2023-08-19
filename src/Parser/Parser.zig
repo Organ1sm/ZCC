@@ -21,21 +21,32 @@ const NodeList = std.ArrayList(NodeIndex);
 const Parser = @This();
 pub const Error = Compilation.Error || error{ParsingFailed};
 
+// values from pp
 pp: *Preprocessor,
-arena: Allocator,
 tokenIds: []const TokenType,
+index: u32 = 0,
+
+// value of incomplete AST
+arena: Allocator,
 nodes: AST.Node.List = .{},
 data: NodeList,
+strings: std.ArrayList(u8),
+valueMap: AST.ValueMap,
+
+// buffers used during compilation
 scopes: std.ArrayList(Scope),
-index: u32 = 0,
+labels: std.ArrayList(Label),
+listBuffer: NodeList,
+declBuffer: NodeList,
+paramBuffer: std.ArrayList(Type.Function.Param),
+enumBuffer: std.ArrayList(Type.Enum.Field),
+recordBuffer: std.ArrayList(Type.Record.Field),
+
+// configuration
 noEval: bool = false,
 inMacro: bool = false,
 inFunc: bool = false,
-currDeclList: *NodeList,
-labels: std.ArrayList(Label),
 labelCount: u32 = 0,
-strings: std.ArrayList(u8),
-valueMap: AST.ValueMap,
 
 const Label = union(enum) {
     unresolvedGoto: TokenIndex,
@@ -283,9 +294,6 @@ fn findTag(p: *Parser, kind: TokenType, nameToken: TokenIndex) !?Scope.Symbol {
 
 /// root : (decl | staticAssert)*
 pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
-    var rootDecls = NodeList.init(pp.compilation.gpa);
-    defer rootDecls.deinit();
-
     var arena = std.heap.ArenaAllocator.init(pp.compilation.gpa);
     errdefer arena.deinit();
 
@@ -293,18 +301,27 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
         .pp = pp,
         .arena = arena.allocator(),
         .tokenIds = pp.tokens.items(.id),
-        .currDeclList = &rootDecls,
         .scopes = std.ArrayList(Scope).init(pp.compilation.gpa),
         .data = NodeList.init(pp.compilation.gpa),
         .labels = std.ArrayList(Label).init(pp.compilation.gpa),
         .strings = std.ArrayList(u8).init(pp.compilation.gpa),
         .valueMap = AST.ValueMap.init(pp.compilation.gpa),
+        .listBuffer = NodeList.init(pp.compilation.gpa),
+        .declBuffer = NodeList.init(pp.compilation.gpa),
+        .paramBuffer = std.ArrayList(Type.Function.Param).init(pp.compilation.gpa),
+        .enumBuffer = std.ArrayList(Type.Enum.Field).init(pp.compilation.gpa),
+        .recordBuffer = std.ArrayList(Type.Record.Field).init(pp.compilation.gpa),
     };
 
     defer {
         p.scopes.deinit();
         p.data.deinit();
         p.labels.deinit();
+        p.listBuffer.deinit();
+        p.declBuffer.deinit();
+        p.paramBuffer.deinit();
+        p.enumBuffer.deinit();
+        p.recordBuffer.deinit();
     }
 
     errdefer {
@@ -346,7 +363,7 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
         .generated = pp.generated.items,
         .nodes = p.nodes.toOwnedSlice(),
         .data = data,
-        .rootDecls = try rootDecls.toOwnedSlice(),
+        .rootDecls = try p.declBuffer.toOwnedSlice(),
         .strings = try p.strings.toOwnedSlice(),
         .valueMap = p.valueMap,
     };
@@ -537,8 +554,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
             }
         }
 
-        try p.currDeclList.append(node);
-
+        try p.declBuffer.append(node);
         return true;
     }
 
@@ -552,7 +568,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
             .tag = try declSpec.validate(p, initD.d.type, initD.initializer != .none),
             .data = .{ .Declaration = .{ .name = initD.d.name, .node = initD.initializer } },
         });
-        try p.currDeclList.append(node);
+        try p.declBuffer.append(node);
 
         if (declSpec.storageClass == .typedef) {
             try p.scopes.append(.{ .typedef = .{
@@ -606,17 +622,21 @@ fn parseStaticAssert(p: *Parser) Error!bool {
     _ = try p.expectToken(.Semicolon);
 
     if (res.value != .unavailable and !res.getBool()) {
-        var msg = std.ArrayList(u8).init(p.pp.compilation.gpa);
-        defer msg.deinit();
+        const stringsTop = p.strings.items.len;
+        defer p.strings.items.len = stringsTop;
 
         const data = p.nodes.items(.data)[@intFromEnum(str.node)].String;
         try AST.dumpString(
             p.strings.items[data.index..][0..data.len],
             p.nodes.items(.tag)[@intFromEnum(str.node)],
-            msg.writer(),
+            p.strings.writer(),
         );
 
-        try p.errStr(.static_assert_failure, curToken, try p.pp.arena.allocator().dupe(u8, msg.items));
+        try p.errStr(
+            .static_assert_failure,
+            curToken,
+            try p.pp.arena.allocator().dupe(u8, p.strings.items[stringsTop..]),
+        );
     }
 
     const node = try p.addNode(.{
@@ -629,8 +649,7 @@ fn parseStaticAssert(p: *Parser) Error!bool {
         },
     });
 
-    try p.currDeclList.append(node);
-
+    try p.declBuffer.append(node);
     return true;
 }
 
@@ -948,44 +967,43 @@ fn parseRecordSpec(p: *Parser, tyBuilder: *TypeBuilder) Error!void {
         try p.scopes.append(if (isStruct) .{ .@"struct" = sym } else .{ .@"union" = sym });
     }
 
-    var fields = std.ArrayList(Type.Record.Field).init(p.pp.compilation.gpa);
-    var fieldNodes = NodeList.init(p.pp.compilation.gpa);
+    // reserve space for this record
+    try p.declBuffer.append(.none);
+    const declBufferTop = p.declBuffer.items.len;
+    const recordBufferTop = p.recordBuffer.items.len;
 
     defer {
-        fields.deinit();
-        fieldNodes.deinit();
+        p.declBuffer.items.len = declBufferTop;
+        p.recordBuffer.items.len = recordBufferTop;
     }
 
-    {
-        // TODO this is kinda janky, look into using a global scratch buffer
-        const savedDecls = p.currDeclList;
-        defer p.currDeclList = savedDecls;
-        p.currDeclList = &fieldNodes;
+    try p.recordDecls();
 
-        try p.recordDecls(&fields);
-    }
-
-    if (fields.items.len == 0) try p.errStr(.empty_record, kindToken, p.tokSlice(kindToken));
+    if (p.recordBuffer.items.len == recordBufferTop)
+        try p.errStr(.empty_record, kindToken, p.tokSlice(kindToken));
 
     try p.expectClosing(lb, .RBrace);
+
     // create the type
     const recordType = try p.arena.create(Type.Record);
     recordType.* = .{
         .name = recordName,
         .size = 0, // TODO calculate
         .alignment = 0, // TODO calculate
-        .fields = try p.arena.dupe(Type.Record.Field, fields.items),
+        .fields = try p.arena.dupe(Type.Record.Field, p.recordBuffer.items[recordBufferTop..]),
     };
     tyBuilder.kind = if (isStruct) .{ .Struct = recordType } else .{ .Union = recordType };
     const ty = Type{
         .specifier = if (isStruct) .Struct else .Union,
         .data = .{ .record = recordType },
     };
-    if (symIndex) |index| if (isStruct) {
-        p.scopes.items[index].@"struct".type = ty;
-    } else {
-        p.scopes.items[index].@"union".type = ty;
-    };
+
+    if (symIndex) |index|
+        if (isStruct) {
+            p.scopes.items[index].@"struct".type = ty;
+        } else {
+            p.scopes.items[index].@"union".type = ty;
+        };
 
     // finish by creating a node
     var node: AST.Node = .{
@@ -993,23 +1011,24 @@ fn parseRecordSpec(p: *Parser, tyBuilder: *TypeBuilder) Error!void {
         .type = ty,
         .data = .{ .BinaryExpr = .{ .lhs = .none, .rhs = .none } },
     };
-    switch (fieldNodes.items.len) {
+    const recordDLS = p.declBuffer.items[declBufferTop..];
+    switch (recordDLS.len) {
         0 => {},
-        1 => node.data = .{ .BinaryExpr = .{ .lhs = fieldNodes.items[0], .rhs = .none } },
-        2 => node.data = .{ .BinaryExpr = .{ .lhs = fieldNodes.items[0], .rhs = fieldNodes.items[1] } },
+        1 => node.data = .{ .BinaryExpr = .{ .lhs = recordDLS[0], .rhs = .none } },
+        2 => node.data = .{ .BinaryExpr = .{ .lhs = recordDLS[0], .rhs = recordDLS[1] } },
         else => {
             node.tag = if (isStruct) .StructDecl else .UnionDecl;
-            node.data = .{ .range = try p.addList(fieldNodes.items) };
+            node.data = .{ .range = try p.addList(recordDLS) };
         },
     }
 
-    try p.currDeclList.append(try p.addNode(node));
+    p.declBuffer.items[declBufferTop - 1] = try p.addNode(node);
 }
 /// recordDecl
 ///  : specQual+ (recordDeclarator (',' recordDeclarator)*)? ;
 ///  | staticAssert
 /// recordDeclarator : declarator (':' constExpr)?
-fn recordDecls(p: *Parser, fields: *std.ArrayList(Type.Record.Field)) Error!void {
+fn recordDecls(p: *Parser) Error!void {
     while (true) {
         if (try p.parseStaticAssert()) continue;
         const baseType = (try p.specQual()) orelse return;
@@ -1020,7 +1039,7 @@ fn recordDecls(p: *Parser, fields: *std.ArrayList(Type.Record.Field)) Error!void
             var ty = baseType;
             var bitsNode: NodeIndex = .none;
             var bits: u32 = 0;
-            const first_tok = p.index;
+            const firstToken = p.index;
             if (try p.declarator(ty, .record)) |d| {
                 nameToken = d.name;
                 ty = d.type;
@@ -1038,17 +1057,18 @@ fn recordDecls(p: *Parser, fields: *std.ArrayList(Type.Record.Field)) Error!void
             if (nameToken == 0 and bitsNode == .none) {
                 try p.err(.missing_declaration);
             } else {
-                try fields.append(.{
-                    .name = if (nameToken != 0) p.tokSlice(nameToken) else try p.getAnonymousName(first_tok),
+                try p.recordBuffer.append(.{
+                    .name = if (nameToken != 0) p.tokSlice(nameToken) else try p.getAnonymousName(firstToken),
                     .ty = ty,
                     .bitWidth = bits,
                 });
+
                 const node = try p.addNode(.{
                     .tag = .RecordFieldDecl,
                     .type = ty,
                     .data = .{ .Declaration = .{ .name = nameToken, .node = bitsNode } },
                 });
-                try p.currDeclList.append(node);
+                try p.declBuffer.append(node);
             }
             if (p.eat(.Comma) == null) break;
         }
@@ -1124,20 +1144,29 @@ fn parseEnumSpec(p: *Parser, tyBuilder: *TypeBuilder) Error!void {
         } });
     }
 
-    var fields = std.ArrayList(Type.Enum.Field).init(p.pp.compilation.gpa);
-    defer fields.deinit();
-    var fieldNodes = NodeList.init(p.pp.compilation.gpa);
-    defer fieldNodes.deinit();
+    // reserve space for this enum
+    try p.declBuffer.append(.none);
+    const declBufferTop = p.declBuffer.items.len;
+    const listBufferTop = p.listBuffer.items.len;
+    const enumBufferTop = p.enumBuffer.items.len;
+
+    defer {
+        p.declBuffer.items.len = declBufferTop;
+        p.listBuffer.items.len = listBufferTop;
+        p.enumBuffer.items.len = enumBufferTop;
+    }
 
     while (try p.enumerator()) |fieldAndNode| {
-        try fields.append(fieldAndNode.field);
-        try fieldNodes.append(fieldAndNode.node);
+        try p.enumBuffer.append(fieldAndNode.field);
+        try p.listBuffer.append(fieldAndNode.node);
         if (p.eat(.Comma) == null) break;
     }
-    if (fields.items.len == 0) try p.err(.empty_enum);
+
+    if (p.enumBuffer.items.len == enumBufferTop)
+        try p.err(.empty_enum);
 
     try p.expectClosing(lb, .RBrace);
-    enumType.fields = try p.arena.dupe(Type.Enum.Field, fields.items);
+    enumType.fields = try p.arena.dupe(Type.Enum.Field, p.enumBuffer.items[enumBufferTop..]);
 
     // finish by creating a node
     var node: AST.Node = .{
@@ -1146,17 +1175,18 @@ fn parseEnumSpec(p: *Parser, tyBuilder: *TypeBuilder) Error!void {
         .data = .{ .BinaryExpr = .{ .lhs = .none, .rhs = .none } },
     };
 
-    switch (fieldNodes.items.len) {
+    const fieldNodes = p.listBuffer.items[listBufferTop..];
+    switch (fieldNodes.len) {
         0 => {},
-        1 => node.data = .{ .BinaryExpr = .{ .lhs = fieldNodes.items[0], .rhs = .none } },
-        2 => node.data = .{ .BinaryExpr = .{ .lhs = fieldNodes.items[0], .rhs = fieldNodes.items[1] } },
+        1 => node.data = .{ .BinaryExpr = .{ .lhs = fieldNodes[0], .rhs = .none } },
+        2 => node.data = .{ .BinaryExpr = .{ .lhs = fieldNodes[0], .rhs = fieldNodes[1] } },
         else => {
             node.tag = .EnumDecl;
-            node.data = .{ .range = try p.addList(fieldNodes.items) };
+            node.data = .{ .range = try p.addList(fieldNodes) };
         },
     }
 
-    try p.currDeclList.append(try p.addNode(node));
+    p.declBuffer.items[declBufferTop - 1] = try p.addNode(node);
 }
 
 const EnumFieldAndNode = struct { field: Type.Enum.Field, node: NodeIndex };
@@ -1427,12 +1457,12 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: Declarator
         } else if (p.getCurrToken() == .Identifier) {
             d.oldTypeFunc = p.index;
 
-            var params = std.ArrayList(Type.Function.Param).init(p.pp.compilation.gpa);
-            defer params.deinit();
+            const paramBufferTop = p.paramBuffer.items.len;
+            defer p.paramBuffer.items.len = paramBufferTop;
 
             specifier = .OldStyleFunc;
             while (true) {
-                try params.append(.{
+                try p.paramBuffer.append(.{
                     .name = p.tokSlice(try p.expectToken(.Identifier)),
                     .ty = .{ .specifier = .Int },
                     .register = false,
@@ -1441,7 +1471,7 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: Declarator
                 if (p.eat(.Comma) == null) break;
             }
 
-            funcType.params = try p.arena.dupe(Type.Function.Param, params.items);
+            funcType.params = try p.arena.dupe(Type.Function.Param, p.paramBuffer.items[paramBufferTop..]);
         } else {
             try p.err(.expected_param_decl);
         }
@@ -1480,13 +1510,12 @@ fn pointer(p: *Parser, baseType: Type) Error!Type {
 /// paramDecls : paramDecl (',' paramDecl)* (',' '...')
 /// paramDecl : declSpec (declarator | abstractDeclarator)
 fn paramDecls(p: *Parser) Error!?[]Type.Function.Param {
-    var params = std.ArrayList(Type.Function.Param).init(p.pp.compilation.gpa);
-    defer params.deinit();
-
+    const paramBufferTop = p.paramBuffer.items.len;
+    defer p.paramBuffer.items.len = paramBufferTop;
     while (true) {
         const paramDeclSpec = if (try p.declSpecifier()) |some|
             some
-        else if (params.items.len == 0)
+        else if (p.paramBuffer.items.len == paramBufferTop)
             return null
         else blk: {
             var d: DeclSpec = .{};
@@ -1518,7 +1547,7 @@ fn paramDecls(p: *Parser) Error!?[]Type.Function.Param {
             };
         } else if (paramType.specifier == .Void) {
             // validate void parameters
-            if (params.items.len == 0) {
+            if (p.paramBuffer.items.len == paramBufferTop) {
                 if (p.getCurrToken() != .RParen) {
                     try p.err(.void_only_param);
                     if (paramType.qual.any())
@@ -1539,7 +1568,7 @@ fn paramDecls(p: *Parser) Error!?[]Type.Function.Param {
 
         try paramDeclSpec.validateParam(p, paramType);
 
-        try params.append(.{
+        try p.paramBuffer.append(.{
             .name = p.tokSlice(nameToken),
             .ty = paramType,
             .register = paramDeclSpec.storageClass == .register,
@@ -1552,7 +1581,7 @@ fn paramDecls(p: *Parser) Error!?[]Type.Function.Param {
             break;
     }
 
-    return try p.arena.dupe(Type.Function.Param, params.items);
+    return try p.arena.dupe(Type.Function.Param, p.paramBuffer.items[paramBufferTop..]);
 }
 
 /// typeName : specQual+ abstractDeclarator
@@ -1571,11 +1600,11 @@ fn typeName(p: *Parser) Error!?Type {
 ///  | '{' initializerItems '}'
 fn initializer(p: *Parser, parenType: Type) Error!Result {
     if (p.eat(.LBrace)) |lb| {
-        var initializers = NodeList.init(p.pp.compilation.gpa);
-        defer initializers.deinit();
+        const listBufferTop = p.listBuffer.items.len;
+        defer p.listBuffer.items.len = listBufferTop;
 
         while (try p.parseInitializerItems(parenType)) |item| {
-            try initializers.append(item);
+            try p.listBuffer.append(item);
             if (p.eat(.Comma) == null) break;
         }
         try p.expectClosing(lb, .RBrace);
@@ -1586,13 +1615,14 @@ fn initializer(p: *Parser, parenType: Type) Error!Result {
             .data = .{ .BinaryExpr = .{ .lhs = .none, .rhs = .none } },
         };
 
-        switch (initializers.items.len) {
+        const initializers = p.listBuffer.items[listBufferTop..];
+        switch (initializers.len) {
             0 => {},
-            1 => node.data = .{ .BinaryExpr = .{ .lhs = initializers.items[0], .rhs = .none } },
-            2 => node.data = .{ .BinaryExpr = .{ .lhs = initializers.items[0], .rhs = initializers.items[1] } },
+            1 => node.data = .{ .BinaryExpr = .{ .lhs = initializers[0], .rhs = .none } },
+            2 => node.data = .{ .BinaryExpr = .{ .lhs = initializers[0], .rhs = initializers[1] } },
             else => {
                 node.tag = .CompoundInitializerExpr;
-                node.data = .{ .range = try p.addList(initializers.items) };
+                node.data = .{ .range = try p.addList(initializers) };
             },
         }
 
@@ -1778,12 +1808,8 @@ fn parseForStmt(p: *Parser) Error!NodeIndex {
     const startScopeLen = p.scopes.items.len;
     defer p.scopes.items.len = startScopeLen;
 
-    var decls = NodeList.init(p.pp.compilation.gpa);
-    defer decls.deinit();
-
-    const savedDecls = p.currDeclList;
-    defer p.currDeclList = savedDecls;
-    p.currDeclList = &decls;
+    const declBufferTop = p.declBuffer.items.len;
+    defer p.declBuffer.items.len = declBufferTop;
 
     const lp = try p.expectToken(.LParen);
     const gotDecl = try p.parseDeclaration();
@@ -1810,7 +1836,7 @@ fn parseForStmt(p: *Parser) Error!NodeIndex {
     const body = try p.stmt();
 
     if (gotDecl) {
-        const start = (try p.addList(decls.items)).start;
+        const start = (try p.addList(p.declBuffer.items[declBufferTop..])).start;
         const end = (try p.addList(&.{ cond.node, incr.node, body })).end;
 
         return try p.addNode(.{
@@ -2017,12 +2043,8 @@ fn labeledStmt(p: *Parser) Error!?NodeIndex {
 fn parseCompoundStmt(p: *Parser) Error!?NodeIndex {
     const lBrace = p.eat(.LBrace) orelse return null;
 
-    var statements = NodeList.init(p.pp.compilation.gpa);
-    defer statements.deinit();
-
-    const savedDS = p.currDeclList;
-    defer p.currDeclList = savedDS;
-    p.currDeclList = &statements;
+    const declBufferTop = p.declBuffer.items.len;
+    defer p.declBuffer.items.len = declBufferTop;
 
     var noreturnIdx: ?TokenIndex = null;
     var noreturnLabelCount: u32 = 0;
@@ -2053,7 +2075,7 @@ fn parseCompoundStmt(p: *Parser) Error!?NodeIndex {
         };
 
         if (s == .none) continue;
-        try statements.append(s);
+        try p.declBuffer.append(s);
 
         if (noreturnIdx == null and p.nodeIsNoreturn(s)) {
             noreturnIdx = p.index;
@@ -2070,14 +2092,14 @@ fn parseCompoundStmt(p: *Parser) Error!?NodeIndex {
         .tag = .CompoundStmtTwo,
         .data = .{ .BinaryExpr = .{ .lhs = .none, .rhs = .none } },
     };
-
-    switch (statements.items.len) {
+    const statements = p.declBuffer.items[declBufferTop..];
+    switch (statements.len) {
         0 => {},
-        1 => node.data = .{ .BinaryExpr = .{ .lhs = statements.items[0], .rhs = .none } },
-        2 => node.data = .{ .BinaryExpr = .{ .lhs = statements.items[0], .rhs = statements.items[1] } },
+        1 => node.data = .{ .BinaryExpr = .{ .lhs = statements[0], .rhs = .none } },
+        2 => node.data = .{ .BinaryExpr = .{ .lhs = statements[0], .rhs = statements[1] } },
         else => {
             node.tag = .CompoundStmt;
-            node.data = .{ .range = try p.addList(statements.items) };
+            node.data = .{ .range = try p.addList(statements) };
         },
     }
 
@@ -2553,11 +2575,11 @@ fn parseCastExpr(p: *Parser) Error!Result {
             try p.expectClosing(lp, .RParen);
 
             if (p.eat(.LBrace)) |lb| {
-                var initializers = NodeList.init(p.pp.compilation.gpa);
-                defer initializers.deinit();
+                const listBufferTop = p.listBuffer.items.len;
+                defer p.listBuffer.items.len = listBufferTop;
 
                 while (try p.parseInitializerItems(ty)) |item| {
-                    try initializers.append(item);
+                    try p.listBuffer.append(item);
                     if (p.eat(.Comma) == null) break;
                 }
                 try p.expectClosing(lb, .RBrace);
@@ -2567,13 +2589,15 @@ fn parseCastExpr(p: *Parser) Error!Result {
                     .type = ty,
                     .data = .{ .BinaryExpr = .{ .lhs = .none, .rhs = .none } },
                 };
-                switch (initializers.items.len) {
+
+                const initializers = p.listBuffer.items[listBufferTop..];
+                switch (initializers.len) {
                     0 => {},
-                    1 => node.data = .{ .BinaryExpr = .{ .lhs = initializers.items[0], .rhs = .none } },
-                    2 => node.data = .{ .BinaryExpr = .{ .lhs = initializers.items[0], .rhs = initializers.items[1] } },
+                    1 => node.data = .{ .BinaryExpr = .{ .lhs = initializers[0], .rhs = .none } },
+                    2 => node.data = .{ .BinaryExpr = .{ .lhs = initializers[0], .rhs = initializers[1] } },
                     else => {
                         node.tag = .CompoundLiteralExpr;
-                        node.data = .{ .range = try p.addList(initializers.items) };
+                        node.data = .{ .range = try p.addList(initializers) };
                     },
                 }
                 return Result{ .node = try p.addNode(node), .ty = ty };
@@ -2820,42 +2844,49 @@ fn suffixExpr(p: *Parser, lhs: Result) Error!Result {
 
             const params = ty.data.func.params;
 
-            var args = NodeList.init(p.pp.compilation.gpa);
-            defer args.deinit();
+            const listBufferTop = p.listBuffer.items.len;
+            defer p.listBuffer.items.len = listBufferTop;
+            var argCount: u32 = 0;
 
             var firstAfter = lParen;
             if (p.eat(.RParen) == null) {
                 while (true) {
-                    if (args.items.len == params.len)
+                    if (argCount == params.len)
                         firstAfter = p.index;
 
                     const arg = try p.assignExpr();
                     try arg.expect(p);
 
-                    if (args.items.len < params.len) {
-                        const casted = try arg.coerce(p, params[args.items.len].ty);
-                        try args.append(casted.node);
+                    if (argCount < params.len) {
+                        const casted = try arg.coerce(p, params[argCount].ty);
+                        try p.listBuffer.append(casted.node);
                     } else {
                         // TODO: coerce to var args passable type
-                        try args.append(arg.node);
+                        try p.listBuffer.append(arg.node);
                     }
 
+                    argCount += 1;
                     _ = p.eat(.Comma) orelse break;
                 }
 
                 try p.expectClosing(lParen, .RParen);
             }
 
-            const extra = Diagnostics.Message.Extra{ .arguments = .{ .expected = @as(u32, @intCast(params.len)), .actual = @as(u32, @intCast(args.items.len)) } };
-            if (ty.specifier == .Func and params.len != args.items.len) {
+            const extra = Diagnostics.Message.Extra{
+                .arguments = .{
+                    .expected = @as(u32, @intCast(params.len)),
+                    .actual = @as(u32, @intCast(argCount)),
+                },
+            };
+            if (ty.specifier == .Func and params.len != argCount) {
                 try p.errExtra(.expected_arguments, firstAfter, extra);
             }
 
-            if (ty.specifier == .OldStyleFunc and params.len != args.items.len) {
+            if (ty.specifier == .OldStyleFunc and params.len != argCount) {
                 try p.errExtra(.expected_arguments_old, firstAfter, extra);
             }
 
-            if (ty.specifier == .VarArgsFunc and args.items.len < params.len) {
+            if (ty.specifier == .VarArgsFunc and argCount < params.len) {
                 try p.errExtra(.expected_at_least_arguments, firstAfter, extra);
             }
 
@@ -2864,13 +2895,15 @@ fn suffixExpr(p: *Parser, lhs: Result) Error!Result {
                 .type = ty.data.func.returnType,
                 .data = .{ .BinaryExpr = .{ .lhs = lhs.node, .rhs = .none } },
             };
-            switch (args.items.len) {
+
+            const args = p.listBuffer.items[listBufferTop..];
+            switch (args.len) {
                 0 => {},
-                1 => callNode.data.BinaryExpr.rhs = args.items[0],
+                1 => callNode.data.BinaryExpr.rhs = args[0],
                 else => {
                     callNode.tag = .CallExpr;
                     try p.data.append(lhs.node);
-                    callNode.data = .{ .range = try p.addList(args.items) };
+                    callNode.data = .{ .range = try p.addList(args) };
                 },
             }
             return Result{ .node = try p.addNode(callNode), .ty = callNode.type };
@@ -2971,7 +3004,7 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
                         .data = .{ .Declaration = .{ .name = nameToken } },
                     });
 
-                    try p.currDeclList.append(node);
+                    try p.declBuffer.append(node);
                     try p.scopes.append(.{ .symbol = .{
                         .name = name,
                         .type = ty,
