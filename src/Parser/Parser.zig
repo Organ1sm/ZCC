@@ -2852,7 +2852,7 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
         else => {
             var lhs = try p.parsePrimaryExpr();
             while (true) {
-                const suffix = try p.suffixExpr(lhs);
+                const suffix = try p.parseSuffixExpr(lhs);
                 if (suffix.node == .none) break;
                 lhs = suffix;
             }
@@ -2868,7 +2868,7 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
 ///  | '->' IDENTIFIER
 ///  | '++'
 ///  | '--'
-fn suffixExpr(p: *Parser, lhs: Result) Error!Result {
+fn parseSuffixExpr(p: *Parser, lhs: Result) Error!Result {
     switch (p.getCurrToken()) {
         .LBracket => {
             var operand = lhs;
@@ -2895,6 +2895,7 @@ fn suffixExpr(p: *Parser, lhs: Result) Error!Result {
 
             const listBufferTop = p.listBuffer.items.len;
             defer p.listBuffer.items.len = listBufferTop;
+            try p.listBuffer.append(lhs.node);
             var argCount: u32 = 0;
 
             var firstAfter = lParen;
@@ -2946,12 +2947,11 @@ fn suffixExpr(p: *Parser, lhs: Result) Error!Result {
             };
 
             const args = p.listBuffer.items[listBufferTop..];
-            switch (args.len) {
+            switch (argCount) {
                 0 => {},
-                1 => callNode.data.BinaryExpr.rhs = args[0],
+                1 => callNode.data.BinaryExpr.rhs = args[1], //args[0]  == lhs.node
                 else => {
                     callNode.tag = .CallExpr;
-                    try p.data.append(lhs.node);
                     callNode.data = .{ .range = try p.addList(args) };
                 },
             }
@@ -3241,8 +3241,77 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
                 }
             }
         },
+
         .KeywordGeneric => {
-            return p.todo("generic");
+            p.index += 1;
+            const lp = try p.expectToken(.LParen);
+            const controlling = try p.assignExpr();
+            _ = try p.expectToken(.Comma);
+
+            const listBufferTop = p.listBuffer.items.len;
+            defer p.listBuffer.items.len = listBufferTop;
+
+            try p.listBuffer.append(controlling.node);
+
+            var defaultToken: ?TokenIndex = null;
+            var chosen: Result = .{};
+
+            while (true) {
+                const start = p.index;
+                if (try p.typeName()) |ty| {
+                    if (ty.qual.any()) {
+                        try p.errToken(.generic_qual_type, start);
+                    }
+
+                    _ = try p.expectToken(.Colon);
+                    chosen = try p.assignExpr();
+
+                    try p.listBuffer.append(try p.addNode(.{
+                        .tag = .GenericAssociationExpr,
+                        .type = ty,
+                        .data = .{ .UnaryExpr = chosen.node },
+                    }));
+                } else if (p.eat(.KeywordDefault)) |tok| {
+                    if (defaultToken) |prev| {
+                        try p.errToken(.generic_duplicate_default, tok);
+                        try p.errToken(.previous_case, prev);
+                    }
+
+                    defaultToken = tok;
+                    _ = try p.expectToken(.Colon);
+                    chosen = try p.assignExpr();
+                    try p.listBuffer.append(try p.addNode(.{
+                        .tag = .GenericDefaultExpr,
+                        .data = .{ .UnaryExpr = chosen.node },
+                    }));
+                } else {
+                    if (p.listBuffer.items.len == listBufferTop + 1) {
+                        try p.err(.expected_type);
+                        return error.ParsingFailed;
+                    }
+
+                    break;
+                }
+
+                if (p.eat(.Comma) == null)
+                    break;
+            }
+
+            try p.expectClosing(lp, .RParen);
+            var genericNode: AST.Node = .{
+                .tag = .GenericExprOne,
+                .type = chosen.ty,
+                .data = .{ .BinaryExpr = .{ .lhs = controlling.node, .rhs = chosen.node } },
+            };
+
+            const associations = p.listBuffer.items[listBufferTop..];
+            if (associations.len > 2) { // associations[0] == controlling.node
+                genericNode.tag = .GenericExpr;
+                genericNode.data = .{ .range = try p.addList(associations) };
+            }
+
+            chosen.node = try p.addNode(genericNode);
+            return chosen;
         },
 
         else => return Result{},

@@ -620,5 +620,32 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
                 try tree.dumpNode(data.UnaryExpr, level + delta, w);
             }
         },
+
+        .GenericExprOne => {
+            try w.writeByteNTimes(' ', level + 1);
+            try w.writeAll("controlling:\n");
+            try tree.dumpNode(data.BinaryExpr.lhs, level + delta, w);
+            try w.writeByteNTimes(' ', level + 1);
+            try w.writeAll("chosen:\n");
+            try tree.dumpNode(data.BinaryExpr.rhs, level + delta, w);
+        },
+
+        .GenericExpr => {
+            const nodes = tree.data[data.range.start..data.range.end];
+            try w.writeByteNTimes(' ', level + 1);
+            try w.writeAll("controlling:\n");
+            try tree.dumpNode(nodes[0], level + delta, w);
+            try w.writeByteNTimes(' ', level + 1);
+            try w.writeAll("chosen:\n");
+            try tree.dumpNode(nodes[1], level + delta, w);
+            try w.writeByteNTimes(' ', level + 1);
+            try w.writeAll("rest:\n");
+            for (nodes[2..]) |expr| {
+                try tree.dumpNode(expr, level + delta, w);
+            }
+        },
+        .GenericAssociationExpr, .GenericDefaultExpr => {
+            try tree.dumpNode(data.UnaryExpr, level + delta, w);
+        },
     }
 }
