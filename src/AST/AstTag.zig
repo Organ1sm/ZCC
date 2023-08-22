@@ -226,6 +226,14 @@ pub const Tag = enum(u8) {
     SizeOfExpr,
     /// _Alignof(un?)
     AlignOfExpr,
+    /// _Generic(controlling lhs, chosen rhs)
+    GenericExprOne,
+    /// _Generic(controlling range[0], chosen range[1], rest range[2..])
+    GenericExpr,
+    /// ty: un
+    GenericAssociationExpr,
+    // default: un
+    GenericDefaultExpr,
 
     /// ====== Initializer expressions ======
     /// { lhs, rhs }
