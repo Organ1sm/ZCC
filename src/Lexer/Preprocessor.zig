@@ -993,6 +993,18 @@ fn pasteTokens(pp: *Preprocessor, lhs: Token, rhs: Token) Error!Token {
     };
 }
 
+/// Defines a new macro and warns  if it  is a duplicate
+fn defineMacro(pp: *Preprocessor, nameToken: RawToken, macro: Macro) Error!void {
+    const name = pp.tokSliceSafe(nameToken);
+    if (try pp.defines.fetchPut(name, macro)) |_| {
+        try pp.compilation.diag.add(.{
+            .tag = .macro_redefined,
+            .loc = .{ .id = nameToken.source, .byteOffset = nameToken.start },
+            .extra = .{ .str = name },
+        });
+    }
+}
+
 /// Handle #define directive
 fn define(pp: *Preprocessor, lexer: *Lexer) Error!void {
     // get the macro name and validate.
@@ -1007,13 +1019,11 @@ fn define(pp: *Preprocessor, lexer: *Lexer) Error!void {
         return skipToNewLine(lexer);
     }
 
-    const nameStr = pp.tokSliceSafe(macroName);
     var first = lexer.next();
     first.id.simplifyMacroKeyword();
 
     if (first.id == .NewLine or first.id == .Eof) {
-        _ = try pp.defines.put(nameStr, .empty);
-        return;
+        return pp.defineMacro(macroName, .empty);
     } else if (first.start == macroName.end) {
         if (first.id == .LParen)
             return pp.defineFunc(lexer, macroName, first);
@@ -1027,9 +1037,8 @@ fn define(pp: *Preprocessor, lexer: *Lexer) Error!void {
         const start = lexer.index;
         const second = lexer.next();
         if (second.id == .NewLine or second.id == .Eof) {
-            if (std.mem.eql(u8, pp.tokSliceSafe(first), nameStr)) {
-                _ = try pp.defines.put(nameStr, .self);
-                return;
+            if (std.mem.eql(u8, pp.tokSliceSafe(first), pp.tokSliceSafe(macroName))) {
+                return pp.defineMacro(macroName, .self);
             }
         }
 
@@ -1059,7 +1068,7 @@ fn define(pp: *Preprocessor, lexer: *Lexer) Error!void {
     }
 
     const list = try pp.arena.allocator().dupe(RawToken, pp.tokenBuffer.items);
-    _ = try pp.defines.put(nameStr, .{ .simple = .{
+    try pp.defineMacro(macroName, .{ .simple = .{
         .loc = .{ .id = macroName.source, .byteOffset = macroName.start },
         .tokens = list,
     } });
@@ -1176,8 +1185,7 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: RawToken, lParen: Raw
 
     const paramList = try pp.arena.allocator().dupe([]const u8, params.items);
     const tokenList = try pp.arena.allocator().dupe(RawToken, pp.tokenBuffer.items);
-    const nameStr = pp.tokSliceSafe(macroName);
-    _ = try pp.defines.put(nameStr, .{ .func = .{
+    try pp.defineMacro(macroName, .{ .func = .{
         .params = paramList,
         .varArgs = varArgs,
         .tokens = tokenList,
