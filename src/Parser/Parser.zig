@@ -3103,9 +3103,7 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
         .CharLiteralUTF_16,
         .CharLiteralUTF_32,
         .CharLiteralWide,
-        => {
-            return p.todo("char literals");
-        },
+        => return p.parseCharLiteral(),
 
         .FloatLiteral => {
             defer p.index += 1;
@@ -3364,6 +3362,74 @@ fn parseIntegerLiteral(p: *Parser) Error!Result {
     }
 }
 
+fn parseCharLiteral(p: *Parser) Error!Result {
+    const litToken = p.index;
+    const ty: Type = switch (p.getCurrToken()) {
+        .CharLiteral => .{ .specifier = .Int },
+        else => return p.todo("unicode char literals"),
+    };
+    p.index += 1;
+
+    var val: u32 = 0;
+    var overflowReported = false;
+    var multichar: u8 = 0;
+    var slice = p.tokSlice(litToken);
+    slice = slice[0 .. slice.len - 1];
+    var i = std.mem.indexOf(u8, slice, "\'").? + 1;
+    while (i < slice.len) : (i += 1) {
+        var c = slice[i];
+        switch (c) {
+            '\\' => {
+                i += 1;
+                switch (slice[i]) {
+                    '\n' => i += 1,
+                    '\r' => i += 2,
+                    '\'', '\"', '\\', '?' => c = slice[i],
+                    'n' => c = '\n',
+                    'r' => c = '\r',
+                    't' => c = '\t',
+                    'a' => c = 0x07,
+                    'b' => c = 0x08,
+                    'e' => c = 0x1B,
+                    'f' => c = 0x0C,
+                    'v' => c = 0x0B,
+                    'x' => c = try p.parseNumberEscape(litToken, 16, slice, &i),
+                    '0'...'7' => c = try p.parseNumberEscape(litToken, 8, slice, &i),
+                    'u', 'U' => return p.todo("unicode escapes in char literals"),
+                    else => unreachable,
+                }
+            },
+            else => {},
+        }
+
+        const mulOV = @mulWithOverflow(val, 0xff);
+        if (mulOV[1] != 0 and !overflowReported) {
+            try p.errExtra(.char_lit_too_wide, litToken, .{ .unsigned = i });
+            overflowReported = true;
+        }
+        val = mulOV[0] + c;
+
+        switch (multichar) {
+            0 => multichar = 1,
+            1 => {
+                multichar = 2;
+                try p.errToken(.multichar_literal, litToken);
+            },
+            else => {},
+        }
+    }
+
+    return Result{
+        .ty = ty,
+        .value = .{ .unsigned = val },
+        .node = try p.addNode(.{
+            .tag = .IntLiteral,
+            .type = ty,
+            .data = .{ .Int = val },
+        }),
+    };
+}
+
 fn parseStringLiteral(p: *Parser) Error!Result {
     var start = p.index;
     var width: ?u8 = null;
@@ -3405,7 +3471,7 @@ fn parseStringLiteral(p: *Parser) Error!Result {
         width = 8;
 
     if (width.? != 8)
-        return p.todo("non utf-8 strings");
+        return p.todo("unicode string literals");
 
     const index = p.strings.items.len;
 
@@ -3431,10 +3497,11 @@ fn parseStringLiteral(p: *Parser) Error!Result {
                         'e' => p.strings.appendAssumeCapacity(0x1B),
                         'f' => p.strings.appendAssumeCapacity(0x0C),
                         'v' => p.strings.appendAssumeCapacity(0x0B),
-                        'x' => try p.parseNumberEscape(start, 16, slice, &i),
+                        'x' => p.strings.appendAssumeCapacity(try p.parseNumberEscape(start, 16, slice, &i)),
+                        '0'...'7' => p.strings.appendAssumeCapacity(try p.parseNumberEscape(start, 8, slice, &i)),
+
                         'u' => try p.parseUnicodeEscape(start, 4, slice, &i),
                         'U' => try p.parseUnicodeEscape(start, 8, slice, &i),
-                        '0'...'7' => try p.parseNumberEscape(start, 8, slice, &i),
                         else => unreachable,
                     }
                 },
@@ -3465,7 +3532,7 @@ fn parseStringLiteral(p: *Parser) Error!Result {
     return res;
 }
 
-fn parseNumberEscape(p: *Parser, tok: TokenIndex, base: u8, slice: []const u8, i: *usize) !void {
+fn parseNumberEscape(p: *Parser, tok: TokenIndex, base: u8, slice: []const u8, i: *usize) !u8 {
     if (base == 16) i.* += 1; // skip x
     var char: u8 = 0;
     var reported = false;
@@ -3482,7 +3549,8 @@ fn parseNumberEscape(p: *Parser, tok: TokenIndex, base: u8, slice: []const u8, i
     }
 
     i.* -= 1;
-    p.strings.appendAssumeCapacity(char);
+
+    return char;
 }
 
 fn parseUnicodeEscape(p: *Parser, tok: TokenIndex, count: u8, slice: []const u8, i: *usize) !void {
