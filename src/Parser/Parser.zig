@@ -3021,11 +3021,6 @@ fn parseSuffixExpr(p: *Parser, lhs: Result) Error!Result {
 ////  | CHAR_LITERAL
 ////  | STRING_LITERAL
 ////  | '(' expr ')'
-////  | keyword_generic '(' assignExpr ',' genericAssoc (',' genericAssoc)* ')'
-////
-//// genericAssoc
-////  : typeName ':' assignExpr
-////  | keyword_default ':' assignExpr
 fn parsePrimaryExpr(p: *Parser) Error!Result {
     if (p.eat(.LParen)) |lp| {
         var e = try p.expr();
@@ -3164,155 +3159,9 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
         .IntegerLiteral_LU,
         .IntegerLiteral_LL,
         .IntegerLiteral_LLU,
-        => {
-            const curToken = p.getCurrToken();
-            var slice = p.tokSlice(p.index);
+        => return p.parseIntegerLiteral(),
 
-            defer p.index += 1;
-
-            var base: u8 = 10;
-            if (std.mem.startsWith(u8, slice, "0x") or std.mem.startsWith(u8, slice, "0X")) {
-                slice = slice[2..];
-                base = 16;
-            } else if (std.mem.startsWith(u8, slice, "0b") or std.mem.startsWith(u8, slice, "0B")) {
-                slice = slice[2..];
-                base = 2;
-            } else if (slice[0] == '0') {
-                base = 8;
-            }
-
-            switch (curToken) {
-                .IntegerLiteral_U, .IntegerLiteral_L => slice = slice[0 .. slice.len - 1],
-                .IntegerLiteral_LU, .IntegerLiteral_LL => slice = slice[0 .. slice.len - 2],
-                .IntegerLiteral_LLU => slice = slice[0 .. slice.len - 3],
-                else => {},
-            }
-
-            var value: u64 = 0;
-            var overflow = false;
-            for (slice) |ch| {
-                const digit: u64 = switch (ch) {
-                    '0'...'9' => ch - '0',
-                    'A'...'Z' => ch - 'A' + 10,
-                    'a'...'z' => ch - 'a' + 10,
-                    else => unreachable,
-                };
-
-                if (value != 0) {
-                    const mulOV = @mulWithOverflow(value, base);
-                    if (mulOV[1] != 0)
-                        overflow = true;
-
-                    value = mulOV[0];
-                }
-
-                const addOV = @addWithOverflow(value, digit);
-                if (addOV[1] != 0)
-                    overflow = true;
-                value = addOV[0];
-            }
-
-            if (overflow) {
-                try p.err(.int_literal_too_big);
-                var res: Result = .{ .ty = .{ .specifier = .ULongLong }, .value = .{ .unsigned = value } };
-                res.node = try p.addNode(.{ .tag = .IntLiteral, .type = res.ty, .data = .{ .Int = value } });
-                return res;
-            }
-
-            if (base == 10) {
-                switch (curToken) {
-                    .IntegerLiteral => return p.castInt(value, &.{ .Int, .Long, .LongLong }),
-                    .IntegerLiteral_U => return p.castInt(value, &.{ .UInt, .ULong, .ULongLong }),
-                    .IntegerLiteral_L => return p.castInt(value, &.{ .Long, .LongLong }),
-                    .IntegerLiteral_LU => return p.castInt(value, &.{ .ULong, .ULongLong }),
-                    .IntegerLiteral_LL => return p.castInt(value, &.{.LongLong}),
-                    .IntegerLiteral_LLU => return p.castInt(value, &.{.ULongLong}),
-                    else => unreachable,
-                }
-            } else {
-                switch (curToken) {
-                    .IntegerLiteral => return p.castInt(value, &.{ .Int, .UInt, .Long, .ULong, .LongLong, .ULongLong }),
-                    .IntegerLiteral_U => return p.castInt(value, &.{ .UInt, .ULong, .ULongLong }),
-                    .IntegerLiteral_L => return p.castInt(value, &.{ .Long, .ULong, .LongLong, .ULongLong }),
-                    .IntegerLiteral_LU => return p.castInt(value, &.{ .ULong, .ULongLong }),
-                    .IntegerLiteral_LL => return p.castInt(value, &.{ .LongLong, .ULongLong }),
-                    .IntegerLiteral_LLU => return p.castInt(value, &.{.ULongLong}),
-                    else => unreachable,
-                }
-            }
-        },
-
-        .KeywordGeneric => {
-            p.index += 1;
-            const lp = try p.expectToken(.LParen);
-            const controlling = try p.assignExpr();
-            _ = try p.expectToken(.Comma);
-
-            const listBufferTop = p.listBuffer.items.len;
-            defer p.listBuffer.items.len = listBufferTop;
-
-            try p.listBuffer.append(controlling.node);
-
-            var defaultToken: ?TokenIndex = null;
-            var chosen: Result = .{};
-
-            while (true) {
-                const start = p.index;
-                if (try p.typeName()) |ty| {
-                    if (ty.qual.any()) {
-                        try p.errToken(.generic_qual_type, start);
-                    }
-
-                    _ = try p.expectToken(.Colon);
-                    chosen = try p.assignExpr();
-
-                    try p.listBuffer.append(try p.addNode(.{
-                        .tag = .GenericAssociationExpr,
-                        .type = ty,
-                        .data = .{ .UnaryExpr = chosen.node },
-                    }));
-                } else if (p.eat(.KeywordDefault)) |tok| {
-                    if (defaultToken) |prev| {
-                        try p.errToken(.generic_duplicate_default, tok);
-                        try p.errToken(.previous_case, prev);
-                    }
-
-                    defaultToken = tok;
-                    _ = try p.expectToken(.Colon);
-                    chosen = try p.assignExpr();
-                    try p.listBuffer.append(try p.addNode(.{
-                        .tag = .GenericDefaultExpr,
-                        .data = .{ .UnaryExpr = chosen.node },
-                    }));
-                } else {
-                    if (p.listBuffer.items.len == listBufferTop + 1) {
-                        try p.err(.expected_type);
-                        return error.ParsingFailed;
-                    }
-
-                    break;
-                }
-
-                if (p.eat(.Comma) == null)
-                    break;
-            }
-
-            try p.expectClosing(lp, .RParen);
-            var genericNode: AST.Node = .{
-                .tag = .GenericExprOne,
-                .type = chosen.ty,
-                .data = .{ .BinaryExpr = .{ .lhs = controlling.node, .rhs = chosen.node } },
-            };
-
-            const associations = p.listBuffer.items[listBufferTop..];
-            if (associations.len > 2) { // associations[0] == controlling.node
-                genericNode.tag = .GenericExpr;
-                genericNode.data = .{ .range = try p.addList(associations) };
-            }
-
-            chosen.node = try p.addNode(genericNode);
-            return chosen;
-        },
+        .KeywordGeneric => return p.parseGenericSelection(),
 
         else => return Result{},
     }
@@ -3359,6 +3208,160 @@ fn castInt(p: *Parser, val: u64, specs: []const Type.Specifier) Error!Result {
 
     res.node = try p.addNode(.{ .tag = .IntLiteral, .type = res.ty, .data = .{ .Int = val } });
     return res;
+}
+
+//// genericSelection : keyword_generic '(' assignExpr ',' genericAssoc (',' genericAssoc)* ')'
+//// genericAssoc
+////  : typeName ':' assignExpr
+////  | keyword_default ':' assignExpr
+fn parseGenericSelection(p: *Parser) Error!Result {
+    p.index += 1;
+    const lp = try p.expectToken(.LParen);
+    const controlling = try p.assignExpr();
+    _ = try p.expectToken(.Comma);
+
+    const listBufferTop = p.listBuffer.items.len;
+    defer p.listBuffer.items.len = listBufferTop;
+
+    try p.listBuffer.append(controlling.node);
+
+    var defaultToken: ?TokenIndex = null;
+    var chosen: Result = .{};
+
+    while (true) {
+        const start = p.index;
+        if (try p.typeName()) |ty| {
+            if (ty.qual.any()) {
+                try p.errToken(.generic_qual_type, start);
+            }
+
+            _ = try p.expectToken(.Colon);
+            chosen = try p.assignExpr();
+
+            try p.listBuffer.append(try p.addNode(.{
+                .tag = .GenericAssociationExpr,
+                .type = ty,
+                .data = .{ .UnaryExpr = chosen.node },
+            }));
+        } else if (p.eat(.KeywordDefault)) |tok| {
+            if (defaultToken) |prev| {
+                try p.errToken(.generic_duplicate_default, tok);
+                try p.errToken(.previous_case, prev);
+            }
+
+            defaultToken = tok;
+            _ = try p.expectToken(.Colon);
+            chosen = try p.assignExpr();
+            try p.listBuffer.append(try p.addNode(.{
+                .tag = .GenericDefaultExpr,
+                .data = .{ .UnaryExpr = chosen.node },
+            }));
+        } else {
+            if (p.listBuffer.items.len == listBufferTop + 1) {
+                try p.err(.expected_type);
+                return error.ParsingFailed;
+            }
+
+            break;
+        }
+
+        if (p.eat(.Comma) == null)
+            break;
+    }
+
+    try p.expectClosing(lp, .RParen);
+    var genericNode: AST.Node = .{
+        .tag = .GenericExprOne,
+        .type = chosen.ty,
+        .data = .{ .BinaryExpr = .{ .lhs = controlling.node, .rhs = chosen.node } },
+    };
+
+    const associations = p.listBuffer.items[listBufferTop..];
+    if (associations.len > 2) { // associations[0] == controlling.node
+        genericNode.tag = .GenericExpr;
+        genericNode.data = .{ .range = try p.addList(associations) };
+    }
+
+    chosen.node = try p.addNode(genericNode);
+    return chosen;
+}
+
+fn parseIntegerLiteral(p: *Parser) Error!Result {
+    const curToken = p.getCurrToken();
+    var slice = p.tokSlice(p.index);
+
+    defer p.index += 1;
+
+    var base: u8 = 10;
+    if (std.mem.startsWith(u8, slice, "0x") or std.mem.startsWith(u8, slice, "0X")) {
+        slice = slice[2..];
+        base = 16;
+    } else if (std.mem.startsWith(u8, slice, "0b") or std.mem.startsWith(u8, slice, "0B")) {
+        slice = slice[2..];
+        base = 2;
+    } else if (slice[0] == '0') {
+        base = 8;
+    }
+
+    switch (curToken) {
+        .IntegerLiteral_U, .IntegerLiteral_L => slice = slice[0 .. slice.len - 1],
+        .IntegerLiteral_LU, .IntegerLiteral_LL => slice = slice[0 .. slice.len - 2],
+        .IntegerLiteral_LLU => slice = slice[0 .. slice.len - 3],
+        else => {},
+    }
+
+    var value: u64 = 0;
+    var overflow = false;
+    for (slice) |ch| {
+        const digit: u64 = switch (ch) {
+            '0'...'9' => ch - '0',
+            'A'...'Z' => ch - 'A' + 10,
+            'a'...'z' => ch - 'a' + 10,
+            else => unreachable,
+        };
+
+        if (value != 0) {
+            const mulOV = @mulWithOverflow(value, base);
+            if (mulOV[1] != 0)
+                overflow = true;
+
+            value = mulOV[0];
+        }
+
+        const addOV = @addWithOverflow(value, digit);
+        if (addOV[1] != 0)
+            overflow = true;
+        value = addOV[0];
+    }
+
+    if (overflow) {
+        try p.err(.int_literal_too_big);
+        var res: Result = .{ .ty = .{ .specifier = .ULongLong }, .value = .{ .unsigned = value } };
+        res.node = try p.addNode(.{ .tag = .IntLiteral, .type = res.ty, .data = .{ .Int = value } });
+        return res;
+    }
+
+    if (base == 10) {
+        switch (curToken) {
+            .IntegerLiteral => return p.castInt(value, &.{ .Int, .Long, .LongLong }),
+            .IntegerLiteral_U => return p.castInt(value, &.{ .UInt, .ULong, .ULongLong }),
+            .IntegerLiteral_L => return p.castInt(value, &.{ .Long, .LongLong }),
+            .IntegerLiteral_LU => return p.castInt(value, &.{ .ULong, .ULongLong }),
+            .IntegerLiteral_LL => return p.castInt(value, &.{.LongLong}),
+            .IntegerLiteral_LLU => return p.castInt(value, &.{.ULongLong}),
+            else => unreachable,
+        }
+    } else {
+        switch (curToken) {
+            .IntegerLiteral => return p.castInt(value, &.{ .Int, .UInt, .Long, .ULong, .LongLong, .ULongLong }),
+            .IntegerLiteral_U => return p.castInt(value, &.{ .UInt, .ULong, .ULongLong }),
+            .IntegerLiteral_L => return p.castInt(value, &.{ .Long, .ULong, .LongLong, .ULongLong }),
+            .IntegerLiteral_LU => return p.castInt(value, &.{ .ULong, .ULongLong }),
+            .IntegerLiteral_LL => return p.castInt(value, &.{ .LongLong, .ULongLong }),
+            .IntegerLiteral_LLU => return p.castInt(value, &.{.ULongLong}),
+            else => unreachable,
+        }
+    }
 }
 
 fn parseStringLiteral(p: *Parser) Error!Result {
