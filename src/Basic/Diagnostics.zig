@@ -49,6 +49,7 @@ const Options = struct {
     @"gnu-alignof-expression": Kind = .warning,
     @"macro-redefined": Kind = .warning,
     @"generic-qual-type": Kind = .warning,
+    multichar: Kind = .warning,
 };
 
 pub const Tag = enum {
@@ -180,6 +181,8 @@ pub const Tag = enum {
     generic_no_match,
     escape_sequence_overflow,
     invalid_universal_character,
+    multichar_literal,
+    char_lit_too_wide,
 };
 
 list: std.ArrayList(Message),
@@ -506,6 +509,8 @@ pub fn renderExtra(comp: *Compilation, m: anytype) void {
             .generic_no_match => m.print("controlling expression type '{s}' not compatile with any generic association type", .{msg.extra.str}),
             .escape_sequence_overflow => m.write("escape sequence out of range"),
             .invalid_universal_character => m.write("invalid universal character"),
+            .multichar_literal => m.write("multi-character character constant"),
+            .char_lit_too_wide => m.write("charcter constant too long for its type"),
         }
 
         m.end(lcs);
@@ -667,6 +672,7 @@ fn tagKind(diag: *Diagnostics, tag: Tag) Kind {
         .useless_static,
         .overflow_unsigned,
         .overflow_signed,
+        .char_lit_too_wide,
         => .warning,
 
         .unsupported_pragma => diag.options.@"unsupported-pragma",
@@ -683,6 +689,7 @@ fn tagKind(diag: *Diagnostics, tag: Tag) Kind {
         .alignof_expr => diag.options.@"gnu-alignof-expression",
         .macro_redefined => diag.options.@"macro-redefined",
         .generic_qual_type => diag.options.@"generic-qual-type",
+        .multichar_literal => diag.options.multichar,
     };
 
     if (kind == .@"error" and diag.fatalErrors)
