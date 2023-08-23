@@ -92,7 +92,7 @@ pub fn preprocess(pp: *Preprocessor, source: Source) Error!void {
 
     // Estimate how many new tokens this source will contain.
     const estimatedTokenCount = source.buffer.len / 8;
-    try pp.tokens.ensureTotalCapacity(pp.compilation.gpa, pp.tokens.len + estimatedTokenCount);
+    try pp.tokens.ensureUnusedCapacity(pp.compilation.gpa, pp.tokens.len + estimatedTokenCount);
 
     var ifLevel: u8 = 0;
     var ifKind = std.packed_int_array.PackedIntArray(u2, 256).init([1]u2{0} ** 256);
@@ -558,7 +558,7 @@ fn expandMacro(pp: *Preprocessor, lexer: *Lexer, raw: RawToken) Error!void {
             try pp.expandExtra(&buffer, &start);
 
             // Add the result tokens to the token list and mark that they were expanded.
-            try pp.tokens.ensureTotalCapacity(pp.compilation.gpa, pp.tokens.len + buffer.items.len);
+            try pp.tokens.ensureUnusedCapacity(pp.compilation.gpa, pp.tokens.len + buffer.items.len);
             const loc = Source.Location{ .id = raw.source, .byteOffset = raw.start };
             for (buffer.items) |*r| {
                 try pp.markExpandedFrom(r, loc);
@@ -614,7 +614,7 @@ fn expandMacro(pp: *Preprocessor, lexer: *Lexer, raw: RawToken) Error!void {
             try pp.expandFunc(&buffer, &startIdx, macro);
 
             // add the result tokens to the token list and mark they were expanded,
-            try pp.tokens.ensureTotalCapacity(pp.compilation.gpa, pp.tokens.len + buffer.items.len);
+            try pp.tokens.ensureUnusedCapacity(pp.compilation.gpa, pp.tokens.len + buffer.items.len);
             const loc = Source.Location{ .id = raw.source, .byteOffset = raw.start };
             for (buffer.items) |*r| {
                 try pp.markExpandedFrom(r, loc);

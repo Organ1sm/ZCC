@@ -3408,10 +3408,10 @@ fn parseStringLiteral(p: *Parser) Error!Result {
 
     while (start < p.index) : (start += 1) {
         var slice = p.tokSlice(start);
-        slice = slice[std.mem.indexOf(u8, slice, "\"").? + 1 .. slice.len - 1];
+        slice = slice[0 .. slice.len - 1];
+        var i = std.mem.indexOf(u8, slice, "\"").? + 1;
 
-        try p.strings.ensureTotalCapacity(slice.len);
-        var i: u32 = 0;
+        try p.strings.ensureUnusedCapacity(slice.len);
         while (i < slice.len) : (i += 1) {
             switch (slice[i]) {
                 '\\' => {
@@ -3428,10 +3428,10 @@ fn parseStringLiteral(p: *Parser) Error!Result {
                         'e' => p.strings.appendAssumeCapacity(0x1B),
                         'f' => p.strings.appendAssumeCapacity(0x0C),
                         'v' => p.strings.appendAssumeCapacity(0x0B),
-                        'x' => return p.todo("hex escape"),
-                        'u' => return p.todo("u escape"),
-                        'U' => return p.todo("U escape"),
-                        '0'...'7' => return p.todo("octal escape"),
+                        'x' => try p.parseNumberEscape(start, 16, slice, &i),
+                        'u' => try p.parseUnicodeEscape(start, 4, slice, &i),
+                        'U' => try p.parseUnicodeEscape(start, 8, slice, &i),
+                        '0'...'7' => try p.parseNumberEscape(start, 8, slice, &i),
                         else => unreachable,
                     }
                 },
@@ -3460,4 +3460,36 @@ fn parseStringLiteral(p: *Parser) Error!Result {
     });
 
     return res;
+}
+
+fn parseNumberEscape(p: *Parser, tok: TokenIndex, base: u8, slice: []const u8, i: *usize) !void {
+    if (base == 16) i.* += 1; // skip x
+    var char: u8 = 0;
+    var reported = false;
+
+    while (i.* < slice.len) : (i.* += 1) {
+        const val = std.fmt.charToDigit(slice[i.*], base) catch break; // validated by Tokenizer
+        const mulOV = @mulWithOverflow(char, base);
+
+        if (mulOV[1] != 0 and !reported) {
+            try p.errExtra(.escape_sequence_overflow, tok, .{ .unsigned = i.* });
+            reported = true;
+        }
+        char = mulOV[0] + val;
+    }
+
+    i.* -= 1;
+    p.strings.appendAssumeCapacity(char);
+}
+
+fn parseUnicodeEscape(p: *Parser, tok: TokenIndex, count: u8, slice: []const u8, i: *usize) !void {
+    const c = std.fmt.parseInt(u21, slice[i.* + 1 ..][0..count], 16) catch unreachable; // Validated by tokenizer
+    i.* += count + 1;
+    if (c >= 0x110000 or (c < 0xa0 and c != '$' and c != '@' and c != '¸')) {
+        try p.errExtra(.invalid_universal_character, tok, .{ .unsigned = i.* - count - 2 });
+        return;
+    }
+    var buf: [4]u8 = undefined;
+    const to_write = std.unicode.utf8Encode(c, &buf) catch unreachable; // validated above
+    p.strings.appendSliceAssumeCapacity(buf[0..to_write]);
 }
