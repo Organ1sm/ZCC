@@ -55,10 +55,6 @@ pub const Builder = struct {
         ComplexDouble,
         ComplexLongDouble,
 
-        IncompleteStruct,
-        IncompleteUnion,
-        IncompleteEnum,
-
         Pointer: *Type,
         UnspecifiedVariableLenArray: *Type,
         Func: *Type.Function,
@@ -123,9 +119,9 @@ pub const Builder = struct {
                 Kind.Pointer => "pointer",
                 Kind.Func, Kind.VarArgsFunc, Kind.OldStyleFunc => "function",
                 Kind.Array, Kind.StaticArray, Kind.UnspecifiedVariableLenArray, Kind.VariableLenArray, Kind.IncompleteArray => "array",
-                Kind.IncompleteStruct, Kind.Struct => "struct",
-                Kind.IncompleteUnion, Kind.Union => "union",
-                Kind.IncompleteEnum, Kind.Enum => "enum",
+                Kind.Struct => "struct",
+                Kind.Union => "union",
+                Kind.Enum => "enum",
             };
         }
     };
@@ -168,10 +164,6 @@ pub const Builder = struct {
                 try p.errExtra(.type_is_invalid, p.index, .{ .str = spec.kind.toString() });
                 return error.ParsingFailed;
             },
-
-            Kind.IncompleteStruct => .IncompleteStruct,
-            Kind.IncompleteEnum => .IncompleteEnum,
-            Kind.IncompleteUnion => .IncompleteUnion,
 
             Kind.Pointer => |data| {
                 ty.specifier = .Pointer;
@@ -443,10 +435,6 @@ pub const Builder = struct {
             .ComplexFloat => Kind.ComplexFloat,
             .ComplexDouble => Kind.ComplexDouble,
             .ComplexLongDouble => Kind.ComplexLongDouble,
-
-            .IncompleteStruct => Kind.IncompleteStruct,
-            .IncompleteEnum => Kind.IncompleteEnum,
-            .IncompleteUnion => Kind.IncompleteUnion,
 
             .Pointer => .{ .Pointer = ty.data.subType },
             .UnspecifiedVariableLenArray => .{ .UnspecifiedVariableLenArray = ty.data.subType },
