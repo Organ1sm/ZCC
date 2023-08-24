@@ -479,10 +479,8 @@ fn parseDeclaration(p: *Parser) Error!bool {
         if (declSpec.type.specifier == .Enum)
             return true;
 
-        if (declSpec.type.isEnumOrRecord()) {
-            //TODO: check that there was a name token
+        if (declSpec.type.isEnumOrRecord() and declSpec.type.data.record.name[0] != '(')
             return true;
-        }
 
         try p.errToken(.missing_declaration, firstTokenIndex);
         return true;
@@ -1098,7 +1096,23 @@ fn recordDecls(p: *Parser) Error!void {
                 }
                 bitsNode = res.node;
             }
-            if (nameToken == 0 and bitsNode == .none) {
+            if (nameToken == 0 and bitsNode == .none) unnamed: {
+                if (ty.specifier == .Enum) break :unnamed;
+                if (ty.isEnumOrRecord() and ty.data.record.name[0] == '(') {
+                    // An anonymous record appears as indirect fields on the parent
+                    try p.recordBuffer.append(.{
+                        .name = try p.getAnonymousName(firstToken),
+                        .ty = ty,
+                        .bitWidth = 0,
+                    });
+                    const node = try p.addNode(.{
+                        .tag = .IndirectRecordFieldDecl,
+                        .type = ty,
+                        .data = undefined,
+                    });
+                    try p.declBuffer.append(node);
+                    break; // must be followed by a semicolon
+                }
                 try p.err(.missing_declaration);
             } else {
                 try p.recordBuffer.append(.{

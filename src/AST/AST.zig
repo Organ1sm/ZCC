@@ -254,6 +254,8 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
             }
         },
 
+        .IndirectRecordFieldDecl => {},
+
         .CompoundStmtTwo,
         .CompoundInitializerExprTwo,
         .CompoundLiteralExprTwo,
@@ -644,6 +646,7 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
                 try tree.dumpNode(expr, level + delta, w);
             }
         },
+
         .GenericAssociationExpr, .GenericDefaultExpr => {
             try tree.dumpNode(data.UnaryExpr, level + delta, w);
         },

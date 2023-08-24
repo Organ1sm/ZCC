@@ -200,7 +200,7 @@ pub fn main() !void {
                     \\
                     \\
                 ,
-                    .{ expectedCount, macro.simple.tokens.len, m.buf.items},
+                    .{ macro.simple.tokens.len, expectedCount, m.buf.items },
                 );
                 continue;
             }

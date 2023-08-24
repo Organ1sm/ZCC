@@ -62,6 +62,8 @@ pub const Tag = enum(u8) {
     /// ty name : node
     /// name == 0 means unnamed
     RecordFieldDecl,
+    /// Used when a record has an unnamed record as a field
+    IndirectRecordFieldDecl,
 
     // ====== Stmt ======
     LabeledStmt,
