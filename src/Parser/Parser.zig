@@ -189,7 +189,8 @@ fn addList(p: *Parser, nodes: []const NodeIndex) Allocator.Error!AST.Range {
     return AST.Range{ .start = start, .end = end };
 }
 
-fn findTypedef(p: *Parser, name: []const u8) ?Scope.Symbol {
+fn findTypedef(p: *Parser, nameToken: TokenIndex) !?Scope.Symbol {
+    const name = p.tokSlice(nameToken);
     var i = p.scopes.items.len;
     while (i > 0) {
         i -= 1;
@@ -197,6 +198,19 @@ fn findTypedef(p: *Parser, name: []const u8) ?Scope.Symbol {
             .typedef => |t| {
                 if (std.mem.eql(u8, t.name, name))
                     return t;
+            },
+
+            .@"struct" => |s| if (std.mem.eql(u8, s.name, name)) {
+                try p.errStr(.must_use_struct, nameToken, name);
+                return s;
+            },
+            .@"union" => |u| if (std.mem.eql(u8, u.name, name)) {
+                try p.errStr(.must_use_union, nameToken, name);
+                return u;
+            },
+            .@"enum" => |e| if (std.mem.eql(u8, e.name, name)) {
+                try p.errStr(.must_use_enum, nameToken, name);
+                return e;
             },
 
             else => {},
@@ -914,7 +928,7 @@ fn parseTypeSpec(p: *Parser, ty: *TypeBuilder, completeType: *Type) Error!bool {
             },
 
             .Identifier => {
-                const typedef = p.findTypedef(p.tokSlice(p.index)) orelse break;
+                const typedef = (try p.findTypedef(p.index)) orelse break;
                 const newSpec = TypeBuilder.fromType(typedef.type);
 
                 const errStart = p.pp.compilation.diag.list.items.len;
@@ -976,7 +990,14 @@ fn parseRecordSpec(p: *Parser) Error!*Type.Record {
             return prev.type.data.record;
         } else {
             // this is a forward declaration, create a new record type.
-            return Type.Record.create(p.arena, p.tokSlice(ident));
+            const recordType = try Type.Record.create(p.arena, p.tokSlice(ident));
+            const ty = Type{
+                .specifier = if (isStruct) .Struct else .Union,
+                .data = .{ .record = recordType },
+            };
+            const sym = Scope.Symbol{ .name = recordType.name, .type = ty, .nameToken = ident };
+            try p.scopes.append(if (isStruct) .{ .@"struct" = sym } else .{ .@"union" = sym });
+            return recordType;
         }
     };
 
@@ -1129,7 +1150,11 @@ fn parseEnumSpec(p: *Parser) Error!*Type.Enum {
         if (try p.findTag(.KeywordEnum, ident, .reference)) |prev| {
             return prev.type.data.@"enum";
         } else {
-            return Type.Enum.create(p.arena, p.tokSlice(ident));
+            const enum_ty = try Type.Enum.create(p.arena, p.tokSlice(ident));
+            const ty = Type{ .specifier = .Enum, .data = .{ .@"enum" = enum_ty } };
+            const sym = Scope.Symbol{ .name = enum_ty.name, .type = ty, .nameToken = ident };
+            try p.scopes.append(.{ .@"enum" = sym });
+            return enum_ty;
         }
     };
 

@@ -270,7 +270,7 @@ pub fn sizeof(ty: Type, comp: *Compilation) ?u32 {
         .ComplexDouble => 16,
         .ComplexLongDouble => 32,
         .Pointer, .StaticArray => comp.target.ptrBitWidth() >> 3,
-        .Array => ty.data.subType.sizeof(comp).? * @as(u32, @intCast(ty.data.array.len)),
+        .Array => ty.data.array.elem.sizeof(comp).? * @as(u32, @intCast(ty.data.array.len)),
         .Struct, .Union => if (ty.data.record.isIncomplete()) null else ty.data.record.size,
         .Enum => if (ty.data.@"enum".isIncomplete()) null else ty.data.@"enum".tagType.sizeof(comp),
     };
