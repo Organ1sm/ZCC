@@ -183,6 +183,9 @@ pub const Tag = enum {
     invalid_universal_character,
     multichar_literal,
     char_lit_too_wide,
+    must_use_struct,
+    must_use_union,
+    must_use_enum,
 };
 
 list: std.ArrayList(Message),
@@ -511,6 +514,9 @@ pub fn renderExtra(comp: *Compilation, m: anytype) void {
             .invalid_universal_character => m.write("invalid universal character"),
             .multichar_literal => m.write("multi-character character constant"),
             .char_lit_too_wide => m.write("charcter constant too long for its type"),
+            .must_use_struct => m.print("must use 'struct' tag to refer to type '{s}'", .{msg.extra.str}),
+            .must_use_union => m.print("must use 'union' tag to refer to type '{s}'", .{msg.extra.str}),
+            .must_use_enum => m.print("must use 'enum' tag to refer to type '{s}'", .{msg.extra.str}),
         }
 
         m.end(lcs);
@@ -655,6 +661,9 @@ fn tagKind(diag: *Diagnostics, tag: Tag) Kind {
         .generic_no_match,
         .escape_sequence_overflow,
         .invalid_universal_character,
+        .must_use_struct,
+        .must_use_union,
+        .must_use_enum,
         => .@"error",
 
         .to_match_paren,
