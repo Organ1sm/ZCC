@@ -72,6 +72,17 @@ pub const Enum = struct {
         ty: Type,
         value: u64,
     };
+
+    pub fn isIncomplete(e: Enum) bool {
+        return e.fields.len == std.math.maxInt(usize);
+    }
+
+    pub fn create(allocator: std.mem.Allocator, name: []const u8) !*Enum {
+        var e = try allocator.create(Enum);
+        e.name = name;
+        e.fields.len = std.math.maxInt(usize);
+        return e;
+    }
 };
 
 pub const Record = struct {
@@ -85,6 +96,17 @@ pub const Record = struct {
         ty: Type,
         bitWidth: u32,
     };
+
+    pub fn isIncomplete(r: Record) bool {
+        return r.fields.len == std.math.maxInt(usize);
+    }
+
+    pub fn create(allocator: std.mem.Allocator, name: []const u8) !*Record {
+        var r = try allocator.create(Record);
+        r.name = name;
+        r.fields.len = std.math.maxInt(usize);
+        return r;
+    }
 };
 
 pub const Specifier = enum {
@@ -132,10 +154,6 @@ pub const Specifier = enum {
     StaticArray,
     IncompleteArray,
     VariableLenArray,
-
-    IncompleteStruct,
-    IncompleteUnion,
-    IncompleteEnum,
 
     // data.record
     Struct,
@@ -200,17 +218,17 @@ pub fn hasIncompleteSize(ty: Type) bool {
     return switch (ty.specifier) {
         .Void,
         .IncompleteArray,
-        .IncompleteStruct,
-        .IncompleteUnion,
-        .IncompleteEnum,
         => true,
+
+        .Enum => ty.data.@"enum".isIncomplete(),
+        .Struct => ty.data.record.isIncomplete(),
 
         else => false,
     };
 }
 
 /// Size of type as reported by sizeof
-pub fn sizeof(ty: Type, comp: *Compilation) ?u64 {
+pub fn sizeof(ty: Type, comp: *Compilation) ?u32 {
     // TODO get target from compilation
     return switch (ty.specifier) {
         .VariableLenArray,
@@ -244,6 +262,7 @@ pub fn sizeof(ty: Type, comp: *Compilation) ?u64 {
 
             else => 32,
         },
+
         .Float => 4,
         .Double => 8,
         .LongDouble => 16,
@@ -251,14 +270,9 @@ pub fn sizeof(ty: Type, comp: *Compilation) ?u64 {
         .ComplexDouble => 16,
         .ComplexLongDouble => 32,
         .Pointer, .StaticArray => comp.target.ptrBitWidth() >> 3,
-        .Array => ty.data.subType.sizeof(comp).? * ty.data.array.len,
-        .Struct, .Union => ty.data.record.size,
-        .Enum => ty.data.@"enum".tagType.sizeof(comp),
-
-        .IncompleteStruct,
-        .IncompleteUnion,
-        .IncompleteEnum,
-        => null,
+        .Array => ty.data.subType.sizeof(comp).? * @as(u32, @intCast(ty.data.array.len)),
+        .Struct, .Union => if (ty.data.record.isIncomplete()) null else ty.data.record.size,
+        .Enum => if (ty.data.@"enum".isIncomplete()) null else ty.data.@"enum".tagType.sizeof(comp),
     };
 }
 
