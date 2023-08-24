@@ -234,7 +234,7 @@ pub fn sizeof(ty: Type, comp: *Compilation) ?u32 {
         .VariableLenArray,
         .UnspecifiedVariableLenArray,
         .IncompleteArray,
-        => unreachable,
+        => return null,
 
         .Func,
         .VarArgsFunc,
@@ -370,7 +370,17 @@ pub fn dump(ty: Type, w: anytype) @TypeOf(w).Error!void {
                 try dumpRecord(ty.data.record, w);
         },
 
-        else => try w.writeAll(Builder.fromType(ty).toString()),
+        .UnspecifiedVariableLenArray => {
+            try w.writeAll("[*]");
+            try ty.data.array.elem.dump(w);
+        },
+
+        .VariableLenArray => {
+            try w.writeAll("[<expr>]");
+            try ty.data.array.elem.dump(w);
+        },
+
+        else => try w.writeAll(Builder.fromType(ty).toString().?),
     }
 
     if (ty.alignment != 0)

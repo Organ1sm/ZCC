@@ -162,6 +162,15 @@ pub fn todo(p: *Parser, msg: []const u8) Error {
     return error.ParsingFailed;
 }
 
+pub fn typeStr(p: *Parser, ty: Type) ![]const u8 {
+    if (TypeBuilder.fromType(ty).toString()) |str| return str;
+    const stringsTop = p.strings.items.len;
+    defer p.strings.items.len = stringsTop;
+
+    try ty.dump(p.strings.writer());
+    return try p.arena.dupe(u8, p.strings.items[stringsTop..]);
+}
+
 pub fn addNode(p: *Parser, node: AST.Node) Allocator.Error!NodeIndex {
     if (p.inMacro)
         return .none;
@@ -916,7 +925,7 @@ fn parseTypeSpec(p: *Parser, ty: *TypeBuilder, completeType: *Type) Error!bool {
 
                 ty.typedef = .{
                     .token = typedef.nameToken,
-                    .spec = newSpec.toString(),
+                    .type = typedef.type,
                 };
             },
             else => break,
@@ -983,9 +992,7 @@ fn parseRecordSpec(p: *Parser) Error!*Type.Record {
             }
         }
         break :recordTy try Type.Record.create(p.arena, p.tokSlice(ident));
-    } else {
-        try Type.Record.create(p.arena, try p.getAnonymousName(kindToken));
-    };
+    } else try Type.Record.create(p.arena, try p.getAnonymousName(kindToken));
 
     const ty = Type{
         .specifier = if (isStruct) .Struct else .Union,
@@ -1262,7 +1269,7 @@ fn parseTypeQual(p: *Parser, ty: *Type) Error!bool {
                     try p.errExtra(
                         .restrict_non_pointer,
                         p.index,
-                        .{ .str = TypeBuilder.fromType(ty.*).toString() },
+                        .{ .str = try p.typeStr(ty.*) },
                     )
                 else if (ty.qual.restrict)
                     try p.errStr(.duplicate_declspec, p.index, "restrict")
@@ -2803,7 +2810,7 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
                 res.value = .{ .unsigned = size };
             } else {
                 res.value = .unavailable;
-                try p.errStr(.invalid_sizeof, expectedParen - 1, TypeBuilder.fromType(res.ty).toString());
+                try p.errStr(.invalid_sizeof, expectedParen - 1, try p.typeStr(res.ty));
             }
             return res.un(p, .SizeOfExpr);
         },
@@ -2871,7 +2878,7 @@ fn parseSuffixExpr(p: *Parser, lhs: Result) Error!Result {
             const lParen = p.index;
             p.index += 1;
             const ty = lhs.ty.isCallable() orelse {
-                try p.errStr(.not_callable, lParen, TypeBuilder.fromType(lhs.ty).toString());
+                try p.errStr(.not_callable, lParen, try p.typeStr(lhs.ty));
                 return error.ParsingFailed;
             };
 
