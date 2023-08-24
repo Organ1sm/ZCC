@@ -9,7 +9,7 @@ const TypeBuilder = @This();
 pub const Builder = struct {
     typedef: ?struct {
         token: TokenIndex,
-        spec: []const u8,
+        type: Type,
     } = null,
 
     kind: Kind = .None,
@@ -69,7 +69,7 @@ pub const Builder = struct {
         Union: *Type.Record,
         Enum: *Type.Enum,
 
-        pub fn toString(spec: Kind) []const u8 {
+        pub fn toString(spec: Kind) ?[]const u8 {
             return switch (spec) {
                 Kind.None => unreachable,
 
@@ -116,12 +116,7 @@ pub const Builder = struct {
                 Kind.ComplexDouble => "_Complex double",
                 Kind.ComplexLongDouble => "_Complex long double",
 
-                Kind.Pointer => "pointer",
-                Kind.Func, Kind.VarArgsFunc, Kind.OldStyleFunc => "function",
-                Kind.Array, Kind.StaticArray, Kind.UnspecifiedVariableLenArray, Kind.VariableLenArray, Kind.IncompleteArray => "array",
-                Kind.Struct => "struct",
-                Kind.Union => "union",
-                Kind.Enum => "enum",
+                else => null,
             };
         }
     };
@@ -161,7 +156,7 @@ pub const Builder = struct {
             Kind.ComplexDouble => .ComplexDouble,
             Kind.ComplexLongDouble => .ComplexLongDouble,
             Kind.Complex, Kind.ComplexLong => {
-                try p.errExtra(.type_is_invalid, p.index, .{ .str = spec.kind.toString() });
+                try p.errExtra(.type_is_invalid, p.index, .{ .str = spec.kind.toString().? });
                 return error.ParsingFailed;
             },
 
@@ -240,14 +235,16 @@ pub const Builder = struct {
     }
 
     pub fn cannotCombine(spec: Builder, p: *Parser, sourceToken: TokenIndex) Compilation.Error!void {
+        var prevType: Type = .{ .specifier = undefined };
+        spec.finish(p, &prevType) catch unreachable;
         try p.errExtra(
             .cannot_combine_spec,
             sourceToken,
-            .{ .str = spec.kind.toString() },
+            .{ .str = try p.typeStr(prevType) },
         );
 
         if (spec.typedef) |some|
-            try p.errStr(.spec_from_typedef, some.token, some.spec);
+            try p.errStr(.spec_from_typedef, some.token, try p.typeStr(some.type));
     }
 
     pub fn combine(spec: *Builder, p: *Parser, new: Kind, sourceToken: TokenIndex) Compilation.Error!void {
