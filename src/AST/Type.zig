@@ -276,6 +276,53 @@ pub fn sizeof(ty: Type, comp: *Compilation) ?u32 {
     };
 }
 
+pub fn eql(a: Type, b: Type, checkQualifiers: bool) bool {
+    if (a.alignment != b.alignment) return false;
+    if (a.specifier != b.specifier) return false;
+
+    if (checkQualifiers) {
+        if (a.qual.@"const" != b.qual.@"const") return false;
+        if (a.qual.atomic != b.qual.atomic) return false;
+        if (a.qual.@"volatile" != b.qual.@"volatile") return false;
+        if (a.qual.restrict != b.qual.restrict) return false;
+    }
+
+    switch (a.specifier) {
+        .Pointer,
+        .UnspecifiedVariableLenArray,
+        => if (!a.data.subType.eql(b.data.subType.*, true)) return false,
+
+        .Func,
+        .VarArgsFunc,
+        .OldStyleFunc,
+        => {
+            // TODO validate this
+            if (a.data.func.params.len != b.data.func.params.len) return false;
+            if (!a.data.func.returnType.eql(b.data.func.returnType, true)) return false;
+            for (a.data.func.params, 0..) |param, i| {
+                if (!param.ty.eql(b.data.func.params[i].ty, true)) return false;
+            }
+        },
+
+        .Array,
+        .StaticArray,
+        .IncompleteArray,
+        => {
+            if (a.data.array.len != b.data.array.len) return false;
+            if (!a.data.array.elem.eql(b.data.array.elem, true)) return false;
+        },
+
+        .VariableLenArray => if (!a.data.vla.elem.eql(b.data.vla.elem, true)) return false,
+
+        .Union, .Struct => if (a.data.record != b.data.record) return false,
+        .Enum => if (a.data.@"enum" != b.data.@"enum") return false,
+
+        else => {},
+    }
+
+    return true;
+}
+
 pub fn combine(inner: *Type, outer: Type, p: *Parser, sourceToken: TokenIndex) Parser.Error!void {
     switch (inner.specifier) {
         .Pointer => return inner.data.subType.combine(outer, p, sourceToken),

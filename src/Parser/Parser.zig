@@ -268,7 +268,7 @@ fn findSwitch(p: *Parser) ?*Scope.Switch {
     return null;
 }
 
-fn findSymbol(p: *Parser, nameToken: TokenIndex) ?Scope {
+fn findSymbol(p: *Parser, nameToken: TokenIndex, refKind: enum { reference, definition }) ?Scope {
     const name = p.tokSlice(nameToken);
     var i = p.scopes.items.len;
     while (i > 0) {
@@ -277,6 +277,7 @@ fn findSymbol(p: *Parser, nameToken: TokenIndex) ?Scope {
         switch (sym) {
             .symbol => |s| if (std.mem.eql(u8, s.name, name)) return sym,
             .enumeration => |e| if (std.mem.eql(u8, e.name, name)) return sym,
+            .block => if (refKind == .definition) return null,
             else => {},
         }
     }
@@ -589,6 +590,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
             .name = p.tokSlice(initD.d.name),
             .type = initD.d.type,
             .nameToken = initD.d.name,
+            .isInitialized = initD.initializer != .none,
         } });
 
         const body = try p.parseCompoundStmt();
@@ -632,6 +634,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
                 .name = p.tokSlice(initD.d.name),
                 .type = initD.d.type,
                 .nameToken = initD.d.name,
+                .isInitialized = initD.initializer != .none,
             } });
         }
 
@@ -816,6 +819,22 @@ fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec) Error!?InitDeclarator {
         const casted = try init.coerce(p, initD.d.type);
 
         initD.initializer = casted.node;
+    }
+
+    const name = initD.d.name;
+    if (p.findSymbol(name, .definition)) |scope| {
+        if (scope == .enumeration) {
+            try p.errStr(.redefinition_different_sym, name, p.tokSlice(name));
+            try p.errToken(.previous_definition, scope.enumeration.nameToken);
+        } else if (scope.symbol.type.eql(initD.d.type, true)) {
+            if ((initD.initializer != .none) and scope.symbol.isInitialized) {
+                try p.errStr(.redefinition, name, p.tokSlice(name));
+                try p.errToken(.previous_definition, scope.symbol.nameToken);
+            }
+        } else {
+            try p.errStr(.redefinition_incompatible, name, p.tokSlice(name));
+            try p.errToken(.previous_definition, scope.symbol.nameToken);
+        }
     }
 
     return initD;
@@ -1267,10 +1286,20 @@ fn enumerator(p: *Parser) Error!?EnumFieldAndNode {
     if (p.eat(.Equal)) |_| {
         res = try p.constExpr();
     }
+    if (p.findSymbol(nameToken, .definition)) |scope| {
+        if (scope == .enumeration) {
+            try p.errStr(.redefinition, nameToken, name);
+            try p.errToken(.previous_definition, scope.enumeration.nameToken);
+        } else {
+            try p.errStr(.redefinition_different_sym, nameToken, name);
+            try p.errToken(.previous_definition, scope.symbol.nameToken);
+        }
+    }
 
     try p.scopes.append(.{ .enumeration = .{
         .name = name,
         .value = res,
+        .nameToken = nameToken,
     } });
 
     return EnumFieldAndNode{
@@ -1517,10 +1546,25 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: Declarator
             const paramBufferTop = p.paramBuffer.items.len;
             defer p.paramBuffer.items.len = paramBufferTop;
 
+            // find Symbol stops search at the block
+            try p.scopes.append(.block);
+
             specifier = .OldStyleFunc;
             while (true) {
+                const nameToken = try p.expectToken(.Identifier);
+                if (p.findSymbol(nameToken, .definition)) |scope| {
+                    try p.errStr(.redefinition_of_parameter, nameToken, p.tokSlice(nameToken));
+                    try p.errToken(.previous_definition, scope.symbol.nameToken);
+                }
+
+                try p.scopes.append(.{ .symbol = .{
+                    .name = p.tokSlice(nameToken),
+                    .type = undefined,
+                    .nameToken = nameToken,
+                } });
+
                 try p.paramBuffer.append(.{
-                    .name = p.tokSlice(try p.expectToken(.Identifier)),
+                    .name = p.tokSlice(nameToken),
                     .ty = .{ .specifier = .Int },
                     .register = false,
                 });
@@ -1575,7 +1619,9 @@ fn paramDecls(p: *Parser) Error!?[]Type.Function.Param {
         p.scopes.items.len = scopesTop;
     }
 
-    defer p.paramBuffer.items.len = paramBufferTop;
+    // findSymbol stops the search at .block
+    try p.scopes.append(.block);
+
     while (true) {
         const paramDeclSpec = if (try p.declSpecifier()) |some|
             some
@@ -1598,12 +1644,23 @@ fn paramDecls(p: *Parser) Error!?[]Type.Function.Param {
 
             nameToken = some.name;
             paramType = some.type;
-            if (some.name != 0)
+            if (some.name != 0) {
+                if (p.findSymbol(nameToken, .definition)) |scope| {
+                    if (scope == .enumeration) {
+                        try p.errStr(.redefinition_of_parameter, nameToken, p.tokSlice(nameToken));
+                        try p.errToken(.previous_definition, scope.enumeration.nameToken);
+                    } else {
+                        try p.errStr(.redefinition_of_parameter, nameToken, p.tokSlice(nameToken));
+                        try p.errToken(.previous_definition, scope.symbol.nameToken);
+                    }
+                }
+
                 try p.scopes.append(.{ .symbol = .{
-                    .name = p.tokSlice(some.name),
+                    .name = p.tokSlice(nameToken),
                     .type = some.type,
-                    .nameToken = some.name,
+                    .nameToken = nameToken,
                 } });
+            }
         }
 
         if (paramType.isFunc()) {
@@ -3063,7 +3120,7 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
             const nameToken = p.index;
             p.index += 1;
 
-            const sym = p.findSymbol(nameToken) orelse {
+            const sym = p.findSymbol(nameToken, .reference) orelse {
                 if (p.getCurrToken() == .LParen) {
                     // implicitly declare simple functions as like `puts("foo")`;
                     const name = p.tokSlice(nameToken);

@@ -23,11 +23,13 @@ pub const Scope = union(enum) {
         name: []const u8,
         type: Type,
         nameToken: TokenIndex,
+        isInitialized : bool = false,
     };
 
     pub const Enumeration = struct {
         name: []const u8,
         value: Result,
+        nameToken: TokenIndex,
     };
 
     pub const Switch = struct {
