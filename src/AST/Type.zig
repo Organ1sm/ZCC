@@ -185,6 +185,25 @@ pub fn isArray(ty: Type) bool {
     };
 }
 
+pub fn isInt(ty: Type) bool {
+    return switch (ty.specifier) {
+        .Bool,
+        .Char,
+        .SChar,
+        .UChar,
+        .Short,
+        .UShort,
+        .Int,
+        .UInt,
+        .Long,
+        .ULong,
+        .LongLong,
+        .ULongLong,
+        => true,
+        else => false,
+    };
+}
+
 pub fn isUnsignedInt(ty: Type, comp: *Compilation) bool {
     _ = comp;
     return switch (ty.specifier) {

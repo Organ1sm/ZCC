@@ -253,9 +253,55 @@ pub const Tag = enum(u8) {
     /// lhs?.name
     MemberDesignatorExpr,
 
-    // implicit casts ///
+    // implicit casts
     /// convert T[] to T*
     ArrayToPointer,
-    ///  same as deref
+    /// Converts an lvalue to an rvalue
     LValueToRValue,
+    /// Convert a function type to a pointer to a function
+    FunctionToPointer,
+    /// Convert a pointer type to a _Bool
+    PointerToBool,
+    /// Convert a pointer type to an integer type
+    PointerToInt,
+    /// Convert _Bool to an integer type
+    BoolToInt,
+    /// Convert _Bool to a floating type
+    BoolToFloat,
+    /// Convert a _Bool to a pointer; will cause a  warning
+    BoolToPointer,
+    /// Convert an integer type to _Bool
+    IntToBool,
+    /// Convert an integer to a floating
+    IntToFloat,
+    /// Convert an integer type to a pointer type
+    IntToPointer,
+    /// Convert a floating type to a _Bool
+    FloatToBool,
+    /// Convert one integer type to another
+    IntCast,
+    /// Convert one floating type to another
+    FloatCast,
+
+    pub fn isImplicit(tag: Tag) bool {
+        return switch (tag) {
+            .ArrayToPointer,
+            .LValueToRValue,
+            .FunctionToPointer,
+            .PointerToBool,
+            .PointerToInt,
+            .BoolToInt,
+            .BoolToFloat,
+            .BoolToPointer,
+            .IntToBool,
+            .IntToFloat,
+            .IntToPointer,
+            .FloatToBool,
+            .IntCast,
+            .FloatCast,
+            => true,
+
+            else => false,
+        };
+    }
 };

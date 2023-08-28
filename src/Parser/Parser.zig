@@ -2341,6 +2341,7 @@ fn expr(p: *Parser) Error!Result {
 
         const rhs = try p.assignExpr();
         lhs.value = rhs.value;
+        lhs.ty = rhs.ty;
         try lhs.bin(p, .CommaExpr, rhs);
     }
 
@@ -2375,6 +2376,8 @@ fn assignExpr(p: *Parser) Error!Result {
     }
 
     var rhs = try p.assignExpr();
+    try rhs.lvalConversion(p);
+
     try lhs.bin(p, if (eq != null)
         .AssignExpr
     else if (mul != null)
@@ -2417,7 +2420,7 @@ fn conditionalExpr(p: *Parser) Error!Result {
     const savedEval = p.noEval;
 
     // Depending on the value of the condition, avoid  evaluating unreachable
-    const thenExpr = blk: {
+    var thenExpr = blk: {
         defer p.noEval = savedEval;
         if (cond.value != .unavailable and !cond.getBool())
             p.noEval = true;
@@ -2425,15 +2428,17 @@ fn conditionalExpr(p: *Parser) Error!Result {
         break :blk try p.expr();
     };
 
-    _ = try p.expectToken(.Colon);
+    const colon = try p.expectToken(.Colon);
 
-    const elseExpr = blk: {
+    var elseExpr = blk: {
         defer p.noEval = savedEval;
         if (cond.value != .unavailable and cond.getBool())
             p.noEval = true;
 
         break :blk try p.conditionalExpr();
     };
+
+    _ = try thenExpr.adjustTypes(colon, &elseExpr, p, .conditional);
 
     if (cond.value != .unavailable)
         cond.value = if (cond.getBool()) thenExpr.value else elseExpr.value;
@@ -2453,12 +2458,12 @@ fn logicalOrExpr(p: *Parser) Error!Result {
     const savedEval = p.noEval;
     defer p.noEval = savedEval;
 
-    while (p.eat(.PipePipe)) |_| {
+    while (p.eat(.PipePipe)) |token| {
         if (lhs.value != .unavailable and lhs.getBool())
             p.noEval = true;
 
-        const rhs = try p.logicalAndExpr();
-        if (lhs.value != .unavailable and rhs.value != .unavailable) {
+        var rhs = try p.logicalAndExpr();
+        if (try lhs.adjustTypes(token, &rhs, p, .scalar)) {
             lhs.value = .{ .signed = @intFromBool(lhs.getBool() or rhs.getBool()) };
         }
 
@@ -2475,12 +2480,12 @@ fn logicalAndExpr(p: *Parser) Error!Result {
     const savedEval = p.noEval;
     defer p.noEval = savedEval;
 
-    while (p.eat(.AmpersandAmpersand)) |_| {
+    while (p.eat(.AmpersandAmpersand)) |token| {
         if (lhs.value != .unavailable and lhs.getBool())
             p.noEval = true;
 
-        const rhs = try p.orExpr();
-        if (lhs.value != .unavailable and rhs.value != .unavailable) {
+        var rhs = try p.orExpr();
+        if (try lhs.adjustTypes(token, &rhs, p, .scalar)) {
             lhs.value = .{ .signed = @intFromBool(lhs.getBool() or rhs.getBool()) };
         }
 
@@ -2493,10 +2498,10 @@ fn logicalAndExpr(p: *Parser) Error!Result {
 /// orExpr : xorExpr ('|' xorExpr)*
 fn orExpr(p: *Parser) Error!Result {
     var lhs = try p.xorExpr();
-    while (p.eat(.Pipe)) |_| {
+    while (p.eat(.Pipe)) |token| {
         var rhs = try p.xorExpr();
 
-        if (try lhs.adjustTypes(&rhs, p)) {
+        if (try lhs.adjustTypes(token, &rhs, p, .integer)) {
             lhs.value = switch (lhs.value) {
                 .unsigned => |v| .{ .unsigned = v | rhs.value.unsigned },
                 .signed => |v| .{ .signed = v | rhs.value.signed },
@@ -2512,10 +2517,10 @@ fn orExpr(p: *Parser) Error!Result {
 /// xorExpr : andExpr ('^' andExpr)*
 fn xorExpr(p: *Parser) Error!Result {
     var lhs = try p.andExpr();
-    while (p.eat(.Caret)) |_| {
+    while (p.eat(.Caret)) |token| {
         var rhs = try p.andExpr();
 
-        if (try lhs.adjustTypes(&rhs, p)) {
+        if (try lhs.adjustTypes(token, &rhs, p, .integer)) {
             lhs.value = switch (lhs.value) {
                 .unsigned => |v| .{ .unsigned = v ^ rhs.value.unsigned },
                 .signed => |v| .{ .signed = v ^ rhs.value.signed },
@@ -2531,10 +2536,10 @@ fn xorExpr(p: *Parser) Error!Result {
 /// andExpr : eqExpr ('&' eqExpr)*
 fn andExpr(p: *Parser) Error!Result {
     var lhs = try p.eqExpr();
-    while (p.eat(.Ampersand)) |_| {
+    while (p.eat(.Ampersand)) |token| {
         var rhs = try p.eqExpr();
 
-        if (try lhs.adjustTypes(&rhs, p)) {
+        if (try lhs.adjustTypes(token, &rhs, p, .integer)) {
             lhs.value = switch (lhs.value) {
                 .unsigned => |v| .{ .unsigned = v & rhs.value.unsigned },
                 .signed => |v| .{ .signed = v & rhs.value.signed },
@@ -2557,7 +2562,7 @@ fn eqExpr(p: *Parser) Error!Result {
         if (ne == null) break;
         var rhs = try p.compExpr();
 
-        if (try lhs.adjustTypes(&rhs, p)) {
+        if (try lhs.adjustTypes(ne.?, &rhs, p, .comparison)) {
             const res = if (eq != null)
                 lhs.compare(.eq, rhs)
             else
@@ -2583,7 +2588,7 @@ fn compExpr(p: *Parser) Error!Result {
         if (ge == null) break;
         var rhs = try p.shiftExpr();
 
-        if (try lhs.adjustTypes(&rhs, p)) {
+        if (try lhs.adjustTypes(ge.?, &rhs, p, .comparison)) {
             const res = if (lt != null)
                 lhs.compare(.lt, rhs)
             else if (le != null)
@@ -2618,7 +2623,7 @@ fn shiftExpr(p: *Parser) Error!Result {
         if (shr == null) break;
         var rhs = try p.addExpr();
 
-        if (try lhs.adjustTypes(&rhs, p)) {
+        if (try lhs.adjustTypes(shr.?, &rhs, p, .integer)) {
             // TODO overflow
             if (shl != null) {
                 lhs.value = switch (lhs.value) {
@@ -2649,7 +2654,7 @@ fn addExpr(p: *Parser) Error!Result {
         if (minus == null) break;
         var rhs = try p.mulExpr();
 
-        if (try lhs.adjustTypes(&rhs, p)) {
+        if (try lhs.adjustTypes(minus.?, &rhs, p, if (plus != null) .add else .sub)) {
             if (plus != null) {
                 try lhs.add(plus.?, rhs, p);
             } else {
@@ -2672,7 +2677,14 @@ fn mulExpr(p: *Parser) Error!Result {
         if (percent == null) break;
         var rhs = try p.parseCastExpr();
 
-        if (try lhs.adjustTypes(&rhs, p)) {
+        const tag = if (mul != null)
+            .MulExpr
+        else if (div != null)
+            AstTag.DivExpr
+        else
+            AstTag.ModExpr;
+
+        if (try lhs.adjustTypes(percent.?, &rhs, p, if (tag == .ModExpr) .integer else .arithmetic)) {
             // TODO divide by 0
             if (mul != null) {
                 try lhs.mul(mul.?, rhs, p);
@@ -2690,14 +2702,9 @@ fn mulExpr(p: *Parser) Error!Result {
                 };
             }
         }
-
-        try lhs.bin(p, if (mul != null)
-            .MulExpr
-        else if (div != null)
-            AstTag.DivExpr
-        else
-            AstTag.ModExpr, rhs);
+        try lhs.bin(p, tag, rhs);
     }
+
     return lhs;
 }
 
