@@ -62,44 +62,94 @@ pub fn un(operand: *Result, p: *Parser, tag: AstTag) Error!Result {
 pub fn coerce(res: Result, p: *Parser, destType: Type) !Result {
     _ = p;
     _ = destType;
-    var casted = res;
-    // var curType = res.ty;
-
-    // if (casted.data == .lVal) {
-    //     curType.qual.@"const" = false;
-    //     casted = try node(p, .{
-    //         .tag = .LValueToRValue,
-    //         .type = curType,
-    //         .data = .{ .first = try casted.toNode(p) },
-    //     });
-    // }
-
-    // if (destType.specifier == .Pointer and curType.isArray()) {
-    //     casted = try node(p, .{
-    //         .tag = .ArrayToPointer,
-    //         .type = destType,
-    //         .data = .{ .first = try casted.toNode(p) },
-    //     });
-    // }
-    return casted;
+    return res;
 }
 
 /// Return true if both are same type
 /// Adjust types for binary operation, returns true if the result can and should be evaluated.
-pub fn adjustTypes(a: *Result, b: *Result, p: *Parser) !bool {
-    const aIsUnsigned = a.ty.isUnsignedInt(p.pp.compilation);
-    const bIsUnsigned = b.ty.isUnsignedInt(p.pp.compilation);
+pub fn adjustTypes(a: *Result, token: TokenIndex, b: *Result, p: *Parser, kind: enum {
+    integer,
+    scalar,
+    add,
+    sub,
+    arithmetic,
+    comparison,
+    conditional,
+}) !bool {
+    try a.lvalConversion(p);
+    try b.lvalConversion(p);
 
-    if (aIsUnsigned != bIsUnsigned) {}
+    if (a.ty.isInt() and b.ty.isInt()) {
+        var intType: Type = .{ .specifier = .Int }; // TODO select based a.ty and b.ty
+        try a.intCast(p, intType);
+        try b.intCast(p, intType);
+        return a.shouldEval(b, p);
+    }
 
-    if (p.noEval)
-        return false;
+    if (kind == .integer)
+        return a.invalidBinTy(token, b, p);
+
+    // TODO more casts here
+
+    return a.shouldEval(b, p);
+}
+
+pub fn lvalConversion(res: *Result, p: *Parser) Error!void {
+    if (res.ty.isArray()) {
+        var elemType = try p.arena.create(Type);
+        elemType.* = res.ty.getElemType();
+
+        res.ty.specifier = .Pointer;
+        res.ty.data = .{ .subType = elemType };
+        res.node = try p.addNode(.{
+            .tag = .ArrayToPointer,
+            .type = res.ty,
+            .data = .{ .UnaryExpr = res.node },
+        });
+    } else if (AST.isLValue(p.nodes.slice(), res.node)) {
+        res.ty.qual = .{};
+        res.node = try p.addNode(.{
+            .tag = .LValueToRValue,
+            .type = res.ty,
+            .data = .{ .UnaryExpr = res.node },
+        });
+    }
+}
+
+fn intCast(res: *Result, p: *Parser, intType: Type) Error!void {
+    if (res.ty.specifier == .Bool) {
+        res.ty = intType;
+        res.node = try p.addNode(.{
+            .tag = .BoolToInt,
+            .type = res.ty,
+            .data = .{ .UnaryExpr = res.node },
+        });
+    } else if (!res.ty.eql(intType, true)) {
+        res.ty = intType;
+        res.node = try p.addNode(.{
+            .tag = .IntCast,
+            .type = res.ty,
+            .data = .{ .UnaryExpr = res.node },
+        });
+    }
+}
+
+fn invalidBinTy(a: *Result, tok: TokenIndex, b: *Result, p: *Parser) Error!bool {
+    // TODO print a and b types
+    _ = a;
+    _ = b;
+    try p.errToken(.invalid_bin_types, tok);
+    return false;
+}
+
+fn shouldEval(a: *Result, b: *Result, p: *Parser) Error!bool {
+    if (p.noEval) return false;
     if (a.value != .unavailable and b.value != .unavailable)
         return true;
 
     try a.saveValue(p);
     try b.saveValue(p);
-    return false;
+    return p.noEval;
 }
 
 fn saveValue(res: Result, p: *Parser) !void {

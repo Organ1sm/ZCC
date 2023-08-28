@@ -172,6 +172,7 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
     const half = delta / 2;
     const TYPE = "\x1b[35;1m";
     const TAG = "\x1b[36;1m";
+    const IMPLICIT = "\x1b[34;1m";
     const NAME = "\x1b[91;1m";
     const LITERAL = "\x1b[32;1m";
     const ATTRIBUTE = "\x1b[93;1m";
@@ -184,7 +185,13 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
     const ty = tree.nodes.items(.type)[@intFromEnum(node)];
 
     try w.writeByteNTimes(' ', level);
-    try w.print(TAG ++ "{s}: " ++ TYPE ++ "'", .{@tagName(tag)});
+
+    if (tag.isImplicit()) {
+        try w.print(IMPLICIT ++ "{s}: " ++ TYPE ++ "'", .{@tagName(tag)});
+    } else {
+        try w.print(TAG ++ "{s}: " ++ TYPE ++ "'", .{@tagName(tag)});
+    }
+
     try ty.dump(w);
     try w.writeAll("'");
     if (tree.valueMap.get(node)) |value| {
@@ -548,8 +555,6 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
         .PostIncExpr,
         .PostDecExpr,
         .ParenExpr,
-        .ArrayToPointer,
-        .LValueToRValue,
         => {
             try w.writeByteNTimes(' ', level + 1);
             try w.writeAll("operand:\n");
@@ -648,6 +653,24 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
         },
 
         .GenericAssociationExpr, .GenericDefaultExpr => {
+            try tree.dumpNode(data.UnaryExpr, level + delta, w);
+        },
+
+        .ArrayToPointer,
+        .LValueToRValue,
+        .FunctionToPointer,
+        .PointerToBool,
+        .PointerToInt,
+        .BoolToInt,
+        .BoolToFloat,
+        .BoolToPointer,
+        .IntToBool,
+        .IntToFloat,
+        .IntToPointer,
+        .FloatToBool,
+        .IntCast,
+        .FloatCast,
+        => {
             try tree.dumpNode(data.UnaryExpr, level + delta, w);
         },
     }
