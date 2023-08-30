@@ -2463,7 +2463,7 @@ fn logicalOrExpr(p: *Parser) Error!Result {
             p.noEval = true;
 
         var rhs = try p.logicalAndExpr();
-        if (try lhs.adjustTypes(token, &rhs, p, .scalar)) {
+        if (try lhs.adjustTypes(token, &rhs, p, .booleanLogic)) {
             lhs.value = .{ .signed = @intFromBool(lhs.getBool() or rhs.getBool()) };
         }
 
@@ -2485,7 +2485,7 @@ fn logicalAndExpr(p: *Parser) Error!Result {
             p.noEval = true;
 
         var rhs = try p.orExpr();
-        if (try lhs.adjustTypes(token, &rhs, p, .scalar)) {
+        if (try lhs.adjustTypes(token, &rhs, p, .booleanLogic)) {
             lhs.value = .{ .signed = @intFromBool(lhs.getBool() or rhs.getBool()) };
         }
 
