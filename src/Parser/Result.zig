@@ -70,7 +70,7 @@ pub fn coerce(res: Result, p: *Parser, destType: Type) !Result {
 pub fn adjustTypes(a: *Result, token: TokenIndex, b: *Result, p: *Parser, kind: enum {
     integer,
     arithmetic,
-    scalar,
+    booleanLogic,
     add,
     sub,
     comparison,
@@ -81,8 +81,6 @@ pub fn adjustTypes(a: *Result, token: TokenIndex, b: *Result, p: *Parser, kind: 
 
     const aIsInt = a.ty.isInt();
     const bIsInt = b.ty.isInt();
-    const aIsFloat = a.ty.isFloat();
-    const bIsFloat = b.ty.isFloat();
 
     if (aIsInt and bIsInt) {
         try a.usualArithmeticConversion(b, p);
@@ -92,7 +90,9 @@ pub fn adjustTypes(a: *Result, token: TokenIndex, b: *Result, p: *Parser, kind: 
     if (kind == .integer)
         return a.invalidBinTy(token, b, p);
 
-    if ((aIsFloat and bIsFloat) or (aIsFloat and bIsInt) or (aIsInt and bIsFloat)) {
+    const aIsArithmetic = aIsInt or a.ty.isFloat();
+    const bIsArithmetic = bIsInt or b.ty.isFloat();
+    if (aIsArithmetic and bIsArithmetic) {
         try a.usualArithmeticConversion(b, p);
         return a.shouldEval(b, p);
     }
@@ -100,13 +100,34 @@ pub fn adjustTypes(a: *Result, token: TokenIndex, b: *Result, p: *Parser, kind: 
     if (kind == .arithmetic)
         return a.invalidBinTy(token, b, p);
 
+    const aIsScalar = aIsArithmetic or a.ty.specifier == .Pointer;
+    const bIsScalar = bIsArithmetic or b.ty.specifier == .Pointer;
+    if (kind == .booleanLogic) {
+        if (!aIsScalar or !bIsScalar) return a.invalidBinTy(token, b, p);
+
+        // Do integer promotions but nothing else
+        if (aIsInt) try a.intCast(p, a.ty.integerPromotion(p.pp.compilation));
+        if (bIsInt) try b.intCast(p, b.ty.integerPromotion(p.pp.compilation));
+        return a.shouldEval(b, p);
+    }
     // TODO more casts here
 
     return a.shouldEval(b, p);
 }
 
 pub fn lvalConversion(res: *Result, p: *Parser) Error!void {
-    if (res.ty.isArray()) {
+    if (res.ty.isFunc()) {
+        var elemType = try p.arena.create(Type);
+        elemType.* = res.ty;
+
+        res.ty.specifier = .Pointer;
+        res.ty.data = .{ .subType = elemType };
+        res.node = try p.addNode(.{
+            .tag = .FunctionToPointer,
+            .type = res.ty,
+            .data = .{ .UnaryExpr = res.node },
+        });
+    } else if (res.ty.isArray()) {
         var elemType = try p.arena.create(Type);
         elemType.* = res.ty.getElemType();
 
@@ -117,7 +138,7 @@ pub fn lvalConversion(res: *Result, p: *Parser) Error!void {
             .type = res.ty,
             .data = .{ .UnaryExpr = res.node },
         });
-    } else if (AST.isLValue(p.nodes.slice(), res.node)) {
+    } else if (!p.inMacro and  AST.isLValue(p.nodes.slice(), res.node)) {
         res.ty.qual = .{};
         res.node = try p.addNode(.{
             .tag = .LValueToRValue,
