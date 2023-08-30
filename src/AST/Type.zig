@@ -204,6 +204,19 @@ pub fn isInt(ty: Type) bool {
     };
 }
 
+pub fn isFloat(ty: Type) bool {
+    return switch (ty.specifier) {
+        .Float,
+        .Double,
+        .LongDouble,
+        .ComplexFloat,
+        .ComplexDouble,
+        .ComplexLongDouble,
+        => true,
+        else => false,
+    };
+}
+
 pub fn isUnsignedInt(ty: Type, comp: *Compilation) bool {
     _ = comp;
     return switch (ty.specifier) {
@@ -225,6 +238,40 @@ pub fn getElemType(ty: Type) Type {
         .Array, .StaticArray, .IncompleteArray => ty.data.array.elem,
         .VariableLenArray => ty.data.array.elem,
         else => unreachable,
+    };
+}
+
+pub fn eitherLongDouble(a: Type, b: Type) ?Type {
+    if (a.specifier == .LongDouble or a.specifier == .ComplexLongDouble) return a;
+    if (b.specifier == .LongDouble or b.specifier == .ComplexLongDouble) return b;
+    return null;
+}
+
+pub fn eitherDouble(a: Type, b: Type) ?Type {
+    if (a.specifier == .Double or a.specifier == .ComplexDouble) return a;
+    if (b.specifier == .Double or b.specifier == .ComplexDouble) return b;
+    return null;
+}
+
+pub fn eitherFloat(a: Type, b: Type) ?Type {
+    if (a.specifier == .Float or a.specifier == .ComplexFloat) return a;
+    if (b.specifier == .Float or b.specifier == .ComplexFloat) return b;
+    return null;
+}
+
+pub fn integerPromotion(ty: Type, comp: *Compilation) Type {
+    return .{
+        .specifier = switch (ty.specifier) {
+            .Bool, .Char, .SChar, .UChar, .Short => .Int,
+            .UShort => if (ty.sizeof(comp).? == sizeof(.{ .specifier = .Int }, comp)) Specifier.UInt else Specifier.Int,
+            .Int => .Int,
+            .UInt => .UInt,
+            .Long => .Long,
+            .ULong => .ULong,
+            .LongLong => .LongLong,
+            .ULongLong => .ULongLong,
+            else => unreachable, // not an integer type
+        },
     };
 }
 

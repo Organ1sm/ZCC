@@ -69,24 +69,35 @@ pub fn coerce(res: Result, p: *Parser, destType: Type) !Result {
 /// Adjust types for binary operation, returns true if the result can and should be evaluated.
 pub fn adjustTypes(a: *Result, token: TokenIndex, b: *Result, p: *Parser, kind: enum {
     integer,
+    arithmetic,
     scalar,
     add,
     sub,
-    arithmetic,
     comparison,
     conditional,
 }) !bool {
     try a.lvalConversion(p);
     try b.lvalConversion(p);
 
-    if (a.ty.isInt() and b.ty.isInt()) {
-        var intType: Type = .{ .specifier = .Int }; // TODO select based a.ty and b.ty
-        try a.intCast(p, intType);
-        try b.intCast(p, intType);
+    const aIsInt = a.ty.isInt();
+    const bIsInt = b.ty.isInt();
+    const aIsFloat = a.ty.isFloat();
+    const bIsFloat = b.ty.isFloat();
+
+    if (aIsInt and bIsInt) {
+        try a.usualArithmeticConversion(b, p);
         return a.shouldEval(b, p);
     }
 
     if (kind == .integer)
+        return a.invalidBinTy(token, b, p);
+
+    if ((aIsFloat and bIsFloat) or (aIsFloat and bIsInt) or (aIsInt and bIsFloat)) {
+        try a.usualArithmeticConversion(b, p);
+        return a.shouldEval(b, p);
+    }
+
+    if (kind == .arithmetic)
         return a.invalidBinTy(token, b, p);
 
     // TODO more casts here
@@ -131,6 +142,82 @@ fn intCast(res: *Result, p: *Parser, intType: Type) Error!void {
             .type = res.ty,
             .data = .{ .UnaryExpr = res.node },
         });
+    }
+}
+
+fn floatCast(res: *Result, p: *Parser, floatType: Type) Error!void {
+    if (res.ty.specifier == .Bool) {
+        res.ty = floatType;
+        res.node = try p.addNode(.{
+            .tag = .BoolToFloat,
+            .type = res.ty,
+            .data = .{ .UnaryExpr = res.node },
+        });
+    } else if (res.ty.isInt()) {
+        res.ty = floatType;
+        res.node = try p.addNode(.{
+            .tag = .IntToFloat,
+            .type = res.ty,
+            .data = .{ .UnaryExpr = res.node },
+        });
+    } else if (!res.ty.eql(floatType, true)) {
+        res.ty = floatType;
+        res.node = try p.addNode(.{
+            .tag = .FloatCast,
+            .type = res.ty,
+            .data = .{ .UnaryExpr = res.node },
+        });
+    }
+}
+
+fn usualArithmeticConversion(a: *Result, b: *Result, p: *Parser) Error!void {
+    // if either is a float cast to that type
+    if (Type.eitherLongDouble(a.ty, b.ty)) |ty| {
+        try a.floatCast(p, ty);
+        try b.floatCast(p, ty);
+        return;
+    }
+    if (Type.eitherDouble(a.ty, b.ty)) |ty| {
+        try a.floatCast(p, ty);
+        try b.floatCast(p, ty);
+        return;
+    }
+    if (Type.eitherFloat(a.ty, b.ty)) |ty| {
+        try a.floatCast(p, ty);
+        try b.floatCast(p, ty);
+        return;
+    }
+
+    // Do integer promotion on both operands
+    const aPromoted = a.ty.integerPromotion(p.pp.compilation);
+    const bPromoted = b.ty.integerPromotion(p.pp.compilation);
+    if (aPromoted.eql(bPromoted, true)) {
+        // cast to promoted type
+        try a.intCast(p, aPromoted);
+        try b.intCast(p, aPromoted);
+        return;
+    }
+
+    const aIsUnsigned = aPromoted.isUnsignedInt(p.pp.compilation);
+    const bIsUnsigned = bPromoted.isUnsignedInt(p.pp.compilation);
+    if (aIsUnsigned == bIsUnsigned) {
+        // cast to greater signed or unsigned type
+        const resSpecifier = @max(@intFromEnum(aPromoted.specifier), @intFromEnum(bPromoted.specifier));
+        const resType = Type{ .specifier = @as(Type.Specifier, @enumFromInt(resSpecifier)) };
+        try a.intCast(p, resType);
+        try b.intCast(p, resType);
+        return;
+    }
+
+    // cast to the unsigned type with greater rank
+    if (aIsUnsigned and (@intFromEnum(aPromoted.specifier) >= @intFromEnum(bPromoted.specifier))) {
+        try a.intCast(p, aPromoted);
+        try b.intCast(p, aPromoted);
+        return;
+    } else {
+        std.debug.assert(bIsUnsigned and (@intFromEnum(bPromoted.specifier) >= @intFromEnum(aPromoted.specifier)));
+        try a.intCast(p, bPromoted);
+        try b.intCast(p, bPromoted);
     }
 }
 
