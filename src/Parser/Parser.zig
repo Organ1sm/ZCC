@@ -1002,7 +1002,7 @@ fn parseRecordSpec(p: *Parser) Error!*Type.Record {
             return error.ParsingFailed;
         };
 
-        // check if this is a referense to a previous type
+        // check if this is a reference to a previous type
         if (try p.findTag(p.tokenIds[kindToken], ident, .reference)) |prev| {
             return prev.type.data.record;
         } else {
@@ -1179,15 +1179,15 @@ fn parseEnumSpec(p: *Parser) Error!*Type.Enum {
             return error.ParsingFailed;
         };
 
-        // check if this is a referense to a previous type
+        // check if this is a reference to a previous type
         if (try p.findTag(.KeywordEnum, ident, .reference)) |prev| {
             return prev.type.data.@"enum";
         } else {
-            const enum_ty = try Type.Enum.create(p.arena, p.tokSlice(ident));
-            const ty = Type{ .specifier = .Enum, .data = .{ .@"enum" = enum_ty } };
-            const sym = Scope.Symbol{ .name = enum_ty.name, .type = ty, .nameToken = ident };
+            const enumType = try Type.Enum.create(p.arena, p.tokSlice(ident));
+            const ty = Type{ .specifier = .Enum, .data = .{ .@"enum" = enumType } };
+            const sym = Scope.Symbol{ .name = enumType.name, .type = ty, .nameToken = ident };
             try p.scopes.append(.{ .@"enum" = sym });
-            return enum_ty;
+            return enumType;
         }
     };
 
@@ -2562,7 +2562,7 @@ fn eqExpr(p: *Parser) Error!Result {
         if (ne == null) break;
         var rhs = try p.compExpr();
 
-        if (try lhs.adjustTypes(ne.?, &rhs, p, .comparison)) {
+        if (try lhs.adjustTypes(ne.?, &rhs, p, .equality)) {
             const res = if (eq != null)
                 lhs.compare(.eq, rhs)
             else
@@ -2588,7 +2588,7 @@ fn compExpr(p: *Parser) Error!Result {
         if (ge == null) break;
         var rhs = try p.shiftExpr();
 
-        if (try lhs.adjustTypes(ge.?, &rhs, p, .comparison)) {
+        if (try lhs.adjustTypes(ge.?, &rhs, p, .relational)) {
             const res = if (lt != null)
                 lhs.compare(.lt, rhs)
             else if (le != null)

@@ -71,9 +71,10 @@ pub fn adjustTypes(a: *Result, token: TokenIndex, b: *Result, p: *Parser, kind: 
     integer,
     arithmetic,
     booleanLogic,
+    relational,
+    equality,
     add,
     sub,
-    comparison,
     conditional,
 }) !bool {
     try a.lvalConversion(p);
@@ -90,9 +91,15 @@ pub fn adjustTypes(a: *Result, token: TokenIndex, b: *Result, p: *Parser, kind: 
     if (kind == .integer)
         return a.invalidBinTy(token, b, p);
 
-    const aIsArithmetic = aIsInt or a.ty.isFloat();
-    const bIsArithmetic = bIsInt or b.ty.isFloat();
+    const aIsFloat = a.ty.isFloat();
+    const bIsFloat = b.ty.isFloat();
+    const aIsArithmetic = aIsInt or aIsFloat;
+    const bIsArithmetic = bIsInt or bIsFloat;
     if (aIsArithmetic and bIsArithmetic) {
+        // <, <=, >, >= only work on real types
+        if (kind == .relational and (!a.ty.isReal() or !b.ty.isReal()))
+            return a.invalidBinTy(token, b, p);
+
         try a.usualArithmeticConversion(b, p);
         return a.shouldEval(b, p);
     }
@@ -100,14 +107,35 @@ pub fn adjustTypes(a: *Result, token: TokenIndex, b: *Result, p: *Parser, kind: 
     if (kind == .arithmetic)
         return a.invalidBinTy(token, b, p);
 
-    const aIsScalar = aIsArithmetic or a.ty.specifier == .Pointer;
-    const bIsScalar = bIsArithmetic or b.ty.specifier == .Pointer;
+    const aIsPtr = a.ty.specifier == .Pointer;
+    const bIsPtr = b.ty.specifier == .Pointer;
+    const aIsScalar = aIsArithmetic or aIsPtr;
+    const bIsScalar = bIsArithmetic or bIsPtr;
     if (kind == .booleanLogic) {
         if (!aIsScalar or !bIsScalar) return a.invalidBinTy(token, b, p);
 
         // Do integer promotions but nothing else
         if (aIsInt) try a.intCast(p, a.ty.integerPromotion(p.pp.compilation));
         if (bIsInt) try b.intCast(p, b.ty.integerPromotion(p.pp.compilation));
+        return a.shouldEval(b, p);
+    }
+
+    if (kind == .relational or kind == .equality) {
+        // comparisons between floats and pointes not allowed
+        if (!aIsScalar or !bIsScalar or (aIsFloat and bIsPtr) or (bIsFloat and aIsPtr))
+            return a.invalidBinTy(token, b, p);
+
+        // TODO print types
+        if (aIsInt or bIsInt) try p.errToken(.comparison_ptr_int, token);
+        if (aIsPtr and bIsPtr) {
+            if (!a.ty.eql(b.ty, false)) try p.errToken(.comparison_distinct_ptr, token);
+        } else if (aIsPtr) {
+            try b.ptrCast(p, a.ty);
+        } else {
+            std.debug.assert(bIsPtr);
+            try a.ptrCast(p, b.ty);
+        }
+
         return a.shouldEval(b, p);
     }
     // TODO more casts here
@@ -138,7 +166,7 @@ pub fn lvalConversion(res: *Result, p: *Parser) Error!void {
             .type = res.ty,
             .data = .{ .UnaryExpr = res.node },
         });
-    } else if (!p.inMacro and  AST.isLValue(p.nodes.slice(), res.node)) {
+    } else if (!p.inMacro and AST.isLValue(p.nodes.slice(), res.node)) {
         res.ty.qual = .{};
         res.node = try p.addNode(.{
             .tag = .LValueToRValue,
@@ -164,6 +192,15 @@ fn intCast(res: *Result, p: *Parser, intType: Type) Error!void {
             .data = .{ .UnaryExpr = res.node },
         });
     }
+
+    const isUnsigned = intType.isUnsignedInt(p.pp.compilation);
+    if (isUnsigned and res.value == .signed) {
+        const copy = res.value.signed;
+        res.value = .{ .unsigned = @bitCast(copy) };
+    } else if (!isUnsigned and res.value == .unsigned) {
+        const copy = res.value.unsigned;
+        res.value = .{ .signed = @bitCast(copy) };
+    }
 }
 
 fn floatCast(res: *Result, p: *Parser, floatType: Type) Error!void {
@@ -185,6 +222,24 @@ fn floatCast(res: *Result, p: *Parser, floatType: Type) Error!void {
         res.ty = floatType;
         res.node = try p.addNode(.{
             .tag = .FloatCast,
+            .type = res.ty,
+            .data = .{ .UnaryExpr = res.node },
+        });
+    }
+}
+
+fn ptrCast(res: *Result, p: *Parser, ptrType: Type) Error!void {
+    if (res.ty.specifier == .Bool) {
+        res.ty = ptrType;
+        res.node = try p.addNode(.{
+            .tag = .BoolToPointer,
+            .type = res.ty,
+            .data = .{ .UnaryExpr = res.node },
+        });
+    } else if (res.ty.isInt()) {
+        res.ty = ptrType;
+        res.node = try p.addNode(.{
+            .tag = .IntToPointer,
             .type = res.ty,
             .data = .{ .UnaryExpr = res.node },
         });
@@ -305,7 +360,7 @@ pub fn mul(a: *Result, token: TokenIndex, b: Result, p: *Parser) !void {
     switch (a.value) {
         .unsigned => |*v| {
             switch (size) {
-                1, 2 => unreachable, // upcasted to int,
+                1, 2 => unreachable, // promoted to int,
                 4 => {
                     const ov = @mulWithOverflow(@as(u32, @truncate(v.*)), @as(u32, @truncate(b.value.unsigned)));
                     isOverflow = ov[1] == 1;
@@ -325,7 +380,7 @@ pub fn mul(a: *Result, token: TokenIndex, b: Result, p: *Parser) !void {
 
         .signed => |*v| {
             switch (size) {
-                1, 2 => unreachable, // upcasted to int
+                1, 2 => unreachable, // promoted to int
                 4 => {
                     const ov = @mulWithOverflow(@as(i32, @truncate(v.*)), @as(i32, @truncate(b.value.signed)));
                     isOverflow = ov[1] == 1;
@@ -352,7 +407,7 @@ pub fn add(a: *Result, tok: TokenIndex, b: Result, p: *Parser) !void {
     switch (a.value) {
         .unsigned => |*v| {
             switch (size) {
-                1, 2 => unreachable, // upcasted to int
+                1, 2 => unreachable, // promoted to int
                 4 => {
                     const ov = @addWithOverflow(@as(u32, @truncate(v.*)), @as(u32, @truncate(b.value.unsigned)));
                     isOverflow = ov[1] == 1;
@@ -372,8 +427,7 @@ pub fn add(a: *Result, tok: TokenIndex, b: Result, p: *Parser) !void {
 
         .signed => |*v| {
             switch (size) {
-                1 => unreachable, // upcasted to int
-                2 => unreachable, // upcasted to int
+                1, 2 => unreachable, // promoted to int
                 4 => {
                     const ov = @addWithOverflow(@as(i32, @truncate(v.*)), @as(i32, @truncate(b.value.signed)));
                     isOverflow = ov[1] == 1;
@@ -401,8 +455,7 @@ pub fn sub(a: *Result, tok: TokenIndex, b: Result, p: *Parser) !void {
     switch (a.value) {
         .unsigned => |*v| {
             switch (size) {
-                1 => unreachable, // upcasted to int
-                2 => unreachable, // upcasted to int
+                1, 2 => unreachable, // promoted to int
                 4 => {
                     const ov = @subWithOverflow(@as(u32, @truncate(v.*)), @as(u32, @truncate(b.value.unsigned)));
                     isOverflow = ov[1] == 1;
@@ -421,8 +474,7 @@ pub fn sub(a: *Result, tok: TokenIndex, b: Result, p: *Parser) !void {
 
         .signed => |*v| {
             switch (size) {
-                1 => unreachable, // upcasted to int
-                2 => unreachable, // upcasted to int
+                1, 2 => unreachable, // promoted to int
                 4 => {
                     const ov = @subWithOverflow(@as(i32, @truncate(v.*)), @as(i32, @truncate(b.value.signed)));
                     isOverflow = ov[1] == 1;
