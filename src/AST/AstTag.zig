@@ -282,6 +282,8 @@ pub const Tag = enum(u8) {
     IntCast,
     /// Convert one floating type to another
     FloatCast,
+    /// Convert type to void; only appears on the branches of a conditional expr
+    ToVoid,
 
     pub fn isImplicit(tag: Tag) bool {
         return switch (tag) {
@@ -299,6 +301,7 @@ pub const Tag = enum(u8) {
             .FloatToBool,
             .IntCast,
             .FloatCast,
+            .ToVoid,
             => true,
 
             else => false,
