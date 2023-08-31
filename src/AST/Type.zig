@@ -217,6 +217,13 @@ pub fn isFloat(ty: Type) bool {
     };
 }
 
+pub fn isReal(ty: Type) bool {
+    return switch (ty.specifier) {
+        .ComplexFloat, .ComplexDouble, .ComplexLongDouble => false,
+        else => true,
+    };
+}
+
 pub fn isUnsignedInt(ty: Type, comp: *Compilation) bool {
     _ = comp;
     return switch (ty.specifier) {
@@ -356,7 +363,7 @@ pub fn eql(a: Type, b: Type, checkQualifiers: bool) bool {
     switch (a.specifier) {
         .Pointer,
         .UnspecifiedVariableLenArray,
-        => if (!a.data.subType.eql(b.data.subType.*, true)) return false,
+        => if (!a.data.subType.eql(b.data.subType.*, checkQualifiers)) return false,
 
         .Func,
         .VarArgsFunc,
@@ -364,9 +371,9 @@ pub fn eql(a: Type, b: Type, checkQualifiers: bool) bool {
         => {
             // TODO validate this
             if (a.data.func.params.len != b.data.func.params.len) return false;
-            if (!a.data.func.returnType.eql(b.data.func.returnType, true)) return false;
+            if (!a.data.func.returnType.eql(b.data.func.returnType, checkQualifiers)) return false;
             for (a.data.func.params, 0..) |param, i| {
-                if (!param.ty.eql(b.data.func.params[i].ty, true)) return false;
+                if (!param.ty.eql(b.data.func.params[i].ty, checkQualifiers)) return false;
             }
         },
 
@@ -375,10 +382,10 @@ pub fn eql(a: Type, b: Type, checkQualifiers: bool) bool {
         .IncompleteArray,
         => {
             if (a.data.array.len != b.data.array.len) return false;
-            if (!a.data.array.elem.eql(b.data.array.elem, true)) return false;
+            if (!a.data.array.elem.eql(b.data.array.elem, checkQualifiers)) return false;
         },
 
-        .VariableLenArray => if (!a.data.vla.elem.eql(b.data.vla.elem, true)) return false,
+        .VariableLenArray => if (!a.data.vla.elem.eql(b.data.vla.elem, checkQualifiers)) return false,
 
         .Union, .Struct => if (a.data.record != b.data.record) return false,
         .Enum => if (a.data.@"enum" != b.data.@"enum") return false,
