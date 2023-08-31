@@ -61,5 +61,6 @@ struct StructWithEnum{
     "containers.c:21:25: warning: declaration does not declare anything" \
     "containers.c:22:20: error: invalid application of 'sizeof' to an incomplete type 'struct StructTest'" \
     "containers.c:38:11: error: invalid application of 'sizeof' to an incomplete type 'struct Foo'" \
+    "containers.c:38:5: warning: expression result unused" \
     "containers.c:39:5: error: must use 'struct' tag to refer to type 'Foo'" \
     "containers.c:46:1: warning: declaration does not declare anything"

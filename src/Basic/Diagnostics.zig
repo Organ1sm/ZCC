@@ -194,6 +194,7 @@ pub const Tag = enum {
     invalid_bin_types,
     comparison_ptr_int,
     comparison_distinct_ptr,
+    incompatible_pointers,
 };
 
 list: std.ArrayList(Message),
@@ -531,6 +532,7 @@ pub fn renderExtra(comp: *Compilation, m: anytype) void {
             .invalid_bin_types => m.write("invalid operands to binary expression"),
             .comparison_ptr_int => m.write("comparison between pointer and integer"),
             .comparison_distinct_ptr => m.write("comparison of distinct pointer types"),
+            .incompatible_pointers => m.write("incompatible pointer types"),
         }
 
         m.end(lcs);
@@ -682,6 +684,7 @@ fn tagKind(diag: *Diagnostics, tag: Tag) Kind {
         .redefinition_incompatible,
         .redefinition_of_parameter,
         .invalid_bin_types,
+        .incompatible_pointers,
         => .@"error",
 
         .to_match_paren,

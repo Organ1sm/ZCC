@@ -1890,7 +1890,7 @@ fn stmt(p: *Parser) Error!NodeIndex {
     const e = try p.expr();
     if (e.node != .none) {
         _ = try p.expectToken(.Semicolon);
-        try p.maybeWarnUnused(e.node, exprStart);
+        try e.maybeWarnUnused(p, exprStart);
         return e.node;
     }
 
@@ -1946,7 +1946,7 @@ fn parseForStmt(p: *Parser) Error!NodeIndex {
     // for-init
     const initStart = p.index;
     const init = if (!gotDecl) try p.expr() else Result{};
-    try p.maybeWarnUnused(init.node, initStart);
+    try init.maybeWarnUnused(p, initStart);
 
     if (!gotDecl)
         _ = try p.expectToken(.Semicolon);
@@ -1958,7 +1958,7 @@ fn parseForStmt(p: *Parser) Error!NodeIndex {
     // increment
     const incrStart = p.index;
     const incr = try p.expr();
-    try p.maybeWarnUnused(incr.node, incrStart);
+    try incr.maybeWarnUnused(p, incrStart);
     try p.expectClosing(lp, .RParen);
 
     try p.scopes.append(.loop);
@@ -2108,29 +2108,6 @@ fn parseDefaultStmt(p: *Parser, defaultToken: u32) Error!?NodeIndex {
     }
 
     return node;
-}
-
-fn maybeWarnUnused(p: *Parser, node: NodeIndex, exprStart: TokenIndex) Error!void {
-    switch (p.nodes.items(.tag)[@intFromEnum(node)]) {
-        .Invalid,
-        .AssignExpr,
-        .MulAssignExpr,
-        .DivAssignExpr,
-        .ModAssignExpr,
-        .AddAssignExpr,
-        .SubAssignExpr,
-        .ShlAssignExpr,
-        .ShrAssignExpr,
-        .BitAndAssignExpr,
-        .BitXorAssignExpr,
-        .BitOrAssignExpr, //
-        .CallExprOne,
-        => return,
-
-        .CastExpr => if (p.nodes.items(.type)[@intFromEnum(node)].specifier == .Void) return,
-        else => {},
-    }
-    try p.errToken(.unused_value, exprStart);
 }
 
 /// labeledStmt
@@ -2336,7 +2313,7 @@ fn expr(p: *Parser) Error!Result {
     var exprStartIdx = p.index;
     var lhs = try p.assignExpr();
     while (p.eat(.Comma)) |_| {
-        try p.maybeWarnUnused(lhs.node, exprStartIdx);
+        try lhs.maybeWarnUnused(p, exprStartIdx);
         exprStartIdx = p.index;
 
         const rhs = try p.assignExpr();
@@ -2443,9 +2420,10 @@ fn conditionalExpr(p: *Parser) Error!Result {
     if (cond.value != .unavailable)
         cond.value = if (cond.getBool()) thenExpr.value else elseExpr.value;
 
+    cond.ty = thenExpr.ty;
     cond.node = try p.addNode(.{
         .tag = .CondExpr,
-        .type = thenExpr.ty,
+        .type = cond.ty,
         .data = .{ .If3 = .{ .cond = cond.node, .body = (try p.addList(&.{ thenExpr.node, elseExpr.node })).start } },
     });
 

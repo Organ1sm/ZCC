@@ -42,6 +42,30 @@ pub fn expect(res: Result, p: *Parser) Error!void {
     }
 }
 
+pub fn maybeWarnUnused(res: Result, p: *Parser, exprStart: TokenIndex) Error!void {
+    switch (p.nodes.items(.tag)[@intFromEnum(res.node)]) {
+        .Invalid,
+        .AssignExpr,
+        .MulAssignExpr,
+        .DivAssignExpr,
+        .ModAssignExpr,
+        .AddAssignExpr,
+        .SubAssignExpr,
+        .ShlAssignExpr,
+        .ShrAssignExpr,
+        .BitAndAssignExpr,
+        .BitXorAssignExpr,
+        .BitOrAssignExpr,
+        .CallExpr,
+        .CallExprOne,
+        => return,
+
+        else => {},
+    }
+    
+    try p.errToken(.unused_value, exprStart);
+}
+
 pub fn bin(lhs: *Result, p: *Parser, tag: AstTag, rhs: Result) !void {
     lhs.node = try p.addNode(.{
         .tag = tag,
@@ -73,9 +97,9 @@ pub fn adjustTypes(a: *Result, token: TokenIndex, b: *Result, p: *Parser, kind: 
     booleanLogic,
     relational,
     equality,
+    conditional,
     add,
     sub,
-    conditional,
 }) !bool {
     try a.lvalConversion(p);
     try b.lvalConversion(p);
@@ -111,34 +135,74 @@ pub fn adjustTypes(a: *Result, token: TokenIndex, b: *Result, p: *Parser, kind: 
     const bIsPtr = b.ty.specifier == .Pointer;
     const aIsScalar = aIsArithmetic or aIsPtr;
     const bIsScalar = bIsArithmetic or bIsPtr;
-    if (kind == .booleanLogic) {
-        if (!aIsScalar or !bIsScalar) return a.invalidBinTy(token, b, p);
+    switch (kind) {
+        .booleanLogic => {
+            if (!aIsScalar or !bIsScalar) return a.invalidBinTy(token, b, p);
 
-        // Do integer promotions but nothing else
-        if (aIsInt) try a.intCast(p, a.ty.integerPromotion(p.pp.compilation));
-        if (bIsInt) try b.intCast(p, b.ty.integerPromotion(p.pp.compilation));
-        return a.shouldEval(b, p);
-    }
+            // Do integer promotions but nothing else
+            if (aIsInt) try a.intCast(p, a.ty.integerPromotion(p.pp.compilation));
+            if (bIsInt) try b.intCast(p, b.ty.integerPromotion(p.pp.compilation));
+            return a.shouldEval(b, p);
+        },
 
-    if (kind == .relational or kind == .equality) {
-        // comparisons between floats and pointes not allowed
-        if (!aIsScalar or !bIsScalar or (aIsFloat and bIsPtr) or (bIsFloat and aIsPtr))
+        .relational, .equality => {
+            // comparisons between floats and pointes not allowed
+            if (!aIsScalar or !bIsScalar or (aIsFloat and bIsPtr) or (bIsFloat and aIsPtr))
+                return a.invalidBinTy(token, b, p);
+
+            // TODO print types
+            if (aIsInt or bIsInt) try p.errToken(.comparison_ptr_int, token);
+            if (aIsPtr and bIsPtr) {
+                if (!a.ty.eql(b.ty, false)) try p.errToken(.comparison_distinct_ptr, token);
+            } else if (aIsPtr) {
+                try b.ptrCast(p, a.ty);
+            } else {
+                std.debug.assert(bIsPtr);
+                try a.ptrCast(p, b.ty);
+            }
+
+            return a.shouldEval(b, p);
+        },
+
+        .conditional => {
+            // doesn't matter what we return here, as the result is ignored
+            if (a.ty.specifier == .Void or b.ty.specifier == .Void) {
+                try a.toVoid(p);
+                try b.toVoid(p);
+                return true;
+            }
+            // TODO struct/record and pointers
             return a.invalidBinTy(token, b, p);
+        },
 
-        // TODO print types
-        if (aIsInt or bIsInt) try p.errToken(.comparison_ptr_int, token);
-        if (aIsPtr and bIsPtr) {
-            if (!a.ty.eql(b.ty, false)) try p.errToken(.comparison_distinct_ptr, token);
-        } else if (aIsPtr) {
-            try b.ptrCast(p, a.ty);
-        } else {
-            std.debug.assert(bIsPtr);
-            try a.ptrCast(p, b.ty);
-        }
+        .add => {
+            // if both aren't arithmetic one should be pointer and the other an integer
+            if (aIsPtr == bIsPtr or aIsInt == bIsInt)
+                return a.invalidBinTy(token, b, p);
 
-        return a.shouldEval(b, p);
+            // Do integer promotions but nothing else
+            if (aIsInt) try a.intCast(p, a.ty.integerPromotion(p.pp.compilation));
+            if (bIsInt) try b.intCast(p, b.ty.integerPromotion(p.pp.compilation));
+            return a.shouldEval(b, p);
+        },
+
+        .sub => {
+            // if both aren't arithmetic then either both should be pointers or just a
+            if (!aIsPtr or !(bIsPtr or bIsInt)) return a.invalidBinTy(token, b, p);
+
+            if (aIsPtr and bIsPtr) {
+                // TODO print types
+                if (!a.ty.eql(b.ty, false)) try p.errToken(.incompatible_pointers, token);
+                a.ty = Type.ptrDiffT(p.pp.compilation);
+            }
+
+            // Do integer promotion on b if needed
+            if (bIsInt) try b.intCast(p, b.ty.integerPromotion(p.pp.compilation));
+            return a.shouldEval(b, p);
+        },
+
+        else => return a.invalidBinTy(token, b, p),
     }
-    // TODO more casts here
 
     return a.shouldEval(b, p);
 }
@@ -240,6 +304,17 @@ fn ptrCast(res: *Result, p: *Parser, ptrType: Type) Error!void {
         res.ty = ptrType;
         res.node = try p.addNode(.{
             .tag = .IntToPointer,
+            .type = res.ty,
+            .data = .{ .UnaryExpr = res.node },
+        });
+    }
+}
+
+fn toVoid(res: *Result, p: *Parser) Error!void {
+    if (res.ty.specifier != .Void) {
+        res.ty = .{ .specifier = .Void };
+        res.node = try p.addNode(.{
+            .tag = .ToVoid,
             .type = res.ty,
             .data = .{ .UnaryExpr = res.node },
         });
