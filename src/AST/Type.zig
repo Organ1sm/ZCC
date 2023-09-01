@@ -343,9 +343,9 @@ pub fn sizeof(ty: Type, comp: *Compilation) ?u32 {
             .emscripten,
             => comp.target.ptrBitWidth() >> 3,
 
-            .windows, .uefi => 32,
+            .windows, .uefi => 4,
 
-            else => 32,
+            else => 4,
         },
 
         .Float => 4,
