@@ -2745,6 +2745,7 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
         .Ampersand => {
             p.index += 1;
 
+            // TODO: validate type
             var operand = try p.parseCastExpr();
             if (!AST.isLValue(p.nodes.slice(), operand.node)) {
                 try p.errToken(.addr_of_rvalue, index);
@@ -2765,6 +2766,7 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
             p.index += 1;
             var operand = try p.parseCastExpr();
 
+            // TODO: validate pointer type
             switch (operand.ty.specifier) {
                 .Pointer => {
                     operand.ty = operand.ty.data.subType.*;
@@ -2785,14 +2787,29 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
 
         .Plus => {
             p.index += 1;
-            // TODO upcast to int / validate arithmetic type
-            return p.parseCastExpr();
+            var operand = try p.parseCastExpr();
+            try operand.lvalConversion(p);
+
+            if (!operand.ty.isInt() and !operand.ty.isFloat())
+                try p.errStr(.invalid_argument_un, index, try p.typeStr(operand.ty));
+
+            if (operand.ty.isInt())
+                try operand.intCast(p, operand.ty.integerPromotion(p.pp.compilation));
+
+            return operand;
         },
 
         .Minus => {
             p.index += 1;
             var operand = try p.parseCastExpr();
-            // TODO upcast to int / validate arithmetic type
+            try operand.lvalConversion(p);
+
+            if (!operand.ty.isInt() and !operand.ty.isFloat())
+                try p.errStr(.invalid_argument_un, index, try p.typeStr(operand.ty));
+
+            if (operand.ty.isInt())
+                try operand.intCast(p, operand.ty.integerPromotion(p.pp.compilation));
+
             const size = operand.ty.sizeof(p.pp.compilation).?;
             switch (operand.value) {
                 .unsigned => |*v| switch (size) {
@@ -2813,10 +2830,17 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
         .PlusPlus => {
             p.index += 1;
             var operand = try p.parseCastExpr();
-            if (!AST.isLValue(p.nodes.slice(), operand.node)) {
+
+            if (!operand.ty.isInt() and !operand.ty.isFloat() and !operand.ty.isReal() and operand.ty.specifier != .Pointer)
+                try p.errStr(.invalid_argument_un, index, try p.typeStr(operand.ty));
+
+            if (!AST.isLValue(p.nodes.slice(), operand.node) or operand.ty.qual.@"const") {
                 try p.errToken(.not_assignable, index);
                 return error.ParsingFailed;
             }
+
+            if (operand.ty.isInt())
+                try operand.intCast(p, operand.ty.integerPromotion(p.pp.compilation));
 
             switch (operand.value) {
                 .unsigned => |*v| v.* += 1,
@@ -2830,10 +2854,17 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
         .MinusMinus => {
             p.index += 1;
             var operand = try p.parseCastExpr();
-            if (!AST.isLValue(p.nodes.slice(), operand.node)) {
+
+            if (!operand.ty.isInt() and !operand.ty.isFloat() and !operand.ty.isReal() and operand.ty.specifier != .Pointer)
+                try p.errStr(.invalid_argument_un, index, try p.typeStr(operand.ty));
+
+            if (!AST.isLValue(p.nodes.slice(), operand.node) or operand.ty.qual.@"const") {
                 try p.errToken(.not_assignable, index);
                 return error.ParsingFailed;
             }
+
+            if (operand.ty.isInt())
+                try operand.intCast(p, operand.ty.integerPromotion(p.pp.compilation));
 
             switch (operand.value) {
                 .unsigned => |*v| v.* -= 1,
@@ -2846,7 +2877,14 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
 
         .Tilde => {
             p.index += 1;
-            var operand = try p.parseUnaryExpr();
+            var operand = try p.parseCastExpr();
+            try operand.lvalConversion(p);
+
+            if (!operand.ty.isInt())
+                try p.errStr(.invalid_argument_un, index, try p.typeStr(operand.ty));
+
+            if (operand.ty.isInt())
+                try operand.intCast(p, operand.ty.integerPromotion(p.pp.compilation));
 
             switch (operand.value) {
                 .unsigned => |*v| v.* = ~v.*,
@@ -2859,7 +2897,15 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
 
         .Bang => {
             p.index += 1;
-            var operand = try p.parseUnaryExpr();
+            var operand = try p.parseCastExpr();
+            try operand.lvalConversion(p);
+
+            if (!operand.ty.isInt() and !operand.ty.isFloat() and operand.ty.specifier != .Pointer)
+                try p.errStr(.invalid_argument_un, index, try p.typeStr(operand.ty));
+
+            if (operand.ty.isInt())
+                try operand.intCast(p, operand.ty.integerPromotion(p.pp.compilation));
+
             if (operand.value != .unavailable) {
                 operand.value = .{ .signed = @intFromBool(!operand.getBool()) };
             }
@@ -2893,6 +2939,8 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
                 res.value = .unavailable;
                 try p.errStr(.invalid_sizeof, expectedParen - 1, try p.typeStr(res.ty));
             }
+
+            res.ty = Type.sizeT(p.pp.compilation);
             return res.un(p, .SizeOfExpr);
         },
 
@@ -2917,6 +2965,7 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
                 try p.errToken(.alignof_expr, expectedParen);
             }
 
+            res.ty = Type.sizeT(p.pp.compilation);
             res.value = .{ .unsigned = res.ty.alignment };
             return res.un(p, .AlignOfExpr);
         },
@@ -3060,24 +3109,36 @@ fn parseSuffixExpr(p: *Parser, lhs: Result) Error!Result {
 
         .PlusPlus => {
             defer p.index += 1;
-
             var operand = lhs;
-            if (!AST.isLValue(p.nodes.slice(), operand.node)) {
+
+            if (!operand.ty.isInt() and !operand.ty.isFloat() and !operand.ty.isReal() and operand.ty.specifier != .Pointer)
+                try p.errStr(.invalid_argument_un, p.index, try p.typeStr(operand.ty));
+
+            if (!AST.isLValue(p.nodes.slice(), operand.node) or operand.ty.qual.@"const") {
                 try p.err(.not_assignable);
                 return error.ParsingFailed;
             }
+
+            if (operand.ty.isInt())
+                try operand.intCast(p, operand.ty.integerPromotion(p.pp.compilation));
 
             return operand.un(p, .PostIncExpr);
         },
 
         .MinusMinus => {
             defer p.index += 1;
-
             var operand = lhs;
-            if (!AST.isLValue(p.nodes.slice(), operand.node)) {
+
+            if (!operand.ty.isInt() and !operand.ty.isFloat() and !operand.ty.isReal() and operand.ty.specifier != .Pointer)
+                try p.errStr(.invalid_argument_un, p.index, try p.typeStr(operand.ty));
+
+            if (!AST.isLValue(p.nodes.slice(), operand.node) or operand.ty.qual.@"const") {
                 try p.err(.not_assignable);
                 return error.ParsingFailed;
             }
+
+            if (operand.ty.isInt())
+                try operand.intCast(p, operand.ty.integerPromotion(p.pp.compilation));
 
             return operand.un(p, .PostDecExpr);
         },
