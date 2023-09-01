@@ -185,7 +185,6 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
     const ty = tree.nodes.items(.type)[@intFromEnum(node)];
 
     try w.writeByteNTimes(' ', level);
-
     if (tag.isImplicit()) {
         try w.print(IMPLICIT ++ "{s}: " ++ TYPE ++ "'", .{@tagName(tag)});
     } else {
@@ -193,18 +192,19 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
     }
 
     try ty.dump(w);
-    try w.writeAll("'");
-    if (tree.valueMap.get(node)) |value| {
-        if (ty.isUnsignedInt(tree.comp))
-            try w.print(LITERAL ++ " (value: {d})" ++ RESET, .{value})
-        else
-            try w.print(LITERAL ++ " (value: {d})" ++ RESET, .{@as(i64, @bitCast(value))});
-    }
-    try w.writeAll("\n" ++ RESET);
+    try w.writeByte('\'');
 
-    if (isLValue(tree.nodes, node)) {
+    if (isLValue(tree.nodes, node))
         try w.writeAll(ATTRIBUTE ++ " lvalue");
+
+    if (tree.valueMap.get(node)) |val| {
+        if (ty.isUnsignedInt(tree.comp))
+            try w.print(LITERAL ++ " (value: {d})" ++ RESET, .{val})
+        else
+            try w.print(LITERAL ++ " (value: {d})" ++ RESET, .{@as(i64, @bitCast(val))});
     }
+
+    try w.writeAll("\n" ++ RESET);
 
     switch (tag) {
         .Invalid => unreachable,
@@ -441,7 +441,7 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
         .TypeDef,
         => {
             try w.writeByteNTimes(' ', level + half);
-            try w.print("name: " ++ LITERAL ++ "\"{s}\"\n" ++ RESET, .{tree.tokSlice(data.Declaration.name)});
+            try w.print("name: " ++ LITERAL ++ "{s}\n" ++ RESET, .{tree.tokSlice(data.Declaration.name)});
 
             if (data.Declaration.node != .none) {
                 try w.writeByteNTimes(' ', level + half);

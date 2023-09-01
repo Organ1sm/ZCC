@@ -43,6 +43,9 @@ pub fn expect(res: Result, p: *Parser) Error!void {
 }
 
 pub fn maybeWarnUnused(res: Result, p: *Parser, exprStart: TokenIndex) Error!void {
+    if (res.ty.specifier == .Void)
+        return;
+
     switch (p.nodes.items(.tag)[@intFromEnum(res.node)]) {
         .Invalid,
         .AssignExpr,
@@ -58,11 +61,15 @@ pub fn maybeWarnUnused(res: Result, p: *Parser, exprStart: TokenIndex) Error!voi
         .BitOrAssignExpr,
         .CallExpr,
         .CallExprOne,
+        .PreIncExpr,
+        .PreDecExpr,
+        .PostIncExpr,
+        .PostDecExpr,
         => return,
 
         else => {},
     }
-    
+
     try p.errToken(.unused_value, exprStart);
 }
 
@@ -240,7 +247,7 @@ pub fn lvalConversion(res: *Result, p: *Parser) Error!void {
     }
 }
 
-fn intCast(res: *Result, p: *Parser, intType: Type) Error!void {
+pub fn intCast(res: *Result, p: *Parser, intType: Type) Error!void {
     if (res.ty.specifier == .Bool) {
         res.ty = intType;
         res.node = try p.addNode(.{
