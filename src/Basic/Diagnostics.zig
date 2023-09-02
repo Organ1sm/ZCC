@@ -53,6 +53,7 @@ const Options = struct {
     @"pointer-integer-compare": Kind = .warning,
     @"compare-distinct-pointer-types": Kind = .warning,
     @"literal-conversion": Kind = .warning,
+    @"cast-qualifiers": Kind = .warning,
 };
 
 pub const Tag = enum {
@@ -199,6 +200,10 @@ pub const Tag = enum {
     invalid_argument_un,
     incompatible_assign,
     implicit_ptr_to_int,
+    invalid_cast_to_float,
+    invalid_cast_to_pointer,
+    invalid_cast_type,
+    qual_cast,
 };
 
 list: std.ArrayList(Message),
@@ -540,6 +545,10 @@ pub fn renderExtra(comp: *Compilation, m: anytype) void {
             .invalid_argument_un => m.print("invalid argument type '{s}' to unary expression", .{msg.extra.str}),
             .incompatible_assign => m.write("assignment from incompatible type"),
             .implicit_ptr_to_int => m.write("implicit pointer to integer conversion in assignment"),
+            .invalid_cast_to_float => m.print("pointer cannot be cast to type '{s}'", .{msg.extra.str}),
+            .invalid_cast_to_pointer => m.print("operand of type '{s}' cannot be cast to a pointer type", .{msg.extra.str}),
+            .invalid_cast_type => m.print("cannot cast to non arithmetic or pointer type '{s}'", .{msg.extra.str}),
+            .qual_cast => m.print("cast to type '{s}' will not preserve qualifiers", .{msg.extra.str}),
         }
 
         m.end(lcs);
@@ -694,6 +703,9 @@ fn tagKind(diag: *Diagnostics, tag: Tag) Kind {
         .incompatible_pointers,
         .invalid_argument_un,
         .incompatible_assign,
+        .invalid_cast_to_float,
+        .invalid_cast_to_pointer,
+        .invalid_cast_type,
         => .@"error",
 
         .to_match_paren,
@@ -732,6 +744,7 @@ fn tagKind(diag: *Diagnostics, tag: Tag) Kind {
         .comparison_ptr_int => diag.options.@"pointer-integer-compare",
         .comparison_distinct_ptr => diag.options.@"compare-distinct-pointer-types",
         .implicit_ptr_to_int => diag.options.@"literal-conversion",
+        .qual_cast => diag.options.@"cast-qualifiers",
     };
 
     if (kind == .@"error" and diag.fatalErrors)
