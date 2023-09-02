@@ -2784,7 +2784,22 @@ fn parseCastExpr(p: *Parser) Error!Result {
                 return Result{ .node = try p.addNode(node), .ty = ty };
             }
             var operand = try p.parseCastExpr();
+            if (ty.specifier == .Void) {
+                // everything can cast to void
+            } else if (ty.isInt() or ty.isFloat() or ty.specifier == .Pointer) {
+                if (ty.isFloat() and operand.ty.specifier == .Pointer)
+                    try p.errStr(.invalid_cast_to_float, lp, try p.typeStr(operand.ty));
+                if (operand.ty.isFloat() and ty.specifier == .Pointer)
+                    try p.errStr(.invalid_cast_to_pointer, lp, try p.typeStr(operand.ty));
+            } else {
+                try p.errStr(.invalid_cast_type, lp, try p.typeStr(operand.ty));
+            }
+            if (ty.qual.any())
+                try p.errStr(.qual_cast, lp, try p.typeStr(ty));
+
             operand.ty = ty;
+            operand.ty.qual = .{};
+
             try operand.un(p, .CastExpr);
             return operand;
         }
