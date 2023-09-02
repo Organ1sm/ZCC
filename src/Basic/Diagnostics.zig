@@ -54,6 +54,7 @@ const Options = struct {
     @"compare-distinct-pointer-types": Kind = .warning,
     @"literal-conversion": Kind = .warning,
     @"cast-qualifiers": Kind = .warning,
+    @"array-bounds": Kind = .warning,
 };
 
 pub const Tag = enum {
@@ -204,6 +205,10 @@ pub const Tag = enum {
     invalid_cast_to_pointer,
     invalid_cast_type,
     qual_cast,
+    invalid_index,
+    invalid_subscript,
+    array_after,
+    array_before,
 };
 
 list: std.ArrayList(Message),
@@ -549,6 +554,10 @@ pub fn renderExtra(comp: *Compilation, m: anytype) void {
             .invalid_cast_to_pointer => m.print("operand of type '{s}' cannot be cast to a pointer type", .{msg.extra.str}),
             .invalid_cast_type => m.print("cannot cast to non arithmetic or pointer type '{s}'", .{msg.extra.str}),
             .qual_cast => m.print("cast to type '{s}' will not preserve qualifiers", .{msg.extra.str}),
+            .invalid_index => m.write("array subscript is not an integer"),
+            .invalid_subscript => m.write("subscripted value is not an array or pointer"),
+            .array_after => m.print("array index {d} is past the end of the array", .{msg.extra.unsigned}),
+            .array_before => m.print("array index {d} is before the beginning of the array", .{msg.extra.signed}),
         }
 
         m.end(lcs);
@@ -706,6 +715,8 @@ fn tagKind(diag: *Diagnostics, tag: Tag) Kind {
         .invalid_cast_to_float,
         .invalid_cast_to_pointer,
         .invalid_cast_type,
+        .invalid_index,
+        .invalid_subscript,
         => .@"error",
 
         .to_match_paren,
@@ -745,6 +756,8 @@ fn tagKind(diag: *Diagnostics, tag: Tag) Kind {
         .comparison_distinct_ptr => diag.options.@"compare-distinct-pointer-types",
         .implicit_ptr_to_int => diag.options.@"literal-conversion",
         .qual_cast => diag.options.@"cast-qualifiers",
+        .array_after => diag.options.@"array-bounds",
+        .array_before => diag.options.@"array-bounds",
     };
 
     if (kind == .@"error" and diag.fatalErrors)

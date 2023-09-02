@@ -3077,16 +3077,31 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
 fn parseSuffixExpr(p: *Parser, lhs: Result) Error!Result {
     switch (p.getCurrToken()) {
         .LBracket => {
-            var operand = lhs;
-
             const lb = p.index;
             p.index += 1;
-            const index = try p.expr();
+            var index = try p.expr();
             try p.expectClosing(lb, .RBracket);
 
-            // TODO validate type
-            try operand.bin(p, .ArrayAccessExpr, index);
-            return operand;
+            const lhsType = lhs.ty;
+            const rhsType = index.ty;
+            var ptr = lhs;
+            try ptr.lvalConversion(p);
+            try index.lvalConversion(p);
+            if (ptr.ty.specifier == .Pointer) {
+                ptr.ty = ptr.ty.data.subType.*;
+                if (!index.ty.isInt()) try p.errToken(.invalid_index, lb);
+                try p.checkArrayBounds(index, lhsType, lb);
+            } else if (index.ty.specifier == .Pointer) {
+                index.ty = index.ty.data.subType.*;
+                if (!ptr.ty.isInt()) try p.errToken(.invalid_index, lb);
+                try p.checkArrayBounds(ptr, rhsType, lb);
+                std.mem.swap(Result, &ptr, &index);
+            } else {
+                try p.errToken(.invalid_subscript, lb);
+            }
+
+            try ptr.bin(p, .ArrayAccessExpr, index);
+            return ptr;
         },
 
         .LParen => {
@@ -3231,6 +3246,23 @@ fn parseSuffixExpr(p: *Parser, lhs: Result) Error!Result {
         },
 
         else => return Result{},
+    }
+}
+
+fn checkArrayBounds(p: *Parser, index: Result, arrayType: Type, token: TokenIndex) !void {
+    const len = switch (arrayType.specifier) {
+        .Array, .StaticArray => arrayType.data.array.len,
+        else => return,
+    };
+
+    switch (index.value) {
+        .unsigned => |val| if (std.math.compare(val, .gte, len))
+            try p.errExtra(.array_after, token, .{ .unsigned = val }),
+        .signed => |val| if (val < 0)
+            try p.errExtra(.array_before, token, .{ .signed = val })
+        else if (std.math.compare(val, .gte, len))
+            try p.errExtra(.array_after, token, .{ .unsigned = @as(u64, @intCast(val)) }),
+        .unavailable => return,
     }
 }
 
