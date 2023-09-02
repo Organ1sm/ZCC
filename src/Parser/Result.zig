@@ -81,13 +81,12 @@ pub fn bin(lhs: *Result, p: *Parser, tag: AstTag, rhs: Result) !void {
     });
 }
 
-pub fn un(operand: *Result, p: *Parser, tag: AstTag) Error!Result {
+pub fn un(operand: *Result, p: *Parser, tag: AstTag) Error!void {
     operand.node = try p.addNode(.{
         .tag = tag,
         .type = operand.ty,
         .data = .{ .UnaryExpr = operand.node },
     });
-    return operand.*;
 }
 
 pub fn coerce(res: Result, p: *Parser, destType: Type) !Result {
@@ -221,47 +220,40 @@ pub fn lvalConversion(res: *Result, p: *Parser) Error!void {
 
         res.ty.specifier = .Pointer;
         res.ty.data = .{ .subType = elemType };
-        res.node = try p.addNode(.{
-            .tag = .FunctionToPointer,
-            .type = res.ty,
-            .data = .{ .UnaryExpr = res.node },
-        });
+        try res.un(p, .FunctionToPointer);
     } else if (res.ty.isArray()) {
         var elemType = try p.arena.create(Type);
         elemType.* = res.ty.getElemType();
 
         res.ty.specifier = .Pointer;
         res.ty.data = .{ .subType = elemType };
-        res.node = try p.addNode(.{
-            .tag = .ArrayToPointer,
-            .type = res.ty,
-            .data = .{ .UnaryExpr = res.node },
-        });
+        try res.un(p, .ArrayToPointer);
     } else if (!p.inMacro and AST.isLValue(p.nodes.slice(), res.node)) {
         res.ty.qual = .{};
-        res.node = try p.addNode(.{
-            .tag = .LValueToRValue,
-            .type = res.ty,
-            .data = .{ .UnaryExpr = res.node },
-        });
+        try res.un(p, .LValueToRValue);
+    }
+}
+
+pub fn boolCast(res: *Result, p: *Parser, boolType: Type) Error!void {
+    if (res.ty.specifier == .Pointer) {
+        res.ty = boolType;
+        try res.un(p, .PointerToBool);
+    } else if (res.ty.isInt() and res.ty.specifier != .Bool) {
+        res.ty = boolType;
+        try res.un(p, .IntToBool);
+    } else if (res.ty.isFloat()) {
+        res.ty = boolType;
+        try res.un(p, .FloatToBool);
     }
 }
 
 pub fn intCast(res: *Result, p: *Parser, intType: Type) Error!void {
     if (res.ty.specifier == .Bool) {
         res.ty = intType;
-        res.node = try p.addNode(.{
-            .tag = .BoolToInt,
-            .type = res.ty,
-            .data = .{ .UnaryExpr = res.node },
-        });
+        try res.un(p, .BoolToInt);
     } else if (!res.ty.eql(intType, true)) {
         res.ty = intType;
-        res.node = try p.addNode(.{
-            .tag = .IntCast,
-            .type = res.ty,
-            .data = .{ .UnaryExpr = res.node },
-        });
+        try res.un(p, .IntCast);
     }
 
     const isUnsigned = intType.isUnsignedInt(p.pp.compilation);
@@ -274,50 +266,30 @@ pub fn intCast(res: *Result, p: *Parser, intType: Type) Error!void {
     }
 }
 
-fn floatCast(res: *Result, p: *Parser, floatType: Type) Error!void {
+pub fn floatCast(res: *Result, p: *Parser, floatType: Type) Error!void {
     if (res.ty.specifier == .Bool) {
         res.ty = floatType;
-        res.node = try p.addNode(.{
-            .tag = .BoolToFloat,
-            .type = res.ty,
-            .data = .{ .UnaryExpr = res.node },
-        });
+        try res.un(p, .BoolToFloat);
     } else if (res.ty.isInt()) {
         res.ty = floatType;
-        res.node = try p.addNode(.{
-            .tag = .IntToFloat,
-            .type = res.ty,
-            .data = .{ .UnaryExpr = res.node },
-        });
+        try res.un(p, .IntToFloat);
     } else if (!res.ty.eql(floatType, true)) {
         res.ty = floatType;
-        res.node = try p.addNode(.{
-            .tag = .FloatCast,
-            .type = res.ty,
-            .data = .{ .UnaryExpr = res.node },
-        });
+        try res.un(p, .FloatCast);
     }
 }
 
-fn ptrCast(res: *Result, p: *Parser, ptrType: Type) Error!void {
+pub fn ptrCast(res: *Result, p: *Parser, ptrType: Type) Error!void {
     if (res.ty.specifier == .Bool) {
         res.ty = ptrType;
-        res.node = try p.addNode(.{
-            .tag = .BoolToPointer,
-            .type = res.ty,
-            .data = .{ .UnaryExpr = res.node },
-        });
+        try res.un(p, .BoolToPointer);
     } else if (res.ty.isInt()) {
         res.ty = ptrType;
-        res.node = try p.addNode(.{
-            .tag = .IntToPointer,
-            .type = res.ty,
-            .data = .{ .UnaryExpr = res.node },
-        });
+        try res.un(p, .IntToPointer);
     }
 }
 
-fn toVoid(res: *Result, p: *Parser) Error!void {
+pub fn toVoid(res: *Result, p: *Parser) Error!void {
     if (res.ty.specifier != .Void) {
         res.ty = .{ .specifier = .Void };
         res.node = try p.addNode(.{
