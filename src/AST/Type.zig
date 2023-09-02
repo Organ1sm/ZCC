@@ -244,7 +244,7 @@ pub fn getElemType(ty: Type) Type {
     return switch (ty.specifier) {
         .Pointer, .UnspecifiedVariableLenArray => ty.data.subType.*,
         .Array, .StaticArray, .IncompleteArray => ty.data.array.elem,
-        .VariableLenArray => ty.data.array.elem,
+        .VariableLenArray => ty.data.vla.elem,
         else => unreachable,
     };
 }
