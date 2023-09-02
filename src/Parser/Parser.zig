@@ -2325,6 +2325,36 @@ fn expr(p: *Parser) Error!Result {
     return lhs;
 }
 
+fn tokToTag(p: *Parser, token: TokenIndex) AstTag {
+    return switch (p.tokenIds[token]) {
+        .Equal => .AssignExpr,
+        .AsteriskEqual => .MulAssignExpr,
+        .SlashEqual => .DivAssignExpr,
+        .PercentEqual => .ModAssignExpr,
+        .PlusEqual => .AddAssignExpr,
+        .MinusEqual => .SubAssignExpr,
+        .AngleBracketAngleBracketLeftEqual => .ShlAssignExpr,
+        .AngleBracketAngleBracketRightEqual => .ShrAssignExpr,
+        .AmpersandEqual => .BitAndAssignExpr,
+        .CaretEqual => .BitXorAssignExpr,
+        .PipeEqual => .BitOrAssignExpr,
+        .EqualEqual => .EqualExpr,
+        .BangEqual => .NotEqualExpr,
+        .AngleBracketLeft => .LessThanExpr,
+        .AngleBracketLeftEqual => .LessThanEqualExpr,
+        .AngleBracketRight => .GreaterThanExpr,
+        .AngleBracketRightEqual => .GreaterThanEqualExpr,
+        .AngleBracketAngleBracketLeft => .ShlExpr,
+        .AngleBracketAngleBracketRight => .ShrExpr,
+        .Plus => .AddExpr,
+        .Minus => .SubExpr,
+        .Asterisk => .MulExpr,
+        .Slash => .DivExpr,
+        .Percent => .ModExpr,
+        else => unreachable,
+    };
+}
+
 /// assignExpr
 ///  : conditionalExpr
 ///  | unaryExpr ('=' | '*=' | '/=' | '%=' | '+=' | '-=' | '<<=' | '>>=' | '&=' | '^=' | '|=') assignExpr
@@ -2344,40 +2374,67 @@ fn assignExpr(p: *Parser) Error!Result {
     const bitXor = bitAnd orelse p.eat(.CaretEqual);
     const bitOr = bitXor orelse p.eat(.PipeEqual);
 
-    if (bitOr == null)
-        return lhs;
+    const tag = p.tokToTag(bitOr orelse return lhs);
+    var rhs = try p.assignExpr();
+    try rhs.lvalConversion(p);
 
-    if (!AST.isLValue(p.nodes.slice(), lhs.node)) {
+    if (!AST.isLValue(p.nodes.slice(), lhs.node) or lhs.ty.qual.@"const") {
         try p.errToken(.not_assignable, index);
         return error.ParsingFailed;
     }
 
-    var rhs = try p.assignExpr();
-    try rhs.lvalConversion(p);
+    // TODO print types in these errors
+    if (lhs.ty.specifier == .Bool) {
+        // this is ridiculous but it's what clang does
+        if (rhs.ty.isInt() or rhs.ty.isFloat() or (rhs.ty.specifier == .Pointer and tag == .AssignExpr)) {
+            try rhs.boolCast(p, lhs.ty);
+        } else {
+            try p.errToken(.incompatible_assign, index);
+        }
+    } else if (lhs.ty.isInt()) {
+        if (rhs.ty.isInt() or rhs.ty.isFloat()) {
+            try rhs.intCast(p, lhs.ty);
+        } else if (tag == .AssignExpr and rhs.ty.specifier == .Pointer) {
+            try p.errToken(.implicit_ptr_to_int, index);
+            try rhs.intCast(p, lhs.ty);
+        } else {
+            try p.errToken(.incompatible_assign, index);
+        }
+    } else if (lhs.ty.isFloat()) {
+        switch (tag) {
+            .ModAssignExpr,
+            .ShlAssignExpr,
+            .ShrAssignExpr,
+            .BitAndAssignExpr,
+            .BitXorAssignExpr,
+            .BitOrAssignExpr,
+            => try p.errToken(.invalid_bin_types, index),
+            else => if (rhs.ty.isInt() or rhs.ty.isFloat()) {
+                try rhs.floatCast(p, lhs.ty);
+            } else {
+                try p.errToken(.incompatible_assign, index);
+            },
+        }
+    } else if (lhs.ty.specifier == .Pointer) {
+        if ((tag == .AddAssignExpr or tag == .SubAssignExpr) and
+            (rhs.ty.isInt() or rhs.ty.isFloat()))
+            try rhs.ptrCast(p, lhs.ty)
+        else if (tag != .AssignExpr)
+            try p.errToken(.invalid_bin_types, index)
+        else if (!lhs.ty.eql(rhs.ty, false))
+            try p.errToken(.incompatible_assign, index);
+    } else if (lhs.ty.isEnumOrRecord()) { // enum.isInt() == true
+        if (tag != .AssignExpr)
+            try p.errToken(.invalid_bin_types, index)
+        else if (!lhs.ty.eql(rhs.ty, false))
+            try p.errToken(.incompatible_assign, index);
+    } else if (lhs.ty.isArray() or lhs.ty.isFunc()) {
+        try p.errToken(.not_assignable, index);
+    } else {
+        try p.errToken(.incompatible_assign, index);
+    }
 
-    try lhs.bin(p, if (eq != null)
-        .AssignExpr
-    else if (mul != null)
-        AstTag.MulAssignExpr
-    else if (div != null)
-        AstTag.DivAssignExpr
-    else if (mod != null)
-        AstTag.ModAssignExpr
-    else if (add != null)
-        AstTag.AddAssignExpr
-    else if (sub != null)
-        AstTag.SubAssignExpr
-    else if (shl != null)
-        AstTag.ShlAssignExpr
-    else if (shr != null)
-        AstTag.ShrAssignExpr
-    else if (bitAnd != null)
-        AstTag.BitAndAssignExpr
-    else if (bitXor != null)
-        AstTag.BitXorAssignExpr
-    else
-        AstTag.BitOrAssignExpr, rhs);
-
+    try lhs.bin(p, tag, rhs);
     return lhs;
 }
 
@@ -2536,12 +2593,11 @@ fn eqExpr(p: *Parser) Error!Result {
     while (true) {
         const eq = p.eat(.EqualEqual);
         const ne = eq orelse p.eat(.BangEqual);
-
-        if (ne == null) break;
+        const tag = p.tokToTag(ne orelse break);
         var rhs = try p.compExpr();
 
         if (try lhs.adjustTypes(ne.?, &rhs, p, .equality)) {
-            const res = if (eq != null)
+            const res = if (tag == .EqualExpr)
                 lhs.compare(.eq, rhs)
             else
                 lhs.compare(.neq, rhs);
@@ -2550,7 +2606,7 @@ fn eqExpr(p: *Parser) Error!Result {
         }
 
         lhs.ty = .{ .specifier = .Int };
-        try lhs.bin(p, if (eq != null) .EqualExpr else .NotEqualExpr, rhs);
+        try lhs.bin(p, tag, rhs);
     }
     return lhs;
 }
@@ -2563,30 +2619,21 @@ fn compExpr(p: *Parser) Error!Result {
         const le = lt orelse p.eat(.AngleBracketLeftEqual);
         const gt = le orelse p.eat(.AngleBracketRight);
         const ge = gt orelse p.eat(.AngleBracketRightEqual);
-        if (ge == null) break;
+        const tag = p.tokToTag(ge orelse break);
         var rhs = try p.shiftExpr();
 
         if (try lhs.adjustTypes(ge.?, &rhs, p, .relational)) {
-            const res = if (lt != null)
-                lhs.compare(.lt, rhs)
-            else if (le != null)
-                lhs.compare(.lte, rhs)
-            else if (gt != null)
-                lhs.compare(.gt, rhs)
-            else
-                lhs.compare(.gte, rhs);
-            lhs.value = .{ .signed = @intFromBool(res) };
+            lhs.value = .{ .signed = @intFromBool(switch (tag) {
+                .LessThanExpr => lhs.compare(.lt, rhs),
+                .LessThanEqualExpr => lhs.compare(.lte, rhs),
+                .GreaterThanExpr => lhs.compare(.gt, rhs),
+                .GreaterThanEqualExpr => lhs.compare(.gte, rhs),
+                else => unreachable,
+            }) };
         }
 
         lhs.ty = .{ .specifier = .Int };
-        try lhs.bin(p, if (lt != null)
-            .LessThanExpr
-        else if (le != null)
-            AstTag.LessThanEqualExpr
-        else if (gt != null)
-            AstTag.GreaterThanExpr
-        else
-            AstTag.GreaterThanEqualExpr, rhs);
+        try lhs.bin(p, tag, rhs);
     }
 
     return lhs;
@@ -2598,7 +2645,7 @@ fn shiftExpr(p: *Parser) Error!Result {
     while (true) {
         const shl = p.eat(.AngleBracketAngleBracketLeft);
         const shr = shl orelse p.eat(.AngleBracketAngleBracketRight);
-        if (shr == null) break;
+        const tag = p.tokToTag(shr orelse break);
         var rhs = try p.addExpr();
 
         if (try lhs.adjustTypes(shr.?, &rhs, p, .integer)) {
@@ -2618,7 +2665,7 @@ fn shiftExpr(p: *Parser) Error!Result {
             }
         }
 
-        try lhs.bin(p, if (shl != null) .ShlExpr else .ShrExpr, rhs);
+        try lhs.bin(p, tag, rhs);
     }
     return lhs;
 }
@@ -2629,7 +2676,7 @@ fn addExpr(p: *Parser) Error!Result {
     while (true) {
         const plus = p.eat(.Plus);
         const minus = plus orelse p.eat(.Minus);
-        if (minus == null) break;
+        const tag = p.tokToTag(minus orelse break);
         var rhs = try p.mulExpr();
 
         if (try lhs.adjustTypes(minus.?, &rhs, p, if (plus != null) .add else .sub)) {
@@ -2640,7 +2687,7 @@ fn addExpr(p: *Parser) Error!Result {
             }
         }
 
-        try lhs.bin(p, if (plus != null) .AddExpr else .SubExpr, rhs);
+        try lhs.bin(p, tag, rhs);
     }
     return lhs;
 }
@@ -2652,15 +2699,8 @@ fn mulExpr(p: *Parser) Error!Result {
         const mul = p.eat(.Asterisk);
         const div = mul orelse p.eat(.Slash);
         const percent = div orelse p.eat(.Percent);
-        if (percent == null) break;
+        const tag = p.tokToTag(percent orelse break);
         var rhs = try p.parseCastExpr();
-
-        const tag = if (mul != null)
-            .MulExpr
-        else if (div != null)
-            AstTag.DivExpr
-        else
-            AstTag.ModExpr;
 
         if (try lhs.adjustTypes(percent.?, &rhs, p, if (tag == .ModExpr) .integer else .arithmetic)) {
             // TODO divide by 0
@@ -2725,7 +2765,8 @@ fn parseCastExpr(p: *Parser) Error!Result {
             }
             var operand = try p.parseCastExpr();
             operand.ty = ty;
-            return operand.un(p, .CastExpr);
+            try operand.un(p, .CastExpr);
+            return operand;
         }
         p.index -= 1;
     }
@@ -2759,7 +2800,8 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
                 .data = .{ .subType = elemType },
             };
 
-            return operand.un(p, .AddrOfExpr);
+            try operand.un(p, .AddrOfExpr);
+            return operand;
         },
 
         .Asterisk => {
@@ -2782,7 +2824,8 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
                     return error.ParsingFailed;
                 },
             }
-            return operand.un(p, .DerefExpr);
+            try operand.un(p, .DerefExpr);
+            return operand;
         },
 
         .Plus => {
@@ -2824,7 +2867,8 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
                 },
                 .unavailable => {},
             }
-            return operand.un(p, .NegateExpr);
+            try operand.un(p, .NegateExpr);
+            return operand;
         },
 
         .PlusPlus => {
@@ -2848,7 +2892,8 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
                 .unavailable => {},
             }
 
-            return operand.un(p, .PreIncExpr);
+            try operand.un(p, .PreIncExpr);
+            return operand;
         },
 
         .MinusMinus => {
@@ -2872,7 +2917,8 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
                 .unavailable => {},
             }
 
-            return operand.un(p, .PreDecExpr);
+            try operand.un(p, .PreDecExpr);
+            return operand;
         },
 
         .Tilde => {
@@ -2892,7 +2938,8 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
                 .unavailable => {},
             }
 
-            return operand.un(p, .BoolNotExpr);
+            try operand.un(p, .BoolNotExpr);
+            return operand;
         },
 
         .Bang => {
@@ -2911,7 +2958,8 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
             }
 
             operand.ty = .{ .specifier = .Int };
-            return operand.un(p, .BoolNotExpr);
+            try operand.un(p, .BoolNotExpr);
+            return operand;
         },
 
         .KeywordSizeof => {
@@ -2941,7 +2989,8 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
             }
 
             res.ty = Type.sizeT(p.pp.compilation);
-            return res.un(p, .SizeOfExpr);
+            try res.un(p, .SizeOfExpr);
+            return res;
         },
 
         .KeywordAlignof, .KeywordGccAlignof1, .KeywordGccAlignof2 => {
@@ -2967,7 +3016,8 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
 
             res.ty = Type.sizeT(p.pp.compilation);
             res.value = .{ .unsigned = res.ty.alignment };
-            return res.un(p, .AlignOfExpr);
+            try res.un(p, .AlignOfExpr);
+            return res;
         },
 
         else => {
@@ -3122,7 +3172,8 @@ fn parseSuffixExpr(p: *Parser, lhs: Result) Error!Result {
             if (operand.ty.isInt())
                 try operand.intCast(p, operand.ty.integerPromotion(p.pp.compilation));
 
-            return operand.un(p, .PostIncExpr);
+            try operand.un(p, .PostIncExpr);
+            return operand;
         },
 
         .MinusMinus => {
@@ -3140,7 +3191,8 @@ fn parseSuffixExpr(p: *Parser, lhs: Result) Error!Result {
             if (operand.ty.isInt())
                 try operand.intCast(p, operand.ty.integerPromotion(p.pp.compilation));
 
-            return operand.un(p, .PostDecExpr);
+            try operand.un(p, .PostDecExpr);
+            return operand;
         },
 
         else => return Result{},
@@ -3158,7 +3210,8 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
     if (p.eat(.LParen)) |lp| {
         var e = try p.expr();
         try p.expectClosing(lp, .RParen);
-        return e.un(p, .ParenExpr);
+        try e.un(p, .ParenExpr);
+        return e;
     }
 
     switch (p.getCurrToken()) {

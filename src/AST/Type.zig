@@ -187,6 +187,7 @@ pub fn isArray(ty: Type) bool {
 
 pub fn isInt(ty: Type) bool {
     return switch (ty.specifier) {
+        .Enum,
         .Bool,
         .Char,
         .SChar,
