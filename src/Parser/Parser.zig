@@ -503,19 +503,28 @@ fn parseDeclaration(p: *Parser) Error!bool {
         if (p.inFunc)
             try p.err(.func_not_in_root);
 
+        // TODO check redefinition
+        try p.scopes.append(.{ .symbol = .{
+            .name = p.tokSlice(initD.d.name),
+            .type = initD.d.type,
+            .nameToken = initD.d.name,
+            .isInitialized = true,
+        } });
+
         const inFunction = p.inFunc;
         p.inFunc = true;
         defer p.inFunc = inFunction;
 
+        const scopesTop = p.scopes.items.len;
+        defer p.scopes.items.len = scopesTop;
+
+        // findSymbol stops the search at .block
+        try p.scopes.append(.block);
+
         // collect old style parameters
         if (initD.d.oldTypeFunc != null) {
             const paramBufferTop = p.paramBuffer.items.len;
-            const scopeTop = p.scopes.items.len;
-
-            defer {
-                p.paramBuffer.items.len = paramBufferTop;
-                p.scopes.items.len = scopeTop;
-            }
+            defer p.paramBuffer.items.len = paramBufferTop;
 
             initD.d.type.specifier = .Func;
             paramLoop: while (true) {
@@ -569,16 +578,16 @@ fn parseDeclaration(p: *Parser) Error!bool {
 
                 _ = try p.expectToken(.Semicolon);
             }
-        }
-
-        for (initD.d.type.data.func.params) |param| {
-            try p.scopes.append(.{
-                .symbol = .{
-                    .name = param.name,
-                    .type = param.ty,
-                    .nameToken = 0, // TODO split Scope.Symbol into Scope.Typedef
-                },
-            });
+        } else {
+            for (initD.d.type.data.func.params) |param| {
+                try p.scopes.append(.{
+                    .symbol = .{
+                        .name = param.name,
+                        .type = param.ty,
+                        .nameToken = 0, // TODO split Scope.Symbol into Scope.Typedef
+                    },
+                });
+            }
         }
 
         const node = try p.addNode(.{
@@ -805,9 +814,9 @@ const InitDeclarator = struct { d: Declarator, initializer: NodeIndex = .none };
 fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec) Error!?InitDeclarator {
     var initD = InitDeclarator{ .d = (try p.declarator(declSpec.type, .normal)) orelse return null };
 
-    if (p.eat(.Equal)) |_| {
-        if (declSpec.storageClass == .typedef or declSpec.type.isFunc())
-            try p.err(.illegal_initializer);
+    if (p.eat(.Equal)) |eq| {
+        if (declSpec.storageClass == .typedef or initD.d.funcDeclarator != null)
+            try p.errToken(.illegal_initializer, eq);
 
         if (declSpec.storageClass == .@"extern") {
             try p.err(.extern_initializer);
@@ -1544,7 +1553,12 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: Declarator
             d.oldTypeFunc = p.index;
 
             const paramBufferTop = p.paramBuffer.items.len;
-            defer p.paramBuffer.items.len = paramBufferTop;
+            const scopesTop = p.scopes.items.len;
+
+            defer {
+                p.paramBuffer.items.len = paramBufferTop;
+                p.scopes.items.len = scopesTop;
+            }
 
             // find Symbol stops search at the block
             try p.scopes.append(.block);
@@ -2440,8 +2454,14 @@ fn assignExpr(p: *Parser) Error!Result {
 
 /// constExpr : conditionalExpr
 fn constExpr(p: *Parser) Error!Result {
+    const start = p.index;
     const res = try p.conditionalExpr();
     try res.expect(p);
+
+    if (!res.ty.isInt()) {
+        try p.errToken(.expected_integer_constant_expr, start);
+        return error.ParsingFailed;
+    }
 
     return res;
 }
