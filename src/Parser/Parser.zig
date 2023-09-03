@@ -45,7 +45,8 @@ recordBuffer: std.ArrayList(Type.Record.Field),
 // configuration
 noEval: bool = false,
 inMacro: bool = false,
-inFunc: bool = false,
+returnType: ?Type = null,
+funcName: TokenIndex = 0,
 labelCount: u32 = 0,
 
 const Label = union(enum) {
@@ -459,7 +460,8 @@ fn parseDeclaration(p: *Parser) Error!bool {
     var declSpec = if (try p.declSpecifier()) |some|
         some
     else blk: {
-        if (p.inFunc) return false;
+        if (p.returnType != null)
+            return false;
 
         switch (p.tokenIds[firstTokenIndex]) {
             .Asterisk, .LParen, .Identifier => {},
@@ -500,7 +502,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
             },
         }
 
-        if (p.inFunc)
+        if (p.returnType != null)
             try p.err(.func_not_in_root);
 
         // TODO check redefinition
@@ -511,9 +513,15 @@ fn parseDeclaration(p: *Parser) Error!bool {
             .isInitialized = true,
         } });
 
-        const inFunction = p.inFunc;
-        p.inFunc = true;
-        defer p.inFunc = inFunction;
+        const returnType = p.returnType;
+        const funcName = p.funcName;
+        p.returnType = initD.d.type.data.func.returnType;
+        p.funcName = initD.d.name;
+
+        defer {
+            p.returnType = returnType;
+            p.funcName = funcName;
+        }
 
         const scopesTop = p.scopes.items.len;
         defer p.scopes.items.len = scopesTop;
@@ -606,7 +614,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
         p.nodes.items(.data)[@intFromEnum(node)].Declaration.node = body.?;
 
         // check gotos
-        if (inFunction) {
+        if (returnType == null) {
             for (p.labels.items) |item| {
                 if (item == .unresolvedGoto)
                     try p.errStr(.undeclared_label, item.unresolvedGoto, p.tokSlice(item.unresolvedGoto));
@@ -1488,7 +1496,7 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: Declarator
 
         switch (size.value) {
             .unavailable => if (size.node != .none) {
-                if (!p.inFunc and kind != .param)
+                if (p.returnType == null and kind != .param)
                     try p.errToken(.variable_len_array_file_scope, lb);
 
                 const vlaType = try p.arena.create(Type.VLA);
@@ -1893,15 +1901,11 @@ fn stmt(p: *Parser) Error!NodeIndex {
         return try p.addNode(.{ .tag = .BreakStmt, .data = undefined });
     }
 
-    if (p.eat(.KeywordReturn)) |_| {
-        const e = try p.expr();
-        _ = try p.expectToken(.Semicolon);
-
-        return try p.addNode(.{ .tag = .ReturnStmt, .data = .{ .UnaryExpr = e.node } });
-    }
+    if (try p.parseReturnStmt()) |some|
+        return some;
 
     const exprStart = p.index;
-    const e = try p.expr();
+    const e = try p.parseExpr();
     if (e.node != .none) {
         _ = try p.expectToken(.Semicolon);
         try e.maybeWarnUnused(p, exprStart);
@@ -1920,7 +1924,7 @@ fn parseIfStmt(p: *Parser) Error!NodeIndex {
     defer p.scopes.items.len = startScopeLen;
 
     const lp = try p.expectToken(.LParen);
-    var cond = try p.expr();
+    var cond = try p.parseExpr();
 
     try cond.expect(p);
     try cond.lvalConversion(p);
@@ -1964,14 +1968,14 @@ fn parseForStmt(p: *Parser) Error!NodeIndex {
 
     // for-init
     const initStart = p.index;
-    const init = if (!gotDecl) try p.expr() else Result{};
+    const init = if (!gotDecl) try p.parseExpr() else Result{};
     try init.maybeWarnUnused(p, initStart);
 
     if (!gotDecl)
         _ = try p.expectToken(.Semicolon);
 
     // cond
-    var cond = try p.expr();
+    var cond = try p.parseExpr();
     if (cond.node != .none) {
         try cond.lvalConversion(p);
         if (cond.ty.isInt())
@@ -1983,7 +1987,7 @@ fn parseForStmt(p: *Parser) Error!NodeIndex {
 
     // increment
     const incrStart = p.index;
-    const incr = try p.expr();
+    const incr = try p.parseExpr();
     try incr.maybeWarnUnused(p, incrStart);
     try p.expectClosing(lp, .RParen);
 
@@ -2016,7 +2020,7 @@ fn parseWhileStmt(p: *Parser) Error!NodeIndex {
     defer p.scopes.items.len = startScopeLen;
 
     const lp = try p.expectToken(.LParen);
-    var cond = try p.expr();
+    var cond = try p.parseExpr();
 
     try cond.expect(p);
     try cond.lvalConversion(p);
@@ -2046,7 +2050,7 @@ fn parseDoWhileStmt(p: *Parser) Error!NodeIndex {
 
     _ = try p.expectToken(.KeywordWhile);
     const lp = try p.expectToken(.LParen);
-    var cond = try p.expr();
+    var cond = try p.parseExpr();
 
     try cond.expect(p);
     try cond.lvalConversion(p);
@@ -2069,7 +2073,7 @@ fn parseSwitchStmt(p: *Parser) Error!NodeIndex {
     defer p.scopes.items.len = startScopeLen;
 
     const lp = try p.expectToken(.LParen);
-    var cond = try p.expr();
+    var cond = try p.parseExpr();
 
     try cond.expect(p);
     try cond.lvalConversion(p);
@@ -2263,6 +2267,64 @@ fn parseCompoundStmt(p: *Parser) Error!?NodeIndex {
     return try p.addNode(node);
 }
 
+fn parseReturnStmt(p: *Parser) Error!?NodeIndex {
+    const retToken = p.eat(.KeywordReturn) orelse return null;
+
+    const eToken = p.index;
+    var expr = try p.parseExpr();
+    _ = try p.expectToken(.Semicolon);
+    const returnType = p.returnType.?;
+
+    if (expr.node == .none) {
+        if (returnType.specifier != .Void)
+            try p.errStr(.func_should_return, retToken, p.tokSlice(p.funcName));
+
+        return try p.addNode(.{ .tag = .ReturnStmt, .data = .{ .UnaryExpr = expr.node } });
+    }
+    try expr.lvalConversion(p);
+
+    // TODO print types in these errors
+    // Return type conversion is done as if it was assignment
+    if (returnType.specifier == .Bool) {
+        // this is ridiculous but it's what clang does
+        if (expr.ty.isInt() or expr.ty.isFloat() or expr.ty.specifier == .Pointer) {
+            try expr.boolCast(p, returnType);
+        } else {
+            try p.errStr(.incompatible_return, eToken, try p.typeStr(expr.ty));
+        }
+    } else if (returnType.isInt()) {
+        if (expr.ty.isInt() or expr.ty.isFloat()) {
+            try expr.intCast(p, returnType);
+        } else if (expr.ty.specifier == .Pointer) {
+            try p.errToken(.implicit_ptr_to_int, eToken);
+            try expr.intCast(p, returnType);
+        } else {
+            try p.errStr(.incompatible_return, eToken, try p.typeStr(expr.ty));
+        }
+    } else if (returnType.isFloat()) {
+        if (expr.ty.isInt() or expr.ty.isFloat()) {
+            try expr.floatCast(p, returnType);
+        } else {
+            try p.errStr(.incompatible_return, eToken, try p.typeStr(expr.ty));
+        }
+    } else if (returnType.specifier == .Pointer) {
+        if (expr.ty.isInt()) {
+            try p.errToken(.implicit_int_to_ptr, eToken);
+            try expr.intCast(p, returnType);
+        } else if (!returnType.eql(expr.ty, false)) {
+            try p.errStr(.incompatible_return, eToken, try p.typeStr(expr.ty));
+        }
+    } else if (returnType.isEnumOrRecord()) { // enum.isInt() == true
+        if (!returnType.eql(expr.ty, false)) {
+            try p.errStr(.incompatible_return, eToken, try p.typeStr(expr.ty));
+        }
+    } else {
+        try p.errStr(.incompatible_return, eToken, try p.typeStr(expr.ty));
+    }
+
+    return try p.addNode(.{ .tag = .ReturnStmt, .data = .{ .UnaryExpr = expr.node } });
+}
+
 fn nodeIsNoreturn(p: *Parser, node: NodeIndex) bool {
     switch (p.nodes.items(.tag)[@intFromEnum(node)]) {
         .BreakStmt, .ContinueStmt, .ReturnStmt => return true,
@@ -2353,7 +2415,7 @@ pub fn macroExpr(p: *Parser) Compilation.Error!bool {
 }
 
 /// expr : assignExpr (',' assignExpr)*
-fn expr(p: *Parser) Error!Result {
+fn parseExpr(p: *Parser) Error!Result {
     var exprStartIdx = p.index;
     var lhs = try p.assignExpr();
     while (p.eat(.Comma)) |_| {
@@ -2509,7 +2571,7 @@ fn conditionalExpr(p: *Parser) Error!Result {
         if (cond.value != .unavailable and !cond.getBool())
             p.noEval = true;
 
-        break :blk try p.expr();
+        break :blk try p.parseExpr();
     };
 
     const colon = try p.expectToken(.Colon);
@@ -3109,7 +3171,7 @@ fn parseSuffixExpr(p: *Parser, lhs: Result) Error!Result {
         .LBracket => {
             const lb = p.index;
             p.index += 1;
-            var index = try p.expr();
+            var index = try p.parseExpr();
             try p.expectClosing(lb, .RBracket);
 
             const lhsType = lhs.ty;
@@ -3305,7 +3367,7 @@ fn checkArrayBounds(p: *Parser, index: Result, arrayType: Type, token: TokenInde
 ////  | '(' expr ')'
 fn parsePrimaryExpr(p: *Parser) Error!Result {
     if (p.eat(.LParen)) |lp| {
-        var e = try p.expr();
+        var e = try p.parseExpr();
         try p.expectClosing(lp, .RParen);
         try e.un(p, .ParenExpr);
         return e;
