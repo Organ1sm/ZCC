@@ -166,7 +166,7 @@ pub const Specifier = enum {
 pub fn isCallable(ty: Type) ?Type {
     return switch (ty.specifier) {
         .Func, .VarArgsFunc, .OldStyleFunc => ty,
-        .Pointer => ty.data.subType.isCallable(),
+        .Pointer => if(ty.data.subType.isFunc()) ty.data.subType.* else null,
         else => null,
     };
 }

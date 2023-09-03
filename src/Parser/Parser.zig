@@ -1920,9 +1920,14 @@ fn parseIfStmt(p: *Parser) Error!NodeIndex {
     defer p.scopes.items.len = startScopeLen;
 
     const lp = try p.expectToken(.LParen);
-    const cond = try p.expr();
+    var cond = try p.expr();
 
     try cond.expect(p);
+    try cond.lvalConversion(p);
+    if (cond.ty.isInt())
+        try cond.intCast(p, cond.ty.integerPromotion(p.pp.compilation))
+    else if (!cond.ty.isFloat() and cond.ty.specifier != .Pointer)
+        try p.errStr(.statement_scalar, lp + 1, try p.typeStr(cond.ty));
 
     try p.expectClosing(lp, .RParen);
 
@@ -1966,7 +1971,14 @@ fn parseForStmt(p: *Parser) Error!NodeIndex {
         _ = try p.expectToken(.Semicolon);
 
     // cond
-    const cond = try p.expr();
+    var cond = try p.expr();
+    if (cond.node != .none) {
+        try cond.lvalConversion(p);
+        if (cond.ty.isInt())
+            try cond.intCast(p, cond.ty.integerPromotion(p.pp.compilation))
+        else if (!cond.ty.isFloat() and cond.ty.specifier != .Pointer)
+            try p.errStr(.statement_scalar, lp + 1, try p.typeStr(cond.ty));
+    }
     _ = try p.expectToken(.Semicolon);
 
     // increment
@@ -2004,9 +2016,15 @@ fn parseWhileStmt(p: *Parser) Error!NodeIndex {
     defer p.scopes.items.len = startScopeLen;
 
     const lp = try p.expectToken(.LParen);
-    const cond = try p.expr();
+    var cond = try p.expr();
 
     try cond.expect(p);
+    try cond.lvalConversion(p);
+    if (cond.ty.isInt())
+        try cond.intCast(p, cond.ty.integerPromotion(p.pp.compilation))
+    else if (!cond.ty.isFloat() and cond.ty.specifier != .Pointer)
+        try p.errStr(.statement_scalar, lp + 1, try p.typeStr(cond.ty));
+
     try p.expectClosing(lp, .RParen);
 
     try p.scopes.append(.loop);
@@ -2028,9 +2046,15 @@ fn parseDoWhileStmt(p: *Parser) Error!NodeIndex {
 
     _ = try p.expectToken(.KeywordWhile);
     const lp = try p.expectToken(.LParen);
-    const cond = try p.expr();
+    var cond = try p.expr();
 
     try cond.expect(p);
+    try cond.lvalConversion(p);
+    if (cond.ty.isInt())
+        try cond.intCast(p, cond.ty.integerPromotion(p.pp.compilation))
+    else if (!cond.ty.isFloat() and cond.ty.specifier != .Pointer)
+        try p.errStr(.statement_scalar, lp + 1, try p.typeStr(cond.ty));
+
     try p.expectClosing(lp, .RParen);
 
     _ = try p.expectToken(.Semicolon);
@@ -2045,9 +2069,15 @@ fn parseSwitchStmt(p: *Parser) Error!NodeIndex {
     defer p.scopes.items.len = startScopeLen;
 
     const lp = try p.expectToken(.LParen);
-    const cond = try p.expr();
+    var cond = try p.expr();
 
     try cond.expect(p);
+    try cond.lvalConversion(p);
+    if (cond.ty.isInt())
+        try cond.intCast(p, cond.ty.integerPromotion(p.pp.compilation))
+    else
+        try p.errStr(.statement_int, lp + 1, try p.typeStr(cond.ty));
+
     try p.expectClosing(lp, .RParen);
 
     var switchScope = Scope.Switch{
