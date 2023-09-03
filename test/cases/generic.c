@@ -6,7 +6,6 @@ void foo(void) {
     (void)_Generic(7, double: 8, double: 9); // TODO duplicate type / no match
 }
 
-#define TESTS_SKIPPED 1
 #define EXPECTED_ERRORS "generic.c:2:21: error: expected ',', found ')'" \
     "generic.c:3:22: error: expected a type" \
     "generic.c:4:23: warning: generic association with qualifiers cannot be matched with" \

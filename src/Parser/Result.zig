@@ -43,7 +43,7 @@ pub fn expect(res: Result, p: *Parser) Error!void {
 }
 
 pub fn maybeWarnUnused(res: Result, p: *Parser, exprStart: TokenIndex) Error!void {
-    if (res.ty.specifier == .Void)
+    if (res.ty.specifier == .Void or res.node == .none)
         return;
 
     switch (p.nodes.items(.tag)[@intFromEnum(res.node)]) {

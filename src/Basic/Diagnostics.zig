@@ -209,6 +209,8 @@ pub const Tag = enum {
     invalid_subscript,
     array_after,
     array_before,
+    statement_int,
+    statement_scalar,
 };
 
 list: std.ArrayList(Message),
@@ -558,6 +560,8 @@ pub fn renderExtra(comp: *Compilation, m: anytype) void {
             .invalid_subscript => m.write("subscripted value is not an array or pointer"),
             .array_after => m.print("array index {d} is past the end of the array", .{msg.extra.unsigned}),
             .array_before => m.print("array index {d} is before the beginning of the array", .{msg.extra.signed}),
+            .statement_int => m.print("statement requires expression with integer type ('{s}' invalid)", .{msg.extra.str}),
+            .statement_scalar => m.print("statement requires expression with scalar type ('{s}' invalid)", .{msg.extra.str}),
         }
 
         m.end(lcs);
@@ -717,6 +721,8 @@ fn tagKind(diag: *Diagnostics, tag: Tag) Kind {
         .invalid_cast_type,
         .invalid_index,
         .invalid_subscript,
+        .statement_int,
+        .statement_scalar,
         => .@"error",
 
         .to_match_paren,
