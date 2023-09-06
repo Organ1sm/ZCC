@@ -35,11 +35,25 @@ pub fn asU64(res: Result) u64 {
 }
 
 pub fn expect(res: Result, p: *Parser) Error!void {
+    if (p.inMacro) {
+        if (res.value == .unavailable) {
+            try p.errToken(.expected_expr, p.index);
+            return error.ParsingFailed;
+        }
+        return;
+    }
+
     try res.saveValue(p);
     if (res.node == .none) {
         try p.errToken(.expected_expr, p.index);
         return error.ParsingFailed;
     }
+}
+
+pub fn empty(res: Result, p: *Parser) bool {
+    if (p.inMacro)
+        return res.value == .unavailable;
+    return res.node == .none;
 }
 
 pub fn maybeWarnUnused(res: Result, p: *Parser, exprStart: TokenIndex) Error!void {
