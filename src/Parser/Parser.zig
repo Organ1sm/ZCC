@@ -2466,6 +2466,8 @@ fn tokToTag(p: *Parser, token: TokenIndex) AstTag {
 ///  | unaryExpr ('=' | '*=' | '/=' | '%=' | '+=' | '-=' | '<<=' | '>>=' | '&=' | '^=' | '|=') assignExpr
 fn assignExpr(p: *Parser) Error!Result {
     var lhs = try p.conditionalExpr();
+    if (lhs.empty(p))
+        return lhs;
 
     const index = p.index;
     const eq = p.eat(.Equal);
@@ -2482,6 +2484,7 @@ fn assignExpr(p: *Parser) Error!Result {
 
     const tag = p.tokToTag(bitOr orelse return lhs);
     var rhs = try p.assignExpr();
+    try rhs.expect(p);
     try rhs.lvalConversion(p);
 
     if (!AST.isLValue(p.nodes.slice(), lhs.node) or lhs.ty.qual.@"const") {
@@ -2561,7 +2564,7 @@ fn constExpr(p: *Parser) Error!Result {
 /// conditionalExpr : logicalOrExpr ('?' expression? ':' conditionalExpr)?
 fn conditionalExpr(p: *Parser) Error!Result {
     var cond = try p.logicalOrExpr();
-    if (p.eat(.QuestionMark) == null)
+    if (cond.empty(p) or p.eat(.QuestionMark) == null)
         return cond;
     const savedEval = p.noEval;
 
@@ -2573,6 +2576,7 @@ fn conditionalExpr(p: *Parser) Error!Result {
 
         break :blk try p.parseExpr();
     };
+    try thenExpr.expect(p);
 
     const colon = try p.expectToken(.Colon);
 
@@ -2583,6 +2587,7 @@ fn conditionalExpr(p: *Parser) Error!Result {
 
         break :blk try p.conditionalExpr();
     };
+    try elseExpr.expect(p);
 
     _ = try thenExpr.adjustTypes(colon, &elseExpr, p, .conditional);
 
@@ -2602,6 +2607,8 @@ fn conditionalExpr(p: *Parser) Error!Result {
 /// logicalOrExpr : logicalAndExpr ('||' logicalAndExpr)*
 fn logicalOrExpr(p: *Parser) Error!Result {
     var lhs = try p.logicalAndExpr();
+    if (lhs.empty(p))
+        return lhs;
     const savedEval = p.noEval;
     defer p.noEval = savedEval;
 
@@ -2610,6 +2617,8 @@ fn logicalOrExpr(p: *Parser) Error!Result {
             p.noEval = true;
 
         var rhs = try p.logicalAndExpr();
+        try rhs.expect(p);
+
         if (try lhs.adjustTypes(token, &rhs, p, .booleanLogic)) {
             lhs.value = .{ .signed = @intFromBool(lhs.getBool() or rhs.getBool()) };
         }
@@ -2624,6 +2633,9 @@ fn logicalOrExpr(p: *Parser) Error!Result {
 /// logicalAndExpr : orExpr ('&&' orExpr)*
 fn logicalAndExpr(p: *Parser) Error!Result {
     var lhs = try p.orExpr();
+    if (lhs.empty(p))
+        return lhs;
+
     const savedEval = p.noEval;
     defer p.noEval = savedEval;
 
@@ -2632,6 +2644,8 @@ fn logicalAndExpr(p: *Parser) Error!Result {
             p.noEval = true;
 
         var rhs = try p.orExpr();
+        try rhs.expect(p);
+
         if (try lhs.adjustTypes(token, &rhs, p, .booleanLogic)) {
             lhs.value = .{ .signed = @intFromBool(lhs.getBool() or rhs.getBool()) };
         }
@@ -2645,8 +2659,12 @@ fn logicalAndExpr(p: *Parser) Error!Result {
 /// orExpr : xorExpr ('|' xorExpr)*
 fn orExpr(p: *Parser) Error!Result {
     var lhs = try p.xorExpr();
+    if (lhs.empty(p))
+        return lhs;
+
     while (p.eat(.Pipe)) |token| {
         var rhs = try p.xorExpr();
+        try rhs.expect(p);
 
         if (try lhs.adjustTypes(token, &rhs, p, .integer)) {
             lhs.value = switch (lhs.value) {
@@ -2664,8 +2682,12 @@ fn orExpr(p: *Parser) Error!Result {
 /// xorExpr : andExpr ('^' andExpr)*
 fn xorExpr(p: *Parser) Error!Result {
     var lhs = try p.andExpr();
+    if (lhs.empty(p))
+        return lhs;
+
     while (p.eat(.Caret)) |token| {
         var rhs = try p.andExpr();
+        try rhs.expect(p);
 
         if (try lhs.adjustTypes(token, &rhs, p, .integer)) {
             lhs.value = switch (lhs.value) {
@@ -2683,8 +2705,12 @@ fn xorExpr(p: *Parser) Error!Result {
 /// andExpr : eqExpr ('&' eqExpr)*
 fn andExpr(p: *Parser) Error!Result {
     var lhs = try p.eqExpr();
+    if (lhs.empty(p))
+        return lhs;
+
     while (p.eat(.Ampersand)) |token| {
         var rhs = try p.eqExpr();
+        try rhs.expect(p);
 
         if (try lhs.adjustTypes(token, &rhs, p, .integer)) {
             lhs.value = switch (lhs.value) {
@@ -2702,11 +2728,15 @@ fn andExpr(p: *Parser) Error!Result {
 /// eqExpr : compExpr (('==' | '!=') compExpr)*
 fn eqExpr(p: *Parser) Error!Result {
     var lhs = try p.compExpr();
+    if (lhs.empty(p))
+        return lhs;
+
     while (true) {
         const eq = p.eat(.EqualEqual);
         const ne = eq orelse p.eat(.BangEqual);
         const tag = p.tokToTag(ne orelse break);
         var rhs = try p.compExpr();
+        try rhs.expect(p);
 
         if (try lhs.adjustTypes(ne.?, &rhs, p, .equality)) {
             const res = if (tag == .EqualExpr)
@@ -2726,6 +2756,9 @@ fn eqExpr(p: *Parser) Error!Result {
 /// compExpr : shiftExpr (('<' | '<=' | '>' | '>=') shiftExpr)*
 fn compExpr(p: *Parser) Error!Result {
     var lhs = try p.shiftExpr();
+    if (lhs.empty(p))
+        return lhs;
+
     while (true) {
         const lt = p.eat(.AngleBracketLeft);
         const le = lt orelse p.eat(.AngleBracketLeftEqual);
@@ -2733,6 +2766,7 @@ fn compExpr(p: *Parser) Error!Result {
         const ge = gt orelse p.eat(.AngleBracketRightEqual);
         const tag = p.tokToTag(ge orelse break);
         var rhs = try p.shiftExpr();
+        try rhs.expect(p);
 
         if (try lhs.adjustTypes(ge.?, &rhs, p, .relational)) {
             lhs.value = .{ .signed = @intFromBool(switch (tag) {
@@ -2754,11 +2788,15 @@ fn compExpr(p: *Parser) Error!Result {
 /// shiftExpr : addExpr (('<<' | '>>') addExpr)*
 fn shiftExpr(p: *Parser) Error!Result {
     var lhs = try p.addExpr();
+    if (lhs.empty(p))
+        return lhs;
+
     while (true) {
         const shl = p.eat(.AngleBracketAngleBracketLeft);
         const shr = shl orelse p.eat(.AngleBracketAngleBracketRight);
         const tag = p.tokToTag(shr orelse break);
         var rhs = try p.addExpr();
+        try rhs.expect(p);
 
         if (try lhs.adjustTypes(shr.?, &rhs, p, .integer)) {
             // TODO overflow
@@ -2785,11 +2823,15 @@ fn shiftExpr(p: *Parser) Error!Result {
 /// addExpr : mulExpr (('+' | '-') mulExpr)*
 fn addExpr(p: *Parser) Error!Result {
     var lhs = try p.mulExpr();
+    if (lhs.empty(p))
+        return lhs;
+
     while (true) {
         const plus = p.eat(.Plus);
         const minus = plus orelse p.eat(.Minus);
         const tag = p.tokToTag(minus orelse break);
         var rhs = try p.mulExpr();
+        try rhs.expect(p);
 
         if (try lhs.adjustTypes(minus.?, &rhs, p, if (plus != null) .add else .sub)) {
             if (plus != null) {
@@ -2807,12 +2849,16 @@ fn addExpr(p: *Parser) Error!Result {
 /// mulExpr : castExpr (('*' | '/' | '%') castExpr)*´
 fn mulExpr(p: *Parser) Error!Result {
     var lhs = try p.parseCastExpr();
+    if (lhs.empty(p))
+        return lhs;
+
     while (true) {
         const mul = p.eat(.Asterisk);
         const div = mul orelse p.eat(.Slash);
         const percent = div orelse p.eat(.Percent);
         const tag = p.tokToTag(percent orelse break);
         var rhs = try p.parseCastExpr();
+        try rhs.expect(p);
 
         if (try lhs.adjustTypes(percent.?, &rhs, p, if (tag == .ModExpr) .integer else .arithmetic)) {
             // TODO divide by 0
@@ -2875,7 +2921,10 @@ fn parseCastExpr(p: *Parser) Error!Result {
                 }
                 return Result{ .node = try p.addNode(node), .ty = ty };
             }
+
             var operand = try p.parseCastExpr();
+            try operand.expect(p);
+
             if (ty.specifier == .Void) {
                 // everything can cast to void
             } else if (ty.isInt() or ty.isFloat() or ty.specifier == .Pointer) {
@@ -2912,9 +2961,9 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
     switch (p.tokenIds[index]) {
         .Ampersand => {
             p.index += 1;
-
-            // TODO: validate type
             var operand = try p.parseCastExpr();
+            try operand.expect(p);
+
             if (!AST.isLValue(p.nodes.slice(), operand.node)) {
                 try p.errToken(.addr_of_rvalue, index);
                 return error.ParsingFailed;
@@ -2934,6 +2983,7 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
         .Asterisk => {
             p.index += 1;
             var operand = try p.parseCastExpr();
+            try operand.expect(p);
 
             // TODO: validate pointer type
             switch (operand.ty.specifier) {
@@ -2958,6 +3008,7 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
         .Plus => {
             p.index += 1;
             var operand = try p.parseCastExpr();
+            try operand.expect(p);
             try operand.lvalConversion(p);
 
             if (!operand.ty.isInt() and !operand.ty.isFloat())
@@ -2972,6 +3023,7 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
         .Minus => {
             p.index += 1;
             var operand = try p.parseCastExpr();
+            try operand.expect(p);
             try operand.lvalConversion(p);
 
             if (!operand.ty.isInt() and !operand.ty.isFloat())
@@ -3001,6 +3053,7 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
         .PlusPlus => {
             p.index += 1;
             var operand = try p.parseCastExpr();
+            try operand.expect(p);
 
             if (!operand.ty.isInt() and !operand.ty.isFloat() and !operand.ty.isReal() and operand.ty.specifier != .Pointer)
                 try p.errStr(.invalid_argument_un, index, try p.typeStr(operand.ty));
@@ -3026,6 +3079,7 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
         .MinusMinus => {
             p.index += 1;
             var operand = try p.parseCastExpr();
+            try operand.expect(p);
 
             if (!operand.ty.isInt() and !operand.ty.isFloat() and !operand.ty.isReal() and operand.ty.specifier != .Pointer)
                 try p.errStr(.invalid_argument_un, index, try p.typeStr(operand.ty));
@@ -3051,6 +3105,7 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
         .Tilde => {
             p.index += 1;
             var operand = try p.parseCastExpr();
+            try operand.expect(p);
             try operand.lvalConversion(p);
 
             if (!operand.ty.isInt())
@@ -3072,6 +3127,7 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
         .Bang => {
             p.index += 1;
             var operand = try p.parseCastExpr();
+            try operand.expect(p);
             try operand.lvalConversion(p);
 
             if (!operand.ty.isInt() and !operand.ty.isFloat() and operand.ty.specifier != .Pointer)
@@ -3103,9 +3159,11 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
                 } else {
                     p.index = expectedParen;
                     res = try p.parseUnaryExpr();
+                    try res.expect(p);
                 }
             } else {
                 res = try p.parseUnaryExpr();
+                try res.expect(p);
             }
 
             if (res.ty.sizeof(p.pp.compilation)) |size| {
@@ -3134,10 +3192,12 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
                 } else {
                     p.index = expectedParen;
                     res = try p.parseUnaryExpr();
+                    try res.expect(p);
                     try p.errToken(.alignof_expr, expectedParen);
                 }
             } else {
                 res = try p.parseUnaryExpr();
+                try res.expect(p);
                 try p.errToken(.alignof_expr, expectedParen);
             }
 
@@ -3149,9 +3209,11 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
 
         else => {
             var lhs = try p.parsePrimaryExpr();
+            if (lhs.empty(p))
+                return lhs;
             while (true) {
                 const suffix = try p.parseSuffixExpr(lhs);
-                if (suffix.node == .none) break;
+                if (suffix.empty(p)) break;
                 lhs = suffix;
             }
             return lhs;
@@ -3167,11 +3229,13 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
 ///  | '++'
 ///  | '--'
 fn parseSuffixExpr(p: *Parser, lhs: Result) Error!Result {
+    std.debug.assert(!lhs.empty(p));
     switch (p.getCurrToken()) {
         .LBracket => {
             const lb = p.index;
             p.index += 1;
             var index = try p.parseExpr();
+            try index.expect(p);
             try p.expectClosing(lb, .RBracket);
 
             const lhsType = lhs.ty;
@@ -3368,6 +3432,7 @@ fn checkArrayBounds(p: *Parser, index: Result, arrayType: Type, token: TokenInde
 fn parsePrimaryExpr(p: *Parser) Error!Result {
     if (p.eat(.LParen)) |lp| {
         var e = try p.parseExpr();
+        try e.expect(p);
         try p.expectClosing(lp, .RParen);
         try e.un(p, .ParenExpr);
         return e;
@@ -3561,6 +3626,7 @@ fn parseGenericSelection(p: *Parser) Error!Result {
     p.index += 1;
     const lp = try p.expectToken(.LParen);
     const controlling = try p.assignExpr();
+    try controlling.expect(p);
     _ = try p.expectToken(.Comma);
 
     const listBufferTop = p.listBuffer.items.len;
@@ -3580,6 +3646,7 @@ fn parseGenericSelection(p: *Parser) Error!Result {
 
             _ = try p.expectToken(.Colon);
             chosen = try p.assignExpr();
+            try chosen.expect(p);
 
             try p.listBuffer.append(try p.addNode(.{
                 .tag = .GenericAssociationExpr,
@@ -3595,6 +3662,8 @@ fn parseGenericSelection(p: *Parser) Error!Result {
             defaultToken = tok;
             _ = try p.expectToken(.Colon);
             chosen = try p.assignExpr();
+            try chosen.expect(p);
+
             try p.listBuffer.append(try p.addNode(.{
                 .tag = .GenericDefaultExpr,
                 .data = .{ .UnaryExpr = chosen.node },
