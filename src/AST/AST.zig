@@ -325,7 +325,11 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
             try w.print("label: " ++ LITERAL ++ "{s}\n" ++ RESET, .{tree.tokSlice(data.DeclarationRef)});
         },
 
-        .ContinueStmt, .BreakStmt => {},
+        .ContinueStmt,
+        .BreakStmt,
+        .ImplicitReturn,
+        => {},
+
         .ReturnStmt => {
             if (data.UnaryExpr != .none) {
                 try w.writeByteNTimes(' ', level + half);

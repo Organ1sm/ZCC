@@ -285,6 +285,10 @@ pub const Tag = enum(u8) {
     /// Convert type to void; only appears on the branches of a conditional expr
     ToVoid,
 
+    /// Inserted at the end of a function body if no return stmt is found.
+    /// ty is the functions return type
+    ImplicitReturn,
+
     pub fn isImplicit(tag: Tag) bool {
         return switch (tag) {
             .ArrayToPointer,
@@ -302,6 +306,7 @@ pub const Tag = enum(u8) {
             .IntCast,
             .FloatCast,
             .ToVoid,
+            .ImplicitReturn,
             => true,
 
             else => false,

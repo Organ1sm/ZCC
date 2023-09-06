@@ -610,7 +610,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
             .isInitialized = initD.initializer != .none,
         } });
 
-        const body = try p.parseCompoundStmt();
+        const body = try p.parseCompoundStmt(true);
         p.nodes.items(.data)[@intFromEnum(node)].Declaration.node = body.?;
 
         // check gotos
@@ -1853,7 +1853,7 @@ fn stmt(p: *Parser) Error!NodeIndex {
     if (try p.labeledStmt()) |some|
         return some;
 
-    if (try p.parseCompoundStmt()) |some|
+    if (try p.parseCompoundStmt(false)) |some|
         return some;
 
     if (p.eat(.KeywordIf)) |_|
@@ -2194,7 +2194,7 @@ fn labeledStmt(p: *Parser) Error!?NodeIndex {
 }
 
 /// compoundStmt : '{' ( decl | staticAssert |stmt)* '}'
-fn parseCompoundStmt(p: *Parser) Error!?NodeIndex {
+fn parseCompoundStmt(p: *Parser, addImplicitReturn: bool) Error!?NodeIndex {
     const lBrace = p.eat(.LBrace) orelse return null;
 
     const declBufferTop = p.declBuffer.items.len;
@@ -2247,6 +2247,19 @@ fn parseCompoundStmt(p: *Parser) Error!?NodeIndex {
     if (noreturnIdx) |some| {
         if (noreturnLabelCount == p.labelCount and some != p.index - 1)
             try p.errToken(.unreachable_code, some);
+    }
+
+    if (addImplicitReturn and (p.declBuffer.items.len == declBufferTop or
+        p.nodes.items(.tag)[@intFromEnum(p.declBuffer.items[p.declBuffer.items.len - 1])] != .ReturnStmt))
+    {
+        if (p.returnType.?.specifier != .Void)
+            try p.errStr(.func_does_not_return, p.index - 1, p.tokSlice(p.funcName));
+
+        try p.declBuffer.append(try p.addNode(.{
+            .tag = .ImplicitReturn,
+            .type = p.returnType.?,
+            .data = undefined,
+        }));
     }
 
     var node: AST.Node = .{
