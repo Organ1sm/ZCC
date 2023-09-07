@@ -48,6 +48,7 @@ pub const Function = struct {
     pub const Param = struct {
         name: []const u8,
         ty: Type,
+        nameToken: TokenIndex,
         register: bool,
     };
 };

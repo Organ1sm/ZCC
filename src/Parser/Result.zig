@@ -103,12 +103,6 @@ pub fn un(operand: *Result, p: *Parser, tag: AstTag) Error!void {
     });
 }
 
-pub fn coerce(res: Result, p: *Parser, destType: Type) !Result {
-    _ = p;
-    _ = destType;
-    return res;
-}
-
 /// Return true if both are same type
 /// Adjust types for binary operation, returns true if the result can and should be evaluated.
 pub fn adjustTypes(a: *Result, token: TokenIndex, b: *Result, p: *Parser, kind: enum {
