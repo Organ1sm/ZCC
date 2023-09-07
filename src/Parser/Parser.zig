@@ -592,7 +592,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
                     .symbol = .{
                         .name = param.name,
                         .type = param.ty,
-                        .nameToken = 0, // TODO split Scope.Symbol into Scope.Typedef
+                        .nameToken = param.nameToken,
                     },
                 });
             }
@@ -833,9 +833,8 @@ fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec) Error!?InitDeclarator {
 
         const init = try p.initializer(declSpec.type);
         try init.expect(p);
-        const casted = try init.coerce(p, initD.d.type);
-
-        initD.initializer = casted.node;
+        //  TODO: do type coerce
+        initD.initializer = init.node;
     }
 
     const name = initD.d.name;
@@ -1587,6 +1586,7 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: Declarator
 
                 try p.paramBuffer.append(.{
                     .name = p.tokSlice(nameToken),
+                    .nameToken = nameToken,
                     .ty = .{ .specifier = .Int },
                     .register = false,
                 });
@@ -1659,6 +1659,7 @@ fn paramDecls(p: *Parser) Error!?[]Type.Function.Param {
         };
 
         var nameToken: TokenIndex = 0;
+        const firstToken = p.index;
         var paramType = paramDeclSpec.type;
         if (try p.declarator(paramDeclSpec.type, .param)) |some| {
             if (some.oldTypeFunc) |tokenIdx|
@@ -1721,6 +1722,7 @@ fn paramDecls(p: *Parser) Error!?[]Type.Function.Param {
 
         try p.paramBuffer.append(.{
             .name = if (nameToken == 0) "" else p.tokSlice(nameToken),
+            .nameToken = if (nameToken == 0) firstToken else nameToken,
             .ty = paramType,
             .register = paramDeclSpec.storageClass == .register,
         });
@@ -3273,80 +3275,7 @@ fn parseSuffixExpr(p: *Parser, lhs: Result) Error!Result {
             return ptr;
         },
 
-        .LParen => {
-            const lParen = p.index;
-            p.index += 1;
-            const ty = lhs.ty.isCallable() orelse {
-                try p.errStr(.not_callable, lParen, try p.typeStr(lhs.ty));
-                return error.ParsingFailed;
-            };
-
-            const params = ty.data.func.params;
-
-            const listBufferTop = p.listBuffer.items.len;
-            defer p.listBuffer.items.len = listBufferTop;
-            try p.listBuffer.append(lhs.node);
-            var argCount: u32 = 0;
-
-            var firstAfter = lParen;
-            if (p.eat(.RParen) == null) {
-                while (true) {
-                    if (argCount == params.len)
-                        firstAfter = p.index;
-
-                    const arg = try p.assignExpr();
-                    try arg.expect(p);
-
-                    if (argCount < params.len) {
-                        const casted = try arg.coerce(p, params[argCount].ty);
-                        try p.listBuffer.append(casted.node);
-                    } else {
-                        // TODO: coerce to var args passable type
-                        try p.listBuffer.append(arg.node);
-                    }
-
-                    argCount += 1;
-                    _ = p.eat(.Comma) orelse break;
-                }
-
-                try p.expectClosing(lParen, .RParen);
-            }
-
-            const extra = Diagnostics.Message.Extra{
-                .arguments = .{
-                    .expected = @as(u32, @intCast(params.len)),
-                    .actual = @as(u32, @intCast(argCount)),
-                },
-            };
-            if (ty.specifier == .Func and params.len != argCount) {
-                try p.errExtra(.expected_arguments, firstAfter, extra);
-            }
-
-            if (ty.specifier == .OldStyleFunc and params.len != argCount) {
-                try p.errExtra(.expected_arguments_old, firstAfter, extra);
-            }
-
-            if (ty.specifier == .VarArgsFunc and argCount < params.len) {
-                try p.errExtra(.expected_at_least_arguments, firstAfter, extra);
-            }
-
-            var callNode: AST.Node = .{
-                .tag = .CallExprOne,
-                .type = ty.data.func.returnType,
-                .data = .{ .BinaryExpr = .{ .lhs = lhs.node, .rhs = .none } },
-            };
-
-            const args = p.listBuffer.items[listBufferTop..];
-            switch (argCount) {
-                0 => {},
-                1 => callNode.data.BinaryExpr.rhs = args[1], //args[0]  == lhs.node
-                else => {
-                    callNode.tag = .CallExpr;
-                    callNode.data = .{ .range = try p.addList(args) };
-                },
-            }
-            return Result{ .node = try p.addNode(callNode), .ty = callNode.type };
-        },
+        .LParen => return p.parseCallExpr(lhs),
 
         .Period => {
             p.index += 1;
@@ -3416,6 +3345,129 @@ fn parseSuffixExpr(p: *Parser, lhs: Result) Error!Result {
 
         else => return Result{},
     }
+}
+
+fn reportParam(p: Parser, paramToken: TokenIndex, arg: Result, argCount: u32, params: []Type.Function.Param) Error!void {
+    try p.errStr(.incompatible_param, paramToken, try p.typeStr(arg.ty));
+    try p.errToken(.parameter_here, params[argCount].nameToken);
+}
+
+fn parseCallExpr(p: *Parser, lhs: Result) Error!Result {
+    const lParen = p.index;
+    p.index += 1;
+    const ty = lhs.ty.isCallable() orelse {
+        try p.errStr(.not_callable, lParen, try p.typeStr(lhs.ty));
+        return error.ParsingFailed;
+    };
+
+    const params = ty.data.func.params;
+    var func = lhs;
+    try func.lvalConversion(p);
+
+    const listBufferTop = p.listBuffer.items.len;
+    defer p.listBuffer.items.len = listBufferTop;
+    try p.listBuffer.append(func.node);
+    var argCount: u32 = 0;
+
+    var firstAfter = lParen;
+    if (p.eat(.RParen) == null) {
+        while (true) {
+            const paramToken = p.index;
+            if (argCount == params.len)
+                firstAfter = p.index;
+
+            var arg = try p.assignExpr();
+            try arg.expect(p);
+            try arg.lvalConversion(p);
+
+            if (argCount < params.len) {
+                const paramType = params[argCount].ty;
+                if (paramType.specifier == .Bool) {
+                    // this is ridiculous but it's what clang does
+                    if (arg.ty.isInt() or arg.ty.isFloat() or arg.ty.specifier == .Pointer)
+                        try arg.boolCast(p, paramType)
+                    else
+                        try p.reportParam(paramToken, arg, argCount, params);
+                } else if (paramType.isInt()) {
+                    if (arg.ty.isInt() or arg.ty.isFloat()) {
+                        try arg.intCast(p, paramType);
+                    } else if (arg.ty.specifier == .Pointer) {
+                        try p.errToken(.implicit_ptr_to_int, paramToken);
+                        try p.errToken(.parameter_here, params[argCount].nameToken);
+                        try arg.intCast(p, paramType);
+                    } else {
+                       try  p.reportParam(paramToken, arg, argCount, params);
+                    }
+                } else if (paramType.isFloat()) {
+                    if (arg.ty.isInt() or arg.ty.isFloat())
+                        try arg.floatCast(p, paramType)
+                    else
+                        try p.reportParam(paramToken, arg, argCount, params);
+                } else if (paramType.specifier == .Pointer) {
+                    if (arg.ty.isInt()) {
+                        try p.errToken(.implicit_int_to_ptr, paramToken);
+                        try p.errToken(.parameter_here, params[argCount].nameToken);
+                        try arg.intCast(p, paramType);
+                    } else if (!paramType.eql(arg.ty, false)) {
+                        try p.reportParam(paramToken, arg, argCount, params);
+                    }
+                } else if (paramType.isEnumOrRecord()) { // enum.isInt() == true
+                    if (!paramType.eql(arg.ty, false)) {
+                        try p.reportParam(paramToken, arg, argCount, params);
+                    }
+                } else {
+                    // should be unreachable
+                    try p.reportParam(paramToken, arg, argCount, params);
+                }
+            } else {
+                if (arg.ty.isInt())
+                    try arg.intCast(p, arg.ty.integerPromotion(p.pp.compilation));
+                if (arg.ty.specifier == .Float)
+                    try arg.floatCast(p, .{ .specifier = .Double });
+            }
+
+            try p.listBuffer.append(arg.node);
+            argCount += 1;
+            _ = p.eat(.Comma) orelse break;
+        }
+
+        try p.expectClosing(lParen, .RParen);
+    }
+
+    const extra = Diagnostics.Message.Extra{
+        .arguments = .{
+            .expected = @as(u32, @intCast(params.len)),
+            .actual = @as(u32, @intCast(argCount)),
+        },
+    };
+    if (ty.specifier == .Func and params.len != argCount) {
+        try p.errExtra(.expected_arguments, firstAfter, extra);
+    }
+
+    if (ty.specifier == .OldStyleFunc and params.len != argCount) {
+        try p.errExtra(.expected_arguments_old, firstAfter, extra);
+    }
+
+    if (ty.specifier == .VarArgsFunc and argCount < params.len) {
+        try p.errExtra(.expected_at_least_arguments, firstAfter, extra);
+    }
+
+    var callNode: AST.Node = .{
+        .tag = .CallExprOne,
+        .type = ty.data.func.returnType,
+        .data = .{ .BinaryExpr = .{ .lhs = lhs.node, .rhs = .none } },
+    };
+
+    const args = p.listBuffer.items[listBufferTop..];
+    switch (argCount) {
+        0 => {},
+        1 => callNode.data.BinaryExpr.rhs = args[1], //args[0]  == lhs.node
+        else => {
+            callNode.tag = .CallExpr;
+            callNode.data = .{ .range = try p.addList(args) };
+        },
+    }
+    return Result{ .node = try p.addNode(callNode), .ty = callNode.type };
 }
 
 fn checkArrayBounds(p: *Parser, index: Result, arrayType: Type, token: TokenIndex) !void {
