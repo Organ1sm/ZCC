@@ -3347,7 +3347,7 @@ fn parseSuffixExpr(p: *Parser, lhs: Result) Error!Result {
     }
 }
 
-fn reportParam(p: Parser, paramToken: TokenIndex, arg: Result, argCount: u32, params: []Type.Function.Param) Error!void {
+fn reportParam(p: *Parser, paramToken: TokenIndex, arg: Result, argCount: u32, params: []Type.Function.Param) Error!void {
     try p.errStr(.incompatible_param, paramToken, try p.typeStr(arg.ty));
     try p.errToken(.parameter_here, params[argCount].nameToken);
 }

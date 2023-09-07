@@ -185,6 +185,13 @@ pub fn adjustTypes(a: *Result, token: TokenIndex, b: *Result, p: *Parser, kind: 
                 try b.toVoid(p);
                 return true;
             }
+
+            if ((aIsPtr and bIsInt) or (aIsInt and bIsPtr)) {
+                try p.errToken(.implicit_int_to_ptr, token);
+                try (if (aIsInt) a else b).ptrCast(p, if (aIsPtr) a.ty else b.ty);
+                return true;
+            }
+
             // TODO struct/record and pointers
             return a.invalidBinTy(token, b, p);
         },
