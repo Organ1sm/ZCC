@@ -22,10 +22,10 @@ threadLocal: ?TokenIndex = null,
 noreturn: ?TokenIndex = null,
 type: Type = .{ .specifier = undefined },
 
-pub fn validateParam(d: DeclSpec, p: *Parser, ty: Type) Error!void {
-    _ = ty;
+pub fn validateParam(d: DeclSpec, p: *Parser, ty: *Type) Error!void {
     switch (d.storageClass) {
-        .none, .register => {},
+        .none => {},
+        .register => ty.qual.register = true,
         .auto, .@"extern", .static, .typedef => |tokenIndex| try p.errToken(.invalid_storage_on_param, tokenIndex),
     }
 
