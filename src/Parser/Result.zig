@@ -43,7 +43,6 @@ pub fn expect(res: Result, p: *Parser) Error!void {
         return;
     }
 
-    try res.saveValue(p);
     if (res.node == .none) {
         try p.errToken(.expected_expr, p.index);
         return error.ParsingFailed;
@@ -384,20 +383,15 @@ fn shouldEval(a: *Result, b: *Result, p: *Parser) Error!bool {
     return p.noEval;
 }
 
-fn saveValue(res: Result, p: *Parser) !void {
+pub fn saveValue(res: *Result, p: *Parser) !void {
     std.debug.assert(!p.inMacro);
-    if (res.value == .unavailable) return;
-
-    switch (p.nodes.items(.tag)[@intFromEnum(res.node)]) {
-        .IntLiteral => return,
-        else => {},
-    }
-
     switch (res.value) {
         .unsigned => |v| try p.valueMap.put(res.node, v),
         .signed => |v| try p.valueMap.put(res.node, @as(u64, @bitCast(v))),
-        .unavailable => {},
+        .unavailable => return,
     }
+
+    res.value = .unavailable;
 }
 
 pub fn hash(res: Result) u64 {
