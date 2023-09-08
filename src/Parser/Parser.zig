@@ -831,10 +831,11 @@ fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec) Error!?InitDeclarator {
             declSpec.storageClass = .none;
         }
 
-        const init = try p.initializer(declSpec.type);
+        var init = try p.initializer(declSpec.type);
         try init.expect(p);
         //  TODO: do type coerce
         initD.initializer = init.node;
+        try init.saveValue(p);
     }
 
     const name = initD.d.name;
@@ -1363,10 +1364,7 @@ fn parseTypeQual(p: *Parser, b: *Type.Qualifiers.Builder) Error!bool {
                     b.@"const" = p.index;
             },
 
-            .KeywordVolatile,
-            .KeywordGccVolatile1,
-            .KeywordGccVolatile2,
-            => {
+            .KeywordVolatile, .KeywordGccVolatile1, .KeywordGccVolatile2 => {
                 if (b.@"volatile" != null)
                     try p.errStr(.duplicate_declspec, p.index, "volatile")
                 else
@@ -1931,6 +1929,7 @@ fn parseIfStmt(p: *Parser) Error!NodeIndex {
     else if (!cond.ty.isFloat() and cond.ty.specifier != .Pointer)
         try p.errStr(.statement_scalar, lp + 1, try p.typeStr(cond.ty));
 
+    try cond.saveValue(p);
     try p.expectClosing(lp, .RParen);
 
     const then = try p.stmt();
@@ -1966,7 +1965,8 @@ fn parseForStmt(p: *Parser) Error!NodeIndex {
 
     // for-init
     const initStart = p.index;
-    const init = if (!gotDecl) try p.parseExpr() else Result{};
+    var init = if (!gotDecl) try p.parseExpr() else Result{};
+    try init.saveValue(p);
     try init.maybeWarnUnused(p, initStart);
 
     if (!gotDecl)
@@ -1981,12 +1981,14 @@ fn parseForStmt(p: *Parser) Error!NodeIndex {
         else if (!cond.ty.isFloat() and cond.ty.specifier != .Pointer)
             try p.errStr(.statement_scalar, lp + 1, try p.typeStr(cond.ty));
     }
+    try cond.saveValue(p);
     _ = try p.expectToken(.Semicolon);
 
     // increment
     const incrStart = p.index;
-    const incr = try p.parseExpr();
+    var incr = try p.parseExpr();
     try incr.maybeWarnUnused(p, incrStart);
+    try incr.saveValue(p);
     try p.expectClosing(lp, .RParen);
 
     try p.scopes.append(.loop);
@@ -2027,6 +2029,7 @@ fn parseWhileStmt(p: *Parser) Error!NodeIndex {
     else if (!cond.ty.isFloat() and cond.ty.specifier != .Pointer)
         try p.errStr(.statement_scalar, lp + 1, try p.typeStr(cond.ty));
 
+    try cond.saveValue(p);
     try p.expectClosing(lp, .RParen);
 
     try p.scopes.append(.loop);
@@ -2057,6 +2060,7 @@ fn parseDoWhileStmt(p: *Parser) Error!NodeIndex {
     else if (!cond.ty.isFloat() and cond.ty.specifier != .Pointer)
         try p.errStr(.statement_scalar, lp + 1, try p.typeStr(cond.ty));
 
+    try cond.saveValue(p);
     try p.expectClosing(lp, .RParen);
 
     _ = try p.expectToken(.Semicolon);
@@ -2080,6 +2084,7 @@ fn parseSwitchStmt(p: *Parser) Error!NodeIndex {
     else
         try p.errStr(.statement_int, lp + 1, try p.typeStr(cond.ty));
 
+    try cond.saveValue(p);
     try p.expectClosing(lp, .RParen);
 
     var switchScope = Scope.Switch{
@@ -2333,6 +2338,7 @@ fn parseReturnStmt(p: *Parser) Error!?NodeIndex {
         try p.errStr(.incompatible_return, eToken, try p.typeStr(expr.ty));
     }
 
+    try expr.saveValue(p);
     return try p.addNode(.{ .tag = .ReturnStmt, .data = .{ .UnaryExpr = expr.node } });
 }
 
@@ -2568,7 +2574,9 @@ fn constExpr(p: *Parser) Error!Result {
         try p.errToken(.expected_integer_constant_expr, start);
         return error.ParsingFailed;
     }
-
+    // saveValue sets val to unavailable
+    var copy = res;
+    try copy.saveValue(p);
     return res;
 }
 
@@ -2602,8 +2610,12 @@ fn conditionalExpr(p: *Parser) Error!Result {
 
     _ = try thenExpr.adjustTypes(colon, &elseExpr, p, .conditional);
 
-    if (cond.value != .unavailable)
+    if (cond.value != .unavailable) {
         cond.value = if (cond.getBool()) thenExpr.value else elseExpr.value;
+    } else {
+        try thenExpr.saveValue(p);
+        try elseExpr.saveValue(p);
+    }
 
     cond.ty = thenExpr.ty;
     cond.node = try p.addNode(.{
@@ -3267,6 +3279,8 @@ fn parseSuffixExpr(p: *Parser, lhs: Result) Error!Result {
                 try p.errToken(.invalid_subscript, lb);
             }
 
+            try ptr.saveValue(p);
+            try index.saveValue(p);
             try ptr.bin(p, .ArrayAccessExpr, index);
             return ptr;
         },
@@ -3422,6 +3436,7 @@ fn parseCallExpr(p: *Parser, lhs: Result) Error!Result {
                     try arg.floatCast(p, .{ .specifier = .Double });
             }
 
+            try arg.saveValue(p);
             try p.listBuffer.append(arg.node);
             argCount += 1;
             _ = p.eat(.Comma) orelse break;
@@ -3686,8 +3701,16 @@ fn castInt(p: *Parser, val: u64, specs: []const Type.Specifier) Error!Result {
 fn parseGenericSelection(p: *Parser) Error!Result {
     p.index += 1;
     const lp = try p.expectToken(.LParen);
-    const controlling = try p.assignExpr();
-    try controlling.expect(p);
+    const controlling = blk: {
+        // controlling expression is not evaluated
+        const noEval = p.noEval;
+        defer p.noEval = noEval;
+        p.noEval = true;
+        const controlling = try p.assignExpr();
+        try controlling.expect(p);
+        break :blk controlling;
+    };
+
     _ = try p.expectToken(.Comma);
 
     const listBufferTop = p.listBuffer.items.len;
@@ -3708,6 +3731,7 @@ fn parseGenericSelection(p: *Parser) Error!Result {
             _ = try p.expectToken(.Colon);
             chosen = try p.assignExpr();
             try chosen.expect(p);
+            try chosen.saveValue(p);
 
             try p.listBuffer.append(try p.addNode(.{
                 .tag = .GenericAssociationExpr,
@@ -3724,6 +3748,7 @@ fn parseGenericSelection(p: *Parser) Error!Result {
             _ = try p.expectToken(.Colon);
             chosen = try p.assignExpr();
             try chosen.expect(p);
+            try chosen.saveValue(p);
 
             try p.listBuffer.append(try p.addNode(.{
                 .tag = .GenericDefaultExpr,
@@ -3734,7 +3759,6 @@ fn parseGenericSelection(p: *Parser) Error!Result {
                 try p.err(.expected_type);
                 return error.ParsingFailed;
             }
-
             break;
         }
 
