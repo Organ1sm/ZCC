@@ -2,7 +2,7 @@ const std = @import("std");
 const Parser = @import("../Parser/Parser.zig");
 const Tree = @import("AST.zig");
 const Compilation = @import("../Basic/Compilation.zig");
-const Builder = @import("TypeBuilder.zig").Builder;
+const TypeBuilder = @import("TypeBuilder.zig");
 
 const Type = @This();
 
@@ -27,6 +27,9 @@ pub const Qualifiers = packed struct {
     @"const": bool = false,
     atomic: bool = false,
     @"volatile": bool = false,
+
+    // for function parameters only, stored here since it fits in the padding
+    register: bool = false,
     restrict: bool = false,
 
     pub fn any(quals: Qualifiers) bool {
@@ -37,8 +40,34 @@ pub const Qualifiers = packed struct {
         if (quals.@"const") try w.writeAll(" const ");
         if (quals.atomic) try w.writeAll(" _Atomic ");
         if (quals.@"volatile") try w.writeAll("volatile ");
-        if (quals.restrict) try w.writeAll(" restrict ");
+        if (quals.restrict) try w.writeAll("restrict ");
+        if (quals.register) try w.writeAll("register ");
     }
+
+    pub const Builder = struct {
+        @"const": ?TokenIndex = null,
+        atomic: ?TokenIndex = null,
+        @"volatile": ?TokenIndex = null,
+        restrict: ?TokenIndex = null,
+
+        pub fn finish(b: Builder, p: *Parser, ty: *Type) !void {
+            if (ty.specifier != .Pointer and b.restrict != null) {
+                try p.errStr(.restrict_non_pointer, b.restrict.?, try p.typeStr(ty.*));
+            }
+            if (b.atomic) |some| {
+                if (ty.isArray()) try p.errStr(.atomic_array, some, try p.typeStr(ty.*));
+                if (ty.isFunc()) try p.errStr(.atomic_func, some, try p.typeStr(ty.*));
+                if (ty.hasIncompleteSize()) try p.errStr(.atomic_incomplete, some, try p.typeStr(ty.*));
+            }
+
+            ty.qual = .{
+                .@"const" = b.@"const" != null,
+                .atomic = b.atomic != null,
+                .@"volatile" = b.@"volatile" != null,
+                .restrict = b.restrict != null,
+            };
+        }
+    };
 };
 
 pub const Function = struct {
@@ -49,7 +78,6 @@ pub const Function = struct {
         name: []const u8,
         ty: Type,
         nameToken: TokenIndex,
-        register: bool,
     };
 };
 
@@ -167,7 +195,7 @@ pub const Specifier = enum {
 pub fn isCallable(ty: Type) ?Type {
     return switch (ty.specifier) {
         .Func, .VarArgsFunc, .OldStyleFunc => ty,
-        .Pointer => if(ty.data.subType.isFunc()) ty.data.subType.* else null,
+        .Pointer => if (ty.data.subType.isFunc()) ty.data.subType.* else null,
         else => null,
     };
 }
@@ -371,7 +399,6 @@ pub fn eql(a: Type, b: Type, checkQualifiers: bool) bool {
         if (a.qual.@"const" != b.qual.@"const") return false;
         if (a.qual.atomic != b.qual.atomic) return false;
         if (a.qual.@"volatile" != b.qual.@"volatile") return false;
-        if (a.qual.restrict != b.qual.restrict) return false;
     }
 
     switch (a.specifier) {
@@ -456,10 +483,8 @@ pub fn dump(ty: Type, w: anytype) @TypeOf(w).Error!void {
         .Func, .VarArgsFunc, .OldStyleFunc => {
             try w.writeAll("fn (");
             for (ty.data.func.params, 0..) |param, i| {
-                if (i != 0) try w.writeAll(", ");
-                if (param.register)
-                    try w.writeAll("register ");
-
+                if (i != 0)
+                    try w.writeAll(", ");
                 if (param.name.len != 0)
                     try w.print("{s}: ", .{param.name});
                 try param.ty.dump(w);
@@ -514,7 +539,7 @@ pub fn dump(ty: Type, w: anytype) @TypeOf(w).Error!void {
             try ty.data.array.elem.dump(w);
         },
 
-        else => try w.writeAll(Builder.fromType(ty).toString().?),
+        else => try w.writeAll(TypeBuilder.fromType(ty).toString().?),
     }
 
     if (ty.alignment != 0)

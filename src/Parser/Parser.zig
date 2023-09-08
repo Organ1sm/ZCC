@@ -7,7 +7,7 @@ const Preprocessor = @import("../Lexer/Preprocessor.zig");
 const AST = @import("../AST/AST.zig");
 const AstTag = @import("../AST/AstTag.zig").Tag;
 const Type = @import("../AST/Type.zig");
-const TypeBuilder = @import("../AST/TypeBuilder.zig").Builder;
+const TypeBuilder = @import("../AST/TypeBuilder.zig");
 const Diagnostics = @import("../Basic/Diagnostics.zig");
 const DeclSpec = @import("../AST/DeclSpec.zig");
 const Scope = @import("../Sema/Scope.zig").Scope;
@@ -879,9 +879,8 @@ fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec) Error!?InitDeclarator {
 fn parseTypeSpec(p: *Parser, ty: *TypeBuilder, completeType: *Type) Error!bool {
     const start = p.index;
     while (true) {
-        if (try p.parseTypeQual(completeType)) {
+        if (try p.parseTypeQual(&ty.qual))
             continue;
-        }
 
         switch (p.getCurrToken()) {
             .KeywordVoid => try ty.combine(p, .Void, p.index),
@@ -914,12 +913,11 @@ fn parseTypeSpec(p: *Parser, ty: *TypeBuilder, completeType: *Type) Error!bool {
                 const newSpec = TypeBuilder.fromType(innerType);
                 try ty.combine(p, newSpec, atomicToken);
 
-                if (completeType.qual.atomic)
+                if (ty.qual.atomic != null)
                     try p.errStr(.duplicate_declspec, atomicToken, "atomic")
                 else
-                    completeType.qual.atomic = true;
+                    ty.qual.atomic = atomicToken;
 
-                // TODO check that the type can be atomic
                 continue;
             },
 
@@ -1340,7 +1338,7 @@ fn enumerator(p: *Parser) Error!?EnumFieldAndNode {
 }
 /// atomicTypeSpec : keyword_atomic '(' typeName ')'
 /// typeQual : keyword_const | keyword_restrict | keyword_volatile | keyword_atomic
-fn parseTypeQual(p: *Parser, ty: *Type) Error!bool {
+fn parseTypeQual(p: *Parser, b: *Type.Qualifiers.Builder) Error!bool {
     var any = false;
 
     while (true) {
@@ -1349,45 +1347,39 @@ fn parseTypeQual(p: *Parser, ty: *Type) Error!bool {
             .KeywordGccRestrict1,
             .KeywordGccRestrict2,
             => {
-                if (ty.specifier != .Pointer)
-                    try p.errExtra(
-                        .restrict_non_pointer,
-                        p.index,
-                        .{ .str = try p.typeStr(ty.*) },
-                    )
-                else if (ty.qual.restrict)
+                if (b.restrict != null)
                     try p.errStr(.duplicate_declspec, p.index, "restrict")
                 else
-                    ty.qual.restrict = true;
+                    b.restrict = p.index;
             },
 
             .KeywordConst,
             .KeywordGccConst1,
             .KeywordGccConst2,
             => {
-                if (ty.qual.@"const")
+                if (b.@"const" != null)
                     try p.errStr(.duplicate_declspec, p.index, "const")
                 else
-                    ty.qual.@"const" = true;
+                    b.@"const" = p.index;
             },
 
             .KeywordVolatile,
             .KeywordGccVolatile1,
             .KeywordGccVolatile2,
             => {
-                if (ty.qual.@"volatile")
+                if (b.@"volatile" != null)
                     try p.errStr(.duplicate_declspec, p.index, "volatile")
                 else
-                    ty.qual.@"volatile" = true;
+                    b.@"volatile" = p.index;
             },
 
             .KeywordAtomic => {
                 // _Atomic(typeName) instead of just _Atomic
                 if (p.tokenIds[p.index + 1] == .LParen) break;
-                if (ty.qual.atomic)
+                if (b.atomic != null)
                     try p.errStr(.duplicate_declspec, p.index, "atomic")
                 else
-                    ty.qual.atomic = true;
+                    b.atomic = p.index;
             },
 
             else => break,
@@ -1462,11 +1454,12 @@ fn declarator(p: *Parser, baseType: Type, kind: DeclaratorKind) Error!?Declarato
 fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: DeclaratorKind) Error!Type {
     if (p.eat(.LBracket)) |lb| {
         var resType = Type{ .specifier = .Pointer };
-        var gotQuals = try p.parseTypeQual(&resType);
+        var qualsBuilder = Type.Qualifiers.Builder{};
+        var gotQuals = try p.parseTypeQual(&qualsBuilder);
         var static = p.eat(.KeywordStatic);
 
         if (static != null and !gotQuals)
-            gotQuals = try p.parseTypeQual(&resType);
+            gotQuals = try p.parseTypeQual(&qualsBuilder);
 
         var star = p.eat(.Asterisk);
         const size = if (star) |_| Result{} else try p.assignExpr();
@@ -1486,8 +1479,10 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: Declarator
             if (star) |some| try p.errToken(.star_non_param, some);
 
             static = null;
-            resType.qual = .{};
+            qualsBuilder = .{};
             star = null;
+        } else {
+            try qualsBuilder.finish(p, &resType);
         }
 
         if (static) |_|
@@ -1588,7 +1583,6 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: Declarator
                     .name = p.tokSlice(nameToken),
                     .nameToken = nameToken,
                     .ty = .{ .specifier = .Int },
-                    .register = false,
                 });
 
                 if (p.eat(.Comma) == null) break;
@@ -1624,7 +1618,10 @@ fn pointer(p: *Parser, baseType: Type) Error!Type {
             .specifier = .Pointer,
             .data = .{ .subType = elemType },
         };
-        _ = try p.parseTypeQual(&ty);
+
+        var qualsBuilder = Type.Qualifiers.Builder{};
+        _ = try p.parseTypeQual(&qualsBuilder);
+        try qualsBuilder.finish(p, &ty);
     }
 
     return ty;
@@ -1718,13 +1715,12 @@ fn paramDecls(p: *Parser) Error!?[]Type.Function.Param {
             return error.ParsingFailed;
         }
 
-        try paramDeclSpec.validateParam(p, paramType);
+        try paramDeclSpec.validateParam(p, &paramType);
 
         try p.paramBuffer.append(.{
             .name = if (nameToken == 0) "" else p.tokSlice(nameToken),
             .nameToken = if (nameToken == 0) firstToken else nameToken,
             .ty = paramType,
-            .register = paramDeclSpec.storageClass == .register,
         });
 
         if (p.eat(.Comma) == null)
@@ -3396,7 +3392,7 @@ fn parseCallExpr(p: *Parser, lhs: Result) Error!Result {
                         try p.errToken(.parameter_here, params[argCount].nameToken);
                         try arg.intCast(p, paramType);
                     } else {
-                       try  p.reportParam(paramToken, arg, argCount, params);
+                        try p.reportParam(paramToken, arg, argCount, params);
                     }
                 } else if (paramType.isFloat()) {
                     if (arg.ty.isInt() or arg.ty.isFloat())

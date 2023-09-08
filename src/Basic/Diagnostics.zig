@@ -218,6 +218,9 @@ pub const Tag = enum {
     func_does_not_return,
     incompatible_param,
     parameter_here,
+    atomic_array,
+    atomic_func,
+    atomic_incomplete,
 };
 
 list: std.ArrayList(Message),
@@ -575,6 +578,9 @@ pub fn renderExtra(comp: *Compilation, m: anytype) void {
             .func_does_not_return => m.print("non-void function '{s}' does not return a value", .{msg.extra.str}),
             .incompatible_param => m.print("passing '{s}' to parameter of incompatible type", .{msg.extra.str}),
             .parameter_here => m.write("passing argument to parameter here"),
+            .atomic_array => m.print("atomic cannot be applied to array type '{s}'", .{msg.extra.str}),
+            .atomic_func => m.print("atomic cannot be applied to function type '{s}'", .{msg.extra.str}),
+            .atomic_incomplete => m.print("atomic cannot be applied to incomplete type '{s}'", .{msg.extra.str}),
         }
 
         m.end(lcs);
@@ -739,6 +745,9 @@ fn tagKind(diag: *Diagnostics, tag: Tag) Kind {
         .func_should_return,
         .incompatible_return,
         .incompatible_param,
+        .atomic_array,
+        .atomic_func,
+        .atomic_incomplete,
         => .@"error",
 
         .to_match_paren,
