@@ -652,6 +652,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
                 .type = initD.d.type,
                 .nameToken = initD.d.name,
                 .isInitialized = initD.initializer != .none,
+                .isRegister = declSpec.storageClass == .register,
             } });
         }
 
@@ -2987,9 +2988,15 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
             var operand = try p.parseCastExpr();
             try operand.expect(p);
 
-            if (!AST.isLValue(p.nodes.slice(), operand.node)) {
+            const slice = p.nodes.slice();
+            if (!AST.isLValue(slice, operand.node)) {
                 try p.errToken(.addr_of_rvalue, index);
-                return error.ParsingFailed;
+            }
+
+            if (slice.items(.tag)[@intFromEnum(operand.node)] == .DeclRefExpr) {
+                const sym = p.findSymbol(slice.items(.data)[@intFromEnum(operand.node)].DeclarationRef, .reference).?;
+                if (sym.symbol.isRegister)
+                    try p.errToken(.addr_of_register, index);
             }
 
             const elemType = try p.arena.create(Type);
@@ -3552,7 +3559,6 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
 
             switch (sym) {
                 .enumeration => |e| {
-                    //TODO  actually check type
                     var res = e.value;
                     res.node = try p.addNode(.{
                         .tag = .EnumerationRef,
@@ -3563,17 +3569,15 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
                     return res;
                 },
 
-                .symbol => |s| {
-                    // TODO actually check type
-                    return Result{
-                        .ty = s.type,
-                        .node = try p.addNode(.{
-                            .tag = .DeclRefExpr,
-                            .type = s.type,
-                            .data = .{ .DeclarationRef = nameToken },
-                        }),
-                    };
+                .symbol => |s| return Result{
+                    .ty = s.type,
+                    .node = try p.addNode(.{
+                        .tag = .DeclRefExpr,
+                        .type = s.type,
+                        .data = .{ .DeclarationRef = nameToken },
+                    }),
                 },
+
                 else => unreachable,
             }
         },

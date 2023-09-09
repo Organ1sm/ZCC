@@ -24,6 +24,7 @@ pub const Scope = union(enum) {
         type: Type,
         nameToken: TokenIndex,
         isInitialized : bool = false,
+        isRegister: bool = false,
     };
 
     pub const Enumeration = struct {

@@ -471,7 +471,7 @@ pub fn combine(inner: *Type, outer: Type, p: *Parser, sourceToken: TokenIndex) P
     }
 }
 
-/// Print type in the
+/// Print type in C style
 pub fn print(ty: Type, w: anytype) @TypeOf(w).Error!void {
     _ = try ty.printPrologue(w);
     try ty.printEpilogue(w);
