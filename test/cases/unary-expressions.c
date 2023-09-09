@@ -20,6 +20,8 @@ void foo(void) {
     (void)!b;
     (void)!(void)1;
     (void);
+    register int d;
+    (void)&d;
 }
 
 
@@ -33,5 +35,5 @@ void foo(void) {
     "unary-expressions.c:17:11: error: invalid argument type 'double' to unary expression" \
     "unary-expressions.c:18:11: error: invalid argument type 'void' to unary expression" \
     "unary-expressions.c:21:11: error: invalid argument type 'void' to unary expression" \
-    "unary-expressions.c:22:11: error: expected expression"
-
+    "unary-expressions.c:22:11: error: expected expression" \
+    "unary-expressions.c:24:11: error: address off register variable requested"
