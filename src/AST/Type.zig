@@ -50,7 +50,7 @@ pub const Qualifiers = packed struct {
         @"volatile": ?TokenIndex = null,
         restrict: ?TokenIndex = null,
 
-        pub fn finish(b: Builder, p: *Parser, ty: *Type) !void {
+        pub fn finish(b: Qualifiers.Builder, p: *Parser, ty: *Type) !void {
             if (ty.specifier != .Pointer and b.restrict != null) {
                 try p.errStr(.restrict_non_pointer, b.restrict.?, try p.typeStr(ty.*));
             }
@@ -446,18 +446,20 @@ pub fn combine(inner: *Type, outer: Type, p: *Parser, sourceToken: TokenIndex) P
         .Array, .StaticArray, .IncompleteArray => {
             try inner.data.array.elem.combine(outer, p, sourceToken);
 
-            if (inner.data.array.elem.hasIncompleteSize()) return p.errToken(.array_incomplete_elem, sourceToken);
-            if (inner.data.array.elem.isFunc()) return p.errToken(.array_func_elem, sourceToken);
-            if (inner.data.array.elem.specifier == .StaticArray and inner.isArray()) return p.errToken(.static_non_outermost_array, sourceToken);
-            if (inner.data.array.elem.qual.any() and inner.isArray()) return p.errToken(.qualifier_non_outermost_array, sourceToken);
+            const elemType = inner.data.array.elem;
+            if (elemType.hasIncompleteSize()) return p.errToken(.array_incomplete_elem, sourceToken);
+            if (elemType.isFunc()) return p.errToken(.array_func_elem, sourceToken);
+            if (elemType.specifier == .StaticArray and elemType.isArray()) return p.errToken(.static_non_outermost_array, sourceToken);
+            if (elemType.qual.any() and elemType.isArray()) return p.errToken(.qualifier_non_outermost_array, sourceToken);
         },
 
         .VariableLenArray => {
             try inner.data.vla.elem.combine(outer, p, sourceToken);
 
-            if (inner.data.vla.elem.hasIncompleteSize()) return p.errToken(.array_incomplete_elem, sourceToken);
-            if (inner.data.vla.elem.isFunc()) return p.errToken(.array_func_elem, sourceToken);
-            if (inner.data.vla.elem.qual.any() and inner.isArray()) return p.errToken(.qualifier_non_outermost_array, sourceToken);
+            const elemType = inner.data.vla.elem;
+            if (elemType.hasIncompleteSize()) return p.errToken(.array_incomplete_elem, sourceToken);
+            if (elemType.isFunc()) return p.errToken(.array_func_elem, sourceToken);
+            if (elemType.qual.any() and elemType.isArray()) return p.errToken(.qualifier_non_outermost_array, sourceToken);
         },
 
         .Func, .VarArgsFunc, .OldStyleFunc => {
@@ -469,11 +471,137 @@ pub fn combine(inner: *Type, outer: Type, p: *Parser, sourceToken: TokenIndex) P
     }
 }
 
+/// Print type in the
+pub fn print(ty: Type, w: anytype) @TypeOf(w).Error!void {
+    _ = try ty.printPrologue(w);
+    try ty.printEpilogue(w);
+}
+
+/// return true if `ty` is simple
+fn printPrologue(ty: Type, w: anytype) @TypeOf(w).Error!bool {
+    if (ty.qual.atomic) {
+        var nonAtomicType = ty;
+        nonAtomicType.qual.atomic = false;
+        try w.writeAll("_Atomic(");
+        try nonAtomicType.print(w);
+        try w.writeAll(")");
+        return true;
+    }
+
+    switch (ty.specifier) {
+        .Pointer => {
+            const elemType = ty.data.subType;
+            const simple = try elemType.printPrologue(w);
+            if (simple) try w.writeByte(' ');
+            if (elemType.isFunc() or elemType.isArray()) try w.writeByte('(');
+            try w.writeByte('*');
+            try ty.qual.dump(w);
+            if (ty.alignment != 0) try w.print(" _Alignas({d})", .{ty.alignment});
+            return false;
+        },
+
+        .Func, .VarArgsFunc, .OldStyleFunc => {
+            const retType = ty.data.func.returnType;
+            const simple = try retType.printPrologue(w);
+            if (simple) try w.writeByte(' ');
+            return false;
+        },
+
+        .Array,
+        .StaticArray,
+        .IncompleteArray,
+        .UnspecifiedVariableLenArray,
+        .VariableLenArray,
+        => {
+            const elemType = ty.getElemType();
+            const simple = try elemType.printPrologue(w);
+            if (simple) try w.writeByte(' ');
+            return false;
+        },
+
+        .Enum => try w.print("enum {s}", .{ty.data.@"enum".name}),
+        .Struct => try w.print("struct {s}", .{ty.data.record.name}),
+        .Union => try w.print("union {s}", .{ty.data.record.name}),
+        else => try w.writeAll(TypeBuilder.fromType(ty).toString().?),
+    }
+    try ty.qual.dump(w);
+    if (ty.alignment != 0)
+        try w.print(" _Alignas({d})", .{ty.alignment});
+    return true;
+}
+
+fn printEpilogue(ty: Type, w: anytype) @TypeOf(w).Error!void {
+    if (ty.qual.atomic) return;
+    switch (ty.specifier) {
+        .Pointer => {
+            const elemType = ty.data.subType;
+            if (elemType.isFunc() or elemType.isArray()) try w.writeByte(')');
+            try elemType.printEpilogue(w);
+        },
+
+        .Func, .VarArgsFunc, .OldStyleFunc => {
+            try w.writeByte('(');
+            for (ty.data.func.params, 0..) |param, i| {
+                if (i != 0) try w.writeAll(", ");
+                _ = try param.ty.printPrologue(w);
+                if (param.name.len != 0) try w.writeAll(param.name);
+                try param.ty.printEpilogue(w);
+            }
+            if (ty.specifier != .Func) {
+                if (ty.data.func.params.len != 0) try w.writeAll(", ");
+                try w.writeAll("...");
+            } else if (ty.data.func.params.len == 0) {
+                try w.writeAll("void");
+            }
+            try w.writeByte(')');
+            try ty.data.func.returnType.printEpilogue(w);
+        },
+
+        .Array, .StaticArray => {
+            try w.writeByte('[');
+            if (ty.specifier == .StaticArray) try w.writeAll("static ");
+            try ty.qual.dump(w);
+            if (ty.alignment != 0) try w.print(" _Alignas({d})", .{ty.alignment});
+            try w.print("{d}]", .{ty.data.array.len});
+            try ty.data.array.elem.printEpilogue(w);
+        },
+
+        .IncompleteArray => {
+            try w.writeByte('[');
+            try ty.qual.dump(w);
+            if (ty.alignment != 0) try w.print(" _Alignas({d})", .{ty.alignment});
+            try w.writeByte(']');
+            try ty.data.array.elem.printEpilogue(w);
+        },
+
+        .UnspecifiedVariableLenArray => {
+            try w.writeByte('[');
+            try ty.qual.dump(w);
+            if (ty.alignment != 0) try w.print(" _Alignas({d})", .{ty.alignment});
+            try w.writeAll("*]");
+            try ty.data.subType.printEpilogue(w);
+        },
+
+        .VariableLenArray => {
+            try w.writeByte('[');
+            try ty.qual.dump(w);
+            if (ty.alignment != 0) try w.print(" _Alignas({d})", .{ty.alignment});
+            try w.writeAll("<expr>]");
+            try ty.data.vla.elem.printEpilogue(w);
+        },
+
+        else => {},
+    }
+}
+
 /// Useful for debugging, too noisy to be enabled by default.
 const DumpDetailedContainers = false;
 
 pub fn dump(ty: Type, w: anytype) @TypeOf(w).Error!void {
     try ty.qual.dump(w);
+    if (ty.alignment != 0)
+        try w.print("_Alignas({d})", .{ty.alignment});
+
     switch (ty.specifier) {
         .Pointer => {
             try w.writeAll("*");
@@ -541,9 +669,6 @@ pub fn dump(ty: Type, w: anytype) @TypeOf(w).Error!void {
 
         else => try w.writeAll(TypeBuilder.fromType(ty).toString().?),
     }
-
-    if (ty.alignment != 0)
-        try w.print(" _Alignas({d})", .{ty.alignment});
 }
 
 fn dumpEnum(@"enum": *Enum, w: anytype) @TypeOf(w).Error!void {
