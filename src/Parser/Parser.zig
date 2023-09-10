@@ -1902,10 +1902,11 @@ fn stmt(p: *Parser) Error!NodeIndex {
         return some;
 
     const exprStart = p.index;
+    const errStart = p.pp.compilation.diag.list.items.len;
     const e = try p.parseExpr();
     if (e.node != .none) {
         _ = try p.expectToken(.Semicolon);
-        try e.maybeWarnUnused(p, exprStart);
+        try e.maybeWarnUnused(p, exprStart, errStart);
         return e.node;
     }
 
@@ -1966,9 +1967,10 @@ fn parseForStmt(p: *Parser) Error!NodeIndex {
 
     // for-init
     const initStart = p.index;
+    var errStart = p.pp.compilation.diag.list.items.len;
     var init = if (!gotDecl) try p.parseExpr() else Result{};
     try init.saveValue(p);
-    try init.maybeWarnUnused(p, initStart);
+    try init.maybeWarnUnused(p, initStart, errStart);
 
     if (!gotDecl)
         _ = try p.expectToken(.Semicolon);
@@ -1987,8 +1989,9 @@ fn parseForStmt(p: *Parser) Error!NodeIndex {
 
     // increment
     const incrStart = p.index;
+    errStart = p.pp.compilation.diag.list.items.len;
     var incr = try p.parseExpr();
-    try incr.maybeWarnUnused(p, incrStart);
+    try incr.maybeWarnUnused(p, incrStart, errStart);
     try incr.saveValue(p);
     try p.expectClosing(lp, .RParen);
 
@@ -2435,10 +2438,12 @@ pub fn macroExpr(p: *Parser) Compilation.Error!bool {
 /// expr : assignExpr (',' assignExpr)*
 fn parseExpr(p: *Parser) Error!Result {
     var exprStartIdx = p.index;
+    var errStart = p.pp.compilation.diag.list.items.len;
     var lhs = try p.assignExpr();
     while (p.eat(.Comma)) |_| {
-        try lhs.maybeWarnUnused(p, exprStartIdx);
+        try lhs.maybeWarnUnused(p, exprStartIdx, errStart);
         exprStartIdx = p.index;
+        errStart = p.pp.compilation.diag.list.items.len;
 
         const rhs = try p.assignExpr();
         lhs.value = rhs.value;
