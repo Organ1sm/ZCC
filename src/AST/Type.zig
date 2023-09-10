@@ -447,7 +447,7 @@ pub fn combine(inner: *Type, outer: Type, p: *Parser, sourceToken: TokenIndex) P
             try inner.data.array.elem.combine(outer, p, sourceToken);
 
             const elemType = inner.data.array.elem;
-            if (elemType.hasIncompleteSize()) return p.errToken(.array_incomplete_elem, sourceToken);
+            if (elemType.hasIncompleteSize()) return p.errStr(.array_incomplete_elem, sourceToken, try p.typeStr(elemType));
             if (elemType.isFunc()) return p.errToken(.array_func_elem, sourceToken);
             if (elemType.specifier == .StaticArray and elemType.isArray()) return p.errToken(.static_non_outermost_array, sourceToken);
             if (elemType.qual.any() and elemType.isArray()) return p.errToken(.qualifier_non_outermost_array, sourceToken);
@@ -457,7 +457,7 @@ pub fn combine(inner: *Type, outer: Type, p: *Parser, sourceToken: TokenIndex) P
             try inner.data.vla.elem.combine(outer, p, sourceToken);
 
             const elemType = inner.data.vla.elem;
-            if (elemType.hasIncompleteSize()) return p.errToken(.array_incomplete_elem, sourceToken);
+            if (elemType.hasIncompleteSize()) return p.errStr(.array_incomplete_elem, sourceToken, try p.typeStr(elemType));
             if (elemType.isFunc()) return p.errToken(.array_func_elem, sourceToken);
             if (elemType.qual.any() and elemType.isArray()) return p.errToken(.qualifier_non_outermost_array, sourceToken);
         },
