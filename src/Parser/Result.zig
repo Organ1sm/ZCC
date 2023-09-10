@@ -55,8 +55,12 @@ pub fn empty(res: Result, p: *Parser) bool {
     return res.node == .none;
 }
 
-pub fn maybeWarnUnused(res: Result, p: *Parser, exprStart: TokenIndex) Error!void {
+pub fn maybeWarnUnused(res: Result, p: *Parser, exprStart: TokenIndex, errStart: usize) Error!void {
     if (res.ty.specifier == .Void or res.node == .none)
+        return;
+
+    // don't warn about unused result if the expression contained errors
+    if (p.pp.compilation.diag.list.items.len > errStart)
         return;
 
     switch (p.nodes.items(.tag)[@intFromEnum(res.node)]) {
