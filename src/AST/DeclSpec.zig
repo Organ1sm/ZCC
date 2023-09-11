@@ -75,7 +75,7 @@ pub fn validateFnDef(d: DeclSpec, p: *Parser) Error!AstTag {
     }
 }
 
-pub fn validate(d: DeclSpec, p: *Parser, ty: Type, hasInit: bool) Error!AstTag {
+pub fn validate(d: DeclSpec, p: *Parser, ty: *Type, hasInit: bool) Error!AstTag {
     const isStatic = d.storageClass == .static;
     if (ty.isFunc() and d.storageClass != .typedef) {
         switch (d.storageClass) {
@@ -123,6 +123,8 @@ pub fn validate(d: DeclSpec, p: *Parser, ty: Type, hasInit: bool) Error!AstTag {
             .typedef => return AstTag.TypeDef,
             else => {},
         }
+
+        ty.qual.register = d.storageClass == .register;
 
         const isExtern = d.storageClass == .@"extern" and !hasInit;
         if (d.threadLocal != null) {

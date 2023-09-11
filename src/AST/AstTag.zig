@@ -35,7 +35,6 @@ pub const Tag = enum(u8) {
     Var,
     ExternVar,
     StaticVar,
-    RegisterVar,
     ThreadlocalVar,
     ThreadlocalExternVar,
     ThreadlocalStaticVar,
