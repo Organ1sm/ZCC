@@ -558,12 +558,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
                         };
                     } else if (d.type.isArray()) {
                         // param declared as arrays are converted to pointers
-                        const elemType = try p.arena.create(Type);
-                        elemType.* = d.type.getElemType();
-                        d.type = Type{
-                            .specifier = .Pointer,
-                            .data = .{ .subType = elemType },
-                        };
+                        d.type.decayArray();
                     } else if (d.type.specifier == .Void) {
                         try p.errToken(.invalid_void_param, d.name);
                     }
@@ -1698,9 +1693,7 @@ fn paramDecls(p: *Parser) Error!?[]Type.Function.Param {
             };
         } else if (paramType.isArray()) {
             // params declared as array are converted to pointers
-            const elemType = try p.arena.create(Type);
-            elemType.* = paramType.getElemType();
-            paramType = Type{ .specifier = .Pointer, .data = .{ .subType = elemType } };
+            paramType.decayArray();
         } else if (paramType.specifier == .Void) {
             // validate void parameters
             if (p.paramBuffer.items.len == paramBufferTop) {
@@ -2313,7 +2306,7 @@ fn parseReturnStmt(p: *Parser) Error!?NodeIndex {
     // Return type conversion is done as if it was assignment
     if (returnType.specifier == .Bool) {
         // this is ridiculous but it's what clang does
-        if (expr.ty.isInt() or expr.ty.isFloat() or expr.ty.specifier == .Pointer) {
+        if (expr.ty.isInt() or expr.ty.isFloat() or expr.ty.isPointer()) {
             try expr.boolCast(p, returnType);
         } else {
             try p.errStr(.incompatible_return, eToken, try p.typeStr(expr.ty));
@@ -2321,7 +2314,7 @@ fn parseReturnStmt(p: *Parser) Error!?NodeIndex {
     } else if (returnType.isInt()) {
         if (expr.ty.isInt() or expr.ty.isFloat()) {
             try expr.intCast(p, returnType);
-        } else if (expr.ty.specifier == .Pointer) {
+        } else if (expr.ty.isPointer()) {
             try p.errToken(.implicit_ptr_to_int, eToken);
             try expr.intCast(p, returnType);
         } else {
@@ -2333,7 +2326,7 @@ fn parseReturnStmt(p: *Parser) Error!?NodeIndex {
         } else {
             try p.errStr(.incompatible_return, eToken, try p.typeStr(expr.ty));
         }
-    } else if (returnType.specifier == .Pointer) {
+    } else if (returnType.isPointer()) {
         if (expr.ty.isInt()) {
             try p.errToken(.implicit_int_to_ptr, eToken);
             try expr.intCast(p, returnType);
@@ -2524,7 +2517,7 @@ fn assignExpr(p: *Parser) Error!Result {
     // TODO print types in these errors
     if (lhs.ty.specifier == .Bool) {
         // this is ridiculous but it's what clang does
-        if (rhs.ty.isInt() or rhs.ty.isFloat() or (rhs.ty.specifier == .Pointer and tag == .AssignExpr)) {
+        if (rhs.ty.isInt() or rhs.ty.isFloat() or (rhs.ty.isPointer() and tag == .AssignExpr)) {
             try rhs.boolCast(p, lhs.ty);
         } else {
             try p.errToken(.incompatible_assign, index);
@@ -2532,7 +2525,7 @@ fn assignExpr(p: *Parser) Error!Result {
     } else if (lhs.ty.isInt()) {
         if (rhs.ty.isInt() or rhs.ty.isFloat()) {
             try rhs.intCast(p, lhs.ty);
-        } else if (tag == .AssignExpr and rhs.ty.specifier == .Pointer) {
+        } else if (tag == .AssignExpr and rhs.ty.isPointer()) {
             try p.errToken(.implicit_ptr_to_int, index);
             try rhs.intCast(p, lhs.ty);
         } else {
@@ -2553,7 +2546,7 @@ fn assignExpr(p: *Parser) Error!Result {
                 try p.errToken(.incompatible_assign, index);
             },
         }
-    } else if (lhs.ty.specifier == .Pointer) {
+    } else if (lhs.ty.isPointer()) {
         if ((tag == .AddAssignExpr or tag == .SubAssignExpr) and
             (rhs.ty.isInt() or rhs.ty.isFloat()))
             try rhs.ptrCast(p, lhs.ty)
@@ -2962,10 +2955,10 @@ fn parseCastExpr(p: *Parser) Error!Result {
 
             if (ty.specifier == .Void) {
                 // everything can cast to void
-            } else if (ty.isInt() or ty.isFloat() or ty.specifier == .Pointer) {
-                if (ty.isFloat() and operand.ty.specifier == .Pointer)
+            } else if (ty.isInt() or ty.isFloat() or ty.isPointer()) {
+                if (ty.isFloat() and operand.ty.isPointer())
                     try p.errStr(.invalid_cast_to_float, lp, try p.typeStr(operand.ty));
-                if (operand.ty.isFloat() and ty.specifier == .Pointer)
+                if (operand.ty.isFloat() and ty.isPointer())
                     try p.errStr(.invalid_cast_to_pointer, lp, try p.typeStr(operand.ty));
             } else {
                 try p.errStr(.invalid_cast_type, lp, try p.typeStr(operand.ty));
@@ -3025,6 +3018,12 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
             p.index += 1;
             var operand = try p.parseCastExpr();
             try operand.expect(p);
+
+            if (operand.ty.isArray() or operand.ty.isPointer()) {
+                operand.ty = operand.ty.getElemType();
+            } else if (!operand.ty.isFunc()) {
+                try p.errToken(.indirection_ptr, index);
+            }
 
             switch (operand.ty.specifier) {
                 .Pointer => operand.ty = operand.ty.data.subType.*,
@@ -3275,12 +3274,12 @@ fn parseSuffixExpr(p: *Parser, lhs: Result) Error!Result {
             var ptr = lhs;
             try ptr.lvalConversion(p);
             try index.lvalConversion(p);
-            if (ptr.ty.specifier == .Pointer) {
-                ptr.ty = ptr.ty.data.subType.*;
+            if (ptr.ty.isPointer()) {
+                ptr.ty = ptr.ty.getElemType();
                 if (!index.ty.isInt()) try p.errToken(.invalid_index, lb);
                 try p.checkArrayBounds(index, lhsType, lb);
-            } else if (index.ty.specifier == .Pointer) {
-                index.ty = index.ty.data.subType.*;
+            } else if (index.ty.isPointer()) {
+                index.ty = index.ty.getElemType();
                 if (!ptr.ty.isInt()) try p.errToken(.invalid_index, lb);
                 try p.checkArrayBounds(ptr, rhsType, lb);
                 std.mem.swap(Result, &ptr, &index);
@@ -3403,14 +3402,14 @@ fn parseCallExpr(p: *Parser, lhs: Result) Error!Result {
                 const paramType = params[argCount].ty;
                 if (paramType.specifier == .Bool) {
                     // this is ridiculous but it's what clang does
-                    if (arg.ty.isInt() or arg.ty.isFloat() or arg.ty.specifier == .Pointer)
+                    if (arg.ty.isInt() or arg.ty.isFloat() or arg.ty.isPointer())
                         try arg.boolCast(p, paramType)
                     else
                         try p.reportParam(paramToken, arg, argCount, params);
                 } else if (paramType.isInt()) {
                     if (arg.ty.isInt() or arg.ty.isFloat()) {
                         try arg.intCast(p, paramType);
-                    } else if (arg.ty.specifier == .Pointer) {
+                    } else if (arg.ty.isPointer()) {
                         try p.errToken(.implicit_ptr_to_int, paramToken);
                         try p.errToken(.parameter_here, params[argCount].nameToken);
                         try arg.intCast(p, paramType);
@@ -3422,7 +3421,7 @@ fn parseCallExpr(p: *Parser, lhs: Result) Error!Result {
                         try arg.floatCast(p, paramType)
                     else
                         try p.reportParam(paramToken, arg, argCount, params);
-                } else if (paramType.specifier == .Pointer) {
+                } else if (paramType.isPointer()) {
                     if (arg.ty.isInt()) {
                         try p.errToken(.implicit_int_to_ptr, paramToken);
                         try p.errToken(.parameter_here, params[argCount].nameToken);

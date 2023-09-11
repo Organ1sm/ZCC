@@ -148,8 +148,8 @@ pub fn adjustTypes(a: *Result, token: TokenIndex, b: *Result, p: *Parser, kind: 
     if (kind == .arithmetic)
         return a.invalidBinTy(token, b, p);
 
-    const aIsPtr = a.ty.specifier == .Pointer;
-    const bIsPtr = b.ty.specifier == .Pointer;
+    const aIsPtr = a.ty.isPointer();
+    const bIsPtr = b.ty.isPointer();
     const aIsScalar = aIsArithmetic or aIsPtr;
     const bIsScalar = bIsArithmetic or bIsPtr;
     switch (kind) {
@@ -240,11 +240,7 @@ pub fn lvalConversion(res: *Result, p: *Parser) Error!void {
         res.ty.data = .{ .subType = elemType };
         try res.un(p, .FunctionToPointer);
     } else if (res.ty.isArray()) {
-        var elemType = try p.arena.create(Type);
-        elemType.* = res.ty.getElemType();
-
-        res.ty.specifier = .Pointer;
-        res.ty.data = .{ .subType = elemType };
+        res.ty.decayArray();
         try res.un(p, .ArrayToPointer);
     } else if (!p.inMacro and AST.isLValue(p.nodes.slice(), res.node)) {
         res.ty.qual = .{};
@@ -253,7 +249,7 @@ pub fn lvalConversion(res: *Result, p: *Parser) Error!void {
 }
 
 pub fn boolCast(res: *Result, p: *Parser, boolType: Type) Error!void {
-    if (res.ty.specifier == .Pointer) {
+    if (res.ty.isPointer()) {
         res.ty = boolType;
         try res.un(p, .PointerToBool);
     } else if (res.ty.isInt() and res.ty.specifier != .Bool) {
@@ -269,6 +265,12 @@ pub fn intCast(res: *Result, p: *Parser, intType: Type) Error!void {
     if (res.ty.specifier == .Bool) {
         res.ty = intType;
         try res.un(p, .BoolToInt);
+    } else if (res.ty.isPointer()) {
+        res.ty = intType;
+        try res.un(p, .PointerToInt);
+    } else if (res.ty.isFloat()) {
+        res.ty = intType;
+        try res.un(p, .FloatToInt);
     } else if (!res.ty.eql(intType, true)) {
         res.ty = intType;
         try res.un(p, .IntCast);

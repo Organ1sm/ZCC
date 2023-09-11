@@ -278,6 +278,8 @@ pub const Tag = enum(u8) {
     IntToPointer,
     /// Convert a floating type to a _Bool
     FloatToBool,
+    /// Convert a floating type to an integer
+    FloatToInt,
     /// Convert one integer type to another
     IntCast,
     /// Convert one floating type to another
@@ -303,6 +305,7 @@ pub const Tag = enum(u8) {
             .IntToFloat,
             .IntToPointer,
             .FloatToBool,
+            .FloatToInt,
             .IntCast,
             .FloatCast,
             .ToVoid,

@@ -58,13 +58,18 @@ pub const Specifier = union(enum) {
 
     Pointer: *Type,
     UnspecifiedVariableLenArray: *Type,
+    DecayedUnspecifiedVariableLenArray: *Type,
     Func: *Type.Function,
     VarArgsFunc: *Type.Function,
     OldStyleFunc: *Type.Function,
     Array: *Type.Array,
+    DecayedArray: *Type.Array,
     StaticArray: *Type.Array,
+    DecayedStaticArray: *Type.Array,
     IncompleteArray: *Type.Array,
+    DecayedIncompleteArray: *Type.Array,
     VariableLenArray: *Type.VLA,
+    DecayedVariableLenArray: *Type.VLA,
 
     Struct: *Type.Record,
     Union: *Type.Record,
@@ -166,8 +171,13 @@ pub fn finish(b: @This(), p: *Parser, ty: *Type) Parser.Error!void {
             ty.data = .{ .subType = data };
         },
 
-        .UnspecifiedVariableLenArray => |data| {
+        Specifier.UnspecifiedVariableLenArray => |data| {
             ty.specifier = .UnspecifiedVariableLenArray;
+            ty.data = .{ .subType = data };
+        },
+
+        Specifier.DecayedUnspecifiedVariableLenArray => |data| {
+            ty.specifier = .DecayedUnspecifiedVariableLenArray;
             ty.data = .{ .subType = data };
         },
 
@@ -191,8 +201,18 @@ pub fn finish(b: @This(), p: *Parser, ty: *Type) Parser.Error!void {
             ty.data = .{ .array = data };
         },
 
+        Specifier.DecayedArray => |data| {
+            ty.specifier = .DecayedArray;
+            ty.data = .{ .array = data };
+        },
+
         Specifier.StaticArray => |data| {
             ty.specifier = .StaticArray;
+            ty.data = .{ .array = data };
+        },
+
+        Specifier.DecayedStaticArray => |data| {
+            ty.specifier = .DecayedStaticArray;
             ty.data = .{ .array = data };
         },
 
@@ -201,8 +221,18 @@ pub fn finish(b: @This(), p: *Parser, ty: *Type) Parser.Error!void {
             ty.data = .{ .array = data };
         },
 
+        Specifier.DecayedIncompleteArray => |data| {
+            ty.specifier = .DecayedIncompleteArray;
+            ty.data = .{ .array = data };
+        },
+
         Specifier.VariableLenArray => |data| {
             ty.specifier = .VariableLenArray;
+            ty.data = .{ .vla = data };
+        },
+
+        Specifier.DecayedVariableLenArray => |data| {
+            ty.specifier = .DecayedVariableLenArray;
             ty.data = .{ .vla = data };
         },
 
@@ -410,13 +440,18 @@ pub fn fromType(ty: Type) Specifier {
 
         .Pointer => .{ .Pointer = ty.data.subType },
         .UnspecifiedVariableLenArray => .{ .UnspecifiedVariableLenArray = ty.data.subType },
+        .DecayedUnspecifiedVariableLenArray => .{ .DecayedUnspecifiedVariableLenArray = ty.data.subType },
         .Func => .{ .Func = ty.data.func },
         .VarArgsFunc => .{ .VarArgsFunc = ty.data.func },
         .OldStyleFunc => .{ .OldStyleFunc = ty.data.func },
         .Array => .{ .Array = ty.data.array },
+        .DecayedArray => .{ .DecayedArray = ty.data.array },
         .StaticArray => .{ .StaticArray = ty.data.array },
+        .DecayedStaticArray => .{ .DecayedStaticArray = ty.data.array },
         .IncompleteArray => .{ .IncompleteArray = ty.data.array },
+        .DecayedIncompleteArray => .{ .DecayedIncompleteArray = ty.data.array },
         .VariableLenArray => .{ .VariableLenArray = ty.data.vla },
+        .DecayedVariableLenArray => .{ .DecayedVariableLenArray = ty.data.vla },
         .Struct => .{ .Struct = ty.data.record },
         .Union => .{ .Union = ty.data.record },
         .Enum => .{ .Enum = ty.data.@"enum" },
