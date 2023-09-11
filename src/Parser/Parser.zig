@@ -593,20 +593,13 @@ fn parseDeclaration(p: *Parser) Error!bool {
             }
         }
 
+        const body = try p.parseCompoundStmt(true);
         const node = try p.addNode(.{
             .type = initD.d.type,
             .tag = try declSpec.validateFnDef(p),
-            .data = .{ .Declaration = .{ .name = initD.d.name } },
+            .data = .{ .Declaration = .{ .name = initD.d.name, .node = body.? } },
         });
-        try p.scopes.append(.{ .symbol = .{
-            .name = p.tokSlice(initD.d.name),
-            .type = initD.d.type,
-            .nameToken = initD.d.name,
-            .isInitialized = initD.initializer != .none,
-        } });
-
-        const body = try p.parseCompoundStmt(true);
-        p.nodes.items(.data)[@intFromEnum(node)].Declaration.node = body.?;
+        try p.declBuffer.append(node);
 
         // check gotos
         if (returnType == null) {
@@ -619,7 +612,6 @@ fn parseDeclaration(p: *Parser) Error!bool {
             }
         }
 
-        try p.declBuffer.append(node);
         return true;
     }
 
@@ -3491,7 +3483,11 @@ fn parseCallExpr(p: *Parser, lhs: Result) Error!Result {
 
 fn checkArrayBounds(p: *Parser, index: Result, arrayType: Type, token: TokenIndex) !void {
     const len = switch (arrayType.specifier) {
-        .Array, .StaticArray => arrayType.data.array.len,
+        .Array,
+        .StaticArray,
+        .DecayedArray,
+        .DecayedStaticArray,
+        => arrayType.data.array.len,
         else => return,
     };
 
