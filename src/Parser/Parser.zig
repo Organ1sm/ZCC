@@ -276,7 +276,7 @@ fn findSymbol(p: *Parser, nameToken: TokenIndex, refKind: enum { reference, defi
         i -= 1;
         const sym = p.scopes.items[i];
         switch (sym) {
-            .symbol => |s| if (std.mem.eql(u8, s.name, name)) return sym,
+            .definition, .declaration => |s| if (std.mem.eql(u8, s.name, name)) return sym,
             .enumeration => |e| if (std.mem.eql(u8, e.name, name)) return sym,
             .block => if (refKind == .definition) return null,
             else => {},
@@ -506,11 +506,10 @@ fn parseDeclaration(p: *Parser) Error!bool {
             try p.err(.func_not_in_root);
 
         // TODO check redefinition
-        try p.scopes.append(.{ .symbol = .{
+        try p.scopes.append(.{ .definition = .{
             .name = p.tokSlice(initD.d.name),
             .type = initD.d.type,
             .nameToken = initD.d.name,
-            .isInitialized = true,
         } });
 
         const returnType = p.returnType;
@@ -575,7 +574,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
                         try p.errStr(.parameter_missing, d.name, name);
                     }
 
-                    try p.scopes.append(.{ .symbol = .{ .name = name, .nameToken = d.name, .type = d.type } });
+                    try p.scopes.append(.{ .definition = .{ .name = name, .nameToken = d.name, .type = d.type } });
                     if (p.eat(.Comma) == null) break;
                 }
 
@@ -584,7 +583,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
         } else {
             for (initD.d.type.data.func.params) |param| {
                 try p.scopes.append(.{
-                    .symbol = .{
+                    .definition = .{
                         .name = param.name,
                         .type = param.ty,
                         .nameToken = param.nameToken,
@@ -620,27 +619,25 @@ fn parseDeclaration(p: *Parser) Error!bool {
         if (initD.d.oldTypeFunc) |tokenIdx|
             try p.errToken(.invalid_old_style_params, tokenIdx);
 
+        const tag = try declSpec.validate(p, &initD.d.type, initD.initializer != .none);
         const node = try p.addNode(.{
             .type = initD.d.type,
-            .tag = try declSpec.validate(p, initD.d.type, initD.initializer != .none),
+            .tag = tag,
             .data = .{ .Declaration = .{ .name = initD.d.name, .node = initD.initializer } },
         });
         try p.declBuffer.append(node);
 
+        const sym = Scope.Symbol{
+            .name = p.tokSlice(initD.d.name),
+            .type = initD.d.type,
+            .nameToken = initD.d.name,
+        };
         if (declSpec.storageClass == .typedef) {
-            try p.scopes.append(.{ .typedef = .{
-                .name = p.tokSlice(initD.d.name),
-                .type = initD.d.type,
-                .nameToken = initD.d.name,
-            } });
+            try p.scopes.append(.{ .typedef = sym });
+        } else if (initD.initializer != .none) {
+            try p.scopes.append(.{ .definition = sym });
         } else {
-            try p.scopes.append(.{ .symbol = .{
-                .name = p.tokSlice(initD.d.name),
-                .type = initD.d.type,
-                .nameToken = initD.d.name,
-                .isInitialized = initD.initializer != .none,
-                .isRegister = declSpec.storageClass == .register,
-            } });
+            try p.scopes.append(.{ .declaration = sym });
         }
 
         if (p.eat(.Comma) == null)
@@ -833,20 +830,26 @@ fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec) Error!?InitDeclarator {
         return initD;
     }
 
-    if (p.findSymbol(name, .definition)) |scope| {
-        if (scope == .enumeration) {
+    if (p.findSymbol(name, .definition)) |scope| switch (scope) {
+        .enumeration => {
             try p.errStr(.redefinition_different_sym, name, p.tokSlice(name));
             try p.errToken(.previous_definition, scope.enumeration.nameToken);
-        } else if (scope.symbol.type.eql(initD.d.type, true)) {
-            if ((initD.initializer != .none) and scope.symbol.isInitialized) {
-                try p.errStr(.redefinition, name, p.tokSlice(name));
-                try p.errToken(.previous_definition, scope.symbol.nameToken);
-            }
-        } else {
+        },
+
+        .declaration => |s| if (!s.type.eql(initD.d.type, true)) {
+            try p.errStr(.redefinition, name, p.tokSlice(name));
+            try p.errToken(.previous_definition, s.nameToken);
+        },
+
+        .definition => |s| if (!s.type.eql(initD.d.type, true)) {
             try p.errStr(.redefinition_incompatible, name, p.tokSlice(name));
-            try p.errToken(.previous_definition, scope.symbol.nameToken);
-        }
-    }
+            try p.errToken(.previous_definition, s.nameToken);
+        } else if (initD.initializer != .none) {
+            try p.errStr(.redefinition, name, p.tokSlice(name));
+            try p.errToken(.previous_definition, s.nameToken);
+        },
+        else => unreachable,
+    };
 
     return initD;
 }
@@ -1295,15 +1298,19 @@ fn enumerator(p: *Parser) Error!?EnumFieldAndNode {
     if (p.eat(.Equal)) |_| {
         res = try p.constExpr();
     }
-    if (p.findSymbol(nameToken, .definition)) |scope| {
-        if (scope == .enumeration) {
+    if (p.findSymbol(nameToken, .definition)) |scope| switch (scope) {
+        .enumeration => |e| {
             try p.errStr(.redefinition, nameToken, name);
-            try p.errToken(.previous_definition, scope.enumeration.nameToken);
-        } else {
+            try p.errToken(.previous_definition, e.nameToken);
+        },
+
+        .declaration, .definition => |s| {
             try p.errStr(.redefinition_different_sym, nameToken, name);
-            try p.errToken(.previous_definition, scope.symbol.nameToken);
-        }
-    }
+            try p.errToken(.previous_definition, s.nameToken);
+        },
+
+        else => unreachable,
+    };
 
     try p.scopes.append(.{ .enumeration = .{
         .name = name,
@@ -1562,10 +1569,10 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: Declarator
                 const nameToken = try p.expectToken(.Identifier);
                 if (p.findSymbol(nameToken, .definition)) |scope| {
                     try p.errStr(.redefinition_of_parameter, nameToken, p.tokSlice(nameToken));
-                    try p.errToken(.previous_definition, scope.symbol.nameToken);
+                    try p.errToken(.previous_definition, scope.definition.nameToken);
                 }
 
-                try p.scopes.append(.{ .symbol = .{
+                try p.scopes.append(.{ .definition = .{
                     .name = p.tokSlice(nameToken),
                     .type = undefined,
                     .nameToken = nameToken,
@@ -1663,11 +1670,11 @@ fn paramDecls(p: *Parser) Error!?[]Type.Function.Param {
                         try p.errToken(.previous_definition, scope.enumeration.nameToken);
                     } else {
                         try p.errStr(.redefinition_of_parameter, nameToken, p.tokSlice(nameToken));
-                        try p.errToken(.previous_definition, scope.symbol.nameToken);
+                        try p.errToken(.previous_definition, scope.definition.nameToken);
                     }
                 }
 
-                try p.scopes.append(.{ .symbol = .{
+                try p.scopes.append(.{ .definition = .{
                     .name = p.tokSlice(nameToken),
                     .type = some.type,
                     .nameToken = nameToken,
@@ -2989,11 +2996,8 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
                 try p.errToken(.addr_of_rvalue, index);
             }
 
-            if (slice.items(.tag)[@intFromEnum(operand.node)] == .DeclRefExpr) {
-                const sym = p.findSymbol(slice.items(.data)[@intFromEnum(operand.node)].DeclarationRef, .reference).?;
-                if (sym.symbol.isRegister)
-                    try p.errToken(.addr_of_register, index);
-            }
+            if (operand.ty.qual.register)
+                try p.errToken(.addr_of_register, index);
 
             const elemType = try p.arena.create(Type);
             elemType.* = operand.ty;
@@ -3539,7 +3543,7 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
                     });
 
                     try p.declBuffer.append(node);
-                    try p.scopes.append(.{ .symbol = .{
+                    try p.scopes.append(.{ .declaration = .{
                         .name = name,
                         .type = ty,
                         .nameToken = nameToken,
@@ -3566,7 +3570,7 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
                     return res;
                 },
 
-                .symbol => |s| return Result{
+                .declaration, .definition => |s| return Result{
                     .ty = s.type,
                     .node = try p.addNode(.{
                         .tag = .DeclRefExpr,
