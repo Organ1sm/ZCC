@@ -166,6 +166,7 @@ pub const Specifier = enum {
     // data.SubType
     Pointer,
     UnspecifiedVariableLenArray,
+    DecayedUnspecifiedVariableLenArray,
 
     // data.func
     /// int foo(int bar, char baz) and int (void)
@@ -180,9 +181,13 @@ pub const Specifier = enum {
 
     // data.array
     Array,
+    DecayedArray,
     StaticArray,
+    DecayedStaticArray,
     IncompleteArray,
+    DecayedIncompleteArray,
     VariableLenArray,
+    DecayedVariableLenArray,
 
     // data.record
     Struct,
@@ -203,6 +208,19 @@ pub fn isCallable(ty: Type) ?Type {
 pub fn isFunc(ty: Type) bool {
     return switch (ty.specifier) {
         .Func, .VarArgsFunc, .OldStyleFunc => true,
+        else => false,
+    };
+}
+
+pub fn isPointer(ty: Type) bool {
+    return switch (ty.specifier) {
+        .Pointer,
+        .DecayedArray,
+        .DecayedStaticArray,
+        .DecayedIncompleteArray,
+        .DecayedVariableLenArray,
+        .DecayedUnspecifiedVariableLenArray,
+        => true,
         else => false,
     };
 }
@@ -271,9 +289,20 @@ pub fn isEnumOrRecord(ty: Type) bool {
 
 pub fn getElemType(ty: Type) Type {
     return switch (ty.specifier) {
-        .Pointer, .UnspecifiedVariableLenArray => ty.data.subType.*,
-        .Array, .StaticArray, .IncompleteArray => ty.data.array.elem,
-        .VariableLenArray => ty.data.vla.elem,
+        .Pointer,
+        .UnspecifiedVariableLenArray,
+        .DecayedUnspecifiedVariableLenArray,
+        => ty.data.subType.*,
+
+        .Array,
+        .StaticArray,
+        .IncompleteArray,
+        .DecayedArray,
+        .DecayedStaticArray,
+        .DecayedIncompleteArray,
+        => ty.data.array.elem,
+
+        .VariableLenArray, .DecayedVariableLenArray => ty.data.vla.elem,
         else => unreachable,
     };
 }
@@ -384,7 +413,16 @@ pub fn sizeof(ty: Type, comp: *Compilation) ?u32 {
         .ComplexFloat => 8,
         .ComplexDouble => 16,
         .ComplexLongDouble => 32,
-        .Pointer, .StaticArray => comp.target.ptrBitWidth() >> 3,
+
+        .Pointer,
+        .StaticArray,
+        .DecayedArray,
+        .DecayedStaticArray,
+        .DecayedIncompleteArray,
+        .DecayedVariableLenArray,
+        .DecayedUnspecifiedVariableLenArray,
+        => comp.target.ptrBitWidth() >> 3,
+
         .Array => ty.data.array.elem.sizeof(comp).? * @as(u32, @intCast(ty.data.array.len)),
         .Struct, .Union => if (ty.data.record.isIncomplete()) null else ty.data.record.size,
         .Enum => if (ty.data.@"enum".isIncomplete()) null else ty.data.@"enum".tagType.sizeof(comp),
@@ -404,6 +442,11 @@ pub fn eql(a: Type, b: Type, checkQualifiers: bool) bool {
     switch (a.specifier) {
         .Pointer,
         .UnspecifiedVariableLenArray,
+        .DecayedArray,
+        .DecayedIncompleteArray,
+        .DecayedVariableLenArray,
+        .DecayedStaticArray,
+        .DecayedUnspecifiedVariableLenArray,
         => if (!a.data.subType.eql(b.data.subType.*, checkQualifiers)) return false,
 
         .Func,
@@ -437,6 +480,10 @@ pub fn eql(a: Type, b: Type, checkQualifiers: bool) bool {
     return true;
 }
 
+pub fn decayArray(ty: *Type) void {
+    ty.specifier = @as(Type.Specifier, @enumFromInt(@intFromEnum(ty.specifier) + 1));
+}
+
 pub fn combine(inner: *Type, outer: Type, p: *Parser, sourceToken: TokenIndex) Parser.Error!void {
     switch (inner.specifier) {
         .Pointer => return inner.data.subType.combine(outer, p, sourceToken),
@@ -467,6 +514,14 @@ pub fn combine(inner: *Type, outer: Type, p: *Parser, sourceToken: TokenIndex) P
             if (inner.data.func.returnType.isFunc()) return p.errToken(.func_cannot_return_func, sourceToken);
             if (inner.data.func.returnType.isArray()) return p.errToken(.func_cannot_return_array, sourceToken);
         },
+
+        .DecayedArray,
+        .DecayedStaticArray,
+        .DecayedIncompleteArray,
+        .DecayedVariableLenArray,
+        .DecayedUnspecifiedVariableLenArray,
+        => unreachable,
+
         else => inner.* = outer,
     }
 }
@@ -489,8 +544,14 @@ fn printPrologue(ty: Type, w: anytype) @TypeOf(w).Error!bool {
     }
 
     switch (ty.specifier) {
-        .Pointer => {
-            const elemType = ty.data.subType;
+        .Pointer,
+        .DecayedArray,
+        .DecayedStaticArray,
+        .DecayedIncompleteArray,
+        .DecayedVariableLenArray,
+        .DecayedUnspecifiedVariableLenArray,
+        => {
+            const elemType = ty.getElemType();
             const simple = try elemType.printPrologue(w);
             if (simple) try w.writeByte(' ');
             if (elemType.isFunc() or elemType.isArray()) try w.writeByte('(');
@@ -533,8 +594,14 @@ fn printPrologue(ty: Type, w: anytype) @TypeOf(w).Error!bool {
 fn printEpilogue(ty: Type, w: anytype) @TypeOf(w).Error!void {
     if (ty.qual.atomic) return;
     switch (ty.specifier) {
-        .Pointer => {
-            const elemType = ty.data.subType;
+        .Pointer,
+        .DecayedArray,
+        .DecayedStaticArray,
+        .DecayedIncompleteArray,
+        .DecayedVariableLenArray,
+        .DecayedUnspecifiedVariableLenArray,
+        => {
+            const elemType = ty.getElemType();
             if (elemType.isFunc() or elemType.isArray()) try w.writeByte(')');
             try elemType.printEpilogue(w);
         },
@@ -627,14 +694,14 @@ pub fn dump(ty: Type, w: anytype) @TypeOf(w).Error!void {
             try ty.data.func.returnType.dump(w);
         },
 
-        .Array, .StaticArray => {
+        .Array, .StaticArray, .DecayedArray, .DecayedStaticArray => {
             try w.writeAll("[");
-            if (ty.specifier == .StaticArray) try w.writeAll("static ");
+            if (ty.specifier == .StaticArray or ty.specifier == .DecayedStaticArray) try w.writeAll("static ");
             try w.print("{d}]", .{ty.data.array.len});
             try ty.data.array.elem.dump(w);
         },
 
-        .IncompleteArray => {
+        .IncompleteArray, .DecayedIncompleteArray => {
             try w.writeAll("[]");
             try ty.data.array.elem.dump(w);
         },
@@ -657,12 +724,12 @@ pub fn dump(ty: Type, w: anytype) @TypeOf(w).Error!void {
                 try dumpRecord(ty.data.record, w);
         },
 
-        .UnspecifiedVariableLenArray => {
+        .UnspecifiedVariableLenArray, .DecayedUnspecifiedVariableLenArray => {
             try w.writeAll("[*]");
             try ty.data.array.elem.dump(w);
         },
 
-        .VariableLenArray => {
+        .VariableLenArray, .DecayedVariableLenArray => {
             try w.writeAll("[<expr>]");
             try ty.data.array.elem.dump(w);
         },
