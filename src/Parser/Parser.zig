@@ -2655,7 +2655,8 @@ fn logicalOrExpr(p: *Parser) Error!Result {
         try rhs.expect(p);
 
         if (try lhs.adjustTypes(token, &rhs, p, .booleanLogic)) {
-            lhs.value = .{ .signed = @intFromBool(lhs.getBool() or rhs.getBool()) };
+            const res = @intFromBool(lhs.getBool() or rhs.getBool());
+            lhs.value = .{ .signed = res };
         }
 
         lhs.ty = .{ .specifier = .Int };
@@ -2682,7 +2683,8 @@ fn logicalAndExpr(p: *Parser) Error!Result {
         try rhs.expect(p);
 
         if (try lhs.adjustTypes(token, &rhs, p, .booleanLogic)) {
-            lhs.value = .{ .signed = @intFromBool(lhs.getBool() or rhs.getBool()) };
+            const res = @intFromBool(lhs.getBool() or rhs.getBool());
+            lhs.value = .{ .signed = res };
         }
 
         lhs.ty = .{ .specifier = .Int };
@@ -2804,13 +2806,15 @@ fn compExpr(p: *Parser) Error!Result {
         try rhs.expect(p);
 
         if (try lhs.adjustTypes(ge.?, &rhs, p, .relational)) {
-            lhs.value = .{ .signed = @intFromBool(switch (tag) {
+            const res = @intFromBool(switch (tag) {
                 .LessThanExpr => lhs.compare(.lt, rhs),
                 .LessThanEqualExpr => lhs.compare(.lte, rhs),
                 .GreaterThanExpr => lhs.compare(.gt, rhs),
                 .GreaterThanEqualExpr => lhs.compare(.gte, rhs),
                 else => unreachable,
-            }) };
+            });
+
+            lhs.value = .{ .signed = res };
         }
 
         lhs.ty = .{ .specifier = .Int };
@@ -3172,7 +3176,8 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
                 try operand.intCast(p, operand.ty.integerPromotion(p.pp.compilation));
 
             if (operand.value != .unavailable) {
-                operand.value = .{ .signed = @intFromBool(!operand.getBool()) };
+                const res = @intFromBool(!operand.getBool());
+                operand.value = .{ .signed = res };
             }
 
             operand.ty = .{ .specifier = .Int };
