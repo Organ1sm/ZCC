@@ -27,6 +27,7 @@ void foo(void) {
     arr = 4;
 }
 
+
 #define EXPECTED_ERRORS "assignment.c:2:7: error: expression is not assignable" \
     "assignment.c:4:7: error: expression is not assignable" \
     "assignment.c:12:7: warning: implicit pointer to integer conversion" \

@@ -276,7 +276,7 @@ fn findSymbol(p: *Parser, nameToken: TokenIndex, refKind: enum { reference, defi
         i -= 1;
         const sym = p.scopes.items[i];
         switch (sym) {
-            .definition, .declaration => |s| if (std.mem.eql(u8, s.name, name)) return sym,
+            .definition, .declaration, .param => |s| if (std.mem.eql(u8, s.name, name)) return sym,
             .enumeration => |e| if (std.mem.eql(u8, e.name, name)) return sym,
             .block => if (refKind == .definition) return null,
             else => {},
@@ -574,7 +574,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
                         try p.errStr(.parameter_missing, d.name, name);
                     }
 
-                    try p.scopes.append(.{ .definition = .{ .name = name, .nameToken = d.name, .type = d.type } });
+                    try p.scopes.append(.{ .param = .{ .name = name, .nameToken = d.name, .type = d.type } });
                     if (p.eat(.Comma) == null) break;
                 }
 
@@ -583,7 +583,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
         } else {
             for (initD.d.type.data.func.params) |param| {
                 try p.scopes.append(.{
-                    .definition = .{
+                    .param = .{
                         .name = param.name,
                         .type = param.ty,
                         .nameToken = param.nameToken,
@@ -848,6 +848,12 @@ fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec) Error!?InitDeclarator {
             try p.errStr(.redefinition, name, p.tokSlice(name));
             try p.errToken(.previous_definition, s.nameToken);
         },
+
+        .param => |s| {
+            try p.errStr(.redefinition, name, p.tokSlice(name));
+            try p.errToken(.previous_definition, s.nameToken);
+        },
+
         else => unreachable,
     };
 
@@ -1304,7 +1310,7 @@ fn enumerator(p: *Parser) Error!?EnumFieldAndNode {
             try p.errToken(.previous_definition, e.nameToken);
         },
 
-        .declaration, .definition => |s| {
+        .declaration, .definition, .param => |s| {
             try p.errStr(.redefinition_different_sym, nameToken, name);
             try p.errToken(.previous_definition, s.nameToken);
         },
@@ -1569,10 +1575,10 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: Declarator
                 const nameToken = try p.expectToken(.Identifier);
                 if (p.findSymbol(nameToken, .definition)) |scope| {
                     try p.errStr(.redefinition_of_parameter, nameToken, p.tokSlice(nameToken));
-                    try p.errToken(.previous_definition, scope.definition.nameToken);
+                    try p.errToken(.previous_definition, scope.param.nameToken);
                 }
 
-                try p.scopes.append(.{ .definition = .{
+                try p.scopes.append(.{ .param = .{
                     .name = p.tokSlice(nameToken),
                     .type = undefined,
                     .nameToken = nameToken,
@@ -1670,11 +1676,11 @@ fn paramDecls(p: *Parser) Error!?[]Type.Function.Param {
                         try p.errToken(.previous_definition, scope.enumeration.nameToken);
                     } else {
                         try p.errStr(.redefinition_of_parameter, nameToken, p.tokSlice(nameToken));
-                        try p.errToken(.previous_definition, scope.definition.nameToken);
+                        try p.errToken(.previous_definition, scope.param.nameToken);
                     }
                 }
 
-                try p.scopes.append(.{ .definition = .{
+                try p.scopes.append(.{ .param = .{
                     .name = p.tokSlice(nameToken),
                     .type = some.type,
                     .nameToken = nameToken,
@@ -2199,7 +2205,7 @@ fn labeledStmt(p: *Parser) Error!?NodeIndex {
 }
 
 /// compoundStmt : '{' ( decl | staticAssert |stmt)* '}'
-fn parseCompoundStmt(p: *Parser, addImplicitReturn: bool) Error!?NodeIndex {
+fn parseCompoundStmt(p: *Parser, isFnBody: bool) Error!?NodeIndex {
     const lBrace = p.eat(.LBrace) orelse return null;
 
     const declBufferTop = p.declBuffer.items.len;
@@ -2210,7 +2216,9 @@ fn parseCompoundStmt(p: *Parser, addImplicitReturn: bool) Error!?NodeIndex {
         p.scopes.items.len = scopeTop;
     }
 
-    try p.scopes.append(.block);
+    // the parameters of a function are in the same scope as the body
+    if (!isFnBody)
+        try p.scopes.append(.block);
 
     var noreturnIdx: ?TokenIndex = null;
     var noreturnLabelCount: u32 = 0;
@@ -2254,7 +2262,7 @@ fn parseCompoundStmt(p: *Parser, addImplicitReturn: bool) Error!?NodeIndex {
             try p.errToken(.unreachable_code, some);
     }
 
-    if (addImplicitReturn and (p.declBuffer.items.len == declBufferTop or
+    if (isFnBody and (p.declBuffer.items.len == declBufferTop or
         p.nodes.items(.tag)[@intFromEnum(p.declBuffer.items[p.declBuffer.items.len - 1])] != .ReturnStmt))
     {
         if (p.returnType.?.specifier != .Void)
@@ -3570,7 +3578,7 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
                     return res;
                 },
 
-                .declaration, .definition => |s| return Result{
+                .declaration, .definition, .param => |s| return Result{
                     .ty = s.type,
                     .node = try p.addNode(.{
                         .tag = .DeclRefExpr,

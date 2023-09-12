@@ -16,6 +16,7 @@ pub const Scope = union(enum) {
     symbol: Symbol,
     declaration: Symbol,
     definition: Symbol,
+    param: Symbol,
     enumeration: Enumeration,
     loop,
     @"switch": *Switch,
