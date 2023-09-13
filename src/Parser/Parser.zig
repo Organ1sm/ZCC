@@ -475,9 +475,7 @@ fn nextExternDecl(p: *Parser) void {
 ///  | staticAssert
 fn parseDeclaration(p: *Parser) Error!bool {
     const firstTokenIndex = p.index;
-    var declSpec = if (try p.declSpecifier()) |some|
-        some
-    else blk: {
+    var declSpec = if (try p.declSpecifier(false)) |some| some else blk: {
         if (p.returnType != null)
             return false;
 
@@ -486,11 +484,8 @@ fn parseDeclaration(p: *Parser) Error!bool {
             else => return false,
         }
 
-        var d = DeclSpec{};
         var spec: TypeBuilder = .{};
-        try spec.finish(p, &d.type);
-
-        break :blk d;
+        break :blk DeclSpec{ .type = try spec.finish(p) };
     };
 
     var initD = (try p.parseInitDeclarator(&declSpec)) orelse {
@@ -553,7 +548,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
 
             initD.d.type.specifier = .Func;
             paramLoop: while (true) {
-                const paramDeclSpec = (try p.declSpecifier()) orelse break;
+                const paramDeclSpec = (try p.declSpecifier(true)) orelse break;
                 if (p.eat(.Semicolon)) |semi| {
                     try p.errToken(.missing_declaration, semi);
                     continue :paramLoop;
@@ -735,13 +730,13 @@ fn parseStaticAssert(p: *Parser) Error!bool {
 ///  | keyword_threadlocal
 ///  | keyword_auto
 ///  | keyword_register
-fn declSpecifier(p: *Parser) Error!?DeclSpec {
+fn declSpecifier(p: *Parser, isParam: bool) Error!?DeclSpec {
     var d: DeclSpec = .{};
     var spec: TypeBuilder = .{};
 
     const start = p.index;
     while (true) {
-        if (try p.parseTypeSpec(&spec, &d.type))
+        if (try p.parseTypeSpec(&spec))
             continue;
 
         const token = p.getCurrToken();
@@ -814,8 +809,12 @@ fn declSpecifier(p: *Parser) Error!?DeclSpec {
     }
 
     if (p.index == start) return null;
-    try spec.finish(p, &d.type);
+    if (isParam and spec.alignToken != null) {
+        try p.errToken(.alignas_on_param, spec.alignToken.?);
+        spec.alignToken = null;
+    }
 
+    d.type = try spec.finish(p);
     return d;
 }
 
@@ -898,7 +897,7 @@ fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec) Error!?InitDeclarator {
 /// alignSpec
 ///   : keyword_alignas '(' typeName ')'
 ///   | keyword_alignas '(' constExpr ')'
-fn parseTypeSpec(p: *Parser, ty: *TypeBuilder, completeType: *Type) Error!bool {
+fn parseTypeSpec(p: *Parser, ty: *TypeBuilder) Error!bool {
     const start = p.index;
     while (true) {
         if (try p.parseTypeQual(&ty.qual))
@@ -962,18 +961,25 @@ fn parseTypeSpec(p: *Parser, ty: *TypeBuilder, completeType: *Type) Error!bool {
             },
 
             .KeywordAlignas => {
-                if (completeType.alignment != 0)
+                if (ty.alignToken != null)
                     try p.errStr(.duplicate_declspec, p.index, "alignment");
 
+                ty.alignToken = p.index;
                 p.index += 1;
 
                 const lp = try p.expectToken(.LParen);
-                if (try p.typeName()) |inner_ty| {
-                    completeType.alignment = inner_ty.alignment;
+                if (try p.typeName()) |innerType| {
+                    ty.alignment = innerType.alignment;
                 } else {
                     const res = try p.constExpr();
-                    // TODO more validation here
-                    completeType.alignment = @as(u32, @intCast(res.asU64()));
+                    var requested = @as(u29, @intCast(res.asU64()));
+                    if (requested == 0) {
+                        try p.errToken(.zero_align_ignored, ty.alignToken.?);
+                    } else if (!std.mem.isValidAlign(requested)) {
+                        requested = 0;
+                        try p.errToken(.non_pow2_align, ty.alignToken.?);
+                    }
+                    ty.alignment = requested;
                 }
 
                 try p.expectClosing(lp, .RParen);
@@ -1192,11 +1198,13 @@ fn recordDecls(p: *Parser) Error!void {
 // specQual : typeSpec | typeQual | alignSpec
 fn specQual(p: *Parser) Error!?Type {
     var spec: TypeBuilder = .{};
-    var ty: Type = .{ .specifier = undefined };
 
-    if (try p.parseTypeSpec(&spec, &ty)) {
-        try spec.finish(p, &ty);
-        return ty;
+    if (try p.parseTypeSpec(&spec)) {
+        if (spec.alignment != 0) {
+            try p.errToken(.align_ignored, spec.alignToken.?);
+            spec.alignToken = null;
+            return try spec.finish(p);
+        }
     }
 
     return null;
@@ -1665,17 +1673,13 @@ fn paramDecls(p: *Parser) Error!?[]Type.Function.Param {
     try p.scopes.append(.block);
 
     while (true) {
-        const paramDeclSpec = if (try p.declSpecifier()) |some|
+        const paramDeclSpec = if (try p.declSpecifier(true)) |some|
             some
         else if (p.paramBuffer.items.len == paramBufferTop)
             return null
         else blk: {
-            var d: DeclSpec = .{};
             var spec: TypeBuilder = .{};
-
-            try spec.finish(p, &d.type);
-
-            break :blk d;
+            break :blk DeclSpec{ .type = try spec.finish(p) };
         };
 
         var nameToken: TokenIndex = 0;
@@ -3259,7 +3263,7 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
             }
 
             res.ty = Type.sizeT(p.pp.compilation);
-            res.value = .{ .unsigned = res.ty.alignment };
+            res.value = .{ .unsigned = res.ty.alignof(p.pp.compilation) };
             try res.un(p, .AlignOfExpr);
             return res;
         },

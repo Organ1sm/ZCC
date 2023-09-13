@@ -14,6 +14,8 @@ typedef: ?struct {
 
 specifier: @This().Specifier = .None,
 qual: Qualifiers.Builder = .{},
+alignment: u32 = 0,
+alignToken: ?TokenIndex = null,
 
 pub const Specifier = union(enum) {
     None,
@@ -127,7 +129,9 @@ pub const Specifier = union(enum) {
     }
 };
 
-pub fn finish(b: @This(), p: *Parser, ty: *Type) Parser.Error!void {
+pub fn finish(b: @This(), p: *Parser) Parser.Error!Type {
+    var ty = Type{ .specifier = undefined };
+
     switch (b.specifier) {
         Specifier.None => {
             ty.specifier = .Int;
@@ -252,12 +256,23 @@ pub fn finish(b: @This(), p: *Parser, ty: *Type) Parser.Error!void {
         },
     }
 
-    try b.qual.finish(p, ty);
+    try b.qual.finish(p, &ty);
+
+    if (b.alignToken) |alignToken| {
+        const default = ty.alignof(p.pp.compilation);
+        if (ty.isFunc()) {
+            try p.errToken(.alignas_on_func, alignToken);
+        } else if (b.alignment != 0 and b.alignment < default) {
+            try p.errExtra(.minimum_alignment, alignToken, .{ .unsigned = default });
+        } else {
+            ty.alignment = b.alignment;
+        }
+    }
+    return ty;
 }
 
 pub fn cannotCombine(b: @This(), p: *Parser, sourceToken: TokenIndex) Compilation.Error!void {
-    var prevType: Type = .{ .specifier = undefined };
-    b.finish(p, &prevType) catch unreachable;
+    const prevType = b.finish(p) catch unreachable;
     try p.errExtra(
         .cannot_combine_spec,
         sourceToken,

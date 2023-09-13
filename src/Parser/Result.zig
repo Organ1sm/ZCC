@@ -240,15 +240,17 @@ pub fn lvalConversion(res: *Result, p: *Parser) Error!void {
     if (res.ty.isFunc()) {
         var elemType = try p.arena.create(Type);
         elemType.* = res.ty;
-
         res.ty.specifier = .Pointer;
         res.ty.data = .{ .subType = elemType };
+        res.ty.alignment = 0;
         try res.un(p, .FunctionToPointer);
     } else if (res.ty.isArray()) {
         res.ty.decayArray();
+        res.ty.alignment = 0;
         try res.un(p, .ArrayToPointer);
     } else if (!p.inMacro and AST.isLValue(p.nodes.slice(), res.node)) {
         res.ty.qual = .{};
+        res.ty.alignment = 0;
         try res.un(p, .LValueToRValue);
     }
 }

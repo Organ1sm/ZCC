@@ -21,6 +21,8 @@ data: union {
 
 qual: Qualifiers = .{},
 specifier: Specifier,
+
+/// user requested alignment, to get type alignment use `alignof`
 alignment: u32 = 0,
 
 pub const Qualifiers = packed struct {
@@ -426,6 +428,53 @@ pub fn sizeof(ty: Type, comp: *Compilation) ?u32 {
         .Array => ty.data.array.elem.sizeof(comp).? * @as(u32, @intCast(ty.data.array.len)),
         .Struct, .Union => if (ty.data.record.isIncomplete()) null else ty.data.record.size,
         .Enum => if (ty.data.@"enum".isIncomplete()) null else ty.data.@"enum".tagType.sizeof(comp),
+    };
+}
+
+/// Get the alignment of a type
+pub fn alignof(ty: Type, comp: *Compilation) u32 {
+    if (ty.alignment != 0)
+        return ty.alignment;
+
+    // TODO get target from compilation
+    return switch (ty.specifier) {
+        .UnspecifiedVariableLenArray => unreachable, // must be bound in function definition
+        .VariableLenArray, .IncompleteArray => ty.getElemType().alignof(comp),
+        .Func, .VarArgsFunc, .OldStyleFunc => 4, // TODO check target
+        .Char, .SChar, .UChar, .Void, .Bool => 1,
+        .Short, .UShort => 2,
+        .Int, .UInt => 4,
+        .Long, .ULong => switch (comp.target.os.tag) {
+            .linux,
+            .macos,
+            .freebsd,
+            .netbsd,
+            .dragonfly,
+            .openbsd,
+            .wasi,
+            .emscripten,
+            => comp.target.ptrBitWidth() >> 3,
+            .windows, .uefi => 4,
+            else => 4,
+        },
+
+        .LongLong, .ULongLong => 8,
+        .Float, .ComplexFloat => 4,
+        .Double, .ComplexDouble => 8,
+        .LongDouble, .ComplexLongDouble => 16,
+
+        .Pointer,
+        .StaticArray,
+        .DecayedArray,
+        .DecayedStaticArray,
+        .DecayedIncompleteArray,
+        .DecayedVariableLenArray,
+        .DecayedUnspecifiedVariableLenArray,
+        => comp.target.ptrBitWidth() >> 3,
+
+        .Array => ty.data.array.elem.alignof(comp),
+        .Struct, .Union => if (ty.data.record.isIncomplete()) 0 else ty.data.record.alignment,
+        .Enum => if (ty.data.@"enum".isIncomplete()) 0 else ty.data.@"enum".tagType.alignof(comp),
     };
 }
 
