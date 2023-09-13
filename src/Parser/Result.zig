@@ -167,10 +167,12 @@ pub fn adjustTypes(a: *Result, token: TokenIndex, b: *Result, p: *Parser, kind: 
             if (!aIsScalar or !bIsScalar or (aIsFloat and bIsPtr) or (bIsFloat and aIsPtr))
                 return a.invalidBinTy(token, b, p);
 
-            // TODO print types
-            if (aIsInt or bIsInt) try p.errToken(.comparison_ptr_int, token);
+            if (aIsInt or bIsInt)
+                try p.errStr(.comparison_ptr_int, token, try p.typePairStr(a.ty, b.ty));
+
             if (aIsPtr and bIsPtr) {
-                if (!a.ty.eql(b.ty, false)) try p.errToken(.comparison_distinct_ptr, token);
+                if (!a.ty.eql(b.ty, false))
+                    try p.errStr(.comparison_distinct_ptr, token, try p.typePairStr(a.ty, b.ty));
             } else if (aIsPtr) {
                 try b.ptrCast(p, a.ty);
             } else {
@@ -190,8 +192,11 @@ pub fn adjustTypes(a: *Result, token: TokenIndex, b: *Result, p: *Parser, kind: 
             }
 
             if ((aIsPtr and bIsInt) or (aIsInt and bIsPtr)) {
-                try p.errToken(.implicit_int_to_ptr, token);
-                try (if (aIsInt) a else b).ptrCast(p, if (aIsPtr) a.ty else b.ty);
+                const intType = if (aIsInt) a else b;
+                const ptrType = if (aIsPtr) a else b;
+
+                try p.errStr(.implicit_int_to_ptr, token, try p.typePairStrExtra(intType.ty, " to ", ptrType.ty));
+                try intType.ptrCast(p, ptrType.ty);
                 return true;
             }
 
@@ -215,8 +220,8 @@ pub fn adjustTypes(a: *Result, token: TokenIndex, b: *Result, p: *Parser, kind: 
             if (!aIsPtr or !(bIsPtr or bIsInt)) return a.invalidBinTy(token, b, p);
 
             if (aIsPtr and bIsPtr) {
-                // TODO print types
-                if (!a.ty.eql(b.ty, false)) try p.errToken(.incompatible_pointers, token);
+                if (!a.ty.eql(b.ty, false))
+                    try p.errStr(.incompatible_pointers, token, try p.typePairStrExtra(a.ty, " to ", b.ty));
                 a.ty = Type.ptrDiffT(p.pp.compilation);
             }
 
@@ -372,10 +377,7 @@ fn usualArithmeticConversion(a: *Result, b: *Result, p: *Parser) Error!void {
 }
 
 fn invalidBinTy(a: *Result, tok: TokenIndex, b: *Result, p: *Parser) Error!bool {
-    // TODO print a and b types
-    _ = a;
-    _ = b;
-    try p.errToken(.invalid_bin_types, tok);
+    try p.errStr(.invalid_bin_types, tok, try p.typePairStr(a.ty, b.ty));
     return false;
 }
 
