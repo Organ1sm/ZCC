@@ -676,6 +676,8 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
         .IntCast,
         .FloatCast,
         .ToVoid,
+        .QualCast,
+        .NullToPointer,
         => {
             try tree.dumpNode(data.UnaryExpr, level + delta, w);
         },

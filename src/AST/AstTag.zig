@@ -283,12 +283,19 @@ pub const Tag = enum(u8) {
     IntCast,
     /// Convert one floating type to another
     FloatCast,
+    /// Convert pointer to one with same child type but more CV-quals,
+    /// OR to appropriately-qualified void *
+    /// only appears on the branches of a conditional expr
+    QualCast,
     /// Convert type to void; only appears on the branches of a conditional expr
     ToVoid,
 
     /// Inserted at the end of a function body if no return stmt is found.
     /// ty is the functions return type
     ImplicitReturn,
+
+    /// Convert a literal 0 to a null pointer
+    NullToPointer,
 
     pub fn isImplicit(tag: Tag) bool {
         return switch (tag) {
@@ -309,6 +316,8 @@ pub const Tag = enum(u8) {
             .FloatCast,
             .ToVoid,
             .ImplicitReturn,
+            .QualCast,
+            .NullToPointer,
             => true,
 
             else => false,

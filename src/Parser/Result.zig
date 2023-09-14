@@ -34,6 +34,14 @@ pub fn asU64(res: Result) u64 {
     };
 }
 
+pub fn isZero(res: Result) bool {
+    return switch (res.value) {
+        .signed => |v| v == 0,
+        .unsigned => |v| v == 0,
+        .unavailable => false,
+    };
+}
+
 pub fn expect(res: Result, p: *Parser) Error!void {
     if (p.inMacro) {
         if (res.value == .unavailable) {
@@ -104,6 +112,42 @@ pub fn un(operand: *Result, p: *Parser, tag: AstTag) Error!void {
         .type = operand.ty,
         .data = .{ .UnaryExpr = operand.node },
     });
+}
+
+pub fn qualCast(res: *Result, p: *Parser, elemType: *Type) Error!void {
+    res.ty = .{
+        .data = .{ .subType = elemType },
+        .specifier = .Pointer,
+    };
+    try res.un(p, .QualCast);
+}
+
+pub fn adjustCondExprPtrs(a: *Result, tok: TokenIndex, b: *Result, p: *Parser) !bool {
+    std.debug.assert(a.ty.specifier == .Pointer and b.ty.specifier == .Pointer);
+
+    const aElem = a.ty.getElemType();
+    const bElem = b.ty.getElemType();
+    if (aElem.eql(bElem, true)) return true;
+
+    var adjustedElemType = try p.arena.create(Type);
+    adjustedElemType.* = aElem;
+
+    const hasVoidStarBranch = a.ty.isVoidStar() or b.ty.isVoidStar();
+    const onlyQualsDiffer = aElem.eql(bElem, false);
+    const pointersCompatible = onlyQualsDiffer or hasVoidStarBranch;
+
+    if (!pointersCompatible or hasVoidStarBranch) {
+        if (!pointersCompatible)
+            try p.errStr(.pointer_mismatch, tok, try p.typePairStrExtra(a.ty, " and ", b.ty));
+
+        adjustedElemType.* = .{ .specifier = .Void };
+    }
+    if (pointersCompatible) {
+        adjustedElemType.qual = aElem.qual.mergeCVAQualifiers(bElem.qual);
+    }
+    if (!adjustedElemType.eql(aElem, true)) try a.qualCast(p, adjustedElemType);
+    if (!adjustedElemType.eql(bElem, true)) try b.qualCast(p, adjustedElemType);
+    return true;
 }
 
 /// Return true if both are same type
@@ -192,6 +236,12 @@ pub fn adjustTypes(a: *Result, token: TokenIndex, b: *Result, p: *Parser, kind: 
             }
 
             if ((aIsPtr and bIsInt) or (aIsInt and bIsPtr)) {
+                if (a.isZero() or b.isZero()) {
+                    try a.nullCast(p, b.ty);
+                    try b.nullCast(p, a.ty);
+                    return true;
+                }
+
                 const intType = if (aIsInt) a else b;
                 const ptrType = if (aIsPtr) a else b;
 
@@ -200,7 +250,10 @@ pub fn adjustTypes(a: *Result, token: TokenIndex, b: *Result, p: *Parser, kind: 
                 return true;
             }
 
-            // TODO struct/record and pointers
+            if (aIsPtr and bIsPtr)
+                return a.adjustCondExprPtrs(token, b, p);
+
+            // TODO struct/record
             return a.invalidBinTy(token, b, p);
         },
 
@@ -325,6 +378,12 @@ pub fn toVoid(res: *Result, p: *Parser) Error!void {
             .data = .{ .UnaryExpr = res.node },
         });
     }
+}
+
+pub fn nullCast(res: *Result, p: *Parser, ptrType: Type) Error!void {
+    if (!res.isZero()) return;
+    res.ty = ptrType;
+    try res.un(p, .NullToPointer);
 }
 
 fn usualArithmeticConversion(a: *Result, b: *Result, p: *Parser) Error!void {
