@@ -1,6 +1,10 @@
 const std = @import("std");
 const print = std.debug.print;
 const zcc = @import("zcc");
+const Tree = zcc.Tree;
+const Token = Tree.Token;
+const NodeIndex = Tree.NodeIndex;
+const AllocatorError = std.mem.Allocator.Error;
 
 const predefined_macros =
     \\#define EXPECT(x) _Static_assert(x, "unexpected result")
@@ -178,6 +182,47 @@ pub fn main() !void {
         var tree = try zcc.Parser.parse(&pp);
         defer tree.deinit();
 
+        if (pp.defines.get("EXPECTED_TYPES")) |types| {
+            const testFn = for (tree.rootDecls) |decl| {
+                if (tree.nodes.items(.tag)[@intFromEnum(decl)] == .FnDef) break tree.nodes.items(.data)[@intFromEnum(decl)];
+            } else {
+                failCount += 1;
+                progress.log("EXPECTED_TYPES requires a function to be defined\n", .{});
+                break;
+            };
+
+            var actual = StmtTypeDumper.init(gpa);
+            defer actual.deinit(gpa);
+
+            try actual.dump(&tree, testFn.Declaration.node, gpa);
+
+            if (types.simple.tokens.len != actual.types.items.len) {
+                failCount += 1;
+                progress.log("EXPECTED_TYPES count of {d} does not match function statement length of {d}\n", .{
+                    types.simple.tokens.len,
+                    actual.types.items.len,
+                });
+                break;
+            }
+            for (types.simple.tokens, 0..) |str, i| {
+                if (str.id != .StringLiteral) {
+                    failCount += 1;
+                    progress.log("EXPECTED_TYPES tokens must be string literals (found {s})\n", .{@tagName(str.id)});
+                    break;
+                }
+                const expectedType = std.mem.trim(u8, pp.tokSliceSafe(str), "\"");
+                const actualType = actual.types.items[i];
+                if (!std.mem.eql(u8, expectedType, actualType)) {
+                    failCount += 1;
+                    progress.log("expected type '{s}' did not match actual type '{s}'\n", .{
+                        expectedType,
+                        actualType,
+                    });
+                    break;
+                }
+            }
+        }
+
         if (pp.defines.get("EXPECTED_ERRORS")) |macro| {
             const expectedCount = comp.diag.list.items.len;
             var m = MsgWriter.init(gpa);
@@ -285,5 +330,59 @@ const MsgWriter = struct {
         }
         m.print("\n{s}\n", .{lcs.?.str});
         m.print("{s: >[1]}^\n", .{ "", lcs.?.col - 1 });
+    }
+};
+
+const StmtTypeDumper = struct {
+    types: std.ArrayList([]const u8),
+
+    fn deinit(self: *StmtTypeDumper, allocator: std.mem.Allocator) void {
+        for (self.types.items) |t| {
+            allocator.free(t);
+        }
+        self.types.deinit();
+    }
+
+    fn init(allocator: std.mem.Allocator) StmtTypeDumper {
+        return .{
+            .types = std.ArrayList([]const u8).init(allocator),
+        };
+    }
+
+    fn dumpNode(self: *StmtTypeDumper, tree: *const Tree, node: NodeIndex, m: *MsgWriter) AllocatorError!void {
+        if (node == .none)
+            return;
+        const tag = tree.nodes.items(.tag)[@intFromEnum(node)];
+        if (tag == .ImplicitReturn)
+            return;
+
+        const ty = tree.nodes.items(.type)[@intFromEnum(node)];
+        ty.dump(m.buf.writer()) catch {};
+        try self.types.append(try m.buf.toOwnedSlice());
+    }
+
+    fn dump(self: *StmtTypeDumper, tree: *const Tree, declIdx: NodeIndex, allocator: std.mem.Allocator) AllocatorError!void {
+        var m = MsgWriter.init(allocator);
+        defer m.deinit();
+
+        const idx = @intFromEnum(declIdx);
+
+        const tag = tree.nodes.items(.tag)[idx];
+        const data = tree.nodes.items(.data)[idx];
+
+        switch (tag) {
+            .CompoundStmtTwo => {
+                try self.dumpNode(tree, data.BinaryExpr.lhs, &m);
+                try self.dumpNode(tree, data.BinaryExpr.rhs, &m);
+            },
+
+            .CompoundStmt => {
+                for (tree.data[data.range.start..data.range.end]) |stmt| {
+                    try self.dumpNode(tree, stmt, &m);
+                }
+            },
+
+            else => unreachable,
+        }
     }
 };

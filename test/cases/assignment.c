@@ -25,6 +25,9 @@ void foo(void) {
     f *= g;
     int arr[4];
     arr = 4;
+    int *x;
+    x = 0;
+    x = (0);
 }
 
 

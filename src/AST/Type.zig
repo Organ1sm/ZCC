@@ -46,6 +46,15 @@ pub const Qualifiers = packed struct {
         if (quals.register) try w.writeAll("register ");
     }
 
+    /// Merge the const/volatile/_Atomic qualifiers
+    pub fn mergeCVAQualifiers(a: Qualifiers, b: Qualifiers) Qualifiers {
+        return .{
+            .@"const" = a.@"const" or b.@"const",
+            .@"volatile" = a.@"volatile" or b.@"volatile",
+            .atomic = a.atomic or b.atomic,
+        };
+    }
+
     pub const Builder = struct {
         @"const": ?TokenIndex = null,
         atomic: ?TokenIndex = null,
@@ -271,6 +280,14 @@ pub fn isReal(ty: Type) bool {
     return switch (ty.specifier) {
         .ComplexFloat, .ComplexDouble, .ComplexLongDouble => false,
         else => true,
+    };
+}
+
+// is the 'void *'
+pub fn isVoidStar(ty: Type) bool {
+    return switch (ty.specifier) {
+        .Pointer => ty.data.subType.specifier == .Void,
+        else => false,
     };
 }
 

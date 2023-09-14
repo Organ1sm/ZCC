@@ -1632,7 +1632,6 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: Declarator
 
         const outer = try p.directDeclarator(baseType, d, kind);
         try resType.combine(outer, p, lp);
-
         return resType;
     } else {
         return baseType;
@@ -2580,6 +2579,8 @@ fn assignExpr(p: *Parser) Error!Result {
             try rhs.ptrCast(p, lhs.ty)
         else if (tag != .AssignExpr)
             try p.errStr(.invalid_bin_types, index, try p.typePairStr(lhs.ty, rhs.ty))
+        else if (rhs.isZero())
+            try rhs.nullCast(p, lhs.ty)
         else if (!lhs.ty.eql(rhs.ty, false))
             try p.errStr(.incompatible_assign, index, try p.typePairStrExtra(lhs.ty, eMsg, rhs.ty));
     } else if (lhs.ty.isEnumOrRecord()) { // enum.isInt() == true
