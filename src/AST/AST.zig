@@ -214,9 +214,12 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
             try w.writeByteNTimes(' ', level + 1);
             try w.writeAll("condition:\n");
             try tree.dumpNode(data.BinaryExpr.lhs, level + delta, w);
-            try w.writeByteNTimes(' ', level + 1);
-            try w.writeAll("diagnostic:\n");
-            try tree.dumpNode(data.BinaryExpr.rhs, level + delta, w);
+
+            if (data.BinaryExpr.rhs != .none) {
+                try w.writeByteNTimes(' ', level + 1);
+                try w.writeAll("diagnostic:\n");
+                try tree.dumpNode(data.BinaryExpr.rhs, level + delta, w);
+            }
         },
 
         .FnProto,

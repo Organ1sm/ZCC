@@ -670,42 +670,59 @@ fn parseDeclaration(p: *Parser) Error!bool {
 fn parseStaticAssert(p: *Parser) Error!bool {
     const curToken = p.eat(.KeywordStaticAssert) orelse return false;
     const lp = try p.expectToken(.LParen);
+    const resToken = p.index;
     const res = try p.constExpr();
+    var messageWarning = false;
 
-    _ = try p.expectToken(.Comma);
-    const str = switch (p.getCurrToken()) {
-        .StringLiteral,
-        .StringLiteralUTF_8,
-        .StringLiteralUTF_16,
-        .StringLiteralUTF_32,
-        .StringLiteralWide,
-        => try p.parseStringLiteral(),
+    const str = if (p.eat(.Comma) != null)
+        switch (p.getCurrToken()) {
+            .StringLiteral,
+            .StringLiteralUTF_8,
+            .StringLiteralUTF_16,
+            .StringLiteralUTF_32,
+            .StringLiteralWide,
+            => try p.parseStringLiteral(),
 
-        else => {
-            try p.err(.expected_str_literal);
-            return error.ParsingFailed;
-        },
+            else => {
+                try p.err(.expected_str_literal);
+                return error.ParsingFailed;
+            },
+        }
+    else blk: {
+        messageWarning = true;
+        break :blk Result{ .ty = .{ .specifier = .Void } };
     };
 
     try p.expectClosing(lp, .RParen);
     _ = try p.expectToken(.Semicolon);
+    if (messageWarning)
+        try p.errToken(.static_assert_missing_message, curToken);
 
-    if (res.value != .unavailable and !res.getBool()) {
-        const stringsTop = p.strings.items.len;
-        defer p.strings.items.len = stringsTop;
+    if (res.value == .unavailable) {
+        // an unavailable sizeof expression is already a compile error, so we don't emit
+        // another error for an invalid _Static_assert condition. This matches the behavior
+        // of gcc/clang
+        const resTag = p.nodes.items(.tag)[@intFromEnum(res.node)];
+        if (resTag != .SizeOfExpr)
+            try p.errToken(.static_assert_not_constant, resToken);
+    } else if (!res.getBool()) {
+        if (str.node != .none) {
+            const stringsTop = p.strings.items.len;
+            defer p.strings.items.len = stringsTop;
 
-        const data = p.nodes.items(.data)[@intFromEnum(str.node)].String;
-        try AST.dumpString(
-            p.strings.items[data.index..][0..data.len],
-            p.nodes.items(.tag)[@intFromEnum(str.node)],
-            p.strings.writer(),
-        );
+            const data = p.nodes.items(.data)[@intFromEnum(str.node)].String;
+            try AST.dumpString(
+                p.strings.items[data.index..][0..data.len],
+                p.nodes.items(.tag)[@intFromEnum(str.node)],
+                p.strings.writer(),
+            );
 
-        try p.errStr(
-            .static_assert_failure,
-            curToken,
-            try p.pp.arena.allocator().dupe(u8, p.strings.items[stringsTop..]),
-        );
+            try p.errStr(
+                .static_assert_failure,
+                curToken,
+                try p.pp.arena.allocator().dupe(u8, p.strings.items[stringsTop..]),
+            );
+        } else try p.errToken(.static_assert_failure, curToken);
     }
 
     const node = try p.addNode(.{
