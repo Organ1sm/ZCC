@@ -672,7 +672,6 @@ fn parseStaticAssert(p: *Parser) Error!bool {
     const lp = try p.expectToken(.LParen);
     const resToken = p.index;
     const res = try p.constExpr();
-    var messageWarning = false;
 
     const str = if (p.eat(.Comma) != null)
         switch (p.getCurrToken()) {
@@ -688,14 +687,12 @@ fn parseStaticAssert(p: *Parser) Error!bool {
                 return error.ParsingFailed;
             },
         }
-    else blk: {
-        messageWarning = true;
-        break :blk Result{ .ty = .{ .specifier = .Void } };
-    };
+    else
+        Result{};
 
     try p.expectClosing(lp, .RParen);
     _ = try p.expectToken(.Semicolon);
-    if (messageWarning)
+    if (str.node == .none)
         try p.errToken(.static_assert_missing_message, curToken);
 
     if (res.value == .unavailable) {
@@ -2056,7 +2053,12 @@ fn parseForStmt(p: *Parser) Error!NodeIndex {
     } else {
         return try p.addNode(.{
             .tag = .ForStmt,
-            .data = .{ .range = try p.addList(&.{ init.node, cond.node, incr.node }) },
+            .data = .{
+                .If3 = .{
+                    .cond = body,
+                    .body = (try p.addList(&.{ init.node, cond.node, incr.node })).start,
+                },
+            },
         });
     }
 }

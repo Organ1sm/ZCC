@@ -123,7 +123,7 @@ pub fn qualCast(res: *Result, p: *Parser, elemType: *Type) Error!void {
 }
 
 pub fn adjustCondExprPtrs(a: *Result, tok: TokenIndex, b: *Result, p: *Parser) !bool {
-    std.debug.assert(a.ty.specifier == .Pointer and b.ty.specifier == .Pointer);
+    std.debug.assert(a.ty.isPointer() and b.ty.isPointer());
 
     const aElem = a.ty.getElemType();
     const bElem = b.ty.getElemType();
@@ -143,7 +143,7 @@ pub fn adjustCondExprPtrs(a: *Result, tok: TokenIndex, b: *Result, p: *Parser) !
         adjustedElemType.* = .{ .specifier = .Void };
     }
     if (pointersCompatible) {
-        adjustedElemType.qual = aElem.qual.mergeCVAQualifiers(bElem.qual);
+        adjustedElemType.qual = aElem.qual.mergeCVQualifiers(bElem.qual);
     }
     if (!adjustedElemType.eql(aElem, true)) try a.qualCast(p, adjustedElemType);
     if (!adjustedElemType.eql(bElem, true)) try b.qualCast(p, adjustedElemType);
