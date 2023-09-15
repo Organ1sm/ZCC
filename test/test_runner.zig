@@ -179,10 +179,14 @@ pub fn main() !void {
             continue;
         }
 
+        const expectedTypes = pp.defines.get("EXPECTED_TYPES");
+        if (expectedTypes) |_| pp.compilation.diag.options.@"unused-value" = .off;
+        defer pp.compilation.diag.options.@"unused-value" = .warning;
+
         var tree = try zcc.Parser.parse(&pp);
         defer tree.deinit();
 
-        if (pp.defines.get("EXPECTED_TYPES")) |types| {
+        if (expectedTypes) |types| {
             const testFn = for (tree.rootDecls) |decl| {
                 if (tree.nodes.items(.tag)[@intFromEnum(decl)] == .FnDef) break tree.nodes.items(.data)[@intFromEnum(decl)];
             } else {
