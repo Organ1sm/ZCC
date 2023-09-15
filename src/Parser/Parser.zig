@@ -595,6 +595,8 @@ fn parseDeclaration(p: *Parser) Error!bool {
             }
         } else {
             for (initD.d.type.data.func.params) |param| {
+                if (param.ty.hasUnboundVLA())
+                    try p.errToken(.unbound_vla, param.nameToken);
                 try p.scopes.append(.{
                     .param = .{
                         .name = param.name,
