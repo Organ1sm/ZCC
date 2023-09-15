@@ -389,6 +389,29 @@ pub fn hasIncompleteSize(ty: Type) bool {
     };
 }
 
+pub fn hasUnboundVLA(ty: Type) bool {
+    var cur = ty;
+    while (true) {
+        switch (cur.specifier) {
+            .UnspecifiedVariableLenArray,
+            .DecayedUnspecifiedVariableLenArray,
+            => return true,
+
+            .Array,
+            .StaticArray,
+            .IncompleteArray,
+            .VariableLenArray,
+            .DecayedArray,
+            .DecayedStaticArray,
+            .DecayedIncompleteArray,
+            .DecayedVariableLenArray,
+            => cur = cur.getElemType(),
+
+            else => return false,
+        }
+    }
+}
+
 /// Size of type as reported by sizeof
 pub fn sizeof(ty: Type, comp: *Compilation) ?u32 {
     // TODO get target from compilation
@@ -553,31 +576,38 @@ pub fn combine(inner: *Type, outer: Type, p: *Parser, sourceToken: TokenIndex) P
     switch (inner.specifier) {
         .Pointer => return inner.data.subType.combine(outer, p, sourceToken),
 
-        .UnspecifiedVariableLenArray => return p.todo("combine [*] array"),
+        .UnspecifiedVariableLenArray => {
+            try inner.data.subType.combine(outer, p, sourceToken);
+
+            const elemType = inner.data.subType.*;
+            if (elemType.hasIncompleteSize()) try p.errStr(.array_incomplete_elem, sourceToken, try p.typeStr(elemType));
+            if (elemType.isFunc()) try p.errToken(.array_func_elem, sourceToken);
+            if (elemType.qual.any() and elemType.isArray()) try p.errToken(.qualifier_non_outermost_array, sourceToken);
+        },
 
         .Array, .StaticArray, .IncompleteArray => {
             try inner.data.array.elem.combine(outer, p, sourceToken);
 
             const elemType = inner.data.array.elem;
-            if (elemType.hasIncompleteSize()) return p.errStr(.array_incomplete_elem, sourceToken, try p.typeStr(elemType));
-            if (elemType.isFunc()) return p.errToken(.array_func_elem, sourceToken);
-            if (elemType.specifier == .StaticArray and elemType.isArray()) return p.errToken(.static_non_outermost_array, sourceToken);
-            if (elemType.qual.any() and elemType.isArray()) return p.errToken(.qualifier_non_outermost_array, sourceToken);
+            if (elemType.hasIncompleteSize()) try p.errStr(.array_incomplete_elem, sourceToken, try p.typeStr(elemType));
+            if (elemType.isFunc()) try p.errToken(.array_func_elem, sourceToken);
+            if (elemType.specifier == .StaticArray and elemType.isArray()) try p.errToken(.static_non_outermost_array, sourceToken);
+            if (elemType.qual.any() and elemType.isArray()) try p.errToken(.qualifier_non_outermost_array, sourceToken);
         },
 
         .VariableLenArray => {
             try inner.data.vla.elem.combine(outer, p, sourceToken);
 
             const elemType = inner.data.vla.elem;
-            if (elemType.hasIncompleteSize()) return p.errStr(.array_incomplete_elem, sourceToken, try p.typeStr(elemType));
-            if (elemType.isFunc()) return p.errToken(.array_func_elem, sourceToken);
-            if (elemType.qual.any() and elemType.isArray()) return p.errToken(.qualifier_non_outermost_array, sourceToken);
+            if (elemType.hasIncompleteSize()) try p.errStr(.array_incomplete_elem, sourceToken, try p.typeStr(elemType));
+            if (elemType.isFunc()) try p.errToken(.array_func_elem, sourceToken);
+            if (elemType.qual.any() and elemType.isArray()) try p.errToken(.qualifier_non_outermost_array, sourceToken);
         },
 
         .Func, .VarArgsFunc, .OldStyleFunc => {
             try inner.data.func.returnType.combine(outer, p, sourceToken);
-            if (inner.data.func.returnType.isFunc()) return p.errToken(.func_cannot_return_func, sourceToken);
-            if (inner.data.func.returnType.isArray()) return p.errToken(.func_cannot_return_array, sourceToken);
+            if (inner.data.func.returnType.isFunc()) try p.errToken(.func_cannot_return_func, sourceToken);
+            if (inner.data.func.returnType.isArray()) try p.errToken(.func_cannot_return_array, sourceToken);
         },
 
         .DecayedArray,
@@ -760,6 +790,7 @@ pub fn dump(ty: Type, w: anytype) @TypeOf(w).Error!void {
         },
 
         .Array, .StaticArray, .DecayedArray, .DecayedStaticArray => {
+            if (ty.specifier == .DecayedArray or ty.specifier == .DecayedStaticArray) try w.writeByte('d');
             try w.writeAll("[");
             if (ty.specifier == .StaticArray or ty.specifier == .DecayedStaticArray) try w.writeAll("static ");
             try w.print("{d}]", .{ty.data.array.len});
@@ -767,6 +798,7 @@ pub fn dump(ty: Type, w: anytype) @TypeOf(w).Error!void {
         },
 
         .IncompleteArray, .DecayedIncompleteArray => {
+            if (ty.specifier == .DecayedIncompleteArray) try w.writeByte('d');
             try w.writeAll("[]");
             try ty.data.array.elem.dump(w);
         },
@@ -790,11 +822,13 @@ pub fn dump(ty: Type, w: anytype) @TypeOf(w).Error!void {
         },
 
         .UnspecifiedVariableLenArray, .DecayedUnspecifiedVariableLenArray => {
+            if (ty.specifier == .DecayedUnspecifiedVariableLenArray) try w.writeByte('d');
             try w.writeAll("[*]");
             try ty.data.array.elem.dump(w);
         },
 
         .VariableLenArray, .DecayedVariableLenArray => {
+            if (ty.specifier == .DecayedVariableLenArray) try w.writeByte('d');
             try w.writeAll("[<expr>]");
             try ty.data.array.elem.dump(w);
         },

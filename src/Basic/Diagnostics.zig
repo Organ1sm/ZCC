@@ -235,6 +235,7 @@ pub const Tag = enum {
     pointer_mismatch,
     static_assert_not_constant,
     static_assert_missing_message,
+    unbound_vla,
 };
 
 list: std.ArrayList(Message),
@@ -607,6 +608,7 @@ pub fn renderExtra(comp: *Compilation, m: anytype) void {
             .pointer_mismatch => m.print("pointer type mismatch ({s})", .{msg.extra.str}),
             .static_assert_not_constant => m.write("static_assert expression is not an integral constant expression"),
             .static_assert_missing_message => m.write("static_assert with no message is a C2X extension"),
+            .unbound_vla => m.write("variable length array must be bound in function definition"),
         }
 
         m.end(lcs);
@@ -782,6 +784,7 @@ fn tagKind(diag: *Diagnostics, tag: Tag) Kind {
         .minimum_alignment,
         .non_pow2_align,
         .static_assert_not_constant,
+        .unbound_vla,
         => .@"error",
 
         .to_match_paren,
