@@ -14,7 +14,7 @@ typedef: ?struct {
 
 specifier: @This().Specifier = .None,
 qual: Qualifiers.Builder = .{},
-alignment: u32 = 0,
+alignment: u29 = 0,
 alignToken: ?TokenIndex = null,
 
 pub const Specifier = union(enum) {

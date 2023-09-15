@@ -70,7 +70,7 @@ pub fn main() !void {
         errdefer comp.gpa.free(contents);
 
         const source = zcc.Source{
-            .id = @as(zcc.Source.ID, @enumFromInt(@as(u32, @intCast(comp.sources.count() + 2)))),
+            .id = @as(zcc.Source.ID, @enumFromInt(comp.sources.count() + 2)),
             .path = dupedPath,
             .buffer = contents,
         };

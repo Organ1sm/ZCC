@@ -6,6 +6,7 @@ _Atomic(int [3]) d;
 _Atomic void e;
 void f[4];
 struct Bar f;
+int x[2305843009213693951u];
 
 #define EXPECTED_ERRORS \
     "invalid-types.c:1:6: error: cannot combine with previous 'long' specifier" \
@@ -17,5 +18,6 @@ struct Bar f;
     "invalid-types.c:6:1: error: atomic cannot be applied to incomplete type 'void'" \
     "invalid-types.c:6:14: error: variable has incomplete type 'void'" \
     "invalid-types.c:7:7: error: array has incomplete element type 'void'" \
-    "invalid-types.c:8:12: error: variable has incomplete type 'struct Bar'"
+    "invalid-types.c:8:12: error: variable has incomplete type 'struct Bar'" \
+    "invalid types.c:9:6: error: array is too large"
 
