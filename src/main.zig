@@ -189,7 +189,7 @@ fn handleArgs(comp: *Compilation, args: [][]const u8) !void {
         errdefer comp.gpa.free(contents);
 
         const source = Source{
-            .id = @enumFromInt(@as(u32, @intCast(comp.sources.count() + 2))),
+            .id = @as(Source.ID, @enumFromInt(comp.sources.count() + 2)),
             .path = dupedPath,
             .buffer = contents,
         };

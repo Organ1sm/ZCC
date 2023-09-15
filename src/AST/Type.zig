@@ -23,7 +23,7 @@ qual: Qualifiers = .{},
 specifier: Specifier,
 
 /// user requested alignment, to get type alignment use `alignof`
-alignment: u32 = 0,
+alignment: u29 = 0,
 
 pub const Qualifiers = packed struct {
     @"const": bool = false,
@@ -127,8 +127,8 @@ pub const Enum = struct {
 pub const Record = struct {
     name: []const u8,
     fields: []Field,
-    size: u32,
-    alignment: u32,
+    size: u64,
+    alignment: u29,
 
     pub const Field = struct {
         name: []const u8,
@@ -413,7 +413,7 @@ pub fn hasUnboundVLA(ty: Type) bool {
 }
 
 /// Size of type as reported by sizeof
-pub fn sizeof(ty: Type, comp: *Compilation) ?u32 {
+pub fn sizeof(ty: Type, comp: *Compilation) ?u64 {
     // TODO get target from compilation
     return switch (ty.specifier) {
         .VariableLenArray,
@@ -464,14 +464,14 @@ pub fn sizeof(ty: Type, comp: *Compilation) ?u32 {
         .DecayedUnspecifiedVariableLenArray,
         => comp.target.ptrBitWidth() >> 3,
 
-        .Array => ty.data.array.elem.sizeof(comp).? * @as(u32, @intCast(ty.data.array.len)),
+        .Array => ty.data.array.elem.sizeof(comp).? * ty.data.array.len,
         .Struct, .Union => if (ty.data.record.isIncomplete()) null else ty.data.record.size,
         .Enum => if (ty.data.@"enum".isIncomplete()) null else ty.data.@"enum".tagType.sizeof(comp),
     };
 }
 
 /// Get the alignment of a type
-pub fn alignof(ty: Type, comp: *Compilation) u32 {
+pub fn alignof(ty: Type, comp: *Compilation) u29 {
     if (ty.alignment != 0)
         return ty.alignment;
 
