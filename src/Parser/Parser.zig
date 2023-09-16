@@ -511,7 +511,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
         if (declSpec.type.specifier == .Enum)
             return true;
 
-        if (declSpec.type.isEnumOrRecord() and declSpec.type.data.record.name[0] != '(')
+        if (declSpec.type.isRecord() and declSpec.type.data.record.name[0] != '(')
             return true;
 
         try p.errToken(.missing_declaration, firstTokenIndex);
@@ -866,6 +866,7 @@ fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec) Error!?InitDeclarator {
         }
 
         var initListExpr = try p.initializer(initD.d.type);
+        try initListExpr.expect(p);
         initD.initializer = initListExpr.node;
         initD.d.type = initListExpr.ty;
     }
@@ -1197,7 +1198,7 @@ fn recordDecls(p: *Parser) Error!void {
             }
             if (nameToken == 0 and bitsNode == .none) unnamed: {
                 if (ty.specifier == .Enum) break :unnamed;
-                if (ty.isEnumOrRecord() and ty.data.record.name[0] == '(') {
+                if (ty.isRecord() and ty.data.record.name[0] == '(') {
                     // An anonymous record appears as indirect fields on the parent
                     try p.recordBuffer.append(.{
                         .name = try p.getAnonymousName(firstToken),
@@ -1823,11 +1824,18 @@ fn typeName(p: *Parser) Error!?Type {
 /// initializer
 ///  : assignExpr
 ///  | '{' initializerItems '}'
+/// initializerItems : designation? initializer (',' designation? initializer)* ','?
+/// designation : designator+ '='
+/// designator
+///  : '[' constExpr ']'
+///  | '.' identifier
 pub fn initializer(p: *Parser, initType: Type) Error!Result {
     const lb = p.eat(.LBrace) orelse {
         const token = p.index;
         var res = try p.assignExpr();
-        try res.expect(p);
+        if (res.empty(p))
+            return res;
+
         try p.coerceInit(&res, token, initType);
         return res;
     };
@@ -1849,15 +1857,66 @@ pub fn initializer(p: *Parser, initType: Type) Error!Result {
     const listBufferTop = p.listBuffer.items.len;
     defer p.listBuffer.items.len = listBufferTop;
 
-    while (try p.parseInitializerItems(initType)) |item| {
-        try p.listBuffer.append(item);
-        if (p.eat(.Comma) == null) break;
+    var elemType = initType;
+    if (elemType.isArray())
+        elemType = elemType.getElemType();
+
+    var first: Result = undefined;
+    var isStrInit = false;
+    while (true) {
+        const firstToken = p.index;
+        var curType = elemType;
+        var designator = false;
+        while (true) {
+            if (p.eat(.LBracket)) |lbr| {
+                const res = try p.constExpr();
+                _ = res;
+                try p.expectClosing(lbr, .RBracket);
+                designator = true;
+            } else if (p.eat(.Period)) |_| {
+                const identifier = try p.expectToken(.Identifier);
+                _ = identifier;
+                designator = true;
+            } else break;
+        }
+
+        const count = p.listBuffer.items.len - listBufferTop;
+        var initRes: Result = undefined;
+        if (designator) {
+            _ = try p.expectToken(.Equal);
+            initRes = try p.initializer(curType);
+            try initRes.expect(p);
+        } else if (p.isStringInit()) {
+            if (count == 0) isStrInit = true;
+            initRes = try p.initializer(initType);
+        } else {
+            initRes = try p.initializer(curType);
+            if (initRes.node == .none) break;
+        }
+
+        if (count == 0) {
+            first = initRes;
+        } else if (count == 1) {
+            if (isScalar)
+                try p.errToken(.excess_scalar_init, firstToken);
+            if (isStrInit)
+                try p.errToken(.excess_str_init, firstToken);
+        }
+
+        try p.listBuffer.append(initRes.node);
     }
     try p.expectClosing(lb, .RBrace);
 
     const initializers = p.listBuffer.items[listBufferTop..];
+    if (isScalar or isStrInit) return first;
+
+    if (initType.specifier == .IncompleteArray) {
+        node.type.data.array.len = initializers.len;
+        node.type.specifier = .Array;
+    }
+
     switch (initializers.len) {
-        0 => {},
+        0 => unreachable,
         1 => node.data = .{ .BinaryExpr = .{ .lhs = initializers[0], .rhs = .none } },
         2 => node.data = .{ .BinaryExpr = .{ .lhs = initializers[0], .rhs = initializers[1] } },
         else => {
@@ -1866,7 +1925,7 @@ pub fn initializer(p: *Parser, initType: Type) Error!Result {
         },
     }
 
-    return Result{ .node = try p.addNode(node), .ty = initType };
+    return Result{ .node = try p.addNode(node), .ty = node.type };
 }
 
 fn coerceInit(p: *Parser, item: *Result, token: TokenIndex, target: Type) !void {
@@ -1874,6 +1933,27 @@ fn coerceInit(p: *Parser, item: *Result, token: TokenIndex, target: Type) !void 
     var unqualType = target;
     unqualType.qual = .{};
     const eMsg = " from incompatible type ";
+    if (unqualType.isArray()) {
+        if (!item.ty.isArray()) {
+            try p.errStr(.incompatible_init, token, try p.typePairStrExtra(target, eMsg, item.ty));
+        } else if (unqualType.specifier == .Array) {
+            std.debug.assert(item.ty.specifier == .Array);
+            var len = item.ty.data.array.len;
+            if (p.nodeIs(item.node, .StringLiteralExpr)) {
+                if (len - 1 > unqualType.data.array.len)
+                    try p.errToken(.str_init_too_long, token);
+            } else if (len > unqualType.data.array.len) {
+                try p.errStr(
+                    .arr_init_too_long,
+                    token,
+                    try p.typePairStrExtra(target, " with array of type ", item.ty),
+                );
+            }
+        }
+        return;
+    }
+
+    try item.lvalConversion(p);
     if (target.specifier == .Bool) {
         // this is ridiculous but it's what clang does
         if (item.ty.isInt() or item.ty.isFloat() or item.ty.isPointer()) {
@@ -1910,11 +1990,9 @@ fn coerceInit(p: *Parser, item: *Result, token: TokenIndex, target: Type) !void 
         } else {
             try p.errStr(.incompatible_init, token, try p.typePairStrExtra(target, eMsg, item.ty));
         }
-    } else if (unqualType.isEnumOrRecord()) { // enum.isInt() == true
+    } else if (unqualType.isRecord()) {
         if (!unqualType.eql(item.ty, false))
             try p.errStr(.incompatible_init, token, try p.typePairStrExtra(target, eMsg, item.ty));
-    } else if (unqualType.isArray()) {
-        // TODO
     } else if (unqualType.isFunc()) {
         // we have already issued an error for this
     } else {
@@ -1922,60 +2000,22 @@ fn coerceInit(p: *Parser, item: *Result, token: TokenIndex, target: Type) !void 
     }
 }
 
-/// initializerItems : designation? initializer (',' designation? initializer)* ','?
-/// designation : designator+ '='
-/// designator
-///  : '[' constExpr ']'
-///  | '.' identifier
-fn parseInitializerItems(p: *Parser, parenType: Type) Error!?NodeIndex {
-    var currType = parenType;
-    var designation: NodeIndex = .none;
-    while (true) {
-        if (p.eat(.LBracket)) |lb| {
-            const res = try p.constExpr();
-            try p.expectClosing(lb, .RBracket);
-            designation = try p.addNode(.{
-                .tag = .ArrayDesignatorExpr,
-                // TODO do type checking
-                .data = .{ .BinaryExpr = .{
-                    .lhs = designation,
-                    .rhs = res.node,
-                } },
-            });
-        } else if (p.eat(.Period)) |_| {
-            const identifier = try p.expectToken(.Identifier);
-            designation = try p.addNode(.{
-                .tag = .MemberDesignatorExpr,
-                .data = .{
-                    .Member = .{
-                        .lhs = designation,
-                        // TODO do type checking
-                        .name = identifier,
-                    },
-                },
-            });
-        } else break;
+fn isStringInit(p: *Parser) bool {
+    var i = p.index;
+    while (true) : (i += 1) {
+        switch (p.tokenIds[i]) {
+            .LParen => {},
+
+            .StringLiteral,
+            .StringLiteralUTF_16,
+            .StringLiteralUTF_8,
+            .StringLiteralUTF_32,
+            .StringLiteralWide,
+            => return true,
+
+            else => return false,
+        }
     }
-    if (designation != .none) _ = try p.expectToken(.Equal);
-
-    const token = p.index;
-    var initRes = try p.initializer(currType);
-    if (designation != .none) {
-        try initRes.expect(p);
-    } else if (initRes.node == .none) {
-        return null;
-    }
-
-    try p.coerceInit(&initRes, token, currType);
-
-    return try p.addNode(.{
-        .tag = .InitializerItemExpr,
-        .type = currType,
-        .data = .{ .BinaryExpr = .{
-            .lhs = designation,
-            .rhs = initRes.node,
-        } },
-    });
 }
 
 // ====== statements ======
@@ -2487,7 +2527,7 @@ fn parseReturnStmt(p: *Parser) Error!?NodeIndex {
         } else if (!returnType.eql(expr.ty, false)) {
             try p.errStr(.incompatible_return, eToken, try p.typeStr(expr.ty));
         }
-    } else if (returnType.isEnumOrRecord()) { // enum.isInt() == true
+    } else if (returnType.isRecord()) { // enum.isInt() == true
         if (!returnType.eql(expr.ty, false)) {
             try p.errStr(.incompatible_return, eToken, try p.typeStr(expr.ty));
         }
@@ -2747,7 +2787,7 @@ fn assignExpr(p: *Parser) Error!Result {
         } else {
             try p.errStr(.incompatible_assign, token, try p.typePairStrExtra(lhs.ty, eMsg, rhs.ty));
         }
-    } else if (lhs.ty.isEnumOrRecord()) {
+    } else if (lhs.ty.isRecord()) {
         if (!unqualType.eql(rhs.ty, false))
             try p.errStr(.incompatible_assign, token, try p.typePairStrExtra(lhs.ty, eMsg, rhs.ty));
     } else if (lhs.ty.isArray() or lhs.ty.isFunc()) {
@@ -3613,7 +3653,7 @@ fn parseCallExpr(p: *Parser, lhs: Result) Error!Result {
                     } else if (!paramType.eql(arg.ty, false)) {
                         try p.reportParam(paramToken, arg, argCount, params);
                     }
-                } else if (paramType.isEnumOrRecord()) { // enum.isInt() == true
+                } else if (paramType.isRecord()) {
                     if (!paramType.eql(arg.ty, false)) {
                         try p.reportParam(paramToken, arg, argCount, params);
                     }

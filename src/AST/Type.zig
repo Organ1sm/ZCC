@@ -305,6 +305,13 @@ pub fn isEnumOrRecord(ty: Type) bool {
     };
 }
 
+pub fn isRecord(ty: Type) bool {
+    return switch (ty.specifier) {
+        .Struct, .Union => true,
+        else => false,
+    };
+}
+
 pub fn getElemType(ty: Type) Type {
     return switch (ty.specifier) {
         .Pointer,
