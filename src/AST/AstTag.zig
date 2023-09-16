@@ -238,12 +238,10 @@ pub const Tag = enum(u8) {
 
     /// ====== Initializer expressions ======
     /// { lhs, rhs }
-    CompoundInitializerExprTwo,
+    InitListExprTwo,
     /// { range }
-    CompoundInitializerExpr,
-    /// (ty){ lhs, rhs }
-    CompoundLiteralExprTwo,
-    /// (ty){ range }
+    InitListExpr,
+    /// (ty){ un }
     CompoundLiteralExpr,
     /// lhs = rhs
     InitializerItemExpr,

@@ -252,8 +252,7 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
         },
 
         .CompoundStmt,
-        .CompoundInitializerExpr,
-        .CompoundLiteralExpr,
+        .InitListExpr,
         .EnumDecl,
         .StructDecl,
         .UnionDecl,
@@ -268,14 +267,17 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
         .IndirectRecordFieldDecl => {},
 
         .CompoundStmtTwo,
-        .CompoundInitializerExprTwo,
-        .CompoundLiteralExprTwo,
+        .InitListExprTwo,
         .EnumDeclTwo,
         .StructDeclTwo,
         .UnionDeclTwo,
         => {
             if (data.BinaryExpr.lhs != .none) try tree.dumpNode(data.BinaryExpr.lhs, level + delta, w);
             if (data.BinaryExpr.rhs != .none) try tree.dumpNode(data.BinaryExpr.rhs, level + delta, w);
+        },
+
+        .CompoundLiteralExpr => {
+            try tree.dumpNode(data.UnaryExpr, level + half, w);
         },
 
         .LabeledStmt => {
