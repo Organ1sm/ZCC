@@ -287,6 +287,22 @@ fn findSwitch(p: *Parser) ?*Scope.Switch {
     return null;
 }
 
+fn nodeIs(p: *Parser, node: NodeIndex, tag: AstTag) bool {
+    var cur = node;
+    const tags = p.nodes.items(.tag);
+    const data = p.nodes.items(.data);
+    while (true) {
+        const curTag = tags[@intFromEnum(cur)];
+        if (curTag == .ParenExpr) {
+            cur = data[@intFromEnum(cur)].UnaryExpr;
+        } else if (curTag == tag) {
+            return true;
+        } else {
+            return false;
+        }
+    }
+}
+
 fn findSymbol(p: *Parser, nameToken: TokenIndex, refKind: enum { reference, definition }) ?Scope {
     const name = p.tokSlice(nameToken);
     var i = p.scopes.items.len;
@@ -701,8 +717,7 @@ fn parseStaticAssert(p: *Parser) Error!bool {
         // an unavailable sizeof expression is already a compile error, so we don't emit
         // another error for an invalid _Static_assert condition. This matches the behavior
         // of gcc/clang
-        const resTag = p.nodes.items(.tag)[@intFromEnum(res.node)];
-        if (resTag != .SizeOfExpr)
+        if (!p.nodeIs(res.node, .SizeOfExpr))
             try p.errToken(.static_assert_not_constant, resToken);
     } else if (!res.getBool()) {
         if (str.node != .none) {
@@ -842,19 +857,17 @@ fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec) Error!?InitDeclarator {
 
     if (p.eat(.Equal)) |eq| {
         if (declSpec.storageClass == .typedef or initD.d.funcDeclarator != null)
-            try p.errToken(.illegal_initializer, eq);
-
-        if (declSpec.storageClass == .@"extern") {
+            try p.errToken(.illegal_initializer, eq)
+        else if (initD.d.type.specifier == .VariableLenArray)
+            try p.errToken(.vla_init, eq)
+        else if (declSpec.storageClass == .@"extern") {
             try p.err(.extern_initializer);
             declSpec.storageClass = .none;
         }
 
-        var init = try p.initializer(declSpec.type);
-        try init.expect(p);
-        //  TODO: do type coerce
-        // TODO: infer array size
-        initD.initializer = init.node;
-        try init.saveValue(p);
+        var initListExpr = try p.initializer(initD.d.type);
+        initD.initializer = initListExpr.node;
+        initD.d.type = initListExpr.ty;
     }
 
     const name = initD.d.name;
@@ -1810,39 +1823,105 @@ fn typeName(p: *Parser) Error!?Type {
 /// initializer
 ///  : assignExpr
 ///  | '{' initializerItems '}'
-fn initializer(p: *Parser, parenType: Type) Error!Result {
-    if (p.eat(.LBrace)) |lb| {
-        const listBufferTop = p.listBuffer.items.len;
-        defer p.listBuffer.items.len = listBufferTop;
+pub fn initializer(p: *Parser, initType: Type) Error!Result {
+    const lb = p.eat(.LBrace) orelse {
+        const token = p.index;
+        var res = try p.assignExpr();
+        try res.expect(p);
+        try p.coerceInit(&res, token, initType);
+        return res;
+    };
 
-        while (try p.parseInitializerItems(parenType)) |item| {
-            try p.listBuffer.append(item);
-            if (p.eat(.Comma) == null) break;
-        }
-        try p.expectClosing(lb, .RBrace);
+    var node: AST.Node = .{
+        .tag = .InitListExprTwo,
+        .type = initType,
+        .data = .{ .BinaryExpr = .{ .lhs = .none, .rhs = .none } },
+    };
 
-        var node: AST.Node = .{
-            .tag = .CompoundInitializerExprTwo,
-            .type = parenType,
-            .data = .{ .BinaryExpr = .{ .lhs = .none, .rhs = .none } },
-        };
+    const isScalar = initType.isInt() or initType.isFloat() or initType.isPointer();
+    if (p.eat(.RBrace)) |_| {
+        if (isScalar)
+            try p.errToken(.empty_scalar_init, lb);
 
-        const initializers = p.listBuffer.items[listBufferTop..];
-        switch (initializers.len) {
-            0 => {},
-            1 => node.data = .{ .BinaryExpr = .{ .lhs = initializers[0], .rhs = .none } },
-            2 => node.data = .{ .BinaryExpr = .{ .lhs = initializers[0], .rhs = initializers[1] } },
-            else => {
-                node.tag = .CompoundInitializerExpr;
-                node.data = .{ .range = try p.addList(initializers) };
-            },
-        }
-
-        return Result{ .node = try p.addNode(node), .ty = parenType };
+        return Result{ .node = try p.addNode(node), .ty = initType };
     }
 
-    return p.assignExpr();
+    const listBufferTop = p.listBuffer.items.len;
+    defer p.listBuffer.items.len = listBufferTop;
+
+    while (try p.parseInitializerItems(initType)) |item| {
+        try p.listBuffer.append(item);
+        if (p.eat(.Comma) == null) break;
+    }
+    try p.expectClosing(lb, .RBrace);
+
+    const initializers = p.listBuffer.items[listBufferTop..];
+    switch (initializers.len) {
+        0 => {},
+        1 => node.data = .{ .BinaryExpr = .{ .lhs = initializers[0], .rhs = .none } },
+        2 => node.data = .{ .BinaryExpr = .{ .lhs = initializers[0], .rhs = initializers[1] } },
+        else => {
+            node.tag = .InitListExpr;
+            node.data = .{ .range = try p.addList(initializers) };
+        },
+    }
+
+    return Result{ .node = try p.addNode(node), .ty = initType };
 }
+
+fn coerceInit(p: *Parser, item: *Result, token: TokenIndex, target: Type) !void {
+    // item does not need to be qualified
+    var unqualType = target;
+    unqualType.qual = .{};
+    const eMsg = " from incompatible type ";
+    if (target.specifier == .Bool) {
+        // this is ridiculous but it's what clang does
+        if (item.ty.isInt() or item.ty.isFloat() or item.ty.isPointer()) {
+            try item.boolCast(p, unqualType);
+        } else {
+            try p.errStr(.incompatible_init, token, try p.typePairStrExtra(target, eMsg, item.ty));
+        }
+    } else if (unqualType.isInt()) {
+        if (item.ty.isInt() or item.ty.isFloat()) {
+            try item.intCast(p, unqualType);
+        } else if (item.ty.isPointer()) {
+            try p.errStr(.implicit_ptr_to_int, token, try p.typePairStrExtra(item.ty, " to ", target));
+            try item.intCast(p, unqualType);
+        } else {
+            try p.errStr(.incompatible_init, token, try p.typePairStrExtra(target, eMsg, item.ty));
+        }
+    } else if (unqualType.isFloat()) {
+        if (item.ty.isInt() or item.ty.isFloat()) {
+            try item.floatCast(p, unqualType);
+        } else {
+            try p.errStr(.incompatible_init, token, try p.typePairStrExtra(target, eMsg, item.ty));
+        }
+    } else if (unqualType.isPointer()) {
+        if (item.isZero()) {
+            try item.nullCast(p, target);
+        } else if (item.ty.isInt()) {
+            try p.errStr(.implicit_int_to_ptr, token, try p.typePairStrExtra(item.ty, " to ", target));
+            try item.ptrCast(p, unqualType);
+        } else if (item.ty.isPointer()) {
+            if (!unqualType.eql(item.ty, false)) {
+                try p.errStr(.incompatible_ptr_assign, token, try p.typePairStrExtra(target, eMsg, item.ty));
+                try item.ptrCast(p, unqualType);
+            }
+        } else {
+            try p.errStr(.incompatible_init, token, try p.typePairStrExtra(target, eMsg, item.ty));
+        }
+    } else if (unqualType.isEnumOrRecord()) { // enum.isInt() == true
+        if (!unqualType.eql(item.ty, false))
+            try p.errStr(.incompatible_init, token, try p.typePairStrExtra(target, eMsg, item.ty));
+    } else if (unqualType.isArray()) {
+        // TODO
+    } else if (unqualType.isFunc()) {
+        // we have already issued an error for this
+    } else {
+        try p.errStr(.incompatible_init, token, try p.typePairStrExtra(target, eMsg, item.ty));
+    }
+}
+
 /// initializerItems : designation? initializer (',' designation? initializer)* ','?
 /// designation : designator+ '='
 /// designator
@@ -1879,15 +1958,19 @@ fn parseInitializerItems(p: *Parser, parenType: Type) Error!?NodeIndex {
     }
     if (designation != .none) _ = try p.expectToken(.Equal);
 
-    const initRes = try p.initializer(currType);
+    const token = p.index;
+    var initRes = try p.initializer(currType);
     if (designation != .none) {
         try initRes.expect(p);
     } else if (initRes.node == .none) {
         return null;
     }
+
+    try p.coerceInit(&initRes, token, currType);
+
     return try p.addNode(.{
         .tag = .InitializerItemExpr,
-        // TODO do type checking
+        .type = currType,
         .data = .{ .BinaryExpr = .{
             .lhs = designation,
             .rhs = initRes.node,
@@ -1992,7 +2075,7 @@ fn parseIfStmt(p: *Parser) Error!NodeIndex {
     try cond.lvalConversion(p);
     if (cond.ty.isInt())
         try cond.intCast(p, cond.ty.integerPromotion(p.pp.compilation))
-    else if (!cond.ty.isFloat() and cond.ty.specifier != .Pointer)
+    else if (!cond.ty.isFloat() and !cond.ty.isPointer())
         try p.errStr(.statement_scalar, lp + 1, try p.typeStr(cond.ty));
 
     try cond.saveValue(p);
@@ -2045,7 +2128,7 @@ fn parseForStmt(p: *Parser) Error!NodeIndex {
         try cond.lvalConversion(p);
         if (cond.ty.isInt())
             try cond.intCast(p, cond.ty.integerPromotion(p.pp.compilation))
-        else if (!cond.ty.isFloat() and cond.ty.specifier != .Pointer)
+        else if (!cond.ty.isFloat() and !cond.ty.isPointer())
             try p.errStr(.statement_scalar, lp + 1, try p.typeStr(cond.ty));
     }
     try cond.saveValue(p);
@@ -2099,7 +2182,7 @@ fn parseWhileStmt(p: *Parser) Error!NodeIndex {
     try cond.lvalConversion(p);
     if (cond.ty.isInt())
         try cond.intCast(p, cond.ty.integerPromotion(p.pp.compilation))
-    else if (!cond.ty.isFloat() and cond.ty.specifier != .Pointer)
+    else if (!cond.ty.isFloat() and !cond.ty.isPointer())
         try p.errStr(.statement_scalar, lp + 1, try p.typeStr(cond.ty));
 
     try cond.saveValue(p);
@@ -2130,7 +2213,7 @@ fn parseDoWhileStmt(p: *Parser) Error!NodeIndex {
     try cond.lvalConversion(p);
     if (cond.ty.isInt())
         try cond.intCast(p, cond.ty.integerPromotion(p.pp.compilation))
-    else if (!cond.ty.isFloat() and cond.ty.specifier != .Pointer)
+    else if (!cond.ty.isFloat() and !cond.ty.isPointer())
         try p.errStr(.statement_scalar, lp + 1, try p.typeStr(cond.ty));
 
     try cond.saveValue(p);
@@ -3033,33 +3116,16 @@ fn parseCastExpr(p: *Parser) Error!Result {
         if (try p.typeName()) |ty| {
             try p.expectClosing(lp, .RParen);
 
-            if (p.eat(.LBrace)) |lb| {
-                const listBufferTop = p.listBuffer.items.len;
-                defer p.listBuffer.items.len = listBufferTop;
+            if (p.getCurrToken() == .LBrace) {
+                // compound literal
+                if (ty.isFunc())
+                    try p.err(.func_init)
+                else if (ty.specifier == .VariableLenArray)
+                    try p.err(.vla_init);
 
-                while (try p.parseInitializerItems(ty)) |item| {
-                    try p.listBuffer.append(item);
-                    if (p.eat(.Comma) == null) break;
-                }
-                try p.expectClosing(lb, .RBrace);
-
-                var node: AST.Node = .{
-                    .tag = .CompoundLiteralExprTwo,
-                    .type = ty,
-                    .data = .{ .BinaryExpr = .{ .lhs = .none, .rhs = .none } },
-                };
-
-                const initializers = p.listBuffer.items[listBufferTop..];
-                switch (initializers.len) {
-                    0 => {},
-                    1 => node.data = .{ .BinaryExpr = .{ .lhs = initializers[0], .rhs = .none } },
-                    2 => node.data = .{ .BinaryExpr = .{ .lhs = initializers[0], .rhs = initializers[1] } },
-                    else => {
-                        node.tag = .CompoundLiteralExpr;
-                        node.data = .{ .range = try p.addList(initializers) };
-                    },
-                }
-                return Result{ .node = try p.addNode(node), .ty = ty };
+                var initListExpr = try p.initializer(ty);
+                try initListExpr.un(p, .CompoundLiteralExpr);
+                return initListExpr;
             }
 
             var operand = try p.parseCastExpr();
@@ -3195,7 +3261,7 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
             var operand = try p.parseCastExpr();
             try operand.expect(p);
 
-            if (!operand.ty.isInt() and !operand.ty.isFloat() and !operand.ty.isReal() and operand.ty.specifier != .Pointer)
+            if (!operand.ty.isInt() and !operand.ty.isFloat() and !operand.ty.isReal() and !operand.ty.isPointer())
                 try p.errStr(.invalid_argument_un, index, try p.typeStr(operand.ty));
 
             if (!AST.isLValue(p.nodes.slice(), operand.node) or operand.ty.qual.@"const") {
@@ -3221,7 +3287,7 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
             var operand = try p.parseCastExpr();
             try operand.expect(p);
 
-            if (!operand.ty.isInt() and !operand.ty.isFloat() and !operand.ty.isReal() and operand.ty.specifier != .Pointer)
+            if (!operand.ty.isInt() and !operand.ty.isFloat() and !operand.ty.isReal() and !operand.ty.isPointer())
                 try p.errStr(.invalid_argument_un, index, try p.typeStr(operand.ty));
 
             if (!AST.isLValue(p.nodes.slice(), operand.node) or operand.ty.qual.@"const") {
@@ -3270,7 +3336,7 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
             try operand.expect(p);
             try operand.lvalConversion(p);
 
-            if (!operand.ty.isInt() and !operand.ty.isFloat() and operand.ty.specifier != .Pointer)
+            if (!operand.ty.isInt() and !operand.ty.isFloat() and !operand.ty.isPointer())
                 try p.errStr(.invalid_argument_un, index, try p.typeStr(operand.ty));
 
             if (operand.ty.isInt())
@@ -3437,7 +3503,7 @@ fn parseSuffixExpr(p: *Parser, lhs: Result) Error!Result {
             defer p.index += 1;
             var operand = lhs;
 
-            if (!operand.ty.isInt() and !operand.ty.isFloat() and !operand.ty.isReal() and operand.ty.specifier != .Pointer)
+            if (!operand.ty.isInt() and !operand.ty.isFloat() and !operand.ty.isReal() and !operand.ty.isPointer())
                 try p.errStr(.invalid_argument_un, p.index, try p.typeStr(operand.ty));
 
             if (!AST.isLValue(p.nodes.slice(), operand.node) or operand.ty.qual.@"const") {
@@ -3456,7 +3522,7 @@ fn parseSuffixExpr(p: *Parser, lhs: Result) Error!Result {
             defer p.index += 1;
             var operand = lhs;
 
-            if (!operand.ty.isInt() and !operand.ty.isFloat() and !operand.ty.isReal() and operand.ty.specifier != .Pointer)
+            if (!operand.ty.isInt() and !operand.ty.isFloat() and !operand.ty.isReal() and !operand.ty.isPointer())
                 try p.errStr(.invalid_argument_un, p.index, try p.typeStr(operand.ty));
 
             if (!AST.isLValue(p.nodes.slice(), operand.node) or operand.ty.qual.@"const") {
