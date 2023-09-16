@@ -2562,7 +2562,7 @@ fn assignExpr(p: *Parser) Error!Result {
     if (lhs.empty(p))
         return lhs;
 
-    const index = p.index;
+    const token = p.index;
     const eq = p.eat(.Equal);
     const mul = eq orelse p.eat(.AsteriskEqual);
     const div = mul orelse p.eat(.SlashEqual);
@@ -2581,61 +2581,96 @@ fn assignExpr(p: *Parser) Error!Result {
     try rhs.lvalConversion(p);
 
     if (!AST.isLValue(p.nodes.slice(), lhs.node) or lhs.ty.qual.@"const") {
-        try p.errToken(.not_assignable, index);
+        try p.errToken(.not_assignable, token);
         return error.ParsingFailed;
     }
+
+    // adjustTypes will do do lvalue conversion but we do not want that
+    var lhsCopy = lhs;
+    switch (tag) {
+        .AssignExpr => {}, // handle plain assignment separately
+
+        .MulAssignExpr,
+        .DivAssignExpr,
+        .ModAssignExpr,
+        => {
+            _ = try lhsCopy.adjustTypes(token, &rhs, p, .arithmetic);
+            try lhs.bin(p, tag, rhs);
+            return lhs;
+        },
+
+        .SubAssignExpr,
+        .AddAssignExpr,
+        => {
+            if (lhs.ty.isPointer() and rhs.ty.isInt()) {
+                try rhs.ptrCast(p, lhs.ty);
+            } else {
+                _ = try lhsCopy.adjustTypes(token, &rhs, p, .arithmetic);
+            }
+            try lhs.bin(p, tag, rhs);
+            return lhs;
+        },
+
+        .ShlAssignExpr,
+        .ShrAssignExpr,
+        .BitAndAssignExpr,
+        .BitXorAssignExpr,
+        .BitOrAssignExpr,
+        => {
+            _ = try lhsCopy.adjustTypes(token, &rhs, p, .integer);
+            try lhs.bin(p, tag, rhs);
+            return lhs;
+        },
+        else => unreachable,
+    }
+
+    // rhs does not need to be qualified
+    var unqualType = lhs.ty;
+    unqualType.qual = .{};
 
     const eMsg = "from incompatible type";
     if (lhs.ty.specifier == .Bool) {
         // this is ridiculous but it's what clang does
-        if (rhs.ty.isInt() or rhs.ty.isFloat() or (rhs.ty.isPointer() and tag == .AssignExpr)) {
+        if (rhs.ty.isInt() or rhs.ty.isFloat() or rhs.ty.isPointer()) {
             try rhs.boolCast(p, lhs.ty);
         } else {
-            try p.errStr(.incompatible_assign, index, try p.typePairStrExtra(lhs.ty, eMsg, rhs.ty));
+            try p.errStr(.incompatible_assign, token, try p.typePairStrExtra(lhs.ty, eMsg, rhs.ty));
         }
-    } else if (lhs.ty.isInt()) {
+    } else if (unqualType.isInt()) {
         if (rhs.ty.isInt() or rhs.ty.isFloat()) {
-            try rhs.intCast(p, lhs.ty);
-        } else if (tag == .AssignExpr and rhs.ty.isPointer()) {
-            try p.errStr(.implicit_ptr_to_int, index, try p.typePairStrExtra(rhs.ty, eMsg, lhs.ty));
-            try rhs.intCast(p, lhs.ty);
+            try rhs.intCast(p, unqualType);
+        } else if (rhs.ty.isPointer()) {
+            try p.errStr(.implicit_ptr_to_int, token, try p.typePairStrExtra(rhs.ty, eMsg, lhs.ty));
+            try rhs.intCast(p, unqualType);
         } else {
-            try p.errStr(.incompatible_assign, index, try p.typePairStrExtra(lhs.ty, eMsg, rhs.ty));
+            try p.errStr(.incompatible_assign, token, try p.typePairStrExtra(lhs.ty, eMsg, rhs.ty));
         }
-    } else if (lhs.ty.isFloat()) {
-        switch (tag) {
-            .ModAssignExpr,
-            .ShlAssignExpr,
-            .ShrAssignExpr,
-            .BitAndAssignExpr,
-            .BitXorAssignExpr,
-            .BitOrAssignExpr,
-            => try p.errStr(.invalid_bin_types, index, try p.typePairStr(lhs.ty, rhs.ty)),
-            else => if (rhs.ty.isInt() or rhs.ty.isFloat()) {
-                try rhs.floatCast(p, lhs.ty);
-            } else {
-                try p.errStr(.incompatible_assign, index, try p.typePairStrExtra(lhs.ty, eMsg, rhs.ty));
-            },
-        }
+    } else if (unqualType.isFloat()) {
+        if (rhs.ty.isInt() or rhs.ty.isFloat())
+            try rhs.floatCast(p, unqualType)
+        else
+            try p.errStr(.incompatible_assign, token, try p.typePairStrExtra(lhs.ty, eMsg, rhs.ty));
     } else if (lhs.ty.isPointer()) {
-        if ((tag == .AddAssignExpr or tag == .SubAssignExpr) and
-            (rhs.ty.isInt() or rhs.ty.isFloat()))
-            try rhs.ptrCast(p, lhs.ty)
-        else if (tag != .AssignExpr)
-            try p.errStr(.invalid_bin_types, index, try p.typePairStr(lhs.ty, rhs.ty))
-        else if (rhs.isZero())
-            try rhs.nullCast(p, lhs.ty)
-        else if (!lhs.ty.eql(rhs.ty, false))
-            try p.errStr(.incompatible_assign, index, try p.typePairStrExtra(lhs.ty, eMsg, rhs.ty));
-    } else if (lhs.ty.isEnumOrRecord()) { // enum.isInt() == true
-        if (tag != .AssignExpr)
-            try p.errStr(.invalid_bin_types, index, try p.typePairStr(lhs.ty, rhs.ty))
-        else if (!lhs.ty.eql(rhs.ty, false))
-            try p.errStr(.incompatible_assign, index, try p.typePairStrExtra(lhs.ty, eMsg, rhs.ty));
+        if (rhs.isZero()) {
+            try rhs.nullCast(p, lhs.ty);
+        } else if (rhs.ty.isInt()) {
+            try p.errStr(.implicit_int_to_ptr, token, try p.typePairStrExtra(rhs.ty, " to ", lhs.ty));
+            try rhs.ptrCast(p, unqualType);
+        } else if (rhs.ty.isPointer()) {
+            if (!unqualType.eql(rhs.ty, false)) {
+                try p.errStr(.incompatible_ptr_assign, token, try p.typePairStrExtra(lhs.ty, eMsg, rhs.ty));
+                try rhs.ptrCast(p, unqualType);
+            }
+        } else {
+            try p.errStr(.incompatible_assign, token, try p.typePairStrExtra(lhs.ty, eMsg, rhs.ty));
+        }
+    } else if (lhs.ty.isEnumOrRecord()) {
+        if (!unqualType.eql(rhs.ty, false))
+            try p.errStr(.incompatible_assign, token, try p.typePairStrExtra(lhs.ty, eMsg, rhs.ty));
     } else if (lhs.ty.isArray() or lhs.ty.isFunc()) {
-        try p.errToken(.not_assignable, index);
+        try p.errToken(.not_assignable, token);
     } else {
-        try p.errStr(.incompatible_assign, index, try p.typePairStrExtra(lhs.ty, eMsg, rhs.ty));
+        try p.errStr(.incompatible_assign, token, try p.typePairStrExtra(lhs.ty, eMsg, rhs.ty));
     }
 
     try lhs.bin(p, tag, rhs);
