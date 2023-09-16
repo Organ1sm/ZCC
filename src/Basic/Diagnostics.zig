@@ -59,6 +59,7 @@ const Options = struct {
     @"pointer-type-mismatch": Kind = .warning,
     @"c2x-extension": Kind = .warning,
     @"incompatible-pointer-types": Kind = .warning,
+    @"excess-initializers": Kind = .warning,
 };
 
 pub const Tag = enum {
@@ -245,6 +246,10 @@ pub const Tag = enum {
     func_init,
     incompatible_init,
     empty_scalar_init,
+    excess_scalar_init,
+    excess_str_init,
+    str_init_too_long,
+    arr_init_too_long,
 };
 
 list: std.ArrayList(Message),
@@ -626,6 +631,10 @@ pub fn renderExtra(comp: *Compilation, m: anytype) void {
             .func_init => m.write("illegal initializer type"),
             .incompatible_init => m.print("initializing {s}", .{msg.extra.str}),
             .empty_scalar_init => m.write("scalar initializer cannot be empty"),
+            .excess_scalar_init => m.write("excess elements in scalar initializer"),
+            .excess_str_init => m.write("excess elements in string initializer"),
+            .str_init_too_long => m.write("initializer-string for char array is too long"),
+            .arr_init_too_long => m.print("cannot initialize type ({s})", .{msg.extra.str}),
         }
 
         m.end(lcs);
@@ -809,6 +818,7 @@ fn tagKind(diag: *Diagnostics, tag: Tag) Kind {
         .func_init,
         .incompatible_init,
         .empty_scalar_init,
+        .arr_init_too_long,
         => .@"error",
 
         .to_match_paren,
@@ -858,6 +868,11 @@ fn tagKind(diag: *Diagnostics, tag: Tag) Kind {
         .pointer_mismatch => diag.options.@"pointer-type-mismatch",
         .static_assert_missing_message => diag.options.@"c2x-extension",
         .incompatible_ptr_assign => diag.options.@"incompatible-pointer-types",
+
+        .excess_scalar_init,
+        .excess_str_init,
+        .str_init_too_long,
+        => diag.options.@"excess-initializers",
     };
 
     if (kind == .@"error" and diag.fatalErrors)
