@@ -246,6 +246,7 @@ fn processSource(comp: *Compilation, source: Source, builtinMacro: Source, userD
 test "simple test" {
     _ = @import("Lexer/Lexer.zig");
     _ = @import("Lexer/Preprocessor.zig");
+    _ = @import("Parser/InitList.zig");
     _ = @import("Basic/Source.zig");
     _ = @import("Basic/Compilation.zig");
     _ = @import("AST/AST.zig");
