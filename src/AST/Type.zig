@@ -682,14 +682,19 @@ fn printPrologue(ty: Type, w: anytype) @TypeOf(w).Error!bool {
             return false;
         },
 
+        else => {},
+    }
+    try ty.qual.dump(w);
+    if (ty.alignment != 0)
+        try w.print(" _Alignas({d})", .{ty.alignment});
+
+    switch (ty.specifier) {
         .Enum => try w.print("enum {s}", .{ty.data.@"enum".name}),
         .Struct => try w.print("struct {s}", .{ty.data.record.name}),
         .Union => try w.print("union {s}", .{ty.data.record.name}),
         else => try w.writeAll(TypeBuilder.fromType(ty).toString().?),
     }
-    try ty.qual.dump(w);
-    if (ty.alignment != 0)
-        try w.print(" _Alignas({d})", .{ty.alignment});
+
     return true;
 }
 
