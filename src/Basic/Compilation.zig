@@ -3,6 +3,7 @@ const builtin = @import("builtin");
 const Source = @import("Source.zig");
 const Diagnostics = @import("../Basic/Diagnostics.zig");
 const Token = @import("../Lexer/Token.zig").Token;
+const LangOpts = @import("LangOpts.zig");
 
 const Allocator = std.mem.Allocator;
 
@@ -20,6 +21,7 @@ systemIncludeDirs: std.ArrayList([]const u8),
 outputName: ?[]const u8 = null,
 target: std.Target = builtin.target,
 onlyPreprocess: bool = false,
+langOpts: LangOpts = .{},
 
 pub fn init(gpa: Allocator) Compilation {
     return .{
