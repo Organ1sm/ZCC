@@ -250,6 +250,7 @@ pub const Tag = enum {
     excess_str_init,
     str_init_too_long,
     arr_init_too_long,
+    invalid_typeof,
 };
 
 list: std.ArrayList(Message),
@@ -635,6 +636,7 @@ pub fn renderExtra(comp: *Compilation, m: anytype) void {
             .excess_str_init => m.write("excess elements in string initializer"),
             .str_init_too_long => m.write("initializer-string for char array is too long"),
             .arr_init_too_long => m.print("cannot initialize type ({s})", .{msg.extra.str}),
+            .invalid_typeof => m.print("'{s} typeof' is invalid", .{msg.extra.str}),
         }
 
         m.end(lcs);
@@ -819,6 +821,7 @@ fn tagKind(diag: *Diagnostics, tag: Tag) Kind {
         .incompatible_init,
         .empty_scalar_init,
         .arr_init_too_long,
+        .invalid_typeof,
         => .@"error",
 
         .to_match_paren,

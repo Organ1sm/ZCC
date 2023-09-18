@@ -16,6 +16,7 @@ specifier: @This().Specifier = .None,
 qual: Qualifiers.Builder = .{},
 alignment: u29 = 0,
 alignToken: ?TokenIndex = null,
+typeof: ?Type = null,
 
 pub const Specifier = union(enum) {
     None,
@@ -134,8 +135,12 @@ pub fn finish(b: @This(), p: *Parser) Parser.Error!Type {
 
     switch (b.specifier) {
         Specifier.None => {
-            ty.specifier = .Int;
-            try p.err(.missing_type_specifier);
+            if (b.typeof) |typeof| {
+                ty = typeof;
+            } else {
+                ty.specifier = .Int;
+                try p.err(.missing_type_specifier);
+            }
         },
 
         Specifier.Void => ty.specifier = .Void,
@@ -257,6 +262,8 @@ pub fn finish(b: @This(), p: *Parser) Parser.Error!Type {
     }
 
     try b.qual.finish(p, &ty);
+    if (b.typeof) |typeof|
+        ty.qual = ty.qual.mergeAllQualifiers(typeof.qual);
 
     if (b.alignToken) |alignToken| {
         const default = ty.alignof(p.pp.compilation);
@@ -283,7 +290,16 @@ pub fn cannotCombine(b: @This(), p: *Parser, sourceToken: TokenIndex) Compilatio
         try p.errStr(.spec_from_typedef, some.token, try p.typeStr(some.type));
 }
 
+pub fn combineFromTypeof(b: *@This(), p: *Parser, new: Type, sourceToken: TokenIndex) Compilation.Error!void {
+    if (b.typeof != null) return p.errStr(.cannot_combine_spec, sourceToken, "typeof");
+    if (b.specifier != .None) return p.errStr(.invalid_typeof, sourceToken, @tagName(b.specifier));
+    b.typeof = new;
+}
+
 pub fn combine(b: *@This(), p: *Parser, new: Specifier, sourceToken: TokenIndex) Compilation.Error!void {
+    if (b.typeof != null)
+        try p.errStr(.invalid_typeof, sourceToken, @tagName(new));
+
     switch (new) {
         Specifier.Signed => b.specifier = switch (b.specifier) {
             Specifier.None => Specifier.Signed,

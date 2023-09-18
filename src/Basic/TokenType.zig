@@ -137,6 +137,8 @@ pub const TokenType = enum(u8) {
     KeywordStruct,
     KeywordSwitch,
     KeywordTypedef,
+    KeywordTypeof1,
+    KeywordTypeof2,
     KeywordUnion,
     KeywordUnsigned,
     KeywordVoid,
@@ -168,6 +170,7 @@ pub const TokenType = enum(u8) {
     KeywordGccRestrict2,
     KeywordGccAlignof1,
     KeywordGccAlignof2,
+    KeywordGccTypeof,
 
     // Preprocessor directives
     KeywordInclude,
@@ -241,6 +244,9 @@ pub const TokenType = enum(u8) {
             .KeywordNoreturn,
             .KeywordStaticAssert,
             .KeywordThreadLocal,
+            .KeywordGccTypeof,
+            .KeywordTypeof1,
+            .KeywordTypeof2,
             .Identifier,
             => return true,
             else => false,
@@ -384,6 +390,7 @@ pub const TokenType = enum(u8) {
             .KeywordStruct => "struct",
             .KeywordSwitch => "switch",
             .KeywordTypedef => "typedef",
+            .KeywordGccTypeof => "typeof",
             .KeywordUnion => "union",
             .KeywordUnsigned => "unsigned",
             .KeywordVoid => "void",
@@ -424,6 +431,8 @@ pub const TokenType = enum(u8) {
             .KeywordPragma => "pragma",
             .KeywordLine => "line",
             .KeywordVarArgs => "__VA_ARGS__",
+            .KeywordTypeof1 => "__typeof",
+            .KeywordTypeof2 => "__typeof__",
         };
     }
 

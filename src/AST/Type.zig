@@ -46,11 +46,23 @@ pub const Qualifiers = packed struct {
         if (quals.register) try w.writeAll("register ");
     }
 
-    /// Merge the const/volatile/ qualifiers
+    /// Merge the const/volatile/ qualifiers, used by type resolution
+    /// of the conditional operator
     pub fn mergeCVQualifiers(a: Qualifiers, b: Qualifiers) Qualifiers {
         return .{
             .@"const" = a.@"const" or b.@"const",
             .@"volatile" = a.@"volatile" or b.@"volatile",
+        };
+    }
+
+    /// Merge all qualifiers, used by typeof()
+    pub fn mergeAllQualifiers(a: Qualifiers, b: Qualifiers) Qualifiers {
+        return .{
+            .@"const" = a.@"const" or b.@"const",
+            .atomic = a.atomic or b.atomic,
+            .@"volatile" = a.@"volatile" or b.@"volatile",
+            .restrict = a.restrict or b.restrict,
+            .register = a.register or b.register,
         };
     }
 
