@@ -403,7 +403,7 @@ pub fn next(self: *Lexer) Token {
             .identifier => switch (c) {
                 'a'...'z', 'A'...'Z', '_', '0'...'9', '$' => {},
                 else => {
-                    id = Token.getTokenId(self.comp.langOpts, self.buffer[start..self.index]);
+                    id = Token.getTokenId(self.comp, self.buffer[start..self.index]);
                     break;
                 },
             },
@@ -830,7 +830,7 @@ pub fn next(self: *Lexer) Token {
         switch (state) {
             .start, .line_comment => {},
             .u, .u8, .U, .L, .identifier => {
-                id = Token.getTokenId(self.comp.langOpts, self.buffer[start..self.index]);
+                id = Token.getTokenId(self.comp, self.buffer[start..self.index]);
             },
 
             .cr,

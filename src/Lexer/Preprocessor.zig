@@ -841,7 +841,7 @@ fn expandFunc(pp: *Preprocessor, source: *ExpandBuffer, startIdx: *usize, macro:
         switch (token.id) {
             .EmptyArg => _ = buf.orderedRemove(tokenIdx),
             .IdentifierFromParam => {
-                token.id = RawToken.getTokenId(pp.compilation.langOpts, pp.expandedSlice(token.*));
+                token.id = RawToken.getTokenId(pp.compilation, pp.expandedSlice(token.*));
                 try pp.expandExtra(&buf, &tokenIdx);
             },
             else => tokenIdx += 1,
