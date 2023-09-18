@@ -474,6 +474,9 @@ fn nextExternDecl(p: *Parser) void {
             .KeywordStruct,
             .KeywordUnion,
             .KeywordAlignas,
+            .KeywordGccTypeof,
+            .KeywordTypeof1,
+            .KeywordTypeof2,
             .Identifier,
             => if (parens == 0) return,
             else => {},
@@ -753,6 +756,27 @@ fn parseStaticAssert(p: *Parser) Error!bool {
     return true;
 }
 
+fn typeof(p: *Parser) Error!?Type {
+    switch (p.getCurrToken()) {
+        .KeywordGccTypeof, .KeywordTypeof1, .KeywordTypeof2 => p.index += 1,
+        else => return null,
+    }
+
+    const lp = try p.expectToken(.LParen);
+    if (try p.typeName()) |ty| {
+        try p.expectClosing(lp, .RParen);
+        return ty;
+    }
+
+    if (p.eat(.RParen)) |rp| {
+        try p.errToken(.expected_expr, rp);
+        return error.ParsingFailed;
+    }
+    const typeofExpr = try p.parseExpr();
+    try p.expectClosing(lp, .RParen);
+    return typeofExpr.ty;
+}
+
 /// declSpec: (storageClassSpec | typeSpec | typeQual | funcSpec | alignSpec)+
 /// storageClassSpec:
 ///  : keyword_typedef
@@ -930,6 +954,11 @@ fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec) Error!?InitDeclarator {
 fn parseTypeSpec(p: *Parser, ty: *TypeBuilder) Error!bool {
     const start = p.index;
     while (true) {
+        if (try p.typeof()) |innerType| {
+            try ty.combineFromTypeof(p, innerType, start);
+            continue;
+        }
+
         if (try p.parseTypeQual(&ty.qual))
             continue;
 
@@ -1236,6 +1265,9 @@ fn recordDecls(p: *Parser) Error!void {
 
 // specQual : typeSpec | typeQual | alignSpec
 fn specQual(p: *Parser) Error!?Type {
+    if (try p.typeof()) |ty|
+        return ty;
+
     var spec: TypeBuilder = .{};
 
     if (try p.parseTypeSpec(&spec)) {
@@ -2601,6 +2633,9 @@ fn nextStmt(p: *Parser, lBrace: TokenIndex) !void {
             .KeywordStruct,
             .KeywordUnion,
             .KeywordAlignas,
+            .KeywordTypeof1,
+            .KeywordTypeof2,
+            .KeywordGccTypeof,
             => if (parens == 0) return,
             else => {},
         }

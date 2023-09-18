@@ -45,6 +45,8 @@ pub const Token = struct {
 
         .{ "sizeof", .KeywordSizeof },
         .{ "typedef", .KeywordTypedef },
+        .{ "__typeof", .KeywordTypeof1 },
+        .{ "__typeof__", .KeywordTypeof2 },
 
         // ISO C99
         .{ "_Bool", .KeywordBool },
@@ -85,5 +87,6 @@ pub const Token = struct {
         .{ "__restrict__", .KeywordGccRestrict2 },
         .{ "__alignof", .KeywordGccAlignof1 },
         .{ "__alignof__", .KeywordGccAlignof2 },
+        .{ "typeof", .KeywordGccTypeof },
     });
 };
