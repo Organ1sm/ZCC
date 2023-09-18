@@ -1,6 +1,7 @@
 const std = @import("std");
 const TokenType = @import("../Basic/TokenType.zig").TokenType;
 const Source = @import("../Basic/Source.zig");
+const LangOpts = @import("../Basic/LangOpts.zig");
 
 pub const Token = struct {
     id: TokenType,
@@ -8,7 +9,21 @@ pub const Token = struct {
     start: u32,
     end: u32,
 
-    pub const keywords = std.ComptimeStringMap(TokenType, .{
+    /// double underscore and underscore + capital letter identifiers
+    /// belong to the implementation namespace, so we always convert them
+    /// to keywords.
+    /// TODO: add `.keyword_asm` here as GNU extension once that is supported.
+    pub fn getTokenId(langopts: LangOpts, str: []const u8) TokenType {
+        const kw = AllKeywords.get(str) orelse return .Identifier;
+        return switch (kw) {
+            .KeywordInline => if (langopts.hasGNUKeywords() or langopts.hasC99Keywords()) kw else .Identifier,
+            .KeywordRestrict => if (langopts.hasC99Keywords()) kw else .Identifier,
+            .KeywordGccTypeof => if (langopts.hasGNUKeywords()) kw else .Identifier,
+            else => kw,
+        };
+    }
+
+    pub const AllKeywords = std.ComptimeStringMap(TokenType, .{
         .{ "enum", .KeywordEnum },
         .{ "union", .KeywordUnion },
         .{ "struct", .KeywordStruct },

@@ -88,6 +88,7 @@ pub fn preprocess(pp: *Preprocessor, source: Source) Error!void {
     var lexer = Lexer{
         .buffer = source.buffer,
         .source = source.id,
+        .comp = pp.compilation,
     };
 
     // Estimate how many new tokens this source will contain.
@@ -840,7 +841,7 @@ fn expandFunc(pp: *Preprocessor, source: *ExpandBuffer, startIdx: *usize, macro:
         switch (token.id) {
             .EmptyArg => _ = buf.orderedRemove(tokenIdx),
             .IdentifierFromParam => {
-                token.id = RawToken.keywords.get(pp.expandedSlice(token.*)) orelse .Identifier;
+                token.id = RawToken.getTokenId(pp.compilation.langOpts, pp.expandedSlice(token.*));
                 try pp.expandExtra(&buf, &tokenIdx);
             },
             else => tokenIdx += 1,
@@ -939,6 +940,7 @@ pub fn expandedSlice(pp: *Preprocessor, token: Token) []const u8 {
         else
             pp.compilation.getSource(token.loc.id).buffer,
 
+        .comp = pp.compilation,
         .index = token.loc.byteOffset,
         .source = .generated,
     };
@@ -969,6 +971,7 @@ fn pasteTokens(pp: *Preprocessor, lhs: Token, rhs: Token) Error!Token {
     // Try to tokenize the result.
     var lexer = Lexer{
         .buffer = pp.generated.items,
+        .comp = pp.compilation,
         .index = @as(u32, @intCast(start)),
         .source = .generated,
     };

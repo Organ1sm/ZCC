@@ -2,11 +2,14 @@ const std = @import("std");
 const TokenType = @import("../Basic/TokenType.zig").TokenType;
 const Token = @import("Token.zig").Token;
 const Source = @import("../Basic/Source.zig");
+const LangOpts = @import("../Basic/LangOpts.zig");
+const Compilation = @import("../Basic/Compilation.zig");
 const Lexer = @This();
 
 buffer: []const u8 = undefined,
 index: u32 = 0,
 source: Source.ID,
+comp: *const Compilation,
 
 const State = enum {
     start,
@@ -400,7 +403,7 @@ pub fn next(self: *Lexer) Token {
             .identifier => switch (c) {
                 'a'...'z', 'A'...'Z', '_', '0'...'9', '$' => {},
                 else => {
-                    id = Token.keywords.get(self.buffer[start..self.index]) orelse TokenType.Identifier;
+                    id = Token.getTokenId(self.comp.langOpts, self.buffer[start..self.index]);
                     break;
                 },
             },
@@ -827,7 +830,7 @@ pub fn next(self: *Lexer) Token {
         switch (state) {
             .start, .line_comment => {},
             .u, .u8, .U, .L, .identifier => {
-                id = Token.keywords.get(self.buffer[start..self.index]) orelse TokenType.Identifier;
+                id = Token.getTokenId(self.comp.langOpts, self.buffer[start..self.index]);
             },
 
             .cr,
@@ -896,9 +899,13 @@ pub fn next(self: *Lexer) Token {
 }
 
 fn expectTokens(source: []const u8, expected: []const TokenType) void {
+    var comp = Compilation.init(std.testing.allocator);
+    defer comp.deinit();
+
     var lexer = Lexer{
         .buffer = source,
         .source = .unused,
+        .comp = &comp,
     };
 
     for (expected) |expectedTokenId| {
