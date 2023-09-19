@@ -2755,6 +2755,13 @@ fn assignExpr(p: *Parser) Error!Result {
         .DivAssignExpr,
         .ModAssignExpr,
         => {
+            if (rhs.isZero()) {
+                switch (tag) {
+                    .DivAssignExpr => try p.errStr(.division_by_zero, div.?, "division"),
+                    .ModAssignExpr => try p.errStr(.division_by_zero, mod.?, "remainder"),
+                    else => {},
+                }
+            }
             _ = try lhsCopy.adjustTypes(token, &rhs, p, .arithmetic);
             try lhs.bin(p, tag, rhs);
             return lhs;
@@ -3161,8 +3168,16 @@ fn mulExpr(p: *Parser) Error!Result {
         var rhs = try p.parseCastExpr();
         try rhs.expect(p);
 
+        if (rhs.isZero() and mul == null and !p.noEval) {
+            lhs.value = .unavailable;
+            if (div != null) {
+                try p.errStr(.division_by_zero, div.?, "division");
+            } else {
+                try p.errStr(.division_by_zero, percent.?, "remainder");
+            }
+        }
+
         if (try lhs.adjustTypes(percent.?, &rhs, p, if (tag == .ModExpr) .integer else .arithmetic)) {
-            // TODO divide by 0
             if (mul != null) {
                 try lhs.mul(mul.?, rhs, p);
             } else if (div != null) {
