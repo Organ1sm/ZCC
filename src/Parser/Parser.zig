@@ -764,16 +764,18 @@ fn typeof(p: *Parser) Error!?Type {
     }
 
     const lp = try p.expectToken(.LParen);
+    const start = p.index;
     if (try p.typeName()) |ty| {
         try p.expectClosing(lp, .RParen);
         return ty;
     }
 
+    p.index = start;
     if (p.eat(.RParen)) |rp| {
         try p.errToken(.expected_expr, rp);
         return error.ParsingFailed;
     }
-    const typeofExpr = try p.parseExpr();
+    const typeofExpr = try p.parseNoEval(assignExpr);
     try p.expectClosing(lp, .RParen);
     return typeofExpr.ty;
 }
@@ -3441,12 +3443,10 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
                     try p.expectClosing(lp, .RParen);
                 } else {
                     p.index = expectedParen;
-                    res = try p.parseUnaryExpr();
-                    try res.expect(p);
+                    res = try p.parseNoEval(assignExpr);
                 }
             } else {
-                res = try p.parseUnaryExpr();
-                try res.expect(p);
+                res = try p.parseNoEval(parseUnaryExpr);
             }
 
             if (res.ty.sizeof(p.pp.compilation)) |size| {
@@ -3474,13 +3474,11 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
                     try p.expectClosing(lp, .RParen);
                 } else {
                     p.index = expectedParen;
-                    res = try p.parseUnaryExpr();
-                    try res.expect(p);
+                    res = try p.parseNoEval(assignExpr);
                     try p.errToken(.alignof_expr, expectedParen);
                 }
             } else {
-                res = try p.parseUnaryExpr();
-                try res.expect(p);
+                res = try p.parseNoEval(parseUnaryExpr);
                 try p.errToken(.alignof_expr, expectedParen);
             }
 
@@ -3963,6 +3961,17 @@ fn castInt(p: *Parser, val: u64, specs: []const Type.Specifier) Error!Result {
     return res;
 }
 
+/// Run a parser function but do not evaluate the result
+fn parseNoEval(p: *Parser, comptime func: fn (*Parser) Error!Result) Error!Result {
+    const noEval = p.noEval;
+    defer p.noEval = noEval;
+
+    p.noEval = true;
+    const parsed = try func(p);
+    try parsed.expect(p);
+    return parsed;
+}
+
 //// genericSelection : keyword_generic '(' assignExpr ',' genericAssoc (',' genericAssoc)* ')'
 //// genericAssoc
 ////  : typeName ':' assignExpr
@@ -3970,16 +3979,7 @@ fn castInt(p: *Parser, val: u64, specs: []const Type.Specifier) Error!Result {
 fn parseGenericSelection(p: *Parser) Error!Result {
     p.index += 1;
     const lp = try p.expectToken(.LParen);
-    const controlling = blk: {
-        // controlling expression is not evaluated
-        const noEval = p.noEval;
-        defer p.noEval = noEval;
-        p.noEval = true;
-        const controlling = try p.assignExpr();
-        try controlling.expect(p);
-        break :blk controlling;
-    };
-
+    const controlling = try p.parseNoEval(assignExpr);
     _ = try p.expectToken(.Comma);
 
     const listBufferTop = p.listBuffer.items.len;
