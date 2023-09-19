@@ -202,6 +202,8 @@ pub fn addNode(p: *Parser, node: AST.Node) Allocator.Error!NodeIndex {
 }
 
 fn addList(p: *Parser, nodes: []const NodeIndex) Allocator.Error!AST.Range {
+    if (p.inMacro)
+        return AST.Range{ .start = 0, .end = 0 };
     const start: u32 = @intCast(p.data.items.len);
     try p.data.appendSlice(nodes);
     const end: u32 = @intCast(p.data.items.len);
@@ -899,7 +901,7 @@ fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec) Error!?InitDeclarator {
     }
 
     const name = initD.d.name;
-    if (initD.d.type.hasIncompleteSize()) {
+    if (declSpec.storageClass != .typedef and initD.d.type.hasIncompleteSize()) {
         try p.errStr(.variable_incomplete_ty, name, try p.typeStr(initD.d.type));
         return initD;
     }
@@ -1164,6 +1166,7 @@ fn parseRecordSpec(p: *Parser) Error!*Type.Record {
     try p.declBuffer.append(.none);
     const declBufferTop = p.declBuffer.items.len;
     const recordBufferTop = p.recordBuffer.items.len;
+    errdefer p.declBuffer.items.len = declBufferTop - 1;
 
     defer {
         p.declBuffer.items.len = declBufferTop;
@@ -1341,6 +1344,7 @@ fn parseEnumSpec(p: *Parser) Error!*Type.Enum {
     const declBufferTop = p.declBuffer.items.len;
     const listBufferTop = p.listBuffer.items.len;
     const enumBufferTop = p.enumBuffer.items.len;
+    errdefer p.declBuffer.items.len = declBufferTop - 1;
 
     defer {
         p.declBuffer.items.len = declBufferTop;
@@ -2945,7 +2949,7 @@ fn logicalAndExpr(p: *Parser) Error!Result {
     defer p.noEval = savedEval;
 
     while (p.eat(.AmpersandAmpersand)) |token| {
-        if (lhs.value != .unavailable and lhs.getBool())
+        if (lhs.value != .unavailable and !lhs.getBool())
             p.noEval = true;
 
         var rhs = try p.orExpr();
