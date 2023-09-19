@@ -1,4 +1,5 @@
 const std = @import("std");
+const DiagnosticTag = @import("Diagnostics.zig").Tag;
 
 const LangOpts = @This();
 
@@ -35,15 +36,16 @@ const Standard = enum {
         .{ "iso9899:2018", .c17 },       .{ "gnu17", .gnu17 },      .{ "gnu18", .gnu17 },
         .{ "c2x", .c2x },                .{ "gnu2x", .gnu2x },
     });
+
+    pub fn atLeast(self: Standard, other: Standard) bool {
+        return @intFromEnum(self) >= @intFromEnum(other);
+    }
 };
 
 standard: Standard = .gnu17,
 
 pub fn hasGNUKeywords(langopts: LangOpts) bool {
-    return switch (langopts.standard) {
-        .gnu89, .gnu99, .gnu11, .gnu17, .gnu2x => true,
-        else => false,
-    };
+    return langopts.standard.atLeast(.c99);
 }
 
 pub fn hasC99Keywords(langopts: LangOpts) bool {
@@ -52,4 +54,11 @@ pub fn hasC99Keywords(langopts: LangOpts) bool {
 
 pub fn setStandard(self: *LangOpts, name: []const u8) error{InvalidStandard}!void {
     self.standard = Standard.NameMap.get(name) orelse return error.InvalidStandard;
+}
+
+pub fn suppress(langopts: LangOpts, tag: DiagnosticTag) bool {
+    return switch (tag) {
+        .static_assert_missing_message => langopts.standard.atLeast(.c2x),
+        else => false,
+    };
 }

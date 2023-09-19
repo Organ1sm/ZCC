@@ -97,7 +97,7 @@ fn expectClosing(p: *Parser, opening: TokenIndex, id: TokenType) Error!void {
     _ = p.expectToken(id) catch |e|
         {
         if (e == error.ParsingFailed) {
-            try p.pp.compilation.diag.add(.{
+            try p.pp.compilation.addDiagnostic(.{
                 .tag = switch (id) {
                     .RParen => .to_match_paren,
                     .RBrace => .to_match_brace,

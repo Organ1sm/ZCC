@@ -167,7 +167,7 @@ fn handleArgs(comp: *Compilation, args: [][]const u8) !void {
                 const option = arg["-W".len..];
                 try comp.diag.set(option, .warning);
             } else if (std.mem.startsWith(u8, arg, "-std=")) {
-                const standard = arg["-std".len..];
+                const standard = arg["-std=".len..];
                 comp.langOpts.setStandard(standard) catch return comp.diag.fatalNoSrc("Invalid standard '{s}'", .{standard});
             } else {
                 try stdOut.print(usage, .{args[0]});
