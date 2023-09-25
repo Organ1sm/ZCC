@@ -4,6 +4,7 @@ const Source = @import("Source.zig");
 const Diagnostics = @import("../Basic/Diagnostics.zig");
 const Token = @import("../Lexer/Token.zig").Token;
 const LangOpts = @import("LangOpts.zig");
+const Type = @import("../AST/Type.zig");
 
 const Allocator = std.mem.Allocator;
 
@@ -19,6 +20,7 @@ diag: Diagnostics,
 includeDirs: std.ArrayList([]const u8),
 systemIncludeDirs: std.ArrayList([]const u8),
 outputName: ?[]const u8 = null,
+builtinHeaderPath: ?[]u8 = null,
 target: std.Target = builtin.target,
 onlyPreprocess: bool = false,
 langOpts: LangOpts = .{},
@@ -43,6 +45,7 @@ pub fn deinit(compilation: *Compilation) void {
     compilation.diag.deinit();
     compilation.includeDirs.deinit();
     compilation.systemIncludeDirs.deinit();
+    if (compilation.builtinHeaderPath) |some| compilation.gpa.free(some);
 }
 
 /// Generate builtin macros that will be available to each source file.
@@ -111,6 +114,11 @@ pub fn generateBuiltinMacros(comp: *Compilation) !Source {
         \\
     );
 
+    const w = buf.writer();
+    try generateTypeMacro(w, "__PTRDIFF_TYPE__", Type.ptrDiffT(comp));
+    try generateTypeMacro(w, "__SIZE_TYPE__", Type.sizeT(comp));
+    try generateTypeMacro(w, "__WCHAR_TYPE__", Type.wideChar(comp));
+
     const duped_path = try comp.gpa.dupe(u8, "<builtin>");
     errdefer comp.gpa.free(duped_path);
 
@@ -124,6 +132,30 @@ pub fn generateBuiltinMacros(comp: *Compilation) !Source {
     };
     try comp.sources.put(duped_path, source);
     return source;
+}
+
+fn generateTypeMacro(w: anytype, name: []const u8, ty: Type) !void {
+    try w.print("#define {s} ", .{name});
+    try ty.print(w);
+    try w.writeByte('\n');
+}
+
+pub fn defineSystemIncludes(comp: *Compilation) !void {
+    var buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+    var searchPath: []const u8 = std.fs.selfExePath(&buf) catch return error.SelfExeNotFound;
+
+    while (std.fs.path.dirname(searchPath)) |dirname| : (searchPath = dirname) {
+        var baseDir = std.fs.cwd().openDir(dirname, .{}) catch continue;
+        defer baseDir.close();
+
+        baseDir.access("include/stddef.h", .{}) catch continue;
+        const path = try std.fs.path.join(comp.gpa, &.{ dirname, "include" });
+        comp.builtinHeaderPath = path;
+        try comp.systemIncludeDirs.append(path);
+        break;
+    } else return error.ZccIncludeNotFound;
+
+    try comp.systemIncludeDirs.append("/usr/include");
 }
 
 pub fn getSource(comp: *Compilation, id: Source.ID) Source {
