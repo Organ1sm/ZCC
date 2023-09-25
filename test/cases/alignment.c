@@ -10,7 +10,7 @@ int baz(_Alignas(8) int d) {
 }
 
 _Alignas(536870912) int e;
-_Alignas(-2) int f;
+_Alignas(-2) int f; 
 
 #define TESTS_SKIPPED 1
 #define EXPECTED_ERRORS "alignment.c:3:3: error: '_Alignas' attribute only applies to variables and fields" \
