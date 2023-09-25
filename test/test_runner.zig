@@ -288,6 +288,7 @@ pub fn main() !void {
                 }
             } else {
                 passCount += 1;
+                progress.log("passed\n", .{});
             }
             continue;
         }
