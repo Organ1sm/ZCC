@@ -64,7 +64,11 @@ const usage =
 ;
 
 fn handleArgs(comp: *Compilation, args: [][]const u8) !void {
-    try comp.systemIncludeDirs.append("/usr/include");
+    comp.defineSystemIncludes() catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        error.SelfExeNotFound => return comp.diag.fatalNoSrc("could not find Aro executable path", .{}),
+        error.ZccIncludeNotFound => return comp.diag.fatalNoSrc("could not find Aro builtin headers", .{}),
+    };
 
     var sourceFiles = std.ArrayList(Source).init(comp.gpa);
     var macroBuffer = std.ArrayList(u8).init(comp.gpa);

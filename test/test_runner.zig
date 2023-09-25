@@ -61,6 +61,8 @@ pub fn main() !void {
     var comp = zcc.Compilation.init(gpa);
     defer comp.deinit();
 
+    try comp.defineSystemIncludes();
+
     const builtinMacros = try comp.generateBuiltinMacros();
     const testRunnerMacros = blk: {
         const dupedPath = try gpa.dupe(u8, "<test_runner>");
