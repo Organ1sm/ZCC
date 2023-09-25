@@ -105,5 +105,8 @@ pub const Token = struct {
         .{ "__alignof", .KeywordGccAlignof1 },
         .{ "__alignof__", .KeywordGccAlignof2 },
         .{ "typeof", .KeywordGccTypeof },
+
+        // gcc builtins
+        .{ "__builtin_choose_expr", .BuiltinChooseExpr },
     });
 };

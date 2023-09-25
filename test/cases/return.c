@@ -26,7 +26,6 @@ int *ip(void) {
     return &a;
 }
 
-
 #define EXPECTED_ERRORS "return.c:2:5: error: non-void function 'b' should return a value" \
     "return.c:3:5: warning: unreachable code" \
     "return.c:6:12: error: returning 'void' from a function with incompatible result type" \

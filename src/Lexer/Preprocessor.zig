@@ -37,10 +37,8 @@ const Macro = union(enum) {
     const Func = struct {
         /// Parameters of the function type macro
         params: []const []const u8,
-
         /// Token constituting the macro body
         tokens: []const RawToken,
-
         varArgs: bool,
         loc: Source.Location,
     };
@@ -96,7 +94,7 @@ pub fn preprocess(pp: *Preprocessor, source: Source) Error!void {
     try pp.tokens.ensureUnusedCapacity(pp.compilation.gpa, pp.tokens.len + estimatedTokenCount);
 
     var ifLevel: u8 = 0;
-    var ifKind = std.packed_int_array.PackedIntArray(u2, 256).init([1]u2{0} ** 256);
+    var ifKind = std.mem.zeroes(std.PackedIntArray(u2, 256));
     var seenPragmaOnce = false;
     const untilElse = 0;
     const untilEndIf = 1;
@@ -116,7 +114,7 @@ pub fn preprocess(pp: *Preprocessor, source: Source) Error!void {
                         }
 
                         var slice = lexer.buffer[start..lexer.index];
-                        slice = std.mem.trim(u8, slice, "\t\x0B\x0C");
+                        slice = std.mem.trim(u8, slice, " \t\x0B\x0C");
 
                         try pp.compilation.diag.add(.{
                             .tag = .error_directive,
@@ -185,7 +183,7 @@ pub fn preprocess(pp: *Preprocessor, source: Source) Error!void {
                         }
 
                         var slice = lexer.buffer[start..lexer.index];
-                        slice = std.mem.trim(u8, slice, "\t\x0B\x0C");
+                        slice = std.mem.trim(u8, slice, " \t\x0B\x0C");
 
                         if (std.mem.eql(u8, slice, "once")) {
                             const prev = try pp.pragmaOnce.fetchPut(lexer.source, {});
@@ -202,6 +200,7 @@ pub fn preprocess(pp: *Preprocessor, source: Source) Error!void {
                             });
                         }
                     },
+
                     .KeywordUndef => {
                         const macro_name = (try pp.expectMacroName(&lexer)) orelse continue;
                         _ = pp.defines.remove(macro_name);
@@ -256,7 +255,6 @@ pub fn preprocess(pp: *Preprocessor, source: Source) Error!void {
                             try pp.err(directive, .else_without_if);
                             continue;
                         }
-
                         ifLevel -= 1;
                     },
 

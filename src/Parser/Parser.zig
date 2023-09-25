@@ -138,7 +138,7 @@ pub fn errStr(p: *Parser, tag: Diagnostics.Tag, index: TokenIndex, str: []const 
 
 pub fn errExtra(p: *Parser, tag: Diagnostics.Tag, index: TokenIndex, extra: Diagnostics.Message.Extra) Compilation.Error!void {
     @setCold(true);
-    try p.pp.compilation.diag.add(.{
+    try p.pp.compilation.addDiagnostic(.{
         .tag = tag,
         .loc = p.pp.tokens.items(.loc)[index],
         .extra = extra,
@@ -148,7 +148,7 @@ pub fn errExtra(p: *Parser, tag: Diagnostics.Tag, index: TokenIndex, extra: Diag
 pub fn errToken(p: *Parser, tag: Diagnostics.Tag, index: TokenIndex) Compilation.Error!void {
     @setCold(true);
 
-    try p.pp.compilation.diag.add(.{
+    try p.pp.compilation.addDiagnostic(.{
         .tag = tag,
         .loc = p.pp.tokens.items(.loc)[index],
     });
@@ -1275,13 +1275,11 @@ fn specQual(p: *Parser) Error!?Type {
         return ty;
 
     var spec: TypeBuilder = .{};
-
     if (try p.parseTypeSpec(&spec)) {
-        if (spec.alignment != 0) {
+        if (spec.alignment != 0)
             try p.errToken(.align_ignored, spec.alignToken.?);
-            spec.alignToken = null;
-            return try spec.finish(p);
-        }
+        spec.alignToken = null;
+        return try spec.finish(p);
     }
 
     return null;
@@ -1610,6 +1608,7 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: Declarator
                     try p.errToken(.variable_len_array_file_scope, lb);
 
                 const vlaType = try p.arena.create(Type.VLA);
+                vlaType.elem = .{ .specifier = .Void };
                 vlaType.expr = size.node;
                 resType.data = .{ .vla = vlaType };
                 resType.specifier = .VariableLenArray;
@@ -1618,10 +1617,12 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: Declarator
                     try p.errToken(.useless_static, some);
             } else if (star) |_| {
                 const elemType = try p.arena.create(Type);
+                elemType.* = .{ .specifier = .Void };
                 resType.data = .{ .subType = elemType };
                 resType.specifier = .UnspecifiedVariableLenArray;
             } else {
                 const arrayType = try p.arena.create(Type.Array);
+                arrayType.elem = .{ .specifier = .Void };
                 arrayType.len = 0;
                 resType.data = .{ .array = arrayType };
                 resType.specifier = .IncompleteArray;
@@ -1629,6 +1630,7 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: Declarator
 
             .unsigned => |v| {
                 const arrayType = try p.arena.create(Type.Array);
+                arrayType.elem = .{ .specifier = .Void };
                 arrayType.len = v;
                 if (arrayType.len > maxElems) {
                     try p.errToken(.array_too_large, lb);
@@ -1643,6 +1645,7 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: Declarator
                     try p.errToken(.negative_array_size, lb);
 
                 const arrayType = try p.arena.create(Type.Array);
+                arrayType.elem = .{ .specifier = .Void };
                 arrayType.len = @as(u64, @bitCast(v));
                 if (arrayType.len > maxElems) {
                     try p.errToken(.array_too_large, lb);
@@ -1654,7 +1657,6 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: Declarator
         }
 
         try resType.combine(outer, p, lb);
-
         return resType;
     } else if (p.eat(.LParen)) |lp| {
         d.funcDeclarator = lp;
@@ -1665,11 +1667,11 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: Declarator
 
         const funcType = try p.arena.create(Type.Function);
         funcType.params = &.{};
+        funcType.returnType.specifier = .Void;
         var specifier: Type.Specifier = .Func;
 
         if (try p.paramDecls()) |params| {
             funcType.params = params;
-
             if (p.eat(.Ellipsis)) |_|
                 specifier = .VarArgsFunc;
         } else if (p.getCurrToken() == .RParen) {
@@ -2332,7 +2334,7 @@ fn parseSwitchStmt(p: *Parser) Error!NodeIndex {
 
     return try p.addNode(.{
         .tag = .SwitchStmt,
-        .data = .{ .BinaryExpr = .{ .rhs = cond.node, .lhs = body } },
+        .data = .{ .BinaryExpr = .{ .lhs = cond.node, .rhs = body } },
     });
 }
 
@@ -2561,7 +2563,7 @@ fn parseReturnStmt(p: *Parser) Error!?NodeIndex {
         }
     } else if (returnType.isPointer()) {
         if (expr.ty.isInt()) {
-            try p.errStr(.implicit_ptr_to_int, eToken, try p.typePairStrExtra(expr.ty, " to ", returnType));
+            try p.errStr(.implicit_int_to_ptr, eToken, try p.typePairStrExtra(expr.ty, " to ", returnType));
             try expr.intCast(p, returnType);
         } else if (!returnType.eql(expr.ty, false)) {
             try p.errStr(.incompatible_return, eToken, try p.typeStr(expr.ty));
@@ -2745,7 +2747,7 @@ fn assignExpr(p: *Parser) Error!Result {
     try rhs.expect(p);
     try rhs.lvalConversion(p);
 
-    if (!AST.isLValue(p.nodes.slice(), lhs.node) or lhs.ty.qual.@"const") {
+    if (!AST.isLValue(p.nodes.slice(), p.data.items, p.valueMap, lhs.node) or lhs.ty.qual.@"const") {
         try p.errToken(.not_assignable, token);
         return error.ParsingFailed;
     }
@@ -2800,7 +2802,7 @@ fn assignExpr(p: *Parser) Error!Result {
     var unqualType = lhs.ty;
     unqualType.qual = .{};
 
-    const eMsg = "from incompatible type";
+    const eMsg = " from incompatible type ";
     if (lhs.ty.specifier == .Bool) {
         // this is ridiculous but it's what clang does
         if (rhs.ty.isInt() or rhs.ty.isFloat() or rhs.ty.isPointer()) {
@@ -2812,7 +2814,7 @@ fn assignExpr(p: *Parser) Error!Result {
         if (rhs.ty.isInt() or rhs.ty.isFloat()) {
             try rhs.intCast(p, unqualType);
         } else if (rhs.ty.isPointer()) {
-            try p.errStr(.implicit_ptr_to_int, token, try p.typePairStrExtra(rhs.ty, eMsg, lhs.ty));
+            try p.errStr(.implicit_ptr_to_int, token, try p.typePairStrExtra(rhs.ty, " to ", lhs.ty));
             try rhs.intCast(p, unqualType);
         } else {
             try p.errStr(.incompatible_assign, token, try p.typePairStrExtra(lhs.ty, eMsg, rhs.ty));
@@ -3207,6 +3209,7 @@ fn mulExpr(p: *Parser) Error!Result {
 /// castExpr :  ( '(' type_name ')' )
 ///  :  '(' typeName ')' castExpr
 ///  | '(' typeName ')' '{' initializerItems '}'
+///  | __builtin_choose_expr '(' constExpr ',' assignExpr ',' assignExpr ')'
 ///  | unExpr
 fn parseCastExpr(p: *Parser) Error!Result {
     if (p.eat(.LParen)) |lp| {
@@ -3250,7 +3253,51 @@ fn parseCastExpr(p: *Parser) Error!Result {
         p.index -= 1;
     }
 
+    switch (p.getCurrToken()) {
+        .BuiltinChooseExpr => return p.parseBuiltinChooseExpr(),
+        // TODO: other special-cased builtins
+        else => {},
+    }
+
     return p.parseUnaryExpr();
+}
+
+fn parseBuiltinChooseExpr(p: *Parser) Error!Result {
+    p.index += 1;
+    const lp = try p.expectToken(.LParen);
+    const condToken = p.index;
+    var cond = try p.constExpr();
+    if (cond.value == .unavailable) {
+        try p.errToken(.builtin_choose_cond, condToken);
+        return error.ParsingFailed;
+    }
+
+    _ = try p.expectToken(.Comma);
+
+    var thenExpr = if (cond.getBool()) try p.assignExpr() else try p.parseNoEval(assignExpr);
+    try thenExpr.expect(p);
+
+    _ = try p.expectToken(.Comma);
+
+    var elseExpr = if (!cond.getBool()) try p.assignExpr() else try p.parseNoEval(assignExpr);
+    try elseExpr.expect(p);
+
+    try p.expectClosing(lp, .RParen);
+
+    if (cond.getBool()) {
+        cond.value = thenExpr.value;
+        cond.ty = thenExpr.ty;
+    } else {
+        cond.value = elseExpr.value;
+        cond.ty = elseExpr.ty;
+    }
+    cond.node = try p.addNode(.{
+        .tag = .BuiltinChooseExpr,
+        .type = cond.ty,
+        .data = .{ .If3 = .{ .cond = cond.node, .body = (try p.addList(&.{ thenExpr.node, elseExpr.node })).start } },
+    });
+
+    return cond;
 }
 
 /// unaryExpr
@@ -3268,7 +3315,7 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
             try operand.expect(p);
 
             const slice = p.nodes.slice();
-            if (!AST.isLValue(slice, operand.node)) {
+            if (!AST.isLValue(slice, p.data.items, p.valueMap, operand.node)) {
                 try p.errToken(.addr_of_rvalue, index);
             }
 
@@ -3297,13 +3344,6 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
                 try p.errToken(.indirection_ptr, index);
             }
 
-            switch (operand.ty.specifier) {
-                .Pointer => operand.ty = operand.ty.data.subType.*,
-                .Array, .StaticArray => operand.ty = operand.ty.data.array.elem,
-
-                .Func, .VarArgsFunc, .OldStyleFunc => {},
-                else => try p.errToken(.indirection_ptr, index),
-            }
             try operand.un(p, .DerefExpr);
             return operand;
         },
@@ -3361,7 +3401,7 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
             if (!operand.ty.isInt() and !operand.ty.isFloat() and !operand.ty.isReal() and !operand.ty.isPointer())
                 try p.errStr(.invalid_argument_un, index, try p.typeStr(operand.ty));
 
-            if (!AST.isLValue(p.nodes.slice(), operand.node) or operand.ty.qual.@"const") {
+            if (!AST.isLValue(p.nodes.slice(), p.data.items, p.valueMap, operand.node) or operand.ty.qual.@"const") {
                 try p.errToken(.not_assignable, index);
                 return error.ParsingFailed;
             }
@@ -3387,7 +3427,7 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
             if (!operand.ty.isInt() and !operand.ty.isFloat() and !operand.ty.isReal() and !operand.ty.isPointer())
                 try p.errStr(.invalid_argument_un, index, try p.typeStr(operand.ty));
 
-            if (!AST.isLValue(p.nodes.slice(), operand.node) or operand.ty.qual.@"const") {
+            if (!AST.isLValue(p.nodes.slice(), p.data.items, p.valueMap, operand.node) or operand.ty.qual.@"const") {
                 try p.errToken(.not_assignable, index);
                 return error.ParsingFailed;
             }
@@ -3599,7 +3639,7 @@ fn parseSuffixExpr(p: *Parser, lhs: Result) Error!Result {
             if (!operand.ty.isInt() and !operand.ty.isFloat() and !operand.ty.isReal() and !operand.ty.isPointer())
                 try p.errStr(.invalid_argument_un, p.index, try p.typeStr(operand.ty));
 
-            if (!AST.isLValue(p.nodes.slice(), operand.node) or operand.ty.qual.@"const") {
+            if (!AST.isLValue(p.nodes.slice(), p.data.items, p.valueMap, operand.node) or operand.ty.qual.@"const") {
                 try p.err(.not_assignable);
                 return error.ParsingFailed;
             }
@@ -3618,7 +3658,7 @@ fn parseSuffixExpr(p: *Parser, lhs: Result) Error!Result {
             if (!operand.ty.isInt() and !operand.ty.isFloat() and !operand.ty.isReal() and !operand.ty.isPointer())
                 try p.errStr(.invalid_argument_un, p.index, try p.typeStr(operand.ty));
 
-            if (!AST.isLValue(p.nodes.slice(), operand.node) or operand.ty.qual.@"const") {
+            if (!AST.isLValue(p.nodes.slice(), p.data.items, p.valueMap, operand.node) or operand.ty.qual.@"const") {
                 try p.err(.not_assignable);
                 return error.ParsingFailed;
             }

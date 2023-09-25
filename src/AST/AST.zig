@@ -106,7 +106,7 @@ pub const Node = struct {
     pub const List = std.MultiArrayList(Node);
 };
 
-pub fn isLValue(nodes: Node.List.Slice, node: NodeIndex) bool {
+pub fn isLValue(nodes: Node.List.Slice, extra: []const NodeIndex, valueMap: ValueMap, node: NodeIndex) bool {
     switch (nodes.items(.tag)[@intFromEnum(node)]) {
         .CompoundLiteralExpr,
         .StringLiteralExpr,
@@ -122,12 +122,22 @@ pub fn isLValue(nodes: Node.List.Slice, node: NodeIndex) bool {
 
         .MemberAccessExpr => {
             const data = nodes.items(.data)[@intFromEnum(node)];
-            return isLValue(nodes, data.Member.lhs);
+            return isLValue(nodes, extra, valueMap, data.Member.lhs);
         },
 
         .ParenExpr => {
             const data = nodes.items(.data)[@intFromEnum(node)];
-            return isLValue(nodes, data.UnaryExpr);
+            return isLValue(nodes, extra, valueMap, data.UnaryExpr);
+        },
+
+        .BuiltinChooseExpr => {
+            const data = nodes.items(.data)[@intFromEnum(node)];
+            if (valueMap.get(data.If3.cond)) |val| {
+                const offset = @intFromBool(val == 0);
+                return isLValue(nodes, extra, valueMap, extra[data.If3.body + offset]);
+            }
+
+            return false;
         },
 
         else => return false,
@@ -196,7 +206,7 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
     try ty.dump(w);
     try w.writeByte('\'');
 
-    if (isLValue(tree.nodes, node))
+    if (isLValue(tree.nodes, tree.data, tree.valueMap, node))
         try w.writeAll(ATTRIBUTE ++ " lvalue");
 
     if (tree.valueMap.get(node)) |val| {
@@ -291,7 +301,7 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
             }
         },
 
-        .CondExpr, .IfThenElseStmt => {
+        .CondExpr, .IfThenElseStmt, .BuiltinChooseExpr => {
             try w.writeByteNTimes(' ', level + half);
             try w.writeAll("cond:\n");
             try tree.dumpNode(data.If3.cond, level + delta, w);

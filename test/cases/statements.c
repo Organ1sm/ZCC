@@ -10,4 +10,3 @@ void foo(void) {
     "statements.c:4:13: error: statement requires expression with integer type ('float' invalid)" \
     "statements.c:5:10: warning: expression result unused" \
     "statements.c:5:10: error: statement requires expression with scalar type ('void' invalid)"
-

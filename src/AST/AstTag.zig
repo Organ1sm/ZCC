@@ -235,6 +235,8 @@ pub const Tag = enum(u8) {
     GenericAssociationExpr,
     // default: un
     GenericDefaultExpr,
+    /// __builtin_choose_expr(lhs, data[0], data[1])
+    BuiltinChooseExpr,
 
     /// ====== Initializer expressions ======
     /// { lhs, rhs }

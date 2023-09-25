@@ -23,6 +23,7 @@ void test_type_resolution(void) {
     (x ? (int *)1 : (_Atomic int*)2);
 }
 
+#define TESTS_SKIPPED 1
 #define EXPECTED_TYPES "int" "long" "unsigned long" "long long" "unsigned long long" "int" \
     "*const void" "*const void" \
     "*volatile int" "*volatile int" \

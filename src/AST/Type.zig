@@ -39,8 +39,8 @@ pub const Qualifiers = packed struct {
     }
 
     pub fn dump(quals: Qualifiers, w: anytype) !void {
-        if (quals.@"const") try w.writeAll(" const ");
-        if (quals.atomic) try w.writeAll(" _Atomic ");
+        if (quals.@"const") try w.writeAll("const ");
+        if (quals.atomic) try w.writeAll("_Atomic ");
         if (quals.@"volatile") try w.writeAll("volatile ");
         if (quals.restrict) try w.writeAll("restrict ");
         if (quals.register) try w.writeAll("register ");
@@ -848,13 +848,13 @@ pub fn dump(ty: Type, w: anytype) @TypeOf(w).Error!void {
         .UnspecifiedVariableLenArray, .DecayedUnspecifiedVariableLenArray => {
             if (ty.specifier == .DecayedUnspecifiedVariableLenArray) try w.writeByte('d');
             try w.writeAll("[*]");
-            try ty.data.array.elem.dump(w);
+            try ty.data.subType.dump(w);
         },
 
         .VariableLenArray, .DecayedVariableLenArray => {
             if (ty.specifier == .DecayedVariableLenArray) try w.writeByte('d');
             try w.writeAll("[<expr>]");
-            try ty.data.array.elem.dump(w);
+            try ty.data.vla.elem.dump(w);
         },
 
         else => try w.writeAll(TypeBuilder.fromType(ty).toString().?),

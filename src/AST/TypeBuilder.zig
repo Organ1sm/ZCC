@@ -132,7 +132,6 @@ pub const Specifier = union(enum) {
 
 pub fn finish(b: @This(), p: *Parser) Parser.Error!Type {
     var ty = Type{ .specifier = undefined };
-
     switch (b.specifier) {
         Specifier.None => {
             if (b.typeof) |typeof| {
@@ -292,13 +291,13 @@ pub fn cannotCombine(b: @This(), p: *Parser, sourceToken: TokenIndex) Compilatio
 
 pub fn combineFromTypeof(b: *@This(), p: *Parser, new: Type, sourceToken: TokenIndex) Compilation.Error!void {
     if (b.typeof != null) return p.errStr(.cannot_combine_spec, sourceToken, "typeof");
-    if (b.specifier != .None) return p.errStr(.invalid_typeof, sourceToken, @tagName(b.specifier));
+    if (b.specifier != .None) return p.errStr(.invalid_typeof, sourceToken, b.specifier.toString().?);
     b.typeof = new;
 }
 
 pub fn combine(b: *@This(), p: *Parser, new: Specifier, sourceToken: TokenIndex) Compilation.Error!void {
     if (b.typeof != null)
-        try p.errStr(.invalid_typeof, sourceToken, @tagName(new));
+        try p.errStr(.invalid_typeof, sourceToken, new.toString().?);
 
     switch (new) {
         Specifier.Signed => b.specifier = switch (b.specifier) {

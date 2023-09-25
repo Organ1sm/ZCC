@@ -301,7 +301,7 @@ pub fn lvalConversion(res: *Result, p: *Parser) Error!void {
         res.ty.decayArray();
         res.ty.alignment = 0;
         try res.un(p, .ArrayToPointer);
-    } else if (!p.inMacro and AST.isLValue(p.nodes.slice(), res.node)) {
+    } else if (!p.inMacro and AST.isLValue(p.nodes.slice(), p.data.items, p.valueMap, res.node)) {
         res.ty.qual = .{};
         res.ty.alignment = 0;
         try res.un(p, .LValueToRValue);
