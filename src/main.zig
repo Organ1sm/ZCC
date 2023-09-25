@@ -1,6 +1,5 @@
 const std = @import("std");
 const builtin = @import("builtin");
-
 const Compilation = @import("Basic/Compilation.zig");
 const Source = @import("Basic/Source.zig");
 const Preprocessor = @import("Lexer/Preprocessor.zig");
@@ -18,7 +17,6 @@ pub fn main() u8 {
     defer arenaInstance.deinit();
 
     const arena = arenaInstance.allocator();
-
     const args = std.process.argsAlloc(arena) catch {
         std.debug.print("Out of Memory\n", .{});
         return 1;

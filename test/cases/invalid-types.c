@@ -8,6 +8,7 @@ void f[4];
 struct Bar f;
 int x[2305843009213693951u];
 
+#define TESTS_SKIPPED 5
 #define EXPECTED_ERRORS \
     "invalid-types.c:1:6: error: cannot combine with previous 'long' specifier" \
     "invalid-types.c:2:14: warning: duplicate 'atomic' declaration specifier" \
