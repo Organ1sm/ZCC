@@ -10,7 +10,9 @@ int baz(_Alignas(8) int d) {
 }
 
 _Alignas(536870912) int e;
-_Alignas(-2) int f; 
+_Alignas(-2) int f;
+
+_Alignas(c) int x;
 
 #define TESTS_SKIPPED 1
 #define EXPECTED_ERRORS "alignment.c:3:3: error: '_Alignas' attribute only applies to variables and fields" \
@@ -21,4 +23,5 @@ _Alignas(-2) int f;
     "alignment.c:9:21: warning: '_Alignas' attribute is ignored here" \
     "alignment.c:12:1: error: requested alignment of 536870912 is too large" \
     "alignment.c:13:1: error: requested negative alignment of -2 is invalid" \
+    "alignment.c:15:1: error: '_Alignas' attribute requires integer constant expression" \
 

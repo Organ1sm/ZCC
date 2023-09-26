@@ -759,6 +759,9 @@ fn parseStaticAssert(p: *Parser) Error!bool {
     return true;
 }
 
+/// typeof
+///   : keyword_typeof '(' typeName ')'
+///   | keyword_typeof '(' expr ')'
 fn typeof(p: *Parser) Error!?Type {
     switch (p.getCurrToken()) {
         .KeywordGccTypeof, .KeywordTypeof1, .KeywordTypeof2 => p.index += 1,
@@ -766,18 +769,13 @@ fn typeof(p: *Parser) Error!?Type {
     }
 
     const lp = try p.expectToken(.LParen);
-    const start = p.index;
     if (try p.typeName()) |ty| {
         try p.expectClosing(lp, .RParen);
         return ty;
     }
 
-    p.index = start;
-    if (p.eat(.RParen)) |rp| {
-        try p.errToken(.expected_expr, rp);
-        return error.ParsingFailed;
-    }
-    const typeofExpr = try p.parseNoEval(assignExpr);
+    const typeofExpr = try p.parseNoEval(parseExpr);
+    try typeofExpr.expect(p);
     try p.expectClosing(lp, .RParen);
     return typeofExpr.ty;
 }
@@ -952,6 +950,7 @@ fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec) Error!?InitDeclarator {
 ///  | recordSpec
 ///  | enumSpec
 ///  | typedef  // IDENTIFIER
+///  | typeof
 /// atomicTypeSpec : keyword_atomic '(' typeName ')'
 /// alignSpec
 ///   : keyword_alignas '(' typeName ')'
@@ -1036,7 +1035,10 @@ fn parseTypeSpec(p: *Parser, ty: *TypeBuilder) Error!bool {
                     ty.alignment = innerType.alignment;
                 } else blk: {
                     const res = try p.constExpr();
-                    if (res.value == .signed and res.value.signed < 0) {
+                    if (res.value == .unavailable) {
+                        try p.errToken(.alignas_unavailable, ty.alignToken.?);
+                        break :blk;
+                    } else if (res.value == .signed and res.value.signed < 0) {
                         try p.errExtra(.negative_alignment, ty.alignToken.?, .{ .signed = res.value.signed });
                         break :blk;
                     }
@@ -1271,9 +1273,6 @@ fn recordDecls(p: *Parser) Error!void {
 
 // specQual : typeSpec | typeQual | alignSpec
 fn specQual(p: *Parser) Error!?Type {
-    if (try p.typeof()) |ty|
-        return ty;
-
     var spec: TypeBuilder = .{};
     if (try p.parseTypeSpec(&spec)) {
         if (spec.alignment != 0)
@@ -1404,8 +1403,13 @@ fn enumerator(p: *Parser) Error!?EnumFieldAndNode {
     };
 
     if (p.eat(.Equal)) |_| {
-        res = try p.constExpr();
+        const specified = try p.constExpr();
+        if (specified.value == .unavailable)
+            try p.errToken(.enum_val_unavailable, nameToken + 2)
+        else
+            res = specified;
     }
+
     if (p.findSymbol(nameToken, .definition)) |scope| switch (scope) {
         .enumeration => |e| {
             try p.errStr(.redefinition, nameToken, name);
@@ -2352,6 +2356,11 @@ fn parseCaseStmt(p: *Parser, caseToken: u32) Error!?NodeIndex {
     });
 
     if (p.findSwitch()) |some| {
+        if (val.value == .unavailable) {
+            try p.errToken(.case_val_unavailable, caseToken + 1);
+            return node;
+        }
+
         const gop = try some.cases.getOrPut(val);
         if (gop.found_existing) {
             switch (val.value) {
@@ -3502,7 +3511,7 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
                     try p.expectClosing(lp, .RParen);
                 } else {
                     p.index = expectedParen;
-                    res = try p.parseNoEval(assignExpr);
+                    res = try p.parseNoEval(parseUnaryExpr);
                 }
             } else {
                 res = try p.parseNoEval(parseUnaryExpr);
@@ -3533,7 +3542,7 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
                     try p.expectClosing(lp, .RParen);
                 } else {
                     p.index = expectedParen;
-                    res = try p.parseNoEval(assignExpr);
+                    res = try p.parseNoEval(parseUnaryExpr);
                     try p.errToken(.alignof_expr, expectedParen);
                 }
             } else {

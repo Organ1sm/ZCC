@@ -861,7 +861,6 @@ fn expandFunc(pp: *Preprocessor, source: *ExpandBuffer, startIdx: *usize, macro:
 
     // Move tokens after the call out of the way.
     const inputLen = args.len + 3; // +3 for identifier, ( and )
-
     if (inputLen == buf.items.len) {
         // TOOD
     } else if (inputLen > buf.items.len) {
@@ -947,7 +946,6 @@ pub fn expandedSlice(pp: *Preprocessor, token: Token) []const u8 {
         while (true) : (lexer.index += 1) {
             if (lexer.buffer[lexer.index] == '>') break;
         }
-
         return lexer.buffer[token.loc.byteOffset .. lexer.index + 1];
     }
 
@@ -1028,12 +1026,12 @@ fn define(pp: *Preprocessor, lexer: *Lexer) Error!void {
     } else if (first.start == macroName.end) {
         if (first.id == .LParen)
             return pp.defineFunc(lexer, macroName, first);
-
         try pp.err(first, .whitespace_after_macro_name);
     } else if (first.id == .HashHash) {
         try pp.err(first, .hash_hash_at_start);
     }
 
+    // check for #define FOO FOO
     {
         const start = lexer.index;
         const second = lexer.next();
@@ -1042,7 +1040,6 @@ fn define(pp: *Preprocessor, lexer: *Lexer) Error!void {
                 return pp.defineMacro(macroName, .self);
             }
         }
-
         lexer.index = start;
     }
 
@@ -1241,7 +1238,6 @@ fn findIncludeSource(pp: *Preprocessor, lexer: *Lexer) !Source {
         else => {
             try pp.err(first, .expected_filename);
             try pp.expectNewLine(lexer);
-
             return error.InvalidInclude;
         },
     }
@@ -1308,61 +1304,4 @@ fn printInBetween(slice: []const u8, w: anytype) !void {
         } else break;
     }
     try w.writeAll(inBetween);
-}
-
-fn expectTokens(buffer: []const u8, expectedTokens: []const TokenType) !void {
-    var comp = Compilation.init(std.testing.allocator);
-    defer comp.deinit();
-
-    const source = Source{
-        .buffer = buffer,
-        .id = @enumFromInt(2),
-        .path = "<test-buffer>",
-    };
-
-    try comp.sources.putNoClobber(source.path, source);
-    defer comp.sources.clearAndFree();
-
-    var pp = Preprocessor.init(&comp);
-    defer pp.deinit();
-
-    try pp.preprocess(source);
-    comp.renderErrors();
-    try std.testing.expect(comp.diag.errors == 0);
-
-    for (expectedTokens, 0..) |expectedTokenId, i| {
-        const actual = pp.tokens.items(.id)[i];
-        if (!std.meta.eql(actual, expectedTokenId)) {
-            std.debug.print("expected {s}, found {s}\n", .{ @tagName(expectedTokenId), @tagName(actual) });
-            return error.TokensDoNotEqual;
-        }
-    }
-}
-
-fn expectStr(buffer: []const u8, expected: []const u8) !void {
-    var comp = Compilation.init(std.testing.allocator);
-    defer comp.deinit();
-
-    const source = Source{
-        .buffer = buffer,
-        .id = @as(Source.ID, @enumFromInt(2)),
-        .path = "<test-buf>",
-    };
-
-    try comp.sources.putNoClobber(source.path, source);
-    defer comp.sources.clearAndFree();
-
-    var pp = Preprocessor.init(&comp);
-    defer pp.deinit();
-
-    try pp.preprocess(source);
-    try pp.tokens.append(comp.gpa, .{ .id = .Eof, .loc = undefined });
-    comp.renderErrors();
-    try std.testing.expect(comp.diag.errors == 0);
-
-    var actual = std.ArrayList(u8).init(std.testing.allocator);
-    defer actual.deinit();
-
-    try pp.prettyPrintTokens(actual.writer());
-    try std.testing.expectEqualStrings(expected, actual.items);
 }
