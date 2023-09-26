@@ -538,7 +538,14 @@ pub fn alignof(ty: Type, comp: *Compilation) u29 {
 
 pub fn eql(a: Type, b: Type, checkQualifiers: bool) bool {
     if (a.alignment != b.alignment) return false;
-    if (a.specifier != b.specifier) return false;
+    if (a.isPointer()) {
+        if (!b.isPointer()) return false;
+    } else if (a.isFunc()) {
+        if (!b.isFunc()) return false;
+    } else if (a.isArray()) {
+        if (!b.isArray()) return false;
+    } else if (a.specifier != b.specifier) return false;
+
     if (a.qual.atomic != b.qual.atomic) return false;
 
     if (checkQualifiers) {
