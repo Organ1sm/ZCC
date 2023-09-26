@@ -197,6 +197,8 @@ pub fn main() !void {
         var tree = try zcc.Parser.parse(&pp);
         defer tree.deinit();
 
+        tree.dump(std.io.null_writer) catch {};
+
         if (expectedTypes) |types| {
             const testFn = for (tree.rootDecls) |decl| {
                 if (tree.nodes.items(.tag)[@intFromEnum(decl)] == .FnDef) break tree.nodes.items(.data)[@intFromEnum(decl)];
