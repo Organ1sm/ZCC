@@ -265,6 +265,9 @@ pub fn adjustTypes(a: *Result, token: TokenIndex, b: *Result, p: *Parser, kind: 
             // Do integer promotions but nothing else
             if (aIsInt) try a.intCast(p, a.ty.integerPromotion(p.pp.compilation));
             if (bIsInt) try b.intCast(p, b.ty.integerPromotion(p.pp.compilation));
+
+            // The result type is the type of the pointer operand
+            if (aIsInt) a.ty = b.ty else b.ty = a.ty;
             return a.shouldEval(b, p);
         },
 
