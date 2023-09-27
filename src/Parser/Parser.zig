@@ -1356,6 +1356,7 @@ fn parseEnumSpec(p: *Parser) Error!*Type.Enum {
     }
 
     enumType.fields = try p.arena.dupe(Type.Enum.Field, p.enumBuffer.items[enumBufferTop..]);
+    enumType.tagType = .{ .specifier = .Int };
 
     if (p.enumBuffer.items.len == enumBufferTop)
         try p.err(.empty_enum);
@@ -2493,6 +2494,11 @@ fn parseCompoundStmt(p: *Parser, isFnBody: bool) Error!?NodeIndex {
             noreturnIdx = p.index;
             noreturnLabelCount = p.labelCount;
         }
+
+        switch (p.nodes.items(.tag)[@intFromEnum(s)]) {
+            .CaseStmt, .DefaultStmt, .LabeledStmt => noreturnIdx = null,
+            else => {},
+        }
     }
 
     if (noreturnIdx) |some| {
@@ -2500,9 +2506,7 @@ fn parseCompoundStmt(p: *Parser, isFnBody: bool) Error!?NodeIndex {
             try p.errToken(.unreachable_code, some);
     }
 
-    if (isFnBody and (p.declBuffer.items.len == declBufferTop or
-        p.nodes.items(.tag)[@intFromEnum(p.declBuffer.items[p.declBuffer.items.len - 1])] != .ReturnStmt))
-    {
+    if (isFnBody and (p.declBuffer.items.len == declBufferTop or !p.nodeIsNoreturn(p.declBuffer.items[p.declBuffer.items.len - 1]))) {
         if (p.returnType.?.specifier != .Void)
             try p.errStr(.func_does_not_return, p.index - 1, p.tokSlice(p.funcName));
 
@@ -2596,6 +2600,19 @@ fn nodeIsNoreturn(p: *Parser, node: NodeIndex) bool {
             const data = p.data.items[p.nodes.items(.data)[@intFromEnum(node)].If3.body..];
             return p.nodeIsNoreturn(data[0]) and p.nodeIsNoreturn(data[1]);
         },
+
+        .CompoundStmtTwo => {
+            const data = p.nodes.items(.data)[@intFromEnum(node)];
+            if (data.BinaryExpr.rhs != .none) return p.nodeIsNoreturn(data.BinaryExpr.rhs);
+            if (data.BinaryExpr.lhs != .none) return p.nodeIsNoreturn(data.BinaryExpr.lhs);
+            return false;
+        },
+
+        .CompoundStmt => {
+            const data = p.nodes.items(.data)[@intFromEnum(node)];
+            return p.nodeIsNoreturn(p.data.items[data.range.end - 1]);
+        },
+
         else => return false,
     }
 }
@@ -3247,9 +3264,19 @@ fn parseCastExpr(p: *Parser) Error!Result {
                     try p.errStr(.invalid_cast_to_float, lp, try p.typeStr(operand.ty));
                 if (operand.ty.isFloat() and ty.isPointer())
                     try p.errStr(.invalid_cast_to_pointer, lp, try p.typeStr(operand.ty));
+
+                const isUnsigned = ty.isUnsignedInt(p.pp.compilation);
+                if (isUnsigned and operand.value == .signed) {
+                    const copy = operand.value.signed;
+                    operand.value = .{ .unsigned = @as(u64, @bitCast(copy)) };
+                } else if (!isUnsigned and operand.value == .unsigned) {
+                    const copy = operand.value.unsigned;
+                    operand.value = .{ .signed = @as(i64, @bitCast(copy)) };
+                }
             } else {
                 try p.errStr(.invalid_cast_type, lp, try p.typeStr(operand.ty));
             }
+
             if (ty.qual.any())
                 try p.errStr(.qual_cast, lp, try p.typeStr(ty));
 
