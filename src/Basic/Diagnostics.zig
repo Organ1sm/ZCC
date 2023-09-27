@@ -61,6 +61,7 @@ const Options = struct {
     @"incompatible-pointer-types": Kind = .warning,
     @"excess-initializers": Kind = .warning,
     @"division-by-zero": Kind = .warning,
+    @"initializer-overrides": Kind = .warning,
 };
 
 pub const Tag = enum {
@@ -257,6 +258,13 @@ pub const Tag = enum {
     alignas_unavailable,
     case_val_unavailable,
     enum_val_unavailable,
+    incompatible_array_init,
+    initializer_overrides,
+    previous_initializer,
+    invalid_array_designator,
+    negative_array_designator,
+    oob_array_designator,
+    invalid_member_designator,
 };
 
 list: std.ArrayList(Message),
@@ -648,6 +656,13 @@ pub fn renderExtra(comp: *Compilation, m: anytype) void {
             .alignas_unavailable => m.write("'_Alignas' attribute requires integer constant expression"),
             .case_val_unavailable => m.write("case value must be an integer constant expression"),
             .enum_val_unavailable => m.write("enum value must be an integer constant expression"),
+            .incompatible_array_init => m.print("cannot initialize array of type {s}", .{msg.extra.str}),
+            .initializer_overrides => m.write("initializer overrides previous initialization"),
+            .previous_initializer => m.write("previous initialization"),
+            .invalid_array_designator => m.print("array designator used for non-array type '{s}'", .{msg.extra.str}),
+            .negative_array_designator => m.print("array designator value {d} is negative", .{msg.extra.signed}),
+            .oob_array_designator => m.print("array designator index {d} exceeds array bounds", .{msg.extra.unsigned}),
+            .invalid_member_designator => m.print("member designator used for non-record type '{s}'", .{msg.extra.str}),
         }
 
         m.end(lcs);
@@ -837,6 +852,11 @@ fn tagKind(diag: *Diagnostics, tag: Tag) Kind {
         .alignas_unavailable,
         .case_val_unavailable,
         .enum_val_unavailable,
+        .incompatible_array_init,
+        .invalid_array_designator,
+        .negative_array_designator,
+        .oob_array_designator,
+        .invalid_member_designator,
         => .@"error",
 
         .to_match_paren,
@@ -848,6 +868,7 @@ fn tagKind(diag: *Diagnostics, tag: Tag) Kind {
         .previous_case,
         .previous_definition,
         .parameter_here,
+        .previous_initializer,
         => .note,
 
         .invalid_old_style_params,
@@ -893,6 +914,7 @@ fn tagKind(diag: *Diagnostics, tag: Tag) Kind {
         => diag.options.@"excess-initializers",
 
         .division_by_zero => diag.options.@"division-by-zero",
+        .initializer_overrides => diag.options.@"initializer-overrides",
     };
 
     if (kind == .@"error" and diag.fatalErrors)

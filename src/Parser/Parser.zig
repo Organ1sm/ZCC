@@ -12,6 +12,7 @@ const Diagnostics = @import("../Basic/Diagnostics.zig");
 const DeclSpec = @import("../AST/DeclSpec.zig");
 const Scope = @import("../Sema/Scope.zig").Scope;
 const Result = @import("Result.zig");
+const InitList = @import("InitList.zig");
 const Token = AST.Token;
 const TokenIndex = AST.TokenIndex;
 const NodeIndex = AST.NodeIndex;
@@ -893,9 +894,12 @@ fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec) Error!?InitDeclarator {
         }
 
         var initListExpr = try p.initializer(initD.d.type);
-        try initListExpr.expect(p);
         initD.initializer = initListExpr.node;
-        initD.d.type = initListExpr.ty;
+        if (initD.d.type.specifier == .IncompleteArray) {
+            // Modifying .data is exceptionally allowed for .IncompleteArray.
+            initD.d.type.data.array.len = initListExpr.ty.data.array.len;
+            initD.d.type.specifier = .Array;
+        }
     }
 
     const name = initD.d.name;
@@ -1870,26 +1874,50 @@ fn typeName(p: *Parser) Error!?Type {
 /// initializer
 ///  : assignExpr
 ///  | '{' initializerItems '}'
+pub fn initializer(p: *Parser, initType: Type) Error!Result {
+    // fast path for non-braced initializers
+    if (p.getCurrToken() != .LBrace) {
+        const token = p.index;
+        var res = try p.assignExpr();
+        try res.expect(p);
+        if (try p.coerceArrayInit(&res, token, initType))
+            return res;
+
+        try p.coerceInit(&res, token, initType);
+        return res;
+    }
+
+    var il: InitList = .{};
+    errdefer il.deinit(p.pp.compilation.gpa);
+
+    var index: usize = 0;
+    _ = try p.initializerItem(&il, &index, initType);
+
+    // TODO collapse InitList to nodes
+    return error.ParsingFailed;
+}
+
 /// initializerItems : designation? initializer (',' designation? initializer)* ','?
 /// designation : designator+ '='
 /// designator
 ///  : '[' constExpr ']'
 ///  | '.' identifier
-pub fn initializer(p: *Parser, initType: Type) Error!Result {
+pub fn initializerItem(p: *Parser, il: *InitList, index: *usize, initType: Type) Error!bool {
     const lb = p.eat(.LBrace) orelse {
         const token = p.index;
         var res = try p.assignExpr();
         if (res.empty(p))
-            return res;
+            return false;
 
-        try p.coerceInit(&res, token, initType);
-        return res;
-    };
+        const arr = try p.coerceArrayInit(&res, token, initType);
+        if (!arr)
+            try p.coerceInit(&res, token, initType);
 
-    var node: AST.Node = .{
-        .tag = .InitListExprTwo,
-        .type = initType,
-        .data = .{ .BinaryExpr = .{ .lhs = .none, .rhs = .none } },
+        if (try il.put(p.pp.compilation.gpa, index.*, res.node, token)) |some| {
+            try p.errToken(.initializer_overrides, token);
+            try p.errToken(.previous_initializer, some);
+        }
+        return true;
     };
 
     const isScalar = initType.isInt() or initType.isFloat() or initType.isPointer();
@@ -1897,81 +1925,135 @@ pub fn initializer(p: *Parser, initType: Type) Error!Result {
         if (isScalar)
             try p.errToken(.empty_scalar_init, lb);
 
-        return Result{ .node = try p.addNode(node), .ty = initType };
+        if (try il.put(p.pp.compilation.gpa, index.*, .none, lb)) |some| {
+            try p.errToken(.initializer_overrides, lb);
+            try p.errToken(.previous_initializer, some);
+        }
+        return true;
     }
 
-    const listBufferTop = p.listBuffer.items.len;
-    defer p.listBuffer.items.len = listBufferTop;
-
-    var elemType = initType;
-    if (elemType.isArray())
-        elemType = elemType.getElemType();
-
-    var first: Result = undefined;
+    var count: u64 = 0;
     var isStrInit = false;
-    while (true) {
+    while (true) : (count += 1) {
         const firstToken = p.index;
-        var curType = elemType;
-        var designator = false;
+        var curType = initType;
+        var curLi = il;
         while (true) {
             if (p.eat(.LBracket)) |lbr| {
-                const res = try p.constExpr();
-                _ = res;
+                if (!curType.isArray()) {
+                    try p.errStr(.invalid_array_designator, lbr, try p.typeStr(curType));
+                    return error.ParsingFailed;
+                }
+
+                const indexRes = try p.constExpr();
                 try p.expectClosing(lbr, .RBracket);
-                designator = true;
-            } else if (p.eat(.Period)) |_| {
+                const indexUnchecked = switch (indexRes.value) {
+                    .unsigned => |val| val,
+                    .signed => |val| if (val < 0) {
+                        try p.errExtra(.negative_array_designator, lbr + 1, .{ .signed = val });
+                        return error.ParsingFailed;
+                    } else @as(u64, @intCast(val)),
+
+                    .unavailable => unreachable,
+                };
+
+                const maxLen = if (curType.specifier == .Array) curType.data.array.len else std.math.maxInt(usize);
+                if (indexUnchecked >= maxLen) {
+                    try p.errExtra(.oob_array_designator, lbr + 1, .{ .unsigned = indexUnchecked });
+                    return error.ParsingFailed;
+                }
+
+                const checked = @as(usize, @intCast(indexUnchecked));
+                if (curLi == il)
+                    index.* = checked;
+
+                const item = try curLi.find(p.pp.compilation.gpa, checked);
+                curLi = &item.list;
+                curType = curType.getElemType();
+            } else if (p.eat(.Period)) |period| {
                 const identifier = try p.expectToken(.Identifier);
                 _ = identifier;
-                designator = true;
+                if (!curType.isRecord()) {
+                    try p.errStr(.invalid_member_designator, period, try p.typeStr(curType));
+                    return error.ParsingFailed;
+                }
+                return p.todo("member designators");
             } else break;
         }
 
-        const count = p.listBuffer.items.len - listBufferTop;
-        var initRes: Result = undefined;
-        if (designator) {
+        var elemType = initType;
+        if (elemType.isArray())
+            elemType = elemType.getElemType();
+
+        if (curLi != il) {
             _ = try p.expectToken(.Equal);
-            initRes = try p.initializer(curType);
-            try initRes.expect(p);
-        } else if (p.isStringInit()) {
-            if (count == 0) isStrInit = true;
-            initRes = try p.initializer(initType);
-        } else {
-            initRes = try p.initializer(curType);
-            if (initRes.node == .none) break;
+        } else if (isStrInit and p.isStringInit()) {
+            elemType = initType;
+        } else if (count == 0 and p.isStringInit()) {
+            isStrInit = true;
+            elemType = initType;
         }
 
-        if (count == 0) {
-            first = initRes;
-        } else if (count == 1) {
+        const saw = try p.initializerItem(curLi, index, elemType);
+        if (!saw) {
+            if (curLi != il) {
+                try p.err(.expected_expr);
+                return error.ParsingFailed;
+            }
+            break;
+        }
+
+        index.* += 1;
+
+        if (count == 1) {
             if (isScalar)
                 try p.errToken(.excess_scalar_init, firstToken);
             if (isStrInit)
                 try p.errToken(.excess_str_init, firstToken);
         }
-
-        try p.listBuffer.append(initRes.node);
+        if (p.eat(.Comma) == null) break;
     }
     try p.expectClosing(lb, .RBrace);
 
-    const initializers = p.listBuffer.items[listBufferTop..];
-    if (isScalar or isStrInit) return first;
+    if (try il.put(p.pp.compilation.gpa, index.*, .none, lb)) |some| {
+        try p.errToken(.initializer_overrides, lb);
+        try p.errToken(.previous_initializer, some);
+    }
+    return true;
+}
 
-    if (initType.specifier == .IncompleteArray) {
-        node.type.data.array.len = initializers.len;
-        node.type.specifier = .Array;
+fn coerceArrayInit(p: *Parser, item: *Result, token: TokenIndex, target: Type) !bool {
+    if (!target.isArray())
+        return false;
+
+    if (!item.ty.isArray()) {
+        const eMsg = " from incompatible type ";
+        try p.errStr(.incompatible_init, token, try p.typePairStrExtra(target, eMsg, item.ty));
+        return true; // do not do further coercion
     }
 
-    switch (initializers.len) {
-        0 => unreachable,
-        1 => node.data = .{ .BinaryExpr = .{ .lhs = initializers[0], .rhs = .none } },
-        2 => node.data = .{ .BinaryExpr = .{ .lhs = initializers[0], .rhs = initializers[1] } },
-        else => {
-            node.tag = .InitListExpr;
-            node.data = .{ .range = try p.addList(initializers) };
-        },
+    if (!target.getElemType().eql(item.ty.getElemType(), false)) {
+        const eMsg = " with array of type ";
+        try p.errStr(.incompatible_array_init, token, try p.typePairStrExtra(target, eMsg, item.ty));
+        return true; // do not do further coercion
     }
 
-    return Result{ .node = try p.addNode(node), .ty = node.type };
+    if (target.specifier == .Array) {
+        std.debug.assert(item.ty.specifier == .Array);
+        var len = item.ty.data.array.len;
+        if (p.nodeIs(item.node, .StringLiteralExpr)) {
+            // the null byte of a string can be dropped
+            if (len - 1 > target.data.array.len)
+                try p.errToken(.str_init_too_long, token);
+        } else if (len > target.data.array.len) {
+            try p.errStr(
+                .arr_init_too_long,
+                token,
+                try p.typePairStrExtra(target, " with array of type ", item.ty),
+            );
+        }
+    }
+    return true;
 }
 
 fn coerceInit(p: *Parser, item: *Result, token: TokenIndex, target: Type) !void {
@@ -2039,7 +2121,7 @@ fn coerceInit(p: *Parser, item: *Result, token: TokenIndex, target: Type) !void 
     } else if (unqualType.isRecord()) {
         if (!unqualType.eql(item.ty, false))
             try p.errStr(.incompatible_init, token, try p.typePairStrExtra(target, eMsg, item.ty));
-    } else if (unqualType.isFunc()) {
+    } else if (unqualType.isArray() or unqualType.isFunc()) {
         // we have already issued an error for this
     } else {
         try p.errStr(.incompatible_init, token, try p.typePairStrExtra(target, eMsg, item.ty));
