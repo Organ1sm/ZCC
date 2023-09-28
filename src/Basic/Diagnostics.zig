@@ -264,7 +264,8 @@ pub const Tag = enum {
     invalid_array_designator,
     negative_array_designator,
     oob_array_designator,
-    invalid_member_designator,
+    invalid_field_designator,
+    no_such_field_designator,
 };
 
 list: std.ArrayList(Message),
@@ -662,7 +663,8 @@ pub fn renderExtra(comp: *Compilation, m: anytype) void {
             .invalid_array_designator => m.print("array designator used for non-array type '{s}'", .{msg.extra.str}),
             .negative_array_designator => m.print("array designator value {d} is negative", .{msg.extra.signed}),
             .oob_array_designator => m.print("array designator index {d} exceeds array bounds", .{msg.extra.unsigned}),
-            .invalid_member_designator => m.print("member designator used for non-record type '{s}'", .{msg.extra.str}),
+            .invalid_field_designator => m.print("field designator used for non-record type '{s}'", .{msg.extra.str}),
+            .no_such_field_designator => m.print("record type has no field named '{s}'", .{msg.extra.str}),
         }
 
         m.end(lcs);
@@ -856,7 +858,8 @@ fn tagKind(diag: *Diagnostics, tag: Tag) Kind {
         .invalid_array_designator,
         .negative_array_designator,
         .oob_array_designator,
-        .invalid_member_designator,
+        .invalid_field_designator,
+        .no_such_field_designator,
         => .@"error",
 
         .to_match_paren,
