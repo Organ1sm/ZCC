@@ -606,7 +606,7 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
             try w.print("value: " ++ LITERAL ++ "{d}\n" ++ RESET, .{data.Double});
         },
 
-        .MemberAccessExpr, .MemberAccessPtrExpr, .MemberDesignatorExpr => {
+        .MemberAccessExpr, .MemberAccessPtrExpr => {
             if (data.Member.lhs != .none) {
                 try w.writeByteNTimes(' ', level + 1);
                 try w.writeAll("lhs:\n");
@@ -616,7 +616,7 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
             try w.print("name: " ++ NAME ++ "{s}\n" ++ RESET, .{tree.tokSlice(data.Member.name)});
         },
 
-        .ArrayAccessExpr, .ArrayDesignatorExpr => {
+        .ArrayAccessExpr => {
             if (data.BinaryExpr.lhs != .none) {
                 try w.writeByteNTimes(' ', level + 1);
                 try w.writeAll("lhs:\n");
@@ -624,17 +624,6 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
             }
             try w.writeByteNTimes(' ', level + 1);
             try w.writeAll("index:\n");
-            try tree.dumpNode(data.BinaryExpr.rhs, level + delta, w);
-        },
-
-        .InitializerItemExpr => {
-            if (data.BinaryExpr.lhs != .none) {
-                try w.writeByteNTimes(' ', level + 1);
-                try w.writeAll("designator:\n");
-                try tree.dumpNode(data.BinaryExpr.lhs, level + delta, w);
-            }
-            try w.writeByteNTimes(' ', level + 1);
-            try w.writeAll("initializer:\n");
             try tree.dumpNode(data.BinaryExpr.rhs, level + delta, w);
         },
 
@@ -697,5 +686,12 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
         => {
             try tree.dumpNode(data.UnaryExpr, level + delta, w);
         },
+
+        .ArrayFillerExpr => {
+            try w.writeByteNTimes(' ', level + 1);
+            try w.print("count: " ++ LITERAL ++ "{d}\n" ++ RESET, .{data.Int});
+        },
+
+        .StructFillerExpr => {},
     }
 }

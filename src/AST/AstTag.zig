@@ -245,12 +245,6 @@ pub const Tag = enum(u8) {
     InitListExpr,
     /// (ty){ un }
     CompoundLiteralExpr,
-    /// lhs = rhs
-    InitializerItemExpr,
-    /// lhs?[rhs]
-    ArrayDesignatorExpr,
-    /// lhs?.name
-    MemberDesignatorExpr,
 
     // implicit casts
     /// convert T[] to T*
@@ -294,6 +288,12 @@ pub const Tag = enum(u8) {
     /// ty is the functions return type
     ImplicitReturn,
 
+    /// Inserted in init_list_expr to represent unspecified elements.
+    /// data.int contains the amount of elements.
+    ArrayFillerExpr,
+    /// Inserted in init_list_expr to represent unspecified fields.
+    StructFillerExpr,
+
     /// Convert a literal 0 to a null pointer
     NullToPointer,
 
@@ -318,6 +318,8 @@ pub const Tag = enum(u8) {
             .ImplicitReturn,
             .QualCast,
             .NullToPointer,
+            .ArrayFillerExpr,
+            .StructFillerExpr,
             => true,
 
             else => false,
