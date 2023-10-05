@@ -1892,10 +1892,8 @@ pub fn initializer(p: *Parser, initType: Type) Error!Result {
 
     _ = try p.initializerItem(&il, initType);
 
-    return Result{
-        .ty = initType,
-        .node = try p.convertInitList(il, initType),
-    };
+    const res = try p.convertInitList(il, initType);
+    return Result{ .ty = p.nodes.items(.type)[@intFromEnum(res)], .node = res };
 }
 
 /// initializerItems : designation? initializer (',' designation? initializer)* ','?
@@ -2193,10 +2191,64 @@ fn convertInitList(p: *Parser, il: InitList, initType: Type) Error!NodeIndex {
     } else if (initType.specifier == .VariableLenArray) {
         return error.ParsingFailed; // vla invalid, reported earlier
     } else if (initType.isArray()) {
-        if (il.node != .none and p.nodeIs(il.node, .StringLiteralExpr))
+        if (il.node != .none)
             return il.node;
 
-        return error.ParsingFailed; // TODO
+        const listBuffTop = p.listBuffer.items.len;
+        defer p.listBuffer.items.len = listBuffTop;
+
+        const elemType = initType.getElemType();
+
+        const maxItems = if (initType.specifier == .Array) initType.data.array.len else std.math.maxInt(usize);
+        var start: u64 = 0;
+        for (il.list.items) |*init| {
+            if (init.index >= maxItems) {
+                try p.errToken(.excess_array_init, init.list.tok);
+                break;
+            }
+            if (init.index > start) {
+                const elem = try p.addNode(.{
+                    .tag = .ArrayFillerExpr,
+                    .type = elemType,
+                    .data = .{ .Int = init.index - start },
+                });
+                try p.listBuffer.append(elem);
+            }
+            start = init.index + 1;
+
+            const elem = try p.convertInitList(init.list, elemType);
+            try p.listBuffer.append(elem);
+        }
+
+        var initListNode: AST.Node = .{
+            .tag = .InitListExprTwo,
+            .type = initType,
+            .data = .{ .BinaryExpr = .{ .lhs = .none, .rhs = .none } },
+        };
+
+        if (initType.specifier == .IncompleteArray) {
+            initListNode.type.specifier = .Array;
+            initListNode.type.data.array.len = start;
+        } else if (start < maxItems) {
+            const elem = try p.addNode(.{
+                .tag = .ArrayFillerExpr,
+                .type = elemType,
+                .data = .{ .Int = maxItems - start },
+            });
+            try p.listBuffer.append(elem);
+        }
+
+        const items = p.listBuffer.items[listBuffTop..];
+        switch (items.len) {
+            0 => {},
+            1 => initListNode.data.BinaryExpr.lhs = items[0],
+            2 => initListNode.data.BinaryExpr = .{ .lhs = items[0], .rhs = items[1] },
+            else => {
+                initListNode.tag = .InitListExpr;
+                initListNode.data = .{ .range = try p.addList(items) };
+            },
+        }
+        return try p.addNode(initListNode);
     } else if (initType.isRecord()) {
         const listBuffTop = p.listBuffer.items.len;
         defer p.listBuffer.items.len = listBuffTop;
