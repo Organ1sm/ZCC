@@ -66,6 +66,8 @@ pub const Node = struct {
 
         Member: struct { lhs: NodeIndex, name: TokenIndex },
 
+        UnionInit: struct { fieldIndex: u32, node: NodeIndex },
+
         Int: u64,
         Float: f32,
         Double: f64,
@@ -263,7 +265,8 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
         },
 
         .CompoundStmt,
-        .InitListExpr,
+        .ArrayInitExpr,
+        .StructInitExpr,
         .EnumDecl,
         .StructDecl,
         .UnionDecl,
@@ -278,13 +281,22 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
         .IndirectRecordFieldDecl => {},
 
         .CompoundStmtTwo,
-        .InitListExprTwo,
+        .ArrayInitExprTwo,
+        .StructInitExprTwo,
         .EnumDeclTwo,
         .StructDeclTwo,
         .UnionDeclTwo,
         => {
             if (data.BinaryExpr.lhs != .none) try tree.dumpNode(data.BinaryExpr.lhs, level + delta, w);
             if (data.BinaryExpr.rhs != .none) try tree.dumpNode(data.BinaryExpr.rhs, level + delta, w);
+        },
+
+        .UnionInitExpr => {
+            try w.writeByteNTimes(' ', level + half);
+            try w.print("field index: " ++ LITERAL ++ "{d}\n" ++ RESET, .{data.UnionInit.fieldIndex});
+            if (data.UnionInit.node != .none) {
+                try tree.dumpNode(data.UnionInit.node, level + delta, w);
+            }
         },
 
         .CompoundLiteralExpr => {
@@ -692,6 +704,6 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
             try w.print("count: " ++ LITERAL ++ "{d}\n" ++ RESET, .{data.Int});
         },
 
-        .StructFillerExpr => {},
+        .DefaultInitExpr => {},
     }
 }
