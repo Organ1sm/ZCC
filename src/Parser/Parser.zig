@@ -1181,6 +1181,8 @@ fn parseRecordSpec(p: *Parser) Error!*Type.Record {
 
     try p.recordDecls();
     recordType.fields = try p.arena.dupe(Type.Record.Field, p.recordBuffer.items[recordBufferTop..]);
+    recordType.size = 1;
+    recordType.alignment = 1;
 
     if (p.recordBuffer.items.len == recordBufferTop)
         try p.errStr(.empty_record, kindToken, p.tokSlice(kindToken));
@@ -1936,11 +1938,13 @@ pub fn initializerItem(p: *Parser, il: *InitList, initType: Type) Error!bool {
     }
 
     var count: u64 = 0;
+    var warnedExcess = false;
     var isStrInit = false;
     while (true) : (count += 1) {
         const firstToken = p.index;
         var curType = initType;
         var curIL = il;
+        var designation = false;
         while (true) {
             if (p.eat(.LBracket)) |lbr| {
                 if (!curType.isArray()) {
@@ -1969,7 +1973,7 @@ pub fn initializerItem(p: *Parser, il: *InitList, initType: Type) Error!bool {
                 const checked = @as(usize, @intCast(indexUnchecked));
                 curIL = try curIL.find(p.pp.compilation.gpa, checked);
                 curType = curType.getElemType();
-                count = checked;
+                designation = true;
             } else if (p.eat(.Period)) |period| {
                 const identifier = try p.expectToken(.Identifier);
                 if (!curType.isRecord()) {
@@ -1983,54 +1987,52 @@ pub fn initializerItem(p: *Parser, il: *InitList, initType: Type) Error!bool {
                 };
                 curIL = try curIL.find(p.pp.compilation.gpa, field.i);
                 curType = field.f.ty;
-                count = field.i;
+                designation = true;
             } else break;
         }
 
-        if (curIL != il) {
+        if (designation)
             _ = try p.expectToken(.Equal);
-            const saw = try p.initializerItem(curIL, curType);
-            if (!saw) {
-                try p.err(.expected_expr);
-                return error.ParsingFailed;
-            }
-        } else if (isStrInit and p.isStringInit()) {
+
+        var saw = false;
+
+        if (isStrInit and p.isStringInit(initType)) {
             var tempIL = InitList{};
             defer tempIL.deinit(p.pp.compilation.gpa);
-
-            const saw = try p.initializerItem(&tempIL, initType);
-            if (!saw) break;
-            if (count == 1)
-                try p.errToken(.excess_str_init, firstToken);
-        } else if (count == 0 and p.isStringInit()) {
-            isStrInit = true;
-            const saw = try p.initializerItem(curIL, curType);
-            if (!saw) break;
+            saw = try p.initializerItem(&tempIL, .{ .specifier = .Void });
+        } else if (count == 0 and p.isStringInit(initType)) {
+            saw = try p.initializerItem(il, initType);
         } else if (isScalar and count != 0) {
             // discard further scalars
             var tempIL = InitList{};
             defer tempIL.deinit(p.pp.compilation.gpa);
-            const saw = try p.initializerItem(&tempIL, initType);
-            if (!saw) break;
-            if (count == 1) try p.errToken(.excess_scalar_init, firstToken);
-        } else if (isScalar and count == 0) {
-            const saw = try p.initializerItem(curIL, initType);
-            if (!saw) break;
-        } else if (curType.isArray()) {
-            curIL = try curIL.find(p.pp.compilation.gpa, count);
-            const saw = try p.initializerItem(curIL, curType.getElemType());
-            if (!saw) break;
-        } else if (curType.isRecord()) {
-            // TODO deal with anonymous structs
-            curIL = try curIL.find(p.pp.compilation.gpa, count);
-            const fType = if (count < curType.data.record.fields.len)
-                curType.data.record.fields[count].ty
-            else
-                Type{ .specifier = .Void };
-            const saw = try p.initializerItem(curIL, fType);
-            if (!saw) break;
+            saw = try p.initializerItem(&tempIL, .{ .specifier = .Void });
+        } else if (p.getCurrToken() == .LBrace) {
+            saw = try p.initializerItem(curIL, curType);
+        } else if (try p.findScalarInitializer(&curIL, &curType)) {
+            saw = try p.initializerItem(curIL, curType);
+        } else if (designation) {
+            // designation overrides previous value, let existing mechanism handle it
+            saw = try p.initializerItem(curIL, curType);
         } else {
-            return error.ParsingFailed;
+            // discard further values
+            var tempIL = InitList{};
+            defer tempIL.deinit(p.pp.compilation.gpa);
+            saw = try p.initializerItem(&tempIL, .{ .specifier = .Void });
+            if (!warnedExcess)
+                try p.errToken(if (initType.isArray()) .excess_array_init else .excess_struct_init, firstToken);
+            warnedExcess = true;
+        }
+
+        if (!saw) {
+            if (designation) {
+                try p.err(.expected_expr);
+                return error.ParsingFailed;
+            }
+            break;
+        } else if (count == 1) {
+            if (isStrInit) try p.errToken(.excess_str_init, firstToken);
+            if (isScalar) try p.errToken(.excess_scalar_init, firstToken);
         }
 
         if (p.eat(.Comma) == null) break;
@@ -2047,6 +2049,69 @@ pub fn initializerItem(p: *Parser, il: *InitList, initType: Type) Error!bool {
     il.node = .none;
     il.tok = lb;
     return true;
+}
+
+/// Returns true if the value is unused.
+fn findScalarInitializer(p: *Parser, il: **InitList, ty: *Type) Error!bool {
+    if (ty.isArray()) {
+        var index = il.*.list.items.len;
+        if (index != 0) index = il.*.list.items[index - 1].index;
+
+        const arrayType = ty.*;
+        const maxElems = if (arrayType.specifier == .Array) arrayType.data.array.len else std.math.maxInt(usize);
+        if (maxElems == 0) {
+            if (p.getCurrToken() != .LBrace) {
+                try p.err(.empty_aggregate_init_braces);
+                return error.ParsingFailed;
+            }
+            return false;
+        }
+        const elemType = arrayType.getElemType();
+        const arrayIL = il.*;
+        while (index < maxElems) : (index += 1) {
+            ty.* = elemType;
+            il.* = try arrayIL.find(p.pp.compilation.gpa, index);
+            if (try p.findScalarInitializer(il, ty))
+                return true;
+        }
+        return false;
+    } else if (ty.specifier == .Struct) {
+        var index = il.*.list.items.len;
+        if (index != 0) index = il.*.list.items[index - 1].index + 1;
+
+        const structType = ty.*;
+        const max_elems = structType.data.record.fields.len;
+        if (max_elems == 0) {
+            if (p.getCurrToken() == .LBrace) {
+                try p.err(.empty_aggregate_init_braces);
+                return error.ParsingFailed;
+            }
+            return false;
+        }
+        const structIL = il.*;
+        while (index < max_elems) : (index += 1) {
+            const field = structType.data.record.fields[index];
+            ty.* = field.ty;
+            il.* = try structIL.find(p.pp.compilation.gpa, index);
+            if (try p.findScalarInitializer(il, ty))
+                return true;
+        }
+        return false;
+    } else if (ty.specifier == .Union) {
+        if (ty.data.record.fields.len == 0) {
+            if (p.getCurrToken() == .LBrace) {
+                try p.err(.empty_aggregate_init_braces);
+                return error.ParsingFailed;
+            }
+            return false;
+        }
+        ty.* = ty.data.record.fields[0].ty;
+        il.* = try il.*.find(p.pp.compilation.gpa, 0);
+        if (try p.findScalarInitializer(il, ty))
+            return true;
+        return false;
+    }
+    return il.*.node == .none;
 }
 
 fn coerceArrayInit(p: *Parser, item: *Result, token: TokenIndex, target: Type) !bool {
@@ -2159,7 +2224,10 @@ fn coerceInit(p: *Parser, item: *Result, token: TokenIndex, target: Type) !void 
     }
 }
 
-fn isStringInit(p: *Parser) bool {
+fn isStringInit(p: *Parser, ty: Type) bool {
+    if (!ty.isArray() or !ty.getElemType().isInt())
+        return false;
+
     var i = p.index;
     while (true) : (i += 1) {
         switch (p.tokenIds[i]) {
@@ -2182,9 +2250,9 @@ fn convertInitList(p: *Parser, il: InitList, initType: Type) Error!NodeIndex {
     if (initType.isInt() or initType.isFloat() or initType.isPointer()) {
         if (il.node == .none) {
             return p.addNode(.{
-                .tag = .ArrayFillerExpr,
+                .tag = .DefaultInitExpr,
                 .type = initType,
-                .data = .{ .Int = 1 },
+                .data = undefined,
             });
         }
         return il.node;
@@ -2202,10 +2270,6 @@ fn convertInitList(p: *Parser, il: InitList, initType: Type) Error!NodeIndex {
         const maxItems = if (initType.specifier == .Array) initType.data.array.len else std.math.maxInt(usize);
         var start: u64 = 0;
         for (il.list.items) |*init| {
-            if (init.index >= maxItems) {
-                try p.errToken(.excess_array_init, init.list.tok);
-                break;
-            }
             if (init.index > start) {
                 const elem = try p.addNode(.{
                     .tag = .ArrayFillerExpr,
@@ -2220,15 +2284,15 @@ fn convertInitList(p: *Parser, il: InitList, initType: Type) Error!NodeIndex {
             try p.listBuffer.append(elem);
         }
 
-        var initListNode: AST.Node = .{
-            .tag = .InitListExprTwo,
+        var arrInitNode: AST.Node = .{
+            .tag = .ArrayInitExprTwo,
             .type = initType,
             .data = .{ .BinaryExpr = .{ .lhs = .none, .rhs = .none } },
         };
 
         if (initType.specifier == .IncompleteArray) {
-            initListNode.type.specifier = .Array;
-            initListNode.type.data.array.len = start;
+            arrInitNode.type.specifier = .Array;
+            arrInitNode.type.data.array.len = start;
         } else if (start < maxItems) {
             const elem = try p.addNode(.{
                 .tag = .ArrayFillerExpr,
@@ -2241,15 +2305,15 @@ fn convertInitList(p: *Parser, il: InitList, initType: Type) Error!NodeIndex {
         const items = p.listBuffer.items[listBuffTop..];
         switch (items.len) {
             0 => {},
-            1 => initListNode.data.BinaryExpr.lhs = items[0],
-            2 => initListNode.data.BinaryExpr = .{ .lhs = items[0], .rhs = items[1] },
+            1 => arrInitNode.data.BinaryExpr.lhs = items[0],
+            2 => arrInitNode.data.BinaryExpr = .{ .lhs = items[0], .rhs = items[1] },
             else => {
-                initListNode.tag = .InitListExpr;
-                initListNode.data = .{ .range = try p.addList(items) };
+                arrInitNode.tag = .ArrayInitExpr;
+                arrInitNode.data = .{ .range = try p.addList(items) };
             },
         }
-        return try p.addNode(initListNode);
-    } else if (initType.isRecord()) {
+        return try p.addNode(arrInitNode);
+    } else if (initType.specifier == .Struct) {
         const listBuffTop = p.listBuffer.items.len;
         defer p.listBuffer.items.len = listBuffTop;
 
@@ -2260,29 +2324,50 @@ fn convertInitList(p: *Parser, il: InitList, initType: Type) Error!NodeIndex {
                 try p.listBuffer.append(item);
                 initIndex += 1;
             } else {
-                const item = try p.addNode(.{ .tag = .StructFillerExpr, .type = f.ty, .data = undefined });
+                const item = try p.addNode(.{ .tag = .DefaultInitExpr, .type = f.ty, .data = undefined });
                 try p.listBuffer.append(item);
             }
         }
-        if (il.list.items.len > initIndex and il.list.items[initIndex].index >= initType.data.record.fields.len)
-            try p.errToken(.excess_struct_init, il.list.items[initIndex].list.tok);
 
-        var initListNode: AST.Node = .{
-            .tag = .InitListExprTwo,
+        var structInitNode: AST.Node = .{
+            .tag = .StructInitExprTwo,
             .type = initType,
             .data = .{ .BinaryExpr = .{ .lhs = .none, .rhs = .none } },
         };
         const items = p.listBuffer.items[listBuffTop..];
         switch (items.len) {
             0 => {},
-            1 => initListNode.data.BinaryExpr.lhs = items[0],
-            2 => initListNode.data.BinaryExpr = .{ .lhs = items[0], .rhs = items[1] },
+            1 => structInitNode.data.BinaryExpr.lhs = items[0],
+            2 => structInitNode.data.BinaryExpr = .{ .lhs = items[0], .rhs = items[1] },
             else => {
-                initListNode.tag = .InitListExpr;
-                initListNode.data = .{ .range = try p.addList(items) };
+                structInitNode.tag = .StructInitExpr;
+                structInitNode.data = .{ .range = try p.addList(items) };
             },
         }
-        return try p.addNode(initListNode);
+        return try p.addNode(structInitNode);
+    } else if (initType.specifier == .Union) {
+        var unionInitNode: AST.Node = .{
+            .tag = .UnionInitExpr,
+            .type = initType,
+            .data = .{ .UnionInit = .{ .fieldIndex = 0, .node = .none } },
+        };
+        if (initType.data.record.fields.len == 0) {
+            // do nothing for empty unions
+        } else if (il.list.items.len == 0) {
+            unionInitNode.data.UnionInit.node = try p.addNode(.{
+                .tag = .DefaultInitExpr,
+                .type = initType,
+                .data = undefined,
+            });
+        } else {
+            const init = il.list.items[0];
+            const fieldType = initType.data.record.fields[init.index].ty;
+            unionInitNode.data.UnionInit = .{
+                .fieldIndex = @as(u32, @truncate(init.index)),
+                .node = try p.convertInitList(init.list, fieldType),
+            };
+        }
+        return try p.addNode(unionInitNode);
     } else if (initType.isFunc()) {
         return error.ParsingFailed; // invalid func initializer, reported earlier
     } else {
