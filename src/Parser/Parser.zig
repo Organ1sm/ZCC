@@ -446,8 +446,7 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
 
 fn nextExternDecl(p: *Parser) void {
     var parens: u32 = 0;
-
-    while (p.index < p.tokenIds.len) : (p.index += 1) {
+    while (true) : (p.index += 1) {
         switch (p.getCurrToken()) {
             .LParen, .LBrace, .LBracket => parens += 1,
             .RParen, .RBrace, .RBracket => if (parens != 0) {
@@ -483,11 +482,29 @@ fn nextExternDecl(p: *Parser) void {
             .KeywordTypeof2,
             .Identifier,
             => if (parens == 0) return,
+            .Eof => return,
             else => {},
         }
     }
+}
 
-    p.index -= 1; // so that we can consume the eof token elsewhere
+fn skipTo(p: *Parser, id: TokenType) void {
+    var parens: u32 = 0;
+    while (true) : (p.index += 1) {
+        if (p.getCurrToken() == id and parens == 0) {
+            p.index += 1;
+            return;
+        }
+        switch (p.getCurrToken()) {
+            .LParen, .LBrace, .LBracket => parens += 1,
+            .RParen, .RBrace, .RBracket => if (parens != 0) {
+                parens -= 1;
+            },
+
+            .Eof => return,
+            else => {},
+        }
+    }
 }
 
 // ====== declarations ======
@@ -1941,6 +1958,7 @@ pub fn initializerItem(p: *Parser, il: *InitList, initType: Type) Error!bool {
     var warnedExcess = false;
     var isStrInit = false;
     while (true) : (count += 1) {
+        errdefer  p.skipTo(.RBrace);
         const firstToken = p.index;
         var curType = initType;
         var curIL = il;
