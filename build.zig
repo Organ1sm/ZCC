@@ -19,6 +19,8 @@ pub fn build(b: *std.Build) void {
         .source_file = .{ .path = "src/zcc.zig" },
     });
 
+    const deps = b.addModule("deps", .{ .source_file = .{ .path = "deps/lib.zig" } });
+
     const exe = b.addExecutable(.{
         .name = "Zcc",
         // In this case the main source file is merely a path, however, in more
@@ -27,6 +29,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = mode,
     });
+    exe.addModule("deps", deps);
 
     // This declares intent for the executable to be installed into the
     // standard location when the user invokes the "install" step (the default
@@ -69,6 +72,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = mode,
     });
+    unit_tests.addModule("deps", deps);
     const run_unit_tests = b.addRunArtifact(unit_tests);
     test_step.dependOn(&run_unit_tests.step);
 
@@ -77,6 +81,7 @@ pub fn build(b: *std.Build) void {
         .root_source_file = .{ .path = "test/test_runner.zig" },
     });
     integration_tests.addModule("zcc", zccModule);
+    integration_tests.addModule("deps", deps);
 
     const integration_test_runner = b.addRunArtifact(integration_tests);
     integration_test_runner.addArg(b.pathFromRoot("test/cases"));
