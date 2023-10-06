@@ -1,6 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const Compilation = @import("Basic/Compilation.zig");
+const Codegen = @import("CodeGen/Codegen.zig");
 const Source = @import("Basic/Source.zig");
 const Preprocessor = @import("Lexer/Preprocessor.zig");
 const Parser = @import("Parser/Parser.zig");
@@ -248,6 +249,8 @@ fn processSource(comp: *Compilation, source: Source, builtinMacro: Source, userD
     comp.renderErrors();
 
     tree.dump(std.io.getStdOut().writer()) catch {};
+
+    try Codegen.generateTree(comp, tree);
 }
 
 test "simple test" {
@@ -258,4 +261,5 @@ test "simple test" {
     _ = @import("Basic/Compilation.zig");
     _ = @import("AST/AST.zig");
     _ = @import("AST/Type.zig");
+    _ = @import("CodeGen/Codegen.zig");
 }
