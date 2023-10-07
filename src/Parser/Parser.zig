@@ -745,20 +745,21 @@ fn parseStaticAssert(p: *Parser) Error!bool {
             try p.errToken(.static_assert_not_constant, resToken);
     } else if (!res.getBool()) {
         if (str.node != .none) {
-            const stringsTop = p.strings.items.len;
-            defer p.strings.items.len = stringsTop;
+            var buffer = std.ArrayList(u8).init(p.pp.compilation.gpa);
+            defer buffer.deinit();
 
             const data = p.nodes.items(.data)[@intFromEnum(str.node)].String;
+            try buffer.ensureUnusedCapacity(data.len);
             try AST.dumpString(
                 p.strings.items[data.index..][0..data.len],
                 p.nodes.items(.tag)[@intFromEnum(str.node)],
-                p.strings.writer(),
+                buffer.writer(),
             );
 
             try p.errStr(
-                .static_assert_failure,
+                .static_assert_failure_message,
                 curToken,
-                try p.pp.arena.allocator().dupe(u8, p.strings.items[stringsTop..]),
+                try p.arena.dupe(u8, buffer.items),
             );
         } else try p.errToken(.static_assert_failure, curToken);
     }

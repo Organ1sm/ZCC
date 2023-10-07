@@ -274,7 +274,12 @@ pub fn main() !void {
                     break;
                 }
 
-                const expectedError = std.mem.trim(u8, pp.tokSliceSafe(str), "\"");
+                const start = pathBuffer.items.len;
+                defer pathBuffer.items.len = start;
+
+                std.debug.assert((try std.zig.string_literal.parseWrite(pathBuffer.writer(), pp.tokSliceSafe(str))) == .success);
+
+                const expectedError = pathBuffer.items[start..];
                 const index = std.mem.indexOf(u8, m.buf.items, expectedError);
                 if (index == null or m.buf.items[index.? + expectedError.len] != '\n') {
                     failCount += 1;
