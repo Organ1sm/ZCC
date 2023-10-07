@@ -1958,7 +1958,7 @@ pub fn initializerItem(p: *Parser, il: *InitList, initType: Type) Error!bool {
     var warnedExcess = false;
     var isStrInit = false;
     while (true) : (count += 1) {
-        errdefer  p.skipTo(.RBrace);
+        errdefer p.skipTo(.RBrace);
         const firstToken = p.index;
         var curType = initType;
         var curIL = il;
@@ -2226,7 +2226,10 @@ fn coerceInit(p: *Parser, item: *Result, token: TokenIndex, target: Type) !void 
             try item.ptrCast(p, unqualType);
         } else if (item.ty.isPointer()) {
             if (!unqualType.eql(item.ty, false)) {
-                try p.errStr(.incompatible_ptr_assign, token, try p.typePairStrExtra(target, eMsg, item.ty));
+                try p.errStr(.incompatible_ptr_init, token, try p.typePairStrExtra(target, eMsg, item.ty));
+                try item.ptrCast(p, unqualType);
+            } else if (!unqualType.eql(item.ty, true)) {
+                try p.errStr(.ptr_init_discards_quals, token, try p.typePairStrExtra(target, eMsg, item.ty));
                 try item.ptrCast(p, unqualType);
             }
         } else {
@@ -3188,6 +3191,8 @@ fn assignExpr(p: *Parser) Error!Result {
         } else if (rhs.ty.isPointer()) {
             if (!unqualType.eql(rhs.ty, false)) {
                 try p.errStr(.incompatible_ptr_assign, token, try p.typePairStrExtra(lhs.ty, eMsg, rhs.ty));
+            } else if (!unqualType.eql(rhs.ty, true)) {
+                try p.errStr(.ptr_assign_discards_quals, token, try p.typePairStrExtra(lhs.ty, eMsg, rhs.ty));
                 try rhs.ptrCast(p, unqualType);
             }
         } else {
