@@ -148,7 +148,7 @@ pub fn isLValue(nodes: Node.List.Slice, extra: []const NodeIndex, valueMap: Valu
 
 pub fn dumpString(bytes: []const u8, tag: AstTag, writer: anytype) !void {
     switch (tag) {
-        .StringLiteralExpr => try writer.print("\"{}\"", .{std.zig.fmtEscapes(bytes)}),
+        .StringLiteralExpr => try writer.print("\"{}\"", .{std.zig.fmtEscapes(bytes[0..bytes.len - 1])}),
         else => unreachable,
     }
 }
