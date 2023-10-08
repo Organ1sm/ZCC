@@ -23,6 +23,7 @@ outputName: ?[]const u8 = null,
 builtinHeaderPath: ?[]u8 = null,
 target: std.Target = builtin.target,
 onlyPreprocess: bool = false,
+onlyCompile: bool = false,
 langOpts: LangOpts = .{},
 
 pub fn init(gpa: Allocator) Compilation {

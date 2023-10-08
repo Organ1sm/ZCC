@@ -46,15 +46,16 @@ const usage =
     \\  -v, --version   Print ZCC version.
     \\ 
     \\Feature Options:
-    \\  -E                      Only run the preprocessor
+    \\  -c                      Only run preprocess, compile, and assemble steps
     \\  -D <macro>=<value>      Define <macro> to <value> (defaults to 1)
-    \\  -U <macro>              Undefine <macro>
+    \\  -E                      Only run the preprocessor
     \\  -fcolor-diagnostics     Enable colors in diagnostics
     \\  -fno-color-diagnostics  Disable colors in diagnostics
     \\  -I <dir>                Add directory to include search path
     \\  -isystem                Add directory to system include search path
     \\  -o <file>               Write output to <file>
     \\  -std=<standard>         Specify language standard
+    \\  -U <macro>              Undefine <macro>
     \\  -Wall                   Enable all warnings
     \\  -Werror                 Treat all warnings as errors
     \\  -Werror=<warning>       Treat warning as error
@@ -92,6 +93,8 @@ fn handleArgs(comp: *Compilation, args: [][]const u8) !void {
                 return stdOut.writeAll(@import("zcc.zig").VersionStr ++ "\n") catch |err| {
                     return comp.diag.fatalNoSrc("{s} when trying to print version", .{@errorName(err)});
                 };
+            } else if (std.mem.eql(u8, arg, "-c")) {
+                comp.onlyCompile = true;
             } else if (std.mem.startsWith(u8, arg, "-D")) {
                 var macro = arg["-D".len..];
                 if (macro.len == 0) {
@@ -246,11 +249,15 @@ fn processSource(comp: *Compilation, source: Source, builtinMacro: Source, userD
     var tree = try Parser.parse(&pp);
     defer tree.deinit();
 
+    const prevErrors = comp.diag.errors;
     comp.renderErrors();
 
-    tree.dump(std.io.getStdOut().writer()) catch {};
-
-    try Codegen.generateTree(comp, tree);
+    if (comp.onlyCompile) {
+        if (comp.diag.errors == prevErrors)
+            try Codegen.generateTree(comp, tree);
+    } else {
+        tree.dump(std.io.getStdOut().writer()) catch {};
+    }
 }
 
 test "simple test" {
