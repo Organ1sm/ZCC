@@ -15,10 +15,7 @@ pub fn build(b: *std.Build) void {
     // set a preferred release mode, allowing the user to decide how to optimize.
     const mode = b.standardOptimizeOption(.{});
 
-    const zccModule = b.addModule("zcc", .{
-        .source_file = .{ .path = "src/zcc.zig" },
-    });
-
+    const zccModule = b.addModule("zcc", .{ .source_file = .{ .path = "src/zcc.zig" } });
     const deps = b.addModule("deps", .{ .source_file = .{ .path = "deps/lib.zig" } });
 
     const exe = b.addExecutable(.{

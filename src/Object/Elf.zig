@@ -7,10 +7,14 @@ const Elf = @This();
 const Section = struct {
     data: std.ArrayListUnmanaged(u8) = .{},
     nameOffset: std.elf.Elf64_Word,
+    type: std.elf.Elf64_Word,
+    flags: std.elf.Elf64_Xword,
 };
 
-const AdditionalSections = 3; // null section, shstrtab, symtab
+const AdditionalSections = 3; // null section, strtab, symtab
 const DefaultStringTable = "\x00.strtab\x00.symtab\x00";
+const StringTableName = 1;
+const SymbolTableName = "\x00.strtab\x00".len;
 
 obj: Object,
 /// The keys are owned by the Codegen.tree
@@ -18,6 +22,7 @@ sections: std.StringArrayHashMap(Section),
 symbolTable: std.ArrayList(std.elf.Elf64_Sym),
 stringTable: std.ArrayList(u8),
 firstGlobal: std.elf.Elf64_Word = 0,
+unnamedSymbolMangle: u32 = 0,
 
 pub fn create(comp: *Compilation) !*Object {
     var strTable = std.ArrayList(u8).init(comp.gpa);
@@ -53,28 +58,47 @@ pub fn deinit(elf: *Elf) void {
     gpa.destroy(elf);
 }
 
-pub fn getSection(elf: *Elf, sectionName: []const u8) !*std.ArrayListUnmanaged(u8) {
+fn sectionString(sec: Object.Section) []const u8 {
+    return switch (sec) {
+        .data => "data",
+        .readOnlydata => "rodata",
+        .func => "text",
+        .strings => "rodata.str",
+        .custom => |name| name,
+    };
+}
+
+pub fn getSection(elf: *Elf, section: Object.Section) !*std.ArrayListUnmanaged(u8) {
+    const sectionName = sectionString(section);
     const sectIdx = elf.sections.getIndex(sectionName) orelse blk: {
         const idx = elf.sections.count();
         try elf.sections.putNoClobber(sectionName, .{
             .nameOffset = @as(std.elf.Elf64_Word, @truncate(elf.stringTable.items.len)),
+            .type = std.elf.SHT_PROGBITS,
+            .flags = switch (section) {
+                .func, .custom => std.elf.SHF_ALLOC + std.elf.SHF_EXECINSTR,
+                .strings => std.elf.SHF_ALLOC + std.elf.SHF_MERGE + std.elf.SHF_STRINGS,
+                .readOnlydata => std.elf.SHF_ALLOC,
+                .data => std.elf.SHF_ALLOC + std.elf.SHF_WRITE,
+            },
         });
         try elf.stringTable.writer().print(".{s}\x00", .{sectionName});
         break :blk idx;
     };
-    const sect = &elf.sections.values()[sectIdx];
-    return &sect.data;
+
+    return &elf.sections.values()[sectIdx].data;
 }
 
 pub fn declareSymbol(
     elf: *Elf,
-    sectionName: []const u8,
-    name: []const u8,
+    section: Object.Section,
+    name: ?[]const u8,
     linkage: std.builtin.GlobalLinkage,
     @"type": Object.SymbolType,
     offset: u64,
     size: u64,
-) !void {
+) ![]const u8 {
+    const sectionName = sectionString(section);
     const sectIdx = @as(std.elf.Elf64_Half, @truncate(elf.sections.getIndex(sectionName).?));
     const binding: u8 = switch (linkage) {
         .Internal => std.elf.STB_LOCAL,
@@ -97,8 +121,15 @@ pub fn declareSymbol(
     if (elf.firstGlobal == 0 and linkage == .Strong)
         elf.firstGlobal = @as(std.elf.Elf64_Word, @truncate(elf.symbolTable.items.len));
 
-    try elf.stringTable.writer().print("{s}\x00", .{name});
+    if (name) |some| {
+        try elf.stringTable.writer().print("{s}\x00", .{some});
+    } else {
+        try elf.stringTable.writer().print(".L.{d}\x00", .{elf.unnamedSymbolMangle});
+        elf.unnamedSymbolMangle += 1;
+    }
+
     try elf.symbolTable.append(sym);
+    return elf.stringTable.items[sym.st_name..];
 }
 
 pub fn finish(elf: *Elf, file: std.fs.File) !void {
@@ -144,7 +175,7 @@ pub fn finish(elf: *Elf, file: std.fs.File) !void {
     for (elf.sections.values()) |sect|
         try w.writeAll(sect.data.items);
 
-    // write shstrtab
+    // write strtab
     try w.writeAll(elf.stringTable.items);
     try w.writeByteNTimes(0, symTabOffsetAligned - symTabOffset);
     try w.writeAll(std.mem.sliceAsBytes(elf.symbolTable.items));
@@ -154,10 +185,10 @@ pub fn finish(elf: *Elf, file: std.fs.File) !void {
     // mandatory null header
     try w.writeStruct(std.mem.zeroes(std.elf.Elf64_Shdr));
 
-    // write shstrtab section header
+    // write strtab section header
     {
         var sect_header = std.elf.Elf64_Shdr{
-            .sh_name = 1,
+            .sh_name = StringTableName,
             .sh_type = std.elf.SHT_STRTAB,
             .sh_flags = 0,
             .sh_addr = 0,
@@ -174,7 +205,7 @@ pub fn finish(elf: *Elf, file: std.fs.File) !void {
     // write symtab section header
     {
         var sect_header = std.elf.Elf64_Shdr{
-            .sh_name = "\x00.strtab\x00".len,
+            .sh_name = SymbolTableName,
             .sh_type = std.elf.SHT_SYMTAB,
             .sh_flags = 0,
             .sh_addr = 0,
@@ -194,8 +225,8 @@ pub fn finish(elf: *Elf, file: std.fs.File) !void {
         for (elf.sections.values()) |sect| {
             var sect_header = std.elf.Elf64_Shdr{
                 .sh_name = sect.nameOffset,
-                .sh_type = std.elf.SHT_PROGBITS,
-                .sh_flags = std.elf.SHF_ALLOC + std.elf.SHF_EXECINSTR,
+                .sh_type = sect.type,
+                .sh_flags = sect.flags,
                 .sh_addr = 0,
                 .sh_offset = sect_offset,
                 .sh_size = sect.data.items.len,
