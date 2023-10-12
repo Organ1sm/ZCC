@@ -6,60 +6,74 @@ const Elf = @This();
 
 const Section = struct {
     data: std.ArrayList(u8),
-    nameOffset: std.elf.Elf64_Word,
-    type: std.elf.Elf64_Word,
-    flags: std.elf.Elf64_Xword,
+    relocations: std.ArrayListUnmanaged(Relocation) = .{},
+    flags: u64,
+    type: u32,
+    index: u16 = undefined,
+};
+
+const Symbol = struct {
+    section: ?*Section,
+    size: u64,
+    offset: u64,
+    index: u16 = undefined,
+    info: u8,
+};
+
+const Relocation = packed struct {
+    symbol: *Symbol,
+    addend: i64,
+    offset: u48,
+    type: u8,
 };
 
 const AdditionalSections = 3; // null section, strtab, symtab
+const StringTabIndex = 1;
+const SymbolTabIndex = 2;
 const DefaultStringTable = "\x00.strtab\x00.symtab\x00";
 const StringTableName = 1;
 const SymbolTableName = "\x00.strtab\x00".len;
 
 obj: Object,
 /// The keys are owned by the Codegen.tree
-sections: std.StringArrayHashMap(Section),
-symbolTable: std.ArrayList(std.elf.Elf64_Sym),
-stringTable: std.ArrayList(u8),
-firstGlobal: std.elf.Elf64_Word = 0,
+sections: std.StringHashMapUnmanaged(*Section) = .{},
+localSymbols: std.StringHashMapUnmanaged(*Symbol) = .{},
+globalSymbols: std.StringHashMapUnmanaged(*Symbol) = .{},
 unnamedSymbolMangle: u32 = 0,
+stringTabLen: u64 = DefaultStringTable.len,
+arena: std.heap.ArenaAllocator,
 
 pub fn create(comp: *Compilation) !*Object {
-    var strTable = std.ArrayList(u8).init(comp.gpa);
-    var symTable = std.ArrayList(std.elf.Elf64_Sym).init(comp.gpa);
-    errdefer {
-        strTable.deinit();
-        symTable.deinit();
-    }
-
-    try strTable.appendSlice(DefaultStringTable);
-    try symTable.append(std.mem.zeroes(std.elf.Elf64_Sym));
-
     const elf = try comp.gpa.create(Elf);
     elf.* = .{
         .obj = .{ .format = .elf, .comp = comp },
-        .sections = std.StringArrayHashMap(Section).init(comp.gpa),
-        .symbolTable = symTable,
-        .stringTable = strTable,
+        .arena = std.heap.ArenaAllocator.init(comp.gpa),
     };
 
     return &elf.obj;
 }
 
 pub fn deinit(elf: *Elf) void {
-    const gpa = elf.sections.allocator;
+    const gpa = elf.arena.child_allocator;
 
-    for (elf.sections.values()) |*sect|
-        sect.data.deinit();
+    {
+        var it = elf.sections.valueIterator();
+        while (it.next()) |sect| {
+            sect.*.data.deinit();
+            sect.*.relocations.deinit(gpa);
+        }
+    }
 
-    elf.sections.deinit();
-    elf.symbolTable.deinit();
-    elf.stringTable.deinit();
+    elf.sections.deinit(gpa);
+    elf.localSymbols.deinit(gpa);
+    elf.globalSymbols.deinit(gpa);
+    elf.arena.deinit();
     gpa.destroy(elf);
 }
 
 fn sectionString(sec: Object.Section) []const u8 {
     return switch (sec) {
+        .undefined => unreachable,
         .data => "data",
         .readOnlydata => "rodata",
         .func => "text",
@@ -68,39 +82,45 @@ fn sectionString(sec: Object.Section) []const u8 {
     };
 }
 
-pub fn getSection(elf: *Elf, section: Object.Section) !*std.ArrayList(u8) {
-    const sectionName = sectionString(section);
-    const sectIdx = elf.sections.getIndex(sectionName) orelse blk: {
-        const idx = elf.sections.count();
-        try elf.sections.putNoClobber(sectionName, .{
-            .data = std.ArrayList(u8).init(elf.sections.allocator),
-            .nameOffset = @as(std.elf.Elf64_Word, @truncate(elf.stringTable.items.len)),
+pub fn getSection(elf: *Elf, sectionKind: Object.Section) !*std.ArrayList(u8) {
+    const sectionName = sectionString(sectionKind);
+    const section = elf.sections.get(sectionName) orelse blk: {
+        const section = try elf.arena.allocator().create(Section);
+        section.* = .{
+            .data = std.ArrayList(u8).init(elf.arena.child_allocator),
             .type = std.elf.SHT_PROGBITS,
-            .flags = switch (section) {
+            .flags = switch (sectionKind) {
                 .func, .custom => std.elf.SHF_ALLOC + std.elf.SHF_EXECINSTR,
                 .strings => std.elf.SHF_ALLOC + std.elf.SHF_MERGE + std.elf.SHF_STRINGS,
                 .readOnlydata => std.elf.SHF_ALLOC,
                 .data => std.elf.SHF_ALLOC + std.elf.SHF_WRITE,
+                .undefined => unreachable,
             },
-        });
-        try elf.stringTable.writer().print(".{s}\x00", .{sectionName});
-        break :blk idx;
+        };
+        try elf.sections.putNoClobber(elf.arena.child_allocator, sectionName, section);
+        elf.stringTabLen += sectionName.len + ".\x00".len;
+        break :blk section;
     };
 
-    return &elf.sections.values()[sectIdx].data;
+    return &section.data;
 }
 
 pub fn declareSymbol(
     elf: *Elf,
-    section: Object.Section,
-    name: ?[]const u8,
+    sectionKind: Object.Section,
+    maybeName: ?[]const u8,
     linkage: std.builtin.GlobalLinkage,
     @"type": Object.SymbolType,
     offset: u64,
     size: u64,
 ) ![]const u8 {
-    const sectionName = sectionString(section);
-    const sectIdx = @as(std.elf.Elf64_Half, @truncate(elf.sections.getIndex(sectionName).?));
+    const section = blk: {
+        if (sectionKind == .undefined)
+            break :blk null;
+
+        const sectionName = sectionString(sectionKind);
+        break :blk elf.sections.get(sectionName);
+    };
     const binding: u8 = switch (linkage) {
         .Internal => std.elf.STB_LOCAL,
         .Strong => std.elf.STB_GLOBAL,
@@ -110,51 +130,78 @@ pub fn declareSymbol(
     const sym_type: u8 = switch (@"type") {
         .func => std.elf.STT_FUNC,
         .variable => std.elf.STT_OBJECT,
+        .external => std.elf.STT_NOTYPE,
     };
-    var sym = std.elf.Elf64_Sym{
-        .st_name = @as(std.elf.Elf64_Word, @truncate(elf.stringTable.items.len)),
-        .st_info = (binding << 4) + sym_type,
-        .st_other = 0,
-        .st_shndx = sectIdx + AdditionalSections,
-        .st_value = offset,
-        .st_size = size,
+    const sym = try elf.arena.allocator().create(Symbol);
+    sym.* = .{
+        .section = section,
+        .size = size,
+        .offset = offset,
+        .info = (binding << 4) + sym_type,
     };
-    if (elf.firstGlobal == 0 and linkage == .Strong)
-        elf.firstGlobal = @as(std.elf.Elf64_Word, @truncate(elf.symbolTable.items.len));
 
-    if (name) |some| {
-        try elf.stringTable.writer().print("{s}\x00", .{some});
-    } else {
-        try elf.stringTable.writer().print(".L.{d}\x00", .{elf.unnamedSymbolMangle});
-        elf.unnamedSymbolMangle += 1;
-    }
+    const name = if (maybeName) |some| some else blk: {
+        defer elf.unnamedSymbolMangle += 1;
+        break :blk try std.fmt.allocPrint(elf.arena.allocator(), ".L.{d}", .{elf.unnamedSymbolMangle});
+    };
 
-    try elf.symbolTable.append(sym);
-    return elf.stringTable.items[sym.st_name..];
+    elf.stringTabLen += name.len + 1; // +1 for null byte
+    if (linkage == .Internal)
+        try elf.localSymbols.put(elf.arena.child_allocator, name, sym)
+    else
+        try elf.globalSymbols.put(elf.arena.child_allocator, name, sym);
+
+    return name;
 }
 
+pub fn addRelocation(elf: *Elf, name: []const u8, sectionKind: Object.Section, address: u64, addend: i64) !void {
+    const sectionName = sectionString(sectionKind);
+    const symbol = elf.localSymbols.get(name) orelse elf.globalSymbols.get(name).?; // reference to undeclared symbol
+    const section = elf.sections.get(sectionName).?;
+    if (section.relocations.items.len == 0)
+        elf.stringTabLen += ".rela".len;
+
+    try section.relocations.append(elf.arena.child_allocator, .{
+        .symbol = symbol,
+        .offset = @as(u48, @intCast(address)),
+        .addend = addend,
+        .type = if (symbol.section == null) 4 else 2, // TODO
+    });
+}
+
+/// elf header
+/// sections contents
+/// symbols
+/// relocations
+/// strtab
+/// section headers
 pub fn finish(elf: *Elf, file: std.fs.File) !void {
     var buffWriter = std.io.bufferedWriter(file.writer());
     const w = buffWriter.writer();
-    const stringTabIndex = 1;
 
-    const sectionsLen = blk: {
-        var len: std.elf.Elf64_Off = 0;
-        for (elf.sections.values()) |sect|
-            len += sect.data.items.len;
-        break :blk len;
-    };
+    var numSections: std.elf.Elf64_Half = AdditionalSections;
+    var relocationsLen: std.elf.Elf64_Off = 0;
+    var sectionsLen: std.elf.Elf64_Off = 0;
+    {
+        var it = elf.sections.valueIterator();
+        while (it.next()) |sect| {
+            sectionsLen += sect.*.data.items.len;
+            relocationsLen += sect.*.relocations.items.len * @sizeOf(std.elf.Elf64_Rela);
+            sect.*.index = numSections;
+            numSections += 1;
+            numSections += @intFromBool(sect.*.relocations.items.len != 0);
+        }
+    }
 
-    const strTabLen = elf.stringTable.items.len;
-    const symTabLen = elf.symbolTable.items.len * @sizeOf(std.elf.Elf64_Sym);
-
-    const strTabOffset = @sizeOf(std.elf.Elf64_Ehdr) + sectionsLen;
-    const symTabOffset = strTabOffset + strTabLen;
+    const symTabLen = (elf.localSymbols.count() + elf.globalSymbols.count() + 1) * @sizeOf(std.elf.Elf64_Sym);
+    const symTabOffset = @sizeOf(std.elf.Elf64_Ehdr) + sectionsLen;
     const symTabOffsetAligned = std.mem.alignForward(u64, symTabOffset, 8);
-    const shOffset = symTabOffsetAligned + symTabLen;
+    const relaOffset = symTabOffsetAligned + symTabLen;
+    const strTabOffset = relaOffset + relocationsLen;
+    const shOffset = strTabOffset + elf.stringTabLen;
     const shOffsetAligned = std.mem.alignForward(u64, shOffset, 16);
 
-    var elf_header = std.elf.Elf64_Ehdr{
+    var elfHeader = std.elf.Elf64_Ehdr{
         .e_ident = .{ 0x7F, 'E', 'L', 'F', 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
         .e_type = std.elf.ET.REL, // we only produce relocatables
         .e_machine = elf.obj.comp.target.cpu.arch.toElfMachine(),
@@ -167,19 +214,92 @@ pub fn finish(elf: *Elf, file: std.fs.File) !void {
         .e_phentsize = 0, // no program header
         .e_phnum = 0, // no program header
         .e_shentsize = @sizeOf(std.elf.Elf64_Shdr),
-        .e_shnum = @as(std.elf.Elf64_Half, @truncate(elf.sections.count() + AdditionalSections)),
+        .e_shnum = numSections,
         .e_shstrndx = 1,
     };
-    try w.writeStruct(elf_header);
+    try w.writeStruct(elfHeader);
 
     // write contents of sections
-    for (elf.sections.values()) |sect|
-        try w.writeAll(sect.data.items);
+    {
+        var it = elf.sections.valueIterator();
+        while (it.next()) |sect| try w.writeAll(sect.*.data.items);
+    }
+
+    // pad to 8 bytes
+    try w.writeByteNTimes(0, symTabOffsetAligned - symTabOffset);
+
+    var nameOffset: u32 = DefaultStringTable.len;
+    // write symbols
+    {
+        // first symbol must be null
+        try w.writeStruct(std.mem.zeroes(std.elf.Elf64_Sym));
+
+        var symIdx: u16 = 1;
+        var it = elf.localSymbols.iterator();
+        while (it.next()) |entry| {
+            const sym = entry.value_ptr.*;
+            try w.writeStruct(std.elf.Elf64_Sym{
+                .st_name = nameOffset,
+                .st_info = sym.info,
+                .st_other = 0,
+                .st_shndx = if (sym.section) |some| some.index else 0,
+                .st_value = sym.offset,
+                .st_size = sym.size,
+            });
+            sym.index = symIdx;
+            symIdx += 1;
+            nameOffset += @as(u32, @intCast(entry.key_ptr.len + 1)); // +1 for null byte
+        }
+        it = elf.globalSymbols.iterator();
+        while (it.next()) |entry| {
+            const sym = entry.value_ptr.*;
+            try w.writeStruct(std.elf.Elf64_Sym{
+                .st_name = nameOffset,
+                .st_info = sym.info,
+                .st_other = 0,
+                .st_shndx = if (sym.section) |some| some.index else 0,
+                .st_value = sym.offset,
+                .st_size = sym.size,
+            });
+            sym.index = symIdx;
+            symIdx += 1;
+            nameOffset += @as(u32, @intCast(entry.key_ptr.len + 1)); // +1 for null byte
+        }
+    }
+
+    // write relocations
+    {
+        var it = elf.sections.valueIterator();
+        while (it.next()) |sect| {
+            for (sect.*.relocations.items) |rela| {
+                try w.writeStruct(std.elf.Elf64_Rela{
+                    .r_offset = rela.offset,
+                    .r_addend = rela.addend,
+                    .r_info = (@as(u64, rela.symbol.index) << 32) | rela.type,
+                });
+            }
+        }
+    }
 
     // write strtab
-    try w.writeAll(elf.stringTable.items);
-    try w.writeByteNTimes(0, symTabOffsetAligned - symTabOffset);
-    try w.writeAll(std.mem.sliceAsBytes(elf.symbolTable.items));
+    try w.writeAll(DefaultStringTable);
+    {
+        var it = elf.localSymbols.keyIterator();
+        while (it.next()) |key|
+            try w.print("{s}\x00", .{key.*});
+
+        it = elf.globalSymbols.keyIterator();
+        while (it.next()) |key|
+            try w.print("{s}\x00", .{key.*});
+    }
+    {
+        var it = elf.sections.iterator();
+        while (it.next()) |entry| {
+            if (entry.value_ptr.*.relocations.items.len != 0)
+                try w.writeAll(".rela");
+            try w.print(".{s}\x00", .{entry.key_ptr.*});
+        }
+    }
 
     // pad to 16 bytes
     try w.writeByteNTimes(0, shOffsetAligned - shOffset);
@@ -194,7 +314,7 @@ pub fn finish(elf: *Elf, file: std.fs.File) !void {
             .sh_flags = 0,
             .sh_addr = 0,
             .sh_offset = strTabOffset,
-            .sh_size = strTabLen,
+            .sh_size = elf.stringTabLen,
             .sh_link = 0,
             .sh_info = 0,
             .sh_addralign = 1,
@@ -205,40 +325,62 @@ pub fn finish(elf: *Elf, file: std.fs.File) !void {
 
     // write symtab section header
     {
-        var sect_header = std.elf.Elf64_Shdr{
+        var sectHeader = std.elf.Elf64_Shdr{
             .sh_name = SymbolTableName,
             .sh_type = std.elf.SHT_SYMTAB,
             .sh_flags = 0,
             .sh_addr = 0,
             .sh_offset = symTabOffsetAligned,
             .sh_size = symTabLen,
-            .sh_link = stringTabIndex,
-            .sh_info = elf.firstGlobal,
+            .sh_link = StringTabIndex,
+            .sh_info = elf.localSymbols.size + 1,
             .sh_addralign = 8,
             .sh_entsize = @sizeOf(std.elf.Elf64_Sym),
         };
-        try w.writeStruct(sect_header);
+        try w.writeStruct(sectHeader);
     }
 
     // remaining section headers
     {
-        var sect_offset: std.elf.Elf64_Addr = @sizeOf(std.elf.Elf64_Ehdr);
-        for (elf.sections.values()) |sect| {
-            var sect_header = std.elf.Elf64_Shdr{
-                .sh_name = sect.nameOffset,
+        var sectOffset: u64 = @sizeOf(std.elf.Elf64_Ehdr);
+        var relaSectOffset: u64 = relaOffset;
+        var it = elf.sections.iterator();
+        while (it.next()) |entry| {
+            const sect = entry.value_ptr.*;
+            const relaCount = sect.relocations.items.len;
+            const relaNameOffset = if (relaCount != 0) @as(u32, @truncate(".rela".len)) else 0;
+            try w.writeStruct(std.elf.Elf64_Shdr{
+                .sh_name = relaNameOffset + nameOffset,
                 .sh_type = sect.type,
                 .sh_flags = sect.flags,
                 .sh_addr = 0,
-                .sh_offset = sect_offset,
+                .sh_offset = sectOffset,
                 .sh_size = sect.data.items.len,
                 .sh_link = 0,
                 .sh_info = 0,
-                .sh_addralign = 16,
+                .sh_addralign = if (sect.flags & std.elf.SHF_EXECINSTR != 0) 16 else 1,
                 .sh_entsize = 0,
-            };
-            try w.writeStruct(sect_header);
+            });
 
-            sect_offset += sect.data.items.len;
+            if (relaCount != 0) {
+                const size = relaCount * @sizeOf(std.elf.Elf64_Rela);
+                try w.writeStruct(std.elf.Elf64_Shdr{
+                    .sh_name = nameOffset,
+                    .sh_type = std.elf.SHT_RELA,
+                    .sh_flags = 0,
+                    .sh_addr = 0,
+                    .sh_offset = relaSectOffset,
+                    .sh_size = relaCount * @sizeOf(std.elf.Elf64_Rela),
+                    .sh_link = SymbolTabIndex,
+                    .sh_info = sect.index,
+                    .sh_addralign = 8,
+                    .sh_entsize = @sizeOf(std.elf.Elf64_Rela),
+                });
+                relaSectOffset += size;
+            }
+
+            sectOffset += sect.data.items.len;
+            nameOffset += @as(u32, @intCast(entry.key_ptr.len + ".\x00".len)) + relaNameOffset;
         }
     }
     try buffWriter.flush();
