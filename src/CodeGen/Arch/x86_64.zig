@@ -50,8 +50,7 @@ fn setReg(func: *Fn, val: Value, reg: Register) !void {
             const offset = func.data.items.len;
             encoder.imm32(0);
 
-            _ = offset;
-            _ = sym;
+            try func.c.obj.addRelocation(sym, .func, offset, -4);
         },
 
         .immediate => |x| if (x == 0) {
@@ -222,8 +221,7 @@ fn genCall(func: *Fn, lhs: Tree.NodeIndex, args: []const Tree.NodeIndex) Codegen
             const offset = func.data.items.len;
             encoder.imm32(0);
 
-            _ = sym;
-            _ = offset;
+            try func.c.obj.addRelocation(sym, .func, offset, -4);
         },
         .immediate => return func.c.comp.diag.fatalNoSrc("TODO call immediate\n", .{}),
         .register => return func.c.comp.diag.fatalNoSrc("TODO call reg\n", .{}),

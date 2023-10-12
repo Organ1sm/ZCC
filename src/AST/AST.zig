@@ -158,7 +158,6 @@ pub fn tokSlice(tree: AST, index: TokenIndex) []const u8 {
         return some;
 
     const loc = tree.tokens.items(.loc)[index];
-
     var lexer = Lexer{
         .buffer = if (loc.id == .generated)
             tree.generated
