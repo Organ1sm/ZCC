@@ -31,7 +31,15 @@ pub fn generateTree(comp: *Compilation, tree: Tree) Compilation.Error!void {
     for (tree.rootDecls) |decl| {
         switch (nodeTags[@intFromEnum(decl)]) {
             // these produce no code
-            .StaticAssert, .TypeDef => {},
+            .StaticAssert,
+            .TypeDef,
+            .StructDeclTwo,
+            .UnionDeclTwo,
+            .EnumDeclTwo,
+            .StructDecl,
+            .UnionDecl,
+            .EnumDecl,
+            => {},
 
             // define symbol
             .FnProto,

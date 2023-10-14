@@ -1,7 +1,9 @@
 const std = @import("std");
+pub const CodeGen = @import("CodeGen/Codegen.zig");
 pub const Compilation = @import("Basic/Compilation.zig");
 pub const Diagnostics = @import("Basic/Diagnostics.zig");
 pub const Parser = @import("Parser/Parser.zig");
+pub const Object = @import("Object/Object.zig");
 pub const Preprocessor = @import("Lexer/Preprocessor.zig");
 pub const Source = @import("Basic/Source.zig");
 pub const Token = @import("Lexer/Token.zig").Token;

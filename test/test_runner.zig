@@ -1,6 +1,7 @@
 const std = @import("std");
 const print = std.debug.print;
 const zcc = @import("zcc");
+const CodeGen = zcc.CodeGen;
 const Tree = zcc.Tree;
 const Token = Tree.Token;
 const NodeIndex = Tree.NodeIndex;
@@ -19,8 +20,8 @@ pub fn main() !void {
     var args = try std.process.argsAlloc(gpa);
     defer std.process.argsFree(gpa, args);
 
-    if (args.len != 2) {
-        print("expected test case directory as only argument\n", .{});
+    if (args.len != 3) {
+        print("expected test case directory  and zig executable as only argument\n", .{});
         return error.InvalidArguments;
     }
 
@@ -303,6 +304,68 @@ pub fn main() !void {
         }
 
         comp.renderErrors();
+
+        if (pp.defines.get("EXPECTED_OUTPUT")) |macro| blk: {
+            if (comp.diag.errors != 0) break :blk;
+
+            if (macro != .simple) {
+                failCount += 1;
+                progress.log("invalid EXPECTED_OUTPUT {}\n", .{macro});
+                continue;
+            }
+
+            if (macro.simple.tokens.len != 1 or macro.simple.tokens[0].id != .StringLiteral) {
+                failCount += 1;
+                progress.log("EXPECTED_OUTPUT takes exactly one string", .{});
+                continue;
+            }
+
+            const start = pathBuffer.items.len;
+            defer pathBuffer.items.len = start;
+            // realistically the strings will only contain \" if any escapes so we can use Zig's string parsing
+            std.debug.assert((try std.zig.string_literal.parseWrite(pathBuffer.writer(), pp.tokSliceSafe(macro.simple.tokens[0]))) == .success);
+            const expectedOutput = pathBuffer.items[start..];
+
+            comp.outputName = "a.o";
+            try CodeGen.generateTree(&comp, tree);
+            var child = std.ChildProcess.init(&.{ args[2], "run", "-lc", comp.outputName.? }, comp.gpa);
+            child.stdout_behavior = .Pipe;
+
+            try child.spawn();
+
+            const stdout = try child.stdout.?.reader().readAllAlloc(comp.gpa, std.math.maxInt(u16));
+            defer comp.gpa.free(stdout);
+
+            switch (try child.wait()) {
+                .Exited => |code| if (code != 0) {
+                    failCount += 1;
+                    continue;
+                },
+                else => {
+                    failCount += 1;
+                    continue;
+                },
+            }
+
+            if (!std.mem.eql(u8, expectedOutput, stdout)) {
+                failCount += 1;
+                progress.log(
+                    \\
+                    \\======= expected output =======
+                    \\{s}
+                    \\
+                    \\=== but output does not contain it ===
+                    \\{s}
+                    \\
+                    \\
+                , .{ expectedOutput, stdout });
+                break;
+            }
+
+            passCount += 1;
+            continue;
+        }
+
         if (comp.diag.errors != 0) failCount += 1 else passCount += 1;
     }
 

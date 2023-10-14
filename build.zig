@@ -15,8 +15,14 @@ pub fn build(b: *std.Build) void {
     // set a preferred release mode, allowing the user to decide how to optimize.
     const mode = b.standardOptimizeOption(.{});
 
-    const zccModule = b.addModule("zcc", .{ .source_file = .{ .path = "src/zcc.zig" } });
-    const depsModule = b.addModule("deps", .{ .source_file = .{ .path = "deps/lib.zig" } });
+    const depsModule = b.createModule(.{ .source_file = .{ .path = "deps/lib.zig" } });
+    const zccModule = b.addModule("zcc", .{
+        .source_file = .{ .path = "src/zcc.zig" },
+        .dependencies = &.{.{
+            .name = "deps",
+            .module = depsModule,
+        }},
+    });
 
     const exe = b.addExecutable(.{
         .name = "Zcc",
@@ -78,10 +84,10 @@ pub fn build(b: *std.Build) void {
         .root_source_file = .{ .path = "test/test_runner.zig" },
     });
     integration_tests.addModule("zcc", zccModule);
-    integration_tests.addModule("deps", depsModule);
 
     const integration_test_runner = b.addRunArtifact(integration_tests);
     integration_test_runner.addArg(b.pathFromRoot("test/cases"));
+    integration_test_runner.addArg(b.zig_exe);
 
     b.installArtifact(integration_tests);
     test_step.dependOn(&integration_test_runner.step);
