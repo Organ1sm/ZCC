@@ -580,13 +580,12 @@ pub fn eql(a: Type, b: Type, checkQualifiers: bool) bool {
 
     switch (a.specifier) {
         .Pointer,
-        .UnspecifiedVariableLenArray,
         .DecayedArray,
         .DecayedIncompleteArray,
         .DecayedVariableLenArray,
         .DecayedStaticArray,
         .DecayedUnspecifiedVariableLenArray,
-        => if (!a.data.subType.eql(b.data.subType.*, checkQualifiers)) return false,
+        => if (!a.getElemType().eql(b.getElemType(), checkQualifiers)) return false,
 
         .Func,
         .VarArgsFunc,
