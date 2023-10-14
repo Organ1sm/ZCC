@@ -1,4 +1,4 @@
-/* <stdbool.h> for the Aro C compiler */
+/* <stdbool.h> for the ZCC C compiler */
 
 #pragma once
 

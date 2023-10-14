@@ -1,4 +1,4 @@
-/* <stdarg.h> for the Aro C compiler */
+/* <stdarg.h> for the ZCC C compiler */
 
 #pragma once
 

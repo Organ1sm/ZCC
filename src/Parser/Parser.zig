@@ -3028,7 +3028,8 @@ pub fn macroExpr(p: *Parser) Compilation.Error!bool {
         try p.errToken(.expected_expr, p.index);
         return false;
     }
-    return res.getBool();
+    const value: bool = res.getBool();
+    return value;
 }
 
 /// expr : assignExpr (',' assignExpr)*
@@ -4329,8 +4330,8 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
 
         .One => {
             p.index += 1;
-            var res: Result = .{ .value = .{ .signed = 0 } };
-            res.node = try p.addNode(.{ .tag = .IntLiteral, .type = res.ty, .data = .{ .Int = 0 } });
+            var res: Result = .{ .value = .{ .signed = 1 } };
+            res.node = try p.addNode(.{ .tag = .IntLiteral, .type = res.ty, .data = .{ .Int = 1 } });
             return res;
         },
 

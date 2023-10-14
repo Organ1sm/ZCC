@@ -55,7 +55,7 @@ pub fn generateBuiltinMacros(comp: *Compilation) !Source {
     defer buf.deinit();
 
     try buf.appendSlice(
-        \\#define __VERSION__ "Aro 
+        \\#define __VERSION__ "Zcc 
     ++ @import("../Basic/Info.zig").VersionStr ++ "\"\n" ++
         \\#define __STDC__ 1
         \\#define __STDC_HOSTED__ 1

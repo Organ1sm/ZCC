@@ -68,8 +68,8 @@ const usage =
 fn handleArgs(comp: *Compilation, args: [][]const u8) !void {
     comp.defineSystemIncludes() catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
-        error.SelfExeNotFound => return comp.diag.fatalNoSrc("could not find Aro executable path", .{}),
-        error.ZccIncludeNotFound => return comp.diag.fatalNoSrc("could not find Aro builtin headers", .{}),
+        error.SelfExeNotFound => return comp.diag.fatalNoSrc("could not find ZCC executable path", .{}),
+        error.ZccIncludeNotFound => return comp.diag.fatalNoSrc("could not find ZCC builtin headers", .{}),
     };
 
     var sourceFiles = std.ArrayList(Source).init(comp.gpa);
