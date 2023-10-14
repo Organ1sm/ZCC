@@ -1,4 +1,4 @@
-/* <stddef.h> for the Aro C compiler */
+/* <stddef.h> for the ZCC C compiler */
 
 #pragma once
 
@@ -8,8 +8,8 @@ typedef __WCHAR_TYPE__ wchar_t;
 
 /* define max_align_t to match GCC and Clang */
 typedef struct {
-  long long __aro_max_align_ll;
-  long double __aro_max_align_ld;
+  long long __zcc_max_align_ll;
+  long double __zcc_max_align_ld;
 } max_align_t;
 
 #define NULL ((void*)0)
