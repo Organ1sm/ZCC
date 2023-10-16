@@ -45,7 +45,7 @@ const usage =
     \\  -h, --help      Print this message.
     \\  -v, --version   Print ZCC version.
     \\ 
-    \\Feature Options:
+    \\Compile Options:
     \\  -c                      Only run preprocess, compile, and assemble steps
     \\  -D <macro>=<value>      Define <macro> to <value> (defaults to 1)
     \\  -E                      Only run the preprocessor
@@ -55,6 +55,7 @@ const usage =
     \\  -isystem                Add directory to system include search path
     \\  -o <file>               Write output to <file>
     \\  -std=<standard>         Specify language standard
+    \\ --target=<value>         Generate code for the given target
     \\  -U <macro>              Undefine <macro>
     \\  -Wall                   Enable all warnings
     \\  -Werror                 Treat all warnings as errors
@@ -62,7 +63,8 @@ const usage =
     \\  -W<warning>             Enable the specified warning
     \\  -Wno-<warning>          Disable the specified warning
     \\
-    \\
+    \\Debug options:
+    \\  --dump-ast              Dump produced AST to stdout
 ;
 
 fn handleArgs(comp: *Compilation, args: [][]const u8) !void {
@@ -175,6 +177,13 @@ fn handleArgs(comp: *Compilation, args: [][]const u8) !void {
             } else if (std.mem.startsWith(u8, arg, "-std=")) {
                 const standard = arg["-std=".len..];
                 comp.langOpts.setStandard(standard) catch return comp.diag.fatalNoSrc("Invalid standard '{s}'", .{standard});
+            } else if (std.mem.startsWith(u8, arg, "--target=")) {
+                const triple = arg["--target=".len..];
+                const cross = std.zig.CrossTarget.parse(.{ .arch_os_abi = triple }) catch
+                    return comp.diag.fatalNoSrc("Invalid target '{s}'", .{triple});
+                comp.target = cross.toTarget(); // TODO deprecated
+            } else if (std.mem.eql(u8, arg, "--dump-ast")) {
+                comp.dumpAst = true;
             } else {
                 try stdOut.print(usage, .{args[0]});
                 return std.debug.print("unknown command: {s}", .{arg});
@@ -249,15 +258,46 @@ fn processSource(comp: *Compilation, source: Source, builtinMacro: Source, userD
     var tree = try Parser.parse(&pp);
     defer tree.deinit();
 
+    if (comp.dumpAst) {
+        var buffWriter = std.io.bufferedWriter(std.io.getStdOut().writer());
+        tree.dump(buffWriter.writer()) catch {};
+        buffWriter.flush() catch {};
+    }
+
     const prevErrors = comp.diag.errors;
     comp.renderErrors();
 
-    if (comp.onlyCompile) {
-        if (comp.diag.errors == prevErrors)
-            try Codegen.generateTree(comp, tree);
-    } else {
-        tree.dump(std.io.getStdOut().writer()) catch {};
+    // do not compile if there were errors
+    if (comp.diag.errors != prevErrors)
+        return;
+
+    if (comp.target.ofmt != .elf or comp.target.cpu.arch != .x86_64) {
+        return comp.diag.fatalNoSrc(
+            "unsupported target {s}-{s}-{s}, currently only x86-64 elf is supported",
+            .{ @tagName(comp.target.cpu.arch), @tagName(comp.target.os.tag), @tagName(comp.target.abi) },
+        );
     }
+
+    const obj = try Codegen.generateTree(comp, tree);
+    defer obj.deinit();
+
+    const basename = std.fs.path.basename(source.path);
+    const outFileName = comp.outputName orelse try std.fmt.allocPrint(comp.gpa, "{s}{s}", .{
+        basename[0 .. basename.len - std.fs.path.extension(source.path).len],
+        comp.target.ofmt.fileExt(comp.target.cpu.arch),
+    });
+    defer if (comp.outputName == null) comp.gpa.free(outFileName);
+
+    const outFile = std.fs.cwd().createFile(outFileName, .{}) catch |err|
+        return comp.diag.fatalNoSrc("could not create output file '{s}': {s}", .{ outFileName, @errorName(err) });
+    defer outFile.close();
+
+    obj.finish(outFile) catch |err|
+        return comp.diag.fatalNoSrc("could output to object file '{s}': {s}", .{ outFileName, @errorName(err) });
+
+    if (comp.onlyCompile) return;
+
+    // TODO invoke linker
 }
 
 test "simple test" {
