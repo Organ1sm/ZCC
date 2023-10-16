@@ -65,6 +65,8 @@ const usage =
     \\
     \\Debug options:
     \\  --dump-ast              Dump produced AST to stdout
+    \\
+    \\
 ;
 
 fn handleArgs(comp: *Compilation, args: [][]const u8) !void {

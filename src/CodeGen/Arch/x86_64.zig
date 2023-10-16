@@ -216,7 +216,7 @@ fn genCall(func: *Fn, lhs: Tree.NodeIndex, args: []const Tree.NodeIndex) Codegen
         .register => return func.c.comp.diag.fatalNoSrc("TODO call reg\n", .{}),
     }
 
-    return Value{ .none = {} };
+    return Value{ .register = x86_64.CABIIntReturnRegs[0] };
 }
 
 pub fn genVar(c: *Codegen, decl: Tree.NodeIndex) Codegen.Error!void {
