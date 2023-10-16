@@ -24,6 +24,7 @@ builtinHeaderPath: ?[]u8 = null,
 target: std.Target = builtin.target,
 onlyPreprocess: bool = false,
 onlyCompile: bool = false,
+dumpAst: bool = false,
 langOpts: LangOpts = .{},
 
 pub fn init(gpa: Allocator) Compilation {
