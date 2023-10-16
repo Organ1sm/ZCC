@@ -127,17 +127,10 @@ pub fn declareSymbol(
         .Weak => std.elf.STB_WEAK,
         .LinkOnce => unreachable,
     };
-    const sym_type: u8 = switch (@"type") {
+    const symType: u8 = switch (@"type") {
         .func => std.elf.STT_FUNC,
         .variable => std.elf.STT_OBJECT,
         .external => std.elf.STT_NOTYPE,
-    };
-    const sym = try elf.arena.allocator().create(Symbol);
-    sym.* = .{
-        .section = section,
-        .size = size,
-        .offset = offset,
-        .info = (binding << 4) + sym_type,
     };
 
     const name = if (maybeName) |some| some else blk: {
@@ -145,11 +138,22 @@ pub fn declareSymbol(
         break :blk try std.fmt.allocPrint(elf.arena.allocator(), ".L.{d}", .{elf.unnamedSymbolMangle});
     };
 
-    elf.stringTabLen += name.len + 1; // +1 for null byte
-    if (linkage == .Internal)
-        try elf.localSymbols.put(elf.arena.child_allocator, name, sym)
+    const gop = if (linkage == .Internal)
+        try elf.localSymbols.getOrPut(elf.arena.child_allocator, name)
     else
-        try elf.globalSymbols.put(elf.arena.child_allocator, name, sym);
+        try elf.globalSymbols.getOrPut(elf.arena.child_allocator, name);
+
+    if (!gop.found_existing) {
+        gop.value_ptr.* = try elf.arena.allocator().create(Symbol);
+        elf.stringTabLen += name.len + 1; // +1 for null byte
+    }
+
+    gop.value_ptr.*.* = .{
+        .section = section,
+        .size = size,
+        .offset = offset,
+        .info = (binding << 4) + symType,
+    };
 
     return name;
 }

@@ -81,6 +81,14 @@ pub fn main() !void {
         break :blk source;
     };
 
+    // apparently we can't use setAstCwd without libc on windows yet
+    const win = @import("builtin").os.tag == .windows;
+    var tmpDir = if (!win) std.testing.tmpDir(.{});
+    defer if (!win) tmpDir.cleanup();
+
+    if (!win)
+        try tmpDir.dir.setAsCwd();
+
     // iterate over all cases
     var passCount: u32 = 0;
     var failCount: u32 = 0;
@@ -326,9 +334,17 @@ pub fn main() !void {
             std.debug.assert((try std.zig.string_literal.parseWrite(pathBuffer.writer(), pp.tokSliceSafe(macro.simple.tokens[0]))) == .success);
             const expectedOutput = pathBuffer.items[start..];
 
-            comp.outputName = "a.o";
-            try CodeGen.generateTree(&comp, tree);
-            var child = std.ChildProcess.init(&.{ args[2], "run", "-lc", comp.outputName.? }, comp.gpa);
+            const objName = "testObject.o";
+            {
+                const obj = try CodeGen.generateTree(&comp, tree);
+                defer obj.deinit();
+
+                const outFile = try std.fs.cwd().createFile(objName, .{});
+                defer outFile.close();
+
+                try obj.finish(outFile);
+            }
+            var child = std.ChildProcess.init(&.{ args[2], "run", "-lc", objName }, comp.gpa);
             child.stdout_behavior = .Pipe;
 
             try child.spawn();
