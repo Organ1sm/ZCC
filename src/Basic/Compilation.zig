@@ -1,3 +1,5 @@
+/// Compilation holds onto the entire state of the Program
+/// and declared symbols as well and house all compiler operation
 const std = @import("std");
 const builtin = @import("builtin");
 const Source = @import("Source.zig");
@@ -142,6 +144,22 @@ fn generateTypeMacro(w: anytype, name: []const u8, ty: Type) !void {
     try w.writeByte('\n');
 }
 
+/// Define the system header file include directories for Zcc
+///
+/// This function will search the directory containing the executable,
+/// and recursively go upwards to find a directory containing stddef.h
+/// in an `include` directory. This will be set as the builtin header
+/// include path.
+///
+/// The default '/usr/include' path will also be added in Linux. All found system
+/// header include directories will be appended to `comp.systemIncludeDirs`.
+///
+/// Params:
+/// - comp: The compilation global state
+///
+/// Errors:
+/// - SelfExeNotFound: Failed to obtain self executable path
+/// - ZccIncludeNotFound: Did not find system include directory
 pub fn defineSystemIncludes(comp: *Compilation) !void {
     var buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
     var searchPath: []const u8 = std.fs.selfExePath(&buf) catch return error.SelfExeNotFound;
@@ -164,6 +182,26 @@ pub fn getSource(comp: *Compilation, id: Source.ID) Source {
     return comp.sources.values()[@intFromEnum(id) - 2];
 }
 
+/// Add a source file to the compilation.
+///
+/// This will read the given file path and add it as a Source object
+/// to the compilation. The contents are loaded into the allocator.
+///
+/// The path string is duplicated. The Source is added to the compilation
+/// sources map, keyed by the path.
+///
+/// If the source already exists, it will be returned immediately.
+///
+/// Params:
+///     compilation: The Compilation instance
+///     path: The file path to add
+///
+/// Returns: The Source object added
+///
+/// Errors:
+///     FileOpenError: If the file failed to open
+///     FileReadError: If reading the file contents failed
+///     OutOfMemory: If allocation failed
 pub fn addSource(compilation: *Compilation, path: []const u8) !Source {
     if (compilation.sources.get(path)) |some| return some;
 
@@ -235,7 +273,7 @@ pub fn findInclude(comp: *Compilation, token: Token, filename: []const u8, searc
 
 pub fn fatal(comp: *Compilation, token: Token, comptime fmt: []const u8, args: anytype) Error {
     const source = comp.getSource(token.source);
-    const lcs = source.lineColString(token.start);
+    const lcs = source.getLineColString(token.start);
 
     return comp.diag.fatal(source.path, lcs, fmt, args);
 }

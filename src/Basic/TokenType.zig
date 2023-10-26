@@ -3,6 +3,7 @@ pub const TokenType = enum(u8) {
     NewLine,
     Eof,
 
+    /// identifier containing solely basic charac set characters
     Identifier,
 
     // string literals with prefixes
