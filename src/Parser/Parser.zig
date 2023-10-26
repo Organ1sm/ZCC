@@ -1110,7 +1110,7 @@ fn parseTypeSpec(p: *Parser, ty: *TypeBuilder) Error!bool {
 fn getAnonymousName(p: *Parser, kindToken: TokenIndex) ![]const u8 {
     const loc = p.pp.tokens.items(.loc)[kindToken];
     const source = p.pp.compilation.getSource(loc.id);
-    const lcs = source.lineColString(loc.byteOffset);
+    const lcs = source.getLineColString(loc.byteOffset);
 
     const kindStr = switch (p.tokenIds[kindToken]) {
         .KeywordStruct,

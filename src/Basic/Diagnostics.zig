@@ -453,7 +453,7 @@ pub fn renderExtra(comp: *Compilation, m: anytype) void {
         if (msg.loc.id != .unused) {
             const loc = if (msg.loc.next != null) msg.loc.next.?.* else msg.loc;
             const source = comp.getSource(loc.id);
-            lcs = source.lineColString(loc.byteOffset);
+            lcs = source.getLineColString(loc.byteOffset);
 
             switch (msg.tag) {
                 .escape_sequence_overflow,
@@ -692,7 +692,7 @@ pub fn renderExtra(comp: *Compilation, m: anytype) void {
                     break;
 
                 const source = comp.getSource(loc.id);
-                const endLcs = source.lineColString(loc.byteOffset);
+                const endLcs = source.getLineColString(loc.byteOffset);
 
                 m.location(source.path, endLcs);
                 m.start(.note);

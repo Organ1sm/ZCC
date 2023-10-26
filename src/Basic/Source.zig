@@ -1,5 +1,9 @@
+/// Source represents a source code file added to the compilation.
+/// Contains the file path, contents buffer, and an ID.
 const Source = @This();
 
+/// Location tracks a specific position within a Source.
+/// Has byte offset, line/column info, and next pointer.
 pub const Location = struct {
     id: ID = .unused,
     byteOffset: u32 = 0,
@@ -16,9 +20,12 @@ path: []const u8,
 buffer: []const u8,
 id: ID,
 
+/// LCS bundles line, column, and line string data.
 pub const LCS = struct { line: u32, col: u32, str: []const u8 };
 
-pub fn lineColString(source: Source, byteOffset: u32) LCS {
+/// calculates line number, column, and line string
+/// for a byte offset into the Source.
+pub fn getLineColString(source: Source, byteOffset: u32) LCS {
     var line: u32 = 1;
     var col: u32 = 1;
 
