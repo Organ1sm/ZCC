@@ -62,13 +62,15 @@ pub fn generateBuiltinMacros(comp: *Compilation) !Source {
     ++ @import("../Basic/Info.zig").VersionStr ++ "\"\n" ++
         \\#define __STDC__ 1
         \\#define __STDC_HOSTED__ 1
-        \\#define __STDC_VERSION__ 201710L
         \\#define __STDC_NO_ATOMICS__ 1
         \\#define __STDC_NO_COMPLEX__ 1
         \\#define __STDC_NO_THREADS__ 1
         \\#define __STDC_NO_VLA__ 1
         \\
     );
+
+    if (comp.langOpts.standard.StdCVersionMacro()) |stdcVersion| 
+        try buf.writer().print("define __STDC_VERSION__ {s}\n", .{stdcVersion})
 
     switch (comp.target.os.tag) {
         .linux => try buf.appendSlice(
