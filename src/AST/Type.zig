@@ -302,9 +302,9 @@ pub fn isVoidStar(ty: Type) bool {
     };
 }
 
-pub fn isUnsignedInt(ty: Type, comp: *Compilation) bool {
-    _ = comp;
+pub fn isUnsignedInt(ty: Type, comp: *const Compilation) bool {
     return switch (ty.specifier) {
+        .Char => return getCharSignedness(comp) == .unsigned,
         .UChar, .UShort, .UInt, .ULong, .ULongLong => return true,
         else => false,
     };
@@ -383,20 +383,44 @@ pub fn integerPromotion(ty: Type, comp: *Compilation) Type {
 }
 
 pub fn wideChar(comp: *Compilation) Type {
-    _ = comp;
-    return .{ .specifier = .Int };
+    const os = comp.target.os.tag;
+    return switch (comp.target.cpu.arch) {
+        .xcore => .{ .specifier = .UChar },
+        .ve => .{ .specifier = .UInt },
+
+        .arm, .armeb, .thumb, .thumbeb => .{
+            .specifier = if (os != .windows and os != .netbsd and os != .openbsd) .UInt else .Int,
+        },
+
+        .aarch64, .aarch64_be, .aarch64_32 => .{
+            .specifier = if (!os.isDarwin() and os != .netbsd) .UInt else .Int,
+        },
+
+        .x86_64, .x86 => .{ .specifier = if (os == .windows) .UShort else .Int },
+        else => .{ .specifier = .Int },
+    };
 }
 
 pub fn ptrDiffT(comp: *Compilation) Type {
-    _ = comp;
-    // TODO get target from compilation
-    return .{ .specifier = .Long };
+    if (comp.target.os.tag == .windows and comp.target.ptrBitWidth() == 64)
+        return .{ .specifier = .LongLong };
+
+    return switch (comp.target.ptrBitWidth()) {
+        32 => .{ .specifier = .Int },
+        64 => .{ .specifier = .Long },
+        else => unreachable,
+    };
 }
 
 pub fn sizeT(comp: *Compilation) Type {
-    _ = comp;
-    // TODO get target from compilation
-    return .{ .specifier = .ULong };
+    if (comp.target.os.tag == .windows and comp.target.ptrBitWidth() == 64)
+        return .{ .specifier = .ULongLong };
+
+    return switch (comp.target.ptrBitWidth()) {
+        32 => .{ .specifier = .UInt },
+        64 => .{ .specifier = .ULong },
+        else => unreachable,
+    };
 }
 
 pub fn hasIncompleteSize(ty: Type) bool {
@@ -456,8 +480,41 @@ pub fn getField(ty: Type, name: []const u8) ?FieldAndIndex {
     return null;
 }
 
+pub fn maxInt(ty: Type, comp: *const Compilation) u64 {
+    std.debug.assert(ty.isInt());
+    return switch (ty.sizeof(comp).?) {
+        1 => if (ty.isUnsignedInt(comp)) @as(u64, std.math.maxInt(u8)) else std.math.maxInt(i8),
+        2 => if (ty.isUnsignedInt(comp)) @as(u64, std.math.maxInt(u16)) else std.math.maxInt(i16),
+        4 => if (ty.isUnsignedInt(comp)) @as(u64, std.math.maxInt(u32)) else std.math.maxInt(i32),
+        8 => if (ty.isUnsignedInt(comp)) @as(u64, std.math.maxInt(u64)) else std.math.maxInt(i64),
+        else => unreachable,
+    };
+}
+
+pub fn getCharSignedness(comp: *const Compilation) std.builtin.Signedness {
+    switch (comp.target.cpu.arch) {
+        .aarch64,
+        .aarch64_32,
+        .aarch64_be,
+        .arm,
+        .armeb,
+        .thumb,
+        .thumbeb,
+        => return if (comp.target.os.tag.isDarwin() or comp.target.os.tag == .windows) .signed else .unsigned,
+
+        .powerpc, .powerpc64 => return if (comp.target.os.tag.isDarwin()) .signed else .unsigned,
+        .powerpc64le,
+        .s390x,
+        .xcore,
+        .arc,
+        => return .unsigned,
+
+        else => return .signed,
+    }
+}
+
 /// Size of type as reported by sizeof
-pub fn sizeof(ty: Type, comp: *Compilation) ?u64 {
+pub fn sizeof(ty: Type, comp: *const Compilation) ?u64 {
     // TODO get target from compilation
     return switch (ty.specifier) {
         .VariableLenArray,

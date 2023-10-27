@@ -53,6 +53,9 @@ pub fn deinit(compilation: *Compilation) void {
     if (compilation.builtinHeaderPath) |some| compilation.gpa.free(some);
 }
 
+/// Dec 31 9999 23:59:59
+const MaxTimestamp = 253402300799;
+
 fn generateDateAndTime(w: anytype) !void {
     const timestamp = std.math.clamp(std.time.timestamp(), 0, std.math.maxInt(i64));
     const epochSeconds = EpochSeconds{ .secs = @as(u64, @intCast(timestamp)) };
@@ -255,20 +258,21 @@ pub fn generateBuiltinMacros(comp: *Compilation) !Source {
         else => {},
     };
 
+    try w.writeAll(
+        \\#define __ORDER_LITTLE_ENDIAN__ 1234
+        \\#define __ORDER_BIG_ENDIAN__ 4321
+        \\#define __ORDER_PDP_ENDIAN__ 3412
+        \\
+    );
+
     if (comp.target.cpu.arch.endian() == .Little)
         try w.writeAll(
-            \\#define __ORDER_LITTLE_ENDIAN__ 1234
-            \\#define __ORDER_BIG_ENDIAN__ 4321
-            \\#define __ORDER_PDP_ENDIAN__ 3412
             \\#define __BYTE_ORDER__ __ORDER_LITTLE_ENDIAN__
             \\#define __LITTLE_ENDIAN__ 1
             \\
         )
     else
         try w.writeAll(
-            \\#define __ORDER_LITTLE_ENDIAN__ 1234
-            \\#define __ORDER_BIG_ENDIAN__ 4321
-            \\#define __ORDER_PDP_ENDIAN__ 3412
             \\#define __BYTE_ORDER__ __ORDER_BIG_ENDIAN__;
             \\#define __BIG_ENDIAN__ 1
             \\
@@ -278,7 +282,40 @@ pub fn generateBuiltinMacros(comp: *Compilation) !Source {
     try generateDateAndTime(w);
 
     //types
+    if (Type.getCharSignedness(comp) == .unsigned)
+        try w.writeAll("#define __CHAR_UNSIGNED__ 1\n");
     try w.writeAll("#define __CHAR_BIT__ 8\n");
+
+    // int maxs
+    try comp.generateIntMax(w, "__SCHAR_MAX__", .{ .specifier = .SChar });
+    try comp.generateIntMax(w, "__SHRT_MAX__", .{ .specifier = .Short });
+    try comp.generateIntMax(w, "__INT_MAX__", .{ .specifier = .Int });
+    try comp.generateIntMax(w, "__LONG_MAX__", .{ .specifier = .Long });
+    try comp.generateIntMax(w, "__LONG_LONG_MAX__", .{ .specifier = .LongLong });
+    try comp.generateIntMax(w, "__WCHAR_MAX__", Type.wideChar(comp));
+    // try comp.generateIntMax(w, "__WINT_MAX__", Type.wideChar(comp));
+    // try comp.generateIntMax(w, "__INTMAX_MAX__", Type.wideChar(comp));
+    try comp.generateIntMax(w, "__SIZE_MAX__", Type.sizeT(comp));
+    // try comp.generateIntMax(w, "__UINTMAX_MAX__", Type.wideChar(comp));
+    try comp.generateIntMax(w, "__PTRDIFF_MAX__", Type.ptrDiffT(comp));
+    // try comp.generateIntMax(w, "__INTPTR_MAX__", Type.wideChar(comp));
+    // try comp.generateIntMax(w, "__UINTPTR_MAX__", Type.sizeT(comp));
+
+    // sizeof types
+    try comp.generateSizeofType(w, "__SIZEOF_FLOAT__", .{ .specifier = .Float });
+    try comp.generateSizeofType(w, "__SIZEOF_DOUBLE__", .{ .specifier = .Double });
+    try comp.generateSizeofType(w, "__SIZEOF_LONG_DOUBLE__", .{ .specifier = .LongDouble });
+    try comp.generateSizeofType(w, "__SIZEOF_SHORT__", .{ .specifier = .Short });
+    try comp.generateSizeofType(w, "__SIZEOF_INT__", .{ .specifier = .Int });
+    try comp.generateSizeofType(w, "__SIZEOF_LONG__", .{ .specifier = .Long });
+    try comp.generateSizeofType(w, "__SIZEOF_LONG_LONG__", .{ .specifier = .LongLong });
+    try comp.generateSizeofType(w, "__SIZEOF_POINTER__", .{ .specifier = .Pointer });
+    try comp.generateSizeofType(w, "__SIZEOF_PTRDIFF_T__", Type.ptrDiffT(comp));
+    try comp.generateSizeofType(w, "__SIZEOF_SIZE_T__", Type.sizeT(comp));
+    try comp.generateSizeofType(w, "__SIZEOF_WCHAR_T__", Type.wideChar(comp));
+    // try comp.generateSizeofType(w, "__SIZEOF_WINT_T__", .{ .specifier = .Pointer });
+
+    // various int types
     try generateTypeMacro(w, "__PTRDIFF_TYPE__", Type.ptrDiffT(comp));
     try generateTypeMacro(w, "__SIZE_TYPE__", Type.sizeT(comp));
     try generateTypeMacro(w, "__WCHAR_TYPE__", Type.wideChar(comp));
@@ -302,6 +339,20 @@ fn generateTypeMacro(w: anytype, name: []const u8, ty: Type) !void {
     try w.print("#define {s} ", .{name});
     try ty.print(w);
     try w.writeByte('\n');
+}
+
+fn generateIntMax(comp: *Compilation, w: anytype, name: []const u8, ty: Type) !void {
+    const bitCount = @as(u8, @intCast(ty.sizeof(comp).? * 8));
+    const unsigned = ty.isUnsignedInt(comp);
+    const max = if (bitCount == 128)
+        @as(u128, if (unsigned) std.math.maxInt(u128) else std.math.maxInt(i128))
+    else
+        ty.maxInt(comp);
+    try w.print("#define {s} {d}\n", .{ name, max });
+}
+
+fn generateSizeofType(comp: *Compilation, w: anytype, name: []const u8, ty: Type) !void {
+    try w.print("#define {s} {d}\n", .{ name, ty.sizeof(comp).? });
 }
 
 /// Define the system header file include directories for Zcc
