@@ -64,7 +64,6 @@ pub fn main() !void {
 
     try comp.defineSystemIncludes();
 
-    const builtinMacros = try comp.generateBuiltinMacros();
     const testRunnerMacros = blk: {
         const dupedPath = try gpa.dupe(u8, "<test_runner>");
         errdefer comp.gpa.free(dupedPath);
@@ -114,6 +113,13 @@ pub fn main() !void {
             if (it.next()) |standard| {
                 try comp.langOpts.setStandard(standard);
             }
+        }
+
+        const builtinMacros = try comp.generateBuiltinMacros();
+        defer {
+            _ = comp.sources.swapRemove(builtinMacros.path);
+            gpa.free(builtinMacros.path);
+            gpa.free(builtinMacros.buffer);
         }
 
         const case = std.mem.sliceTo(std.fs.path.basename(path), '.');

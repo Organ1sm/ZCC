@@ -153,18 +153,18 @@ pub fn generateBuiltinMacros(comp: *Compilation) !Source {
     try generateTypeMacro(w, "__SIZE_TYPE__", Type.sizeT(comp));
     try generateTypeMacro(w, "__WCHAR_TYPE__", Type.wideChar(comp));
 
-    const duped_path = try comp.gpa.dupe(u8, "<builtin>");
-    errdefer comp.gpa.free(duped_path);
+    const dupedPath = try comp.gpa.dupe(u8, "<builtin>");
+    errdefer comp.gpa.free(dupedPath);
 
     const contents = try buf.toOwnedSlice();
     errdefer comp.gpa.free(contents);
 
     const source = Source{
         .id = @as(Source.ID, @enumFromInt(comp.sources.count() + 2)),
-        .path = duped_path,
+        .path = dupedPath,
         .buffer = contents,
     };
-    try comp.sources.put(duped_path, source);
+    try comp.sources.put(dupedPath, source);
     return source;
 }
 
