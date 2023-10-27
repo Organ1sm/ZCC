@@ -9,6 +9,7 @@ const LangOpts = @import("LangOpts.zig");
 const Type = @import("../AST/Type.zig");
 
 const Allocator = std.mem.Allocator;
+const EpochSeconds = std.time.epoch.EpochSeconds;
 
 const Compilation = @This();
 pub const Error = error{
@@ -52,6 +53,31 @@ pub fn deinit(compilation: *Compilation) void {
     if (compilation.builtinHeaderPath) |some| compilation.gpa.free(some);
 }
 
+fn generateDateAndTime(w: anytype) !void {
+    const timestamp = std.math.clamp(std.time.timestamp(), 0, std.math.maxInt(i64));
+    const epochSeconds = EpochSeconds{ .secs = @as(u64, @intCast(timestamp)) };
+    const epochDay = epochSeconds.getEpochDay();
+    const daySeconds = epochSeconds.getDaySeconds();
+    const yearDay = epochDay.calculateYearDay();
+
+    const monthDay = yearDay.calculateMonthDay();
+
+    const MonthNames = [_][]const u8{ "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
+    std.debug.assert(std.time.epoch.Month.jan.numeric() == 1);
+
+    const monthName = MonthNames[monthDay.month.numeric() - 1];
+    try w.print("#define __DATE__ \"{s} {d: >2} {d}\"\n", .{
+        monthName,
+        monthDay.day_index + 1,
+        yearDay.year,
+    });
+    try w.print("#define __TIME__ \"{d:0>2}:{d:0>2}:{d:0>2}\"\n", .{
+        daySeconds.getHoursIntoDay(),
+        daySeconds.getMinutesIntoHour(),
+        daySeconds.getSecondsIntoMinute(),
+    });
+}
+
 /// Generate builtin macros that will be available to each source file.
 pub fn generateBuiltinMacros(comp: *Compilation) !Source {
     var buf = std.ArrayList(u8).init(comp.gpa);
@@ -69,8 +95,10 @@ pub fn generateBuiltinMacros(comp: *Compilation) !Source {
         \\
     );
 
-    if (comp.langOpts.standard.StdCVersionMacro()) |stdcVersion| 
-        try buf.writer().print("define __STDC_VERSION__ {s}\n", .{stdcVersion})
+    try generateDateAndTime(buf.writer());
+
+    if (comp.langOpts.standard.StdCVersionMacro()) |stdcVersion|
+        try buf.writer().print("#define __STDC_VERSION__ {s}\n", .{stdcVersion});
 
     switch (comp.target.os.tag) {
         .linux => try buf.appendSlice(
