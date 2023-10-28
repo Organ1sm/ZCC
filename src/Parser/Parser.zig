@@ -212,7 +212,7 @@ fn addList(p: *Parser, nodes: []const NodeIndex) Allocator.Error!AST.Range {
     return AST.Range{ .start = start, .end = end };
 }
 
-fn findTypedef(p: *Parser, nameToken: TokenIndex) !?Scope.Symbol {
+fn findTypedef(p: *Parser, nameToken: TokenIndex, notTypeYet: bool) !?Scope.Symbol {
     const name = p.tokSlice(nameToken);
     var i = p.scopes.items.len;
     while (i > 0) {
@@ -224,14 +224,20 @@ fn findTypedef(p: *Parser, nameToken: TokenIndex) !?Scope.Symbol {
             },
 
             .@"struct" => |s| if (std.mem.eql(u8, s.name, name)) {
+                if (notTypeYet)
+                    return null;
                 try p.errStr(.must_use_struct, nameToken, name);
                 return s;
             },
             .@"union" => |u| if (std.mem.eql(u8, u.name, name)) {
+                if (notTypeYet)
+                    return null;
                 try p.errStr(.must_use_union, nameToken, name);
                 return u;
             },
             .@"enum" => |e| if (std.mem.eql(u8, e.name, name)) {
+                if (notTypeYet)
+                    return null;
                 try p.errStr(.must_use_enum, nameToken, name);
                 return e;
             },
@@ -1084,7 +1090,7 @@ fn parseTypeSpec(p: *Parser, ty: *TypeBuilder) Error!bool {
             },
 
             .Identifier => {
-                const typedef = (try p.findTypedef(p.index)) orelse break;
+                const typedef = (try p.findTypedef(p.index, ty.specifier != .None)) orelse break;
                 const newSpec = TypeBuilder.fromType(typedef.type);
 
                 const errStart = p.pp.compilation.diag.list.items.len;
