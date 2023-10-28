@@ -923,14 +923,14 @@ fn getArgSlice(args: []const Token, index: u32) []const Token {
             else => if (parens != 0) continue,
         }
 
-        if (args[i].id == .Comma) {
+        if (parens == 0 and args[i].id == .Comma) {
             if (index == 0) return args[0..i];
             commasSeen += 1;
             continue;
         }
 
         if (commasSeen == index) for (args[i..], 0..) |a_2, j| {
-            if (a_2.id == .Comma) {
+            if (parens == 0 and a_2.id == .Comma) {
                 return args[i..][0..j];
             }
         } else return args[i..];
@@ -951,7 +951,7 @@ fn getVarArgSlice(args: []const Token, index: usize) []const Token {
             .RParen => parens -= 1,
             else => if (parens != 0) continue,
         }
-        if (args[i].id == .Comma) commasSeen += 1;
+        if (parens == 0 and args[i].id == .Comma) commasSeen += 1;
         if (commasSeen == index) return args[i + 1 ..];
     }
     return args[i..];
