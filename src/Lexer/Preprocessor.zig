@@ -214,7 +214,7 @@ pub fn preprocess(pp: *Preprocessor, source: Source) Error!void {
                         }
 
                         var slice = lexer.buffer[start..lexer.index];
-                        slice = std.mem.trim(u8, slice, " \t\x0B\x0C");
+                        slice = std.mem.trim(u8, slice, " \r\t\x0B\x0C");
 
                         if (std.mem.eql(u8, slice, "once")) {
                             const prev = try pp.pragmaOnce.fetchPut(lexer.source, {});
