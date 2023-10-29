@@ -813,10 +813,10 @@ fn typeof(p: *Parser) Error!?Type {
     try typeofExpr.expect(p);
     try p.expectClosing(lp, .RParen);
 
-    const inner = try p.arena.create(Type.VLA);
+    const inner = try p.arena.create(Type.Expr);
     inner.* = .{
-        .expr = typeofExpr.node,
-        .elem = .{
+        .node= typeofExpr.node,
+        .ty = .{
             .data = typeofExpr.ty.data,
             .qual = typeofExpr.ty.qual, // todo: exclude register qualifier
             .specifier = typeofExpr.ty.specifier,
@@ -824,7 +824,7 @@ fn typeof(p: *Parser) Error!?Type {
     };
 
     return Type{
-        .data = .{ .vla = inner },
+        .data = .{ .expr = inner },
         .specifier = .TypeofExpr,
     };
 }
@@ -1666,10 +1666,10 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: Declarator
                 if (p.returnType == null and kind != .param)
                     try p.errToken(.variable_len_array_file_scope, lb);
 
-                const vlaType = try p.arena.create(Type.VLA);
-                vlaType.elem = .{ .specifier = .Void };
-                vlaType.expr = size.node;
-                resType.data = .{ .vla = vlaType };
+                const exprType = try p.arena.create(Type.Expr);
+                exprType.ty = .{ .specifier = .Void };
+                exprType.node = size.node;
+                resType.data = .{ .expr = exprType };
                 resType.specifier = .VariableLenArray;
 
                 if (static) |some|

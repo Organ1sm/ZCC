@@ -13,7 +13,7 @@ data: union {
     subType: *Type,
     func: *Function,
     array: *Array,
-    vla: *VLA,
+    expr: *Expr,
     @"enum": *Enum,
     record: *Record,
     none: void,
@@ -108,9 +108,9 @@ pub const Array = struct {
     elem: Type,
 };
 
-pub const VLA = struct {
-    expr: NodeIndex,
-    elem: Type,
+pub const Expr = struct {
+    node: NodeIndex,
+    ty: Type,
 };
 
 pub const Enum = struct {
@@ -208,6 +208,7 @@ pub const Specifier = enum {
     DecayedStaticArray,
     IncompleteArray,
     DecayedIncompleteArray,
+    // data.expr
     VariableLenArray,
     DecayedVariableLenArray,
 
@@ -235,7 +236,7 @@ pub fn is(ty: Type, specifier: Specifier) bool {
     std.debug.assert(specifier != .TypeofExpr and specifier != .TypeofType);
     return switch (ty.specifier) {
         .TypeofType => ty.data.subType.is(specifier),
-        .TypeofExpr => ty.data.vla.elem.is(specifier),
+        .TypeofExpr => ty.data.expr.ty.is(specifier),
         else => ty.specifier == specifier,
     };
 }
@@ -245,7 +246,7 @@ pub fn isCallable(ty: Type) ?Type {
         .Func, .VarArgsFunc, .OldStyleFunc => ty,
         .Pointer => if (ty.data.subType.isFunc()) ty.data.subType.* else null,
         .TypeofType => ty.data.subType.isCallable(),
-        .TypeofExpr => ty.data.vla.elem.isCallable(),
+        .TypeofExpr => ty.data.expr.ty.isCallable(),
         else => null,
     };
 }
@@ -254,7 +255,7 @@ pub fn isFunc(ty: Type) bool {
     return switch (ty.specifier) {
         .Func, .VarArgsFunc, .OldStyleFunc => true,
         .TypeofType => ty.data.subType.isFunc(),
-        .TypeofExpr => ty.data.vla.elem.isFunc(),
+        .TypeofExpr => ty.data.expr.ty.isFunc(),
         else => false,
     };
 }
@@ -272,7 +273,7 @@ pub fn isPointer(ty: Type) bool {
         => true,
 
         .TypeofType => ty.data.subType.isPointer(),
-        .TypeofExpr => ty.data.vla.elem.isPointer(),
+        .TypeofExpr => ty.data.expr.ty.isPointer(),
 
         else => false,
     };
@@ -282,7 +283,7 @@ pub fn isArray(ty: Type) bool {
     return switch (ty.specifier) {
         .Array, .StaticArray, .IncompleteArray, .VariableLenArray, .UnspecifiedVariableLenArray => true,
         .TypeofType => ty.data.subType.isArray(),
-        .TypeofExpr => ty.data.vla.elem.isArray(),
+        .TypeofExpr => ty.data.expr.ty.isArray(),
         else => false,
     };
 }
@@ -305,7 +306,7 @@ pub fn isInt(ty: Type) bool {
         => true,
 
         .TypeofType => ty.data.subType.isInt(),
-        .TypeofExpr => ty.data.vla.elem.isInt(),
+        .TypeofExpr => ty.data.expr.ty.isInt(),
 
         else => false,
     };
@@ -322,7 +323,7 @@ pub fn isFloat(ty: Type) bool {
         => true,
 
         .TypeofType => ty.data.subType.isFloat(),
-        .TypeofExpr => ty.data.vla.elem.isFloat(),
+        .TypeofExpr => ty.data.expr.ty.isFloat(),
 
         else => false,
     };
@@ -333,7 +334,7 @@ pub fn isReal(ty: Type) bool {
         .ComplexFloat, .ComplexDouble, .ComplexLongDouble => false,
 
         .TypeofType => ty.data.subType.isReal(),
-        .TypeofExpr => ty.data.vla.elem.isReal(),
+        .TypeofExpr => ty.data.expr.ty.isReal(),
 
         else => true,
     };
@@ -349,7 +350,7 @@ fn isTypeof(ty: Type) bool {
 pub fn isConst(ty: Type) bool {
     return switch (ty.specifier) {
         .TypeofType, .DecayedTypeofType => ty.qual.@"const" or ty.data.subType.isConst(),
-        .TypeofExpr, .DecayedTypeofExpr => ty.qual.@"const" or ty.data.vla.elem.isConst(),
+        .TypeofExpr, .DecayedTypeofExpr => ty.qual.@"const" or ty.data.expr.ty.isConst(),
         else => ty.qual.@"const",
     };
 }
@@ -359,7 +360,7 @@ pub fn isVoidStar(ty: Type) bool {
     return switch (ty.specifier) {
         .Pointer => ty.data.subType.is(.Void),
         .TypeofType => ty.data.subType.isVoidStar(),
-        .TypeofExpr => ty.data.vla.elem.isVoidStar(),
+        .TypeofExpr => ty.data.expr.ty.isVoidStar(),
         else => false,
     };
 }
@@ -369,7 +370,7 @@ pub fn isUnsignedInt(ty: Type, comp: *const Compilation) bool {
         .Char => return getCharSignedness(comp) == .unsigned,
         .UChar, .UShort, .UInt, .ULong, .ULongLong => return true,
         .TypeofType => ty.data.subType.isUnsignedInt(comp),
-        .TypeofExpr => ty.data.vla.elem.isUnsignedInt(comp),
+        .TypeofExpr => ty.data.expr.ty.isUnsignedInt(comp),
         else => false,
     };
 }
@@ -378,7 +379,7 @@ pub fn isEnumOrRecord(ty: Type) bool {
     return switch (ty.specifier) {
         .Enum, .Struct, .Union => true,
         .TypeofType => ty.data.subType.isEnumOrRecord(),
-        .TypeofExpr => ty.data.vla.elem.isEnumOrRecord(),
+        .TypeofExpr => ty.data.expr.ty.isEnumOrRecord(),
         else => false,
     };
 }
@@ -387,7 +388,7 @@ pub fn isRecord(ty: Type) bool {
     return switch (ty.specifier) {
         .Struct, .Union => true,
         .TypeofType => ty.data.subType.isRecord(),
-        .TypeofExpr => ty.data.vla.elem.isRecord(),
+        .TypeofExpr => ty.data.expr.ty.isRecord(),
         else => false,
     };
 }
@@ -395,7 +396,7 @@ pub fn isRecord(ty: Type) bool {
 pub fn unwrapTypeof(ty: Type) Type {
     return switch (ty.specifier) {
         .TypeofType => ty.data.subType.unwrapTypeof(),
-        .TypeofExpr => ty.data.vla.elem.unwrapTypeof(),
+        .TypeofExpr => ty.data.expr.ty.unwrapTypeof(),
         else => ty,
     };
 }
@@ -417,7 +418,7 @@ pub fn getElemType(ty: Type) Type {
 
         .VariableLenArray,
         .DecayedVariableLenArray,
-        => ty.data.vla.elem.unwrapTypeof(),
+        => ty.data.expr.ty.unwrapTypeof(),
 
         .TypeofType,
         .DecayedTypeofType,
@@ -425,7 +426,7 @@ pub fn getElemType(ty: Type) Type {
 
         .TypeofExpr,
         .DecayedTypeofExpr,
-        => ty.data.vla.elem.getElemType(),
+        => ty.data.expr.ty.getElemType(),
 
         else => unreachable,
     };
@@ -466,7 +467,7 @@ pub fn integerPromotion(ty: Type, comp: *Compilation) Type {
             .ULongLong => .ULongLong,
 
             .TypeofType => return ty.data.subType.integerPromotion(comp),
-            .TypeofExpr => return ty.data.vla.elem.integerPromotion(comp),
+            .TypeofExpr => return ty.data.expr.ty.integerPromotion(comp),
 
             else => unreachable, // not an integer type
         },
@@ -524,7 +525,7 @@ pub fn hasIncompleteSize(ty: Type) bool {
         .Struct => ty.data.record.isIncomplete(),
 
         .TypeofType => ty.data.subType.hasIncompleteSize(),
-        .TypeofExpr => ty.data.vla.elem.hasIncompleteSize(),
+        .TypeofExpr => ty.data.expr.ty.hasIncompleteSize(),
 
         else => false,
     };
@@ -554,7 +555,7 @@ pub fn hasUnboundVLA(ty: Type) bool {
 
             .TypeofExpr,
             .DecayedTypeofExpr,
-            => cur = cur.data.vla.elem,
+            => cur = cur.data.expr.ty,
 
             else => return false,
         }
@@ -677,7 +678,7 @@ pub fn sizeof(ty: Type, comp: *const Compilation) ?u64 {
 
         .TypeofExpr,
         .DecayedTypeofExpr,
-        => ty.data.vla.elem.sizeof(comp),
+        => ty.data.expr.ty.sizeof(comp),
     };
 }
 
@@ -727,7 +728,7 @@ pub fn alignof(ty: Type, comp: *Compilation) u29 {
         .Enum => if (ty.data.@"enum".isIncomplete()) 0 else ty.data.@"enum".tagType.alignof(comp),
 
         .TypeofType, .DecayedTypeofType => ty.data.subType.alignof(comp),
-        .TypeofExpr, .DecayedTypeofExpr => ty.data.vla.elem.alignof(comp),
+        .TypeofExpr, .DecayedTypeofExpr => ty.data.expr.ty.alignof(comp),
     };
 }
 
@@ -780,7 +781,7 @@ pub fn eql(aParam: Type, bParam: Type, checkQualifiers: bool) bool {
             if (!a.data.array.elem.eql(b.data.array.elem, checkQualifiers)) return false;
         },
 
-        .VariableLenArray => if (!a.data.vla.elem.eql(b.data.vla.elem, checkQualifiers)) return false,
+        .VariableLenArray => if (!a.data.expr.ty.eql(b.data.expr.ty, checkQualifiers)) return false,
 
         .Union, .Struct => if (a.data.record != b.data.record) return false,
         .Enum => if (a.data.@"enum" != b.data.@"enum") return false,
@@ -819,9 +820,9 @@ pub fn combine(inner: *Type, outer: Type, p: *Parser, sourceToken: TokenIndex) P
         },
 
         .VariableLenArray => {
-            try inner.data.vla.elem.combine(outer, p, sourceToken);
+            try inner.data.expr.ty.combine(outer, p, sourceToken);
 
-            const elemType = inner.data.vla.elem;
+            const elemType = inner.data.expr.ty;
             if (elemType.hasIncompleteSize()) try p.errStr(.array_incomplete_elem, sourceToken, try p.typeStr(elemType));
             if (elemType.isFunc()) try p.errToken(.array_func_elem, sourceToken);
             if (elemType.qual.any() and elemType.isArray()) try p.errToken(.qualifier_non_outermost_array, sourceToken);
@@ -991,7 +992,7 @@ fn printEpilogue(ty: Type, w: anytype) @TypeOf(w).Error!void {
             try ty.qual.dump(w);
             if (ty.alignment != 0) try w.print(" _Alignas({d})", .{ty.alignment});
             try w.writeAll("<expr>]");
-            try ty.data.vla.elem.printEpilogue(w);
+            try ty.data.expr.ty.printEpilogue(w);
         },
 
         else => {},
@@ -1072,7 +1073,7 @@ pub fn dump(ty: Type, w: anytype) @TypeOf(w).Error!void {
         .VariableLenArray, .DecayedVariableLenArray => {
             if (ty.is(.DecayedVariableLenArray)) try w.writeByte('d');
             try w.writeAll("[<expr>]");
-            try ty.data.vla.elem.dump(w);
+            try ty.data.expr.ty.dump(w);
         },
 
         .TypeofType, .DecayedTypeofType => {
@@ -1083,7 +1084,7 @@ pub fn dump(ty: Type, w: anytype) @TypeOf(w).Error!void {
 
         .TypeofExpr, .DecayedTypeofExpr => {
             try w.writeAll("typeof(<expr>: ");
-            try ty.data.vla.elem.dump(w);
+            try ty.data.expr.ty.dump(w);
             try w.writeAll(")");
         },
 

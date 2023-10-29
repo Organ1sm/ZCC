@@ -71,8 +71,8 @@ pub const Specifier = union(enum) {
     DecayedStaticArray: *Type.Array,
     IncompleteArray: *Type.Array,
     DecayedIncompleteArray: *Type.Array,
-    VariableLenArray: *Type.VLA,
-    DecayedVariableLenArray: *Type.VLA,
+    VariableLenArray: *Type.Expr,
+    DecayedVariableLenArray: *Type.Expr,
 
     Struct: *Type.Record,
     Union: *Type.Record,
@@ -80,8 +80,8 @@ pub const Specifier = union(enum) {
 
     TypeofType: *Type,
     DecayedTypeofType: *Type,
-    TypeofExpr: *Type.VLA,
-    DecayedTypeofExpr: *Type.VLA,
+    TypeofExpr: *Type.Expr,
+    DecayedTypeofExpr: *Type.Expr,
 
     pub fn toString(spec: Specifier) ?[]const u8 {
         return switch (spec) {
@@ -241,12 +241,12 @@ pub fn finish(b: @This(), p: *Parser) Parser.Error!Type {
 
         Specifier.VariableLenArray => |data| {
             ty.specifier = .VariableLenArray;
-            ty.data = .{ .vla = data };
+            ty.data = .{ .expr = data };
         },
 
         Specifier.DecayedVariableLenArray => |data| {
             ty.specifier = .DecayedVariableLenArray;
-            ty.data = .{ .vla = data };
+            ty.data = .{ .expr = data };
         },
 
         Specifier.Struct => |data| {
@@ -276,12 +276,12 @@ pub fn finish(b: @This(), p: *Parser) Parser.Error!Type {
 
         Specifier.TypeofExpr => |data| {
             ty.specifier = .TypeofExpr;
-            ty.data = .{ .vla = data };
+            ty.data = .{ .expr = data };
         },
 
         Specifier.DecayedTypeofExpr => |data| {
             ty.specifier = .DecayedTypeofExpr;
-            ty.data = .{ .vla = data };
+            ty.data = .{ .expr = data };
         },
     }
 
@@ -505,15 +505,15 @@ pub fn fromType(ty: Type) Specifier {
         .DecayedStaticArray => .{ .DecayedStaticArray = ty.data.array },
         .IncompleteArray => .{ .IncompleteArray = ty.data.array },
         .DecayedIncompleteArray => .{ .DecayedIncompleteArray = ty.data.array },
-        .VariableLenArray => .{ .VariableLenArray = ty.data.vla },
-        .DecayedVariableLenArray => .{ .DecayedVariableLenArray = ty.data.vla },
+        .VariableLenArray => .{ .VariableLenArray = ty.data.expr },
+        .DecayedVariableLenArray => .{ .DecayedVariableLenArray = ty.data.expr },
         .Struct => .{ .Struct = ty.data.record },
         .Union => .{ .Union = ty.data.record },
         .Enum => .{ .Enum = ty.data.@"enum" },
 
         .TypeofType => .{ .TypeofType = ty.data.subType },
         .DecayedTypeofType => .{ .DecayedTypeofType = ty.data.subType },
-        .TypeofExpr => .{ .TypeofExpr = ty.data.vla },
-        .DecayedTypeofExpr => .{.DecayedTypeofExpr = ty.data.vla},
+        .TypeofExpr => .{ .TypeofExpr = ty.data.expr },
+        .DecayedTypeofExpr => .{ .DecayedTypeofExpr = ty.data.expr },
     };
 }
