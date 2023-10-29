@@ -64,7 +64,7 @@ pub fn empty(res: Result, p: *Parser) bool {
 }
 
 pub fn maybeWarnUnused(res: Result, p: *Parser, exprStart: TokenIndex, errStart: usize) Error!void {
-    if (res.ty.specifier == .Void or res.node == .none)
+    if (res.ty.is(.Void) or res.node == .none)
         return;
 
     // don't warn about unused result if the expression contained errors
@@ -229,7 +229,7 @@ pub fn adjustTypes(a: *Result, token: TokenIndex, b: *Result, p: *Parser, kind: 
 
         .conditional => {
             // doesn't matter what we return here, as the result is ignored
-            if (a.ty.specifier == .Void or b.ty.specifier == .Void) {
+            if (a.ty.is(.Void) or b.ty.is(.Void)) {
                 try a.toVoid(p);
                 try b.toVoid(p);
                 return true;
@@ -315,7 +315,7 @@ pub fn boolCast(res: *Result, p: *Parser, boolType: Type) Error!void {
     if (res.ty.isPointer()) {
         res.ty = boolType;
         try res.un(p, .PointerToBool);
-    } else if (res.ty.isInt() and res.ty.specifier != .Bool) {
+    } else if (res.ty.isInt() and !res.ty.is(.Bool)) {
         res.ty = boolType;
         try res.un(p, .IntToBool);
     } else if (res.ty.isFloat()) {
@@ -325,7 +325,7 @@ pub fn boolCast(res: *Result, p: *Parser, boolType: Type) Error!void {
 }
 
 pub fn intCast(res: *Result, p: *Parser, intType: Type) Error!void {
-    if (res.ty.specifier == .Bool) {
+    if (res.ty.is(.Bool)) {
         res.ty = intType;
         try res.un(p, .BoolToInt);
     } else if (res.ty.isPointer()) {
@@ -350,7 +350,7 @@ pub fn intCast(res: *Result, p: *Parser, intType: Type) Error!void {
 }
 
 pub fn floatCast(res: *Result, p: *Parser, floatType: Type) Error!void {
-    if (res.ty.specifier == .Bool) {
+    if (res.ty.is(.Bool)) {
         res.ty = floatType;
         try res.un(p, .BoolToFloat);
     } else if (res.ty.isInt()) {
@@ -363,7 +363,7 @@ pub fn floatCast(res: *Result, p: *Parser, floatType: Type) Error!void {
 }
 
 pub fn ptrCast(res: *Result, p: *Parser, ptrType: Type) Error!void {
-    if (res.ty.specifier == .Bool) {
+    if (res.ty.is(.Bool)) {
         res.ty = ptrType;
         try res.un(p, .BoolToPointer);
     } else if (res.ty.isInt()) {
@@ -373,7 +373,7 @@ pub fn ptrCast(res: *Result, p: *Parser, ptrType: Type) Error!void {
 }
 
 pub fn toVoid(res: *Result, p: *Parser) Error!void {
-    if (res.ty.specifier != .Void) {
+    if (!res.ty.is(.Void)) {
         res.ty = .{ .specifier = .Void };
         res.node = try p.addNode(.{
             .tag = .ToVoid,

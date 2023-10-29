@@ -78,6 +78,11 @@ pub const Specifier = union(enum) {
     Union: *Type.Record,
     Enum: *Type.Enum,
 
+    TypeofType: *Type,
+    DecayedTypeofType: *Type,
+    TypeofExpr: *Type.VLA,
+    DecayedTypeofExpr: *Type.VLA,
+
     pub fn toString(spec: Specifier) ?[]const u8 {
         return switch (spec) {
             Specifier.None => unreachable,
@@ -257,6 +262,26 @@ pub fn finish(b: @This(), p: *Parser) Parser.Error!Type {
         Specifier.Enum => |data| {
             ty.specifier = .Enum;
             ty.data = .{ .@"enum" = data };
+        },
+
+        Specifier.TypeofType => |data| {
+            ty.specifier = .TypeofType;
+            ty.data = .{ .subType = data };
+        },
+
+        Specifier.DecayedTypeofType => |data| {
+            ty.specifier = .DecayedTypeofType;
+            ty.data = .{ .subType = data };
+        },
+
+        Specifier.TypeofExpr => |data| {
+            ty.specifier = .TypeofExpr;
+            ty.data = .{ .vla = data };
+        },
+
+        Specifier.DecayedTypeofExpr => |data| {
+            ty.specifier = .DecayedTypeofExpr;
+            ty.data = .{ .vla = data };
         },
     }
 
@@ -485,5 +510,10 @@ pub fn fromType(ty: Type) Specifier {
         .Struct => .{ .Struct = ty.data.record },
         .Union => .{ .Union = ty.data.record },
         .Enum => .{ .Enum = ty.data.@"enum" },
+
+        .TypeofType => .{ .TypeofType = ty.data.subType },
+        .DecayedTypeofType => .{ .DecayedTypeofType = ty.data.subType },
+        .TypeofExpr => .{ .TypeofExpr = ty.data.vla },
+        .DecayedTypeofExpr => .{.DecayedTypeofExpr = ty.data.vla},
     };
 }
