@@ -445,12 +445,17 @@ pub fn getElemType(ty: Type) Type {
     };
 }
 
-pub fn arrayLen(ty: Type) usize {
+pub fn arrayLen(ty: Type) ?usize {
     return switch (ty.specifier) {
-        .Array => ty.data.array.len,
-        .TypeofType => ty.data.subType.arrayLen(),
-        .TypeofExpr => ty.data.expr.ty.arrayLen(),
-        else => std.math.maxInt(usize),
+        .Array,
+        .StaticArray,
+        .DecayedArray,
+        .DecayedStaticArray,
+        => ty.data.array.len,
+
+        .TypeofType, .DecayedTypeofType => ty.data.subType.arrayLen(),
+        .TypeofExpr, .DecayedTypeofExpr => ty.data.expr.ty.arrayLen(),
+        else => null,
     };
 }
 

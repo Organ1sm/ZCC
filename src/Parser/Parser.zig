@@ -947,7 +947,7 @@ fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec) Error!?InitDeclarator {
             const arrayType = try p.arena.create(Type.Array);
             arrayType.* = .{
                 .elem = incompleteArrayType.data.array.elem,
-                .len = initListExpr.ty.arrayLen(),
+                .len = initListExpr.ty.arrayLen().?,
             };
             initD.d.type = .{
                 .specifier = .Array,
@@ -2021,7 +2021,7 @@ pub fn initializerItem(p: *Parser, il: *InitList, initType: Type) Error!bool {
                     .unavailable => unreachable,
                 };
 
-                const maxLen = curType.arrayLen();
+                const maxLen = curType.arrayLen() orelse std.math.maxInt(usize);
                 if (indexUnchecked >= maxLen) {
                     try p.errExtra(.oob_array_designator, lbr + 1, .{ .unsigned = indexUnchecked });
                     return error.ParsingFailed;
@@ -2115,7 +2115,7 @@ fn findScalarInitializer(p: *Parser, il: **InitList, ty: *Type) Error!bool {
         if (index != 0) index = il.*.list.items[index - 1].index;
 
         const arrayType = ty.*;
-        const maxElems = arrayType.arrayLen();
+        const maxElems = arrayType.arrayLen() orelse std.math.maxInt(usize);
         if (maxElems == 0) {
             if (p.getCurrToken() != .LBrace) {
                 try p.err(.empty_aggregate_init_braces);
@@ -2188,12 +2188,13 @@ fn coerceArrayInit(p: *Parser, item: *Result, token: TokenIndex, target: Type) !
 
     if (target.get(.Array)) |arrayType| {
         std.debug.assert(item.ty.is(.Array));
-        var len = item.ty.data.array.len;
+        var len = item.ty.arrayLen().?;
+        const arrayLen = arrayType.arrayLen().?;
         if (p.nodeIs(item.node, .StringLiteralExpr)) {
             // the null byte of a string can be dropped
-            if (len - 1 > arrayType.arrayLen())
+            if (len - 1 > arrayLen)
                 try p.errToken(.str_init_too_long, token);
-        } else if (len > arrayType.arrayLen()) {
+        } else if (len > arrayLen) {
             try p.errStr(
                 .arr_init_too_long,
                 token,
@@ -2325,8 +2326,7 @@ fn convertInitList(p: *Parser, il: InitList, initType: Type) Error!NodeIndex {
         defer p.listBuffer.items.len = listBuffTop;
 
         const elemType = initType.getElemType();
-
-        const maxItems = initType.arrayLen();
+        const maxItems = initType.arrayLen() orelse std.math.maxInt(usize);
         var start: u64 = 0;
         for (il.list.items) |*init| {
             if (init.index > start) {
@@ -4222,16 +4222,7 @@ fn parseCallExpr(p: *Parser, lhs: Result) Error!Result {
 }
 
 fn checkArrayBounds(p: *Parser, index: Result, arrayType: Type, token: TokenIndex) !void {
-    const unwrapped = arrayType.unwrapTypeof();
-    const len = switch (unwrapped.specifier) {
-        .Array,
-        .StaticArray,
-        .DecayedArray,
-        .DecayedStaticArray,
-        => unwrapped.data.array.len,
-        else => return,
-    };
-
+    const len = arrayType.arrayLen() orelse return;
     switch (index.value) {
         .unsigned => |val| if (std.math.compare(val, .gte, len))
             try p.errExtra(.array_after, token, .{ .unsigned = val }),
