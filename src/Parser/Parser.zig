@@ -943,10 +943,18 @@ fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec) Error!?InitDeclarator {
 
         var initListExpr = try p.initializer(initD.d.type);
         initD.initializer = initListExpr.node;
-        if (initD.d.type.is(.IncompleteArray)) {
-            // Modifying .data is exceptionally allowed for .IncompleteArray.
-            initD.d.type.data.array.len = initListExpr.ty.data.array.len;
-            initD.d.type.specifier = .Array;
+        if (initD.d.type.get(.IncompleteArray)) |incompleteArrayType| {
+            const arrayType = try p.arena.create(Type.Array);
+            arrayType.* = .{
+                .elem = incompleteArrayType.data.array.elem,
+                .len = initListExpr.ty.arrayLen(),
+            };
+            initD.d.type = .{
+                .specifier = .Array,
+                .data = .{ .array = arrayType },
+                .qual = incompleteArrayType.qual,
+                .alignment = incompleteArrayType.alignment,
+            };
         }
     }
 
@@ -2341,9 +2349,18 @@ fn convertInitList(p: *Parser, il: InitList, initType: Type) Error!NodeIndex {
             .data = .{ .BinaryExpr = .{ .lhs = .none, .rhs = .none } },
         };
 
-        if (initType.is(.IncompleteArray)) {
-            arrInitNode.type.specifier = .Array;
-            arrInitNode.type.data.array.len = start;
+        if (initType.get(.IncompleteArray)) |incompleteArrayType| {
+            const arrayType = try p.arena.create(Type.Array);
+            arrayType.* = .{
+                .elem = incompleteArrayType.data.array.elem,
+                .len = start,
+            };
+            arrInitNode.type = .{
+                .specifier = .Array,
+                .data = .{ .array = arrayType },
+                .qual = incompleteArrayType.qual,
+                .alignment = incompleteArrayType.alignment,
+            };
         } else if (start < maxItems) {
             const elem = try p.addNode(.{
                 .tag = .ArrayFillerExpr,
@@ -2364,7 +2381,7 @@ fn convertInitList(p: *Parser, il: InitList, initType: Type) Error!NodeIndex {
             },
         }
         return try p.addNode(arrInitNode);
-    } else if (initType.get(.Struct))  |structType| {
+    } else if (initType.get(.Struct)) |structType| {
         const listBuffTop = p.listBuffer.items.len;
         defer p.listBuffer.items.len = listBuffTop;
 
