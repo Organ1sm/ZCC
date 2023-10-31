@@ -242,11 +242,7 @@ pub const Specifier = enum {
 /// types if necessary.
 pub fn is(ty: Type, specifier: Specifier) bool {
     std.debug.assert(specifier != .TypeofExpr and specifier != .TypeofType);
-    return switch (ty.specifier) {
-        .TypeofType => ty.data.subType.is(specifier),
-        .TypeofExpr => ty.data.expr.ty.is(specifier),
-        else => ty.specifier == specifier,
-    };
+    return ty.get(specifier) != null;
 }
 
 pub fn isCallable(ty: Type) ?Type {

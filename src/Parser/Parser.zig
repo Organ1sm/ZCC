@@ -2186,14 +2186,14 @@ fn coerceArrayInit(p: *Parser, item: *Result, token: TokenIndex, target: Type) !
         return true; // do not do further coercion
     }
 
-    if (target.is(.Array)) {
+    if (target.get(.Array)) |arrayType| {
         std.debug.assert(item.ty.is(.Array));
         var len = item.ty.data.array.len;
         if (p.nodeIs(item.node, .StringLiteralExpr)) {
             // the null byte of a string can be dropped
-            if (len - 1 > target.arrayLen())
+            if (len - 1 > arrayType.arrayLen())
                 try p.errToken(.str_init_too_long, token);
-        } else if (len > target.arrayLen()) {
+        } else if (len > arrayType.arrayLen()) {
             try p.errStr(
                 .arr_init_too_long,
                 token,
