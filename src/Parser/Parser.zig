@@ -2013,7 +2013,7 @@ pub fn initializerItem(p: *Parser, il: *InitList, initType: Type) Error!bool {
                     .unavailable => unreachable,
                 };
 
-                const maxLen = if (curType.is(.Array)) curType.data.array.len else std.math.maxInt(usize);
+                const maxLen = curType.arrayLen();
                 if (indexUnchecked >= maxLen) {
                     try p.errExtra(.oob_array_designator, lbr + 1, .{ .unsigned = indexUnchecked });
                     return error.ParsingFailed;
@@ -2107,7 +2107,7 @@ fn findScalarInitializer(p: *Parser, il: **InitList, ty: *Type) Error!bool {
         if (index != 0) index = il.*.list.items[index - 1].index;
 
         const arrayType = ty.*;
-        const maxElems = if (arrayType.is(.Array)) arrayType.data.array.len else std.math.maxInt(usize);
+        const maxElems = arrayType.arrayLen();
         if (maxElems == 0) {
             if (p.getCurrToken() != .LBrace) {
                 try p.err(.empty_aggregate_init_braces);
@@ -2184,9 +2184,9 @@ fn coerceArrayInit(p: *Parser, item: *Result, token: TokenIndex, target: Type) !
         var len = item.ty.data.array.len;
         if (p.nodeIs(item.node, .StringLiteralExpr)) {
             // the null byte of a string can be dropped
-            if (len - 1 > target.data.array.len)
+            if (len - 1 > target.arrayLen())
                 try p.errToken(.str_init_too_long, token);
-        } else if (len > target.data.array.len) {
+        } else if (len > target.arrayLen()) {
             try p.errStr(
                 .arr_init_too_long,
                 token,
@@ -2319,7 +2319,7 @@ fn convertInitList(p: *Parser, il: InitList, initType: Type) Error!NodeIndex {
 
         const elemType = initType.getElemType();
 
-        const maxItems = if (initType.is(.Array)) initType.data.array.len else std.math.maxInt(usize);
+        const maxItems = initType.arrayLen();
         var start: u64 = 0;
         for (il.list.items) |*init| {
             if (init.index > start) {
@@ -4206,12 +4206,13 @@ fn parseCallExpr(p: *Parser, lhs: Result) Error!Result {
 }
 
 fn checkArrayBounds(p: *Parser, index: Result, arrayType: Type, token: TokenIndex) !void {
-    const len = switch (arrayType.specifier) {
+    const unwrapped = arrayType.unwrapTypeof();
+    const len = switch (unwrapped.specifier) {
         .Array,
         .StaticArray,
         .DecayedArray,
         .DecayedStaticArray,
-        => arrayType.data.array.len,
+        => unwrapped.data.array.len,
         else => return,
     };
 

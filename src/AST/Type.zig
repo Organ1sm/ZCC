@@ -440,6 +440,15 @@ pub fn getElemType(ty: Type) Type {
     };
 }
 
+pub fn arrayLen(ty: Type) usize {
+    return switch (ty.specifier) {
+        .Array => ty.data.array.len,
+        .TypeofType => ty.data.subType.arrayLen(),
+        .TypeofExpr => ty.data.expr.ty.arrayLen(),
+        else => std.math.maxInt(usize),
+    };
+}
+
 pub fn eitherLongDouble(a: Type, b: Type) ?Type {
     if (a.unwrapTypeof().is(.LongDouble) or a.unwrapTypeof().is(.ComplexLongDouble)) return a;
     if (b.unwrapTypeof().is(.LongDouble) or b.unwrapTypeof().is(.ComplexLongDouble)) return b;
