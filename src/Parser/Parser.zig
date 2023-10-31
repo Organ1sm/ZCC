@@ -1886,7 +1886,7 @@ fn paramDecls(p: *Parser) Error!?[]Type.Function.Param {
             if (p.paramBuffer.items.len == paramBufferTop) {
                 if (p.getCurrToken() != .RParen) {
                     try p.err(.void_only_param);
-                    if (paramType.qual.any())
+                    if (paramType.containAnyQual())
                         try p.err(.void_param_qualified);
 
                     return error.ParsingFailed;
@@ -3659,7 +3659,7 @@ fn parseCastExpr(p: *Parser) Error!Result {
                 try p.errStr(.invalid_cast_type, lp, try p.typeStr(operand.ty));
             }
 
-            if (ty.qual.any())
+            if (ty.containAnyQual())
                 try p.errStr(.qual_cast, lp, try p.typeStr(ty));
 
             operand.ty = ty;
@@ -4468,7 +4468,7 @@ fn parseGenericSelection(p: *Parser) Error!Result {
     while (true) {
         const start = p.index;
         if (try p.typeName()) |ty| {
-            if (ty.qual.any()) {
+            if (ty.containAnyQual()) {
                 try p.errToken(.generic_qual_type, start);
             }
 

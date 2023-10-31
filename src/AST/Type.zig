@@ -458,6 +458,14 @@ pub fn arrayLen(ty: Type) usize {
     };
 }
 
+pub fn containAnyQual(ty: Type) bool {
+    return switch (ty.specifier) {
+        .TypeofType => ty.qual.any() or ty.data.subType.containAnyQual(),
+        .TypeofExpr => ty.qual.any() or ty.data.expr.ty.containAnyQual(),
+        else => ty.qual.any(),
+    };
+}
+
 pub fn eitherLongDouble(a: Type, b: Type) ?Type {
     if (a.unwrapTypeof().is(.LongDouble) or a.unwrapTypeof().is(.ComplexLongDouble)) return a;
     if (b.unwrapTypeof().is(.LongDouble) or b.unwrapTypeof().is(.ComplexLongDouble)) return b;
@@ -832,7 +840,7 @@ pub fn combine(inner: *Type, outer: Type, p: *Parser, sourceToken: TokenIndex) P
             const elemType = inner.data.subType.*;
             if (elemType.hasIncompleteSize()) try p.errStr(.array_incomplete_elem, sourceToken, try p.typeStr(elemType));
             if (elemType.isFunc()) try p.errToken(.array_func_elem, sourceToken);
-            if (elemType.qual.any() and elemType.isArray()) try p.errToken(.qualifier_non_outermost_array, sourceToken);
+            if (elemType.containAnyQual() and elemType.isArray()) try p.errToken(.qualifier_non_outermost_array, sourceToken);
         },
 
         .Array, .StaticArray, .IncompleteArray => {
@@ -842,7 +850,7 @@ pub fn combine(inner: *Type, outer: Type, p: *Parser, sourceToken: TokenIndex) P
             if (elemType.hasIncompleteSize()) try p.errStr(.array_incomplete_elem, sourceToken, try p.typeStr(elemType));
             if (elemType.isFunc()) try p.errToken(.array_func_elem, sourceToken);
             if (elemType.is(.StaticArray) and elemType.isArray()) try p.errToken(.static_non_outermost_array, sourceToken);
-            if (elemType.qual.any() and elemType.isArray()) try p.errToken(.qualifier_non_outermost_array, sourceToken);
+            if (elemType.containAnyQual() and elemType.isArray()) try p.errToken(.qualifier_non_outermost_array, sourceToken);
         },
 
         .VariableLenArray => {
@@ -851,7 +859,7 @@ pub fn combine(inner: *Type, outer: Type, p: *Parser, sourceToken: TokenIndex) P
             const elemType = inner.data.expr.ty;
             if (elemType.hasIncompleteSize()) try p.errStr(.array_incomplete_elem, sourceToken, try p.typeStr(elemType));
             if (elemType.isFunc()) try p.errToken(.array_func_elem, sourceToken);
-            if (elemType.qual.any() and elemType.isArray()) try p.errToken(.qualifier_non_outermost_array, sourceToken);
+            if (elemType.containAnyQual() and elemType.isArray()) try p.errToken(.qualifier_non_outermost_array, sourceToken);
         },
 
         .Func, .VarArgsFunc, .OldStyleFunc => {
