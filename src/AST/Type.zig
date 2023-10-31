@@ -397,12 +397,43 @@ pub fn isRecord(ty: Type) bool {
     };
 }
 
-pub fn unwrapTypeof(ty: Type) Type {
-    return switch (ty.specifier) {
-        .TypeofType => ty.data.subType.unwrapTypeof(),
-        .TypeofExpr => ty.data.expr.ty.unwrapTypeof(),
-        else => ty,
-    };
+/// Canonicalize a possibly-typeof() type. If the type is not a typeof() type, simply
+/// return it. Otherwise, determine the actual qualified type.
+/// The `qual_handling` parameter can be used to return the full set of qualifiers
+/// added by typeof() operations, which is useful when determining the elemType of
+/// arrays and pointers.
+pub fn canonicalize(ty: Type, qualHandling: enum { standard, preserve_quals }) Type {
+    if (!ty.isTypeof())
+        return ty;
+
+    var cur = ty;
+    var qual = cur.qual;
+    while (true) {
+        switch (cur.specifier) {
+            .TypeofType => cur = cur.data.subType.*,
+            .TypeofExpr => cur = cur.data.expr.ty,
+
+            .DecayedTypeofType => {
+                cur = cur.data.subType.*;
+                cur.decayArray();
+            },
+
+            .DecayedTypeofExpr => {
+                cur = cur.data.expr.ty;
+                cur.decayArray();
+            },
+
+            else => break,
+        }
+        qual = qual.mergeAllQualifiers(cur.qual);
+    }
+
+    if ((cur.isArray() or cur.isPointer()) and qualHandling == .standard)
+        cur.qual = .{}
+    else
+        cur.qual = qual;
+
+    return cur;
 }
 
 pub fn get(ty: *const Type, specifier: Specifier) ?*const Type {
@@ -419,7 +450,7 @@ pub fn getElemType(ty: Type) Type {
         .Pointer,
         .UnspecifiedVariableLenArray,
         .DecayedUnspecifiedVariableLenArray,
-        => ty.data.subType.unwrapTypeof(),
+        => ty.data.subType.*,
 
         .Array,
         .StaticArray,
@@ -427,19 +458,22 @@ pub fn getElemType(ty: Type) Type {
         .DecayedArray,
         .DecayedStaticArray,
         .DecayedIncompleteArray,
-        => ty.data.array.elem.unwrapTypeof(),
+        => ty.data.array.elem,
 
         .VariableLenArray,
         .DecayedVariableLenArray,
-        => ty.data.expr.ty.unwrapTypeof(),
+        => ty.data.expr.ty,
 
         .TypeofType,
         .DecayedTypeofType,
-        => ty.data.subType.getElemType(),
-
         .TypeofExpr,
         .DecayedTypeofExpr,
-        => ty.data.expr.ty.getElemType(),
+        => {
+            const unwrapped = ty.canonicalize(.preserve_quals);
+            var elem = unwrapped.getElemType();
+            elem.qual = elem.qual.mergeAllQualifiers(unwrapped.qual);
+            return elem;
+        },
 
         else => unreachable,
     };
@@ -468,20 +502,20 @@ pub fn containAnyQual(ty: Type) bool {
 }
 
 pub fn eitherLongDouble(a: Type, b: Type) ?Type {
-    if (a.unwrapTypeof().is(.LongDouble) or a.unwrapTypeof().is(.ComplexLongDouble)) return a;
-    if (b.unwrapTypeof().is(.LongDouble) or b.unwrapTypeof().is(.ComplexLongDouble)) return b;
+    if (a.is(.LongDouble) or a.is(.ComplexLongDouble)) return a;
+    if (b.is(.LongDouble) or b.is(.ComplexLongDouble)) return b;
     return null;
 }
 
 pub fn eitherDouble(a: Type, b: Type) ?Type {
-    if (a.unwrapTypeof().is(.Double) or a.unwrapTypeof().is(.ComplexDouble)) return a;
-    if (b.unwrapTypeof().is(.Double) or b.unwrapTypeof().is(.ComplexDouble)) return b;
+    if (a.is(.Double) or a.is(.ComplexDouble)) return a;
+    if (b.is(.Double) or b.is(.ComplexDouble)) return b;
     return null;
 }
 
 pub fn eitherFloat(a: Type, b: Type) ?Type {
-    if (a.unwrapTypeof().is(.Float) or a.unwrapTypeof().is(.ComplexFloat)) return a;
-    if (b.unwrapTypeof().is(.Float) or b.unwrapTypeof().is(.ComplexFloat)) return b;
+    if (a.is(.Float) or a.is(.ComplexFloat)) return a;
+    if (b.is(.Float) or b.is(.ComplexFloat)) return b;
     return null;
 }
 
@@ -768,8 +802,8 @@ pub fn alignof(ty: Type, comp: *Compilation) u29 {
 }
 
 pub fn eql(aParam: Type, bParam: Type, checkQualifiers: bool) bool {
-    const a = aParam.unwrapTypeof();
-    const b = bParam.unwrapTypeof();
+    const a = aParam.canonicalize(.standard);
+    const b = bParam.canonicalize(.standard);
 
     if (a.alignment != b.alignment) return false;
     if (a.isPointer()) {
@@ -794,7 +828,7 @@ pub fn eql(aParam: Type, bParam: Type, checkQualifiers: bool) bool {
         .DecayedVariableLenArray,
         .DecayedStaticArray,
         .DecayedUnspecifiedVariableLenArray,
-        => if (!a.getElemType().eql(b.getElemType(), checkQualifiers)) return false,
+        => if (!aParam.getElemType().eql(bParam.getElemType(), checkQualifiers)) return false,
 
         .Func,
         .VarArgsFunc,
@@ -942,7 +976,7 @@ fn printPrologue(ty: Type, w: anytype) @TypeOf(w).Error!bool {
         .TypeofType,
         .TypeofExpr,
         => {
-            const actual = ty.unwrapTypeof();
+            const actual = ty.canonicalize(.standard);
             return actual.printPrologue(w);
         },
 

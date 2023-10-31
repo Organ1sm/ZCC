@@ -943,17 +943,19 @@ fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec) Error!?InitDeclarator {
 
         var initListExpr = try p.initializer(initD.d.type);
         initD.initializer = initListExpr.node;
-        if (initD.d.type.get(.IncompleteArray)) |incompleteArrayType| {
+        if (initD.d.type.specifier == .IncompleteArray) {
+            initD.d.type.data.array.len = initListExpr.ty.data.array.len;
+            initD.d.type.specifier = .Array;
+        } else if (initD.d.type.is(.IncompleteArray)) {
             const arrayType = try p.arena.create(Type.Array);
             arrayType.* = .{
-                .elem = incompleteArrayType.data.array.elem,
+                .elem = initD.d.type.getElemType(),
                 .len = initListExpr.ty.arrayLen().?,
             };
             initD.d.type = .{
                 .specifier = .Array,
                 .data = .{ .array = arrayType },
-                .qual = incompleteArrayType.qual,
-                .alignment = incompleteArrayType.alignment,
+                .alignment = initD.d.type.alignment,
             };
         }
     }
@@ -2211,7 +2213,7 @@ fn coerceInit(p: *Parser, item: *Result, token: TokenIndex, target: Type) !void 
         return;
 
     // item does not need to be qualified
-    var unqualType = target.unwrapTypeof();
+    var unqualType = target.canonicalize(.standard);
     unqualType.qual = .{};
     const eMsg = " from incompatible type ";
     if (unqualType.isArray()) {
@@ -2349,17 +2351,19 @@ fn convertInitList(p: *Parser, il: InitList, initType: Type) Error!NodeIndex {
             .data = .{ .BinaryExpr = .{ .lhs = .none, .rhs = .none } },
         };
 
-        if (initType.get(.IncompleteArray)) |incompleteArrayType| {
+        if (initType.specifier == .IncompleteArray) {
+            arrInitNode.type.specifier = .Array;
+            arrInitNode.type.data.array.len = start;
+        } else if (initType.is(.IncompleteArray)) {
             const arrayType = try p.arena.create(Type.Array);
             arrayType.* = .{
-                .elem = incompleteArrayType.data.array.elem,
+                .elem = initType.getElemType(),
                 .len = start,
             };
             arrInitNode.type = .{
                 .specifier = .Array,
                 .data = .{ .array = arrayType },
-                .qual = incompleteArrayType.qual,
-                .alignment = incompleteArrayType.alignment,
+                .alignment = initType.alignment,
             };
         } else if (start < maxItems) {
             const elem = try p.addNode(.{
@@ -3205,7 +3209,7 @@ fn assignExpr(p: *Parser) Error!Result {
     }
 
     // rhs does not need to be qualified
-    var unqualType = lhs.ty.unwrapTypeof();
+    var unqualType = lhs.ty.canonicalize(.standard);
     unqualType.qual = .{};
 
     const eMsg = " from incompatible type ";

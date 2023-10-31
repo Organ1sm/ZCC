@@ -286,8 +286,6 @@ pub fn finish(b: @This(), p: *Parser) Parser.Error!Type {
     }
 
     try b.qual.finish(p, &ty);
-    if (b.typeof) |typeof|
-        ty.qual = ty.qual.mergeAllQualifiers(typeof.qual);
 
     if (b.alignToken) |alignToken| {
         const default = ty.alignof(p.pp.compilation);
