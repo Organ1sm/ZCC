@@ -409,6 +409,15 @@ pub fn unwrapTypeof(ty: Type) Type {
     };
 }
 
+pub fn get(ty: *const Type, specifier: Specifier) ?*const Type {
+    std.debug.assert(specifier != .TypeofType and specifier != .TypeofExpr);
+    return switch (ty.specifier) {
+        .TypeofType => ty.data.subType.get(specifier),
+        .TypeofExpr => ty.data.expr.ty.get(specifier),
+        else => if (ty.specifier == specifier) ty else null,
+    };
+}
+
 pub fn getElemType(ty: Type) Type {
     return switch (ty.specifier) {
         .Pointer,

@@ -2124,11 +2124,10 @@ fn findScalarInitializer(p: *Parser, il: **InitList, ty: *Type) Error!bool {
                 return true;
         }
         return false;
-    } else if (ty.is(.Struct)) {
+    } else if (ty.get(.Struct)) |structType| {
         var index = il.*.list.items.len;
         if (index != 0) index = il.*.list.items[index - 1].index + 1;
 
-        const structType = ty.*;
         const max_elems = structType.data.record.fields.len;
         if (max_elems == 0) {
             if (p.getCurrToken() == .LBrace) {
@@ -2146,15 +2145,15 @@ fn findScalarInitializer(p: *Parser, il: **InitList, ty: *Type) Error!bool {
                 return true;
         }
         return false;
-    } else if (ty.is(.Union)) {
-        if (ty.data.record.fields.len == 0) {
+    } else if (ty.get(.Union)) |unionType| {
+        if (unionType.data.record.fields.len == 0) {
             if (p.getCurrToken() == .LBrace) {
                 try p.err(.empty_aggregate_init_braces);
                 return error.ParsingFailed;
             }
             return false;
         }
-        ty.* = ty.data.record.fields[0].ty;
+        ty.* = unionType.data.record.fields[0].ty;
         il.* = try il.*.find(p.pp.compilation.gpa, 0);
         if (try p.findScalarInitializer(il, ty))
             return true;
@@ -2365,12 +2364,12 @@ fn convertInitList(p: *Parser, il: InitList, initType: Type) Error!NodeIndex {
             },
         }
         return try p.addNode(arrInitNode);
-    } else if (initType.is(.Struct)) {
+    } else if (initType.get(.Struct))  |structType| {
         const listBuffTop = p.listBuffer.items.len;
         defer p.listBuffer.items.len = listBuffTop;
 
         var initIndex: usize = 0;
-        for (initType.data.record.fields, 0..) |f, i| {
+        for (structType.data.record.fields, 0..) |f, i| {
             if (initIndex < il.list.items.len and il.list.items[initIndex].index == i) {
                 const item = try p.convertInitList(il.list.items[initIndex].list, f.ty);
                 try p.listBuffer.append(item);
@@ -2397,13 +2396,13 @@ fn convertInitList(p: *Parser, il: InitList, initType: Type) Error!NodeIndex {
             },
         }
         return try p.addNode(structInitNode);
-    } else if (initType.is(.Union)) {
+    } else if (initType.get(.Union)) |unionType| {
         var unionInitNode: AST.Node = .{
             .tag = .UnionInitExpr,
             .type = initType,
             .data = .{ .UnionInit = .{ .fieldIndex = 0, .node = .none } },
         };
-        if (initType.data.record.fields.len == 0) {
+        if (unionType.data.record.fields.len == 0) {
             // do nothing for empty unions
         } else if (il.list.items.len == 0) {
             unionInitNode.data.UnionInit.node = try p.addNode(.{
@@ -2413,7 +2412,7 @@ fn convertInitList(p: *Parser, il: InitList, initType: Type) Error!NodeIndex {
             });
         } else {
             const init = il.list.items[0];
-            const fieldType = initType.data.record.fields[init.index].ty;
+            const fieldType = unionType.data.record.fields[init.index].ty;
             unionInitNode.data.UnionInit = .{
                 .fieldIndex = @as(u32, @truncate(init.index)),
                 .node = try p.convertInitList(init.list, fieldType),
