@@ -799,7 +799,7 @@ fn typeof(p: *Parser) Error!?Type {
         const typeofType = try p.arena.create(Type);
         typeofType.* = .{
             .data = ty.data,
-            .qual = ty.qual,
+            .qual = ty.qual.inheritFromTypeof(),
             .specifier = ty.specifier,
         };
 
@@ -815,10 +815,10 @@ fn typeof(p: *Parser) Error!?Type {
 
     const inner = try p.arena.create(Type.Expr);
     inner.* = .{
-        .node= typeofExpr.node,
+        .node = typeofExpr.node,
         .ty = .{
             .data = typeofExpr.ty.data,
-            .qual = typeofExpr.ty.qual, // todo: exclude register qualifier
+            .qual = typeofExpr.ty.qual.inheritFromTypeof(),
             .specifier = typeofExpr.ty.specifier,
         },
     };
