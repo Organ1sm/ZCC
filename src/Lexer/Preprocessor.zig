@@ -701,8 +701,7 @@ fn expandFuncMacro(
 
                 // TODO pretty print these
                 try charBuffer.append('"');
-                for (arg, 0..) |tok, i| {
-                    if (i != 0) try charBuffer.append(' ');
+                for (arg) |tok| {
                     for (pp.expandedSlice(tok)) |c| {
                         if (c == '"')
                             try charBuffer.appendSlice("\\\"")
