@@ -705,6 +705,8 @@ fn expandFuncMacro(
                     for (pp.expandedSlice(tok)) |c| {
                         if (c == '"')
                             try charBuffer.appendSlice("\\\"")
+                        else if (c == '\\')
+                            try charBuffer.appendSlice("\\\\")
                         else
                             try charBuffer.append(c);
                     }
@@ -778,12 +780,20 @@ fn collectMacroFuncArguments(
     const initialLexerIdx = lexer.index;
     const oldEnd = endIdx.*;
 
-    const lparenToken = try nextBufToken(lexer, buf, startIdx, endIdx, extendBuffer);
-    if (lparenToken.id != .LParen) {
-        // Not a macro function call, go over normal identifier, rewind
-        lexer.index = initialLexerIdx;
-        endIdx.* = oldEnd;
-        return null;
+    var lpFound = false;
+
+    while (!lpFound) {
+        const lparenToken = try nextBufToken(lexer, buf, startIdx, endIdx, extendBuffer);
+        if (lparenToken.id == .NewLine)
+            continue;
+        if (lparenToken.id != .LParen) {
+            // Not a macro function call, go over normal identifier, rewind
+            lexer.index = initialLexerIdx;
+            endIdx.* = oldEnd;
+            return null;
+        }
+
+        lpFound = true;
     }
 
     // collect the arguments.
