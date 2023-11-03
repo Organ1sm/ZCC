@@ -94,7 +94,11 @@ pub const TokenType = enum(u8) {
     AngleBracketAngleBracketRight,
     AngleBracketAngleBracketRightEqual,
 
+    /// Special token to speed up preprocessing, `loc.end` will be an index to the param list.
     MacroParam,
+    /// Special token to signal that the argument must be replaced without expansion (e.g. in concatenation)
+    MacroParamNoExpand,
+    /// Special token to speed up preprocessing, `loc.end` will be an index to the param list.
     StringifyParam,
     /// Same as stringify_param, but for var args
     StringifyVarArgs,
@@ -314,6 +318,7 @@ pub const TokenType = enum(u8) {
             .Eof,
             .NewLine,
             .MacroParam,
+            .MacroParamNoExpand,
             .StringifyParam,
             .StringifyVarArgs,
             .EmptyArg,
