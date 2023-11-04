@@ -82,10 +82,6 @@ generated: std.ArrayList(u8),
 pragmaOnce: std.AutoHashMap(Source.ID, void),
 tokenBuffer: RawTokenList,
 charBuffer: std.ArrayList(u8),
-
-// It is safe to have pointers to entries of defines since it
-// cannot be modified while we are expanding a macro.
-expansionLog: std.AutoHashMap(*Macro, void),
 includeDepth: u8 = 0,
 
 pub fn init(comp: *Compilation) Preprocessor {
@@ -97,7 +93,6 @@ pub fn init(comp: *Compilation) Preprocessor {
         .pragmaOnce = std.AutoHashMap(Source.ID, void).init(comp.gpa),
         .tokenBuffer = RawTokenList.init(comp.gpa),
         .charBuffer = std.ArrayList(u8).init(comp.gpa),
-        .expansionLog = std.AutoHashMap(*Macro, void).init(comp.gpa),
     };
 }
 
@@ -109,7 +104,6 @@ pub fn deinit(pp: *Preprocessor) void {
     pp.pragmaOnce.deinit();
     pp.tokenBuffer.deinit();
     pp.charBuffer.deinit();
-    pp.expansionLog.deinit();
 }
 
 pub fn preprocess(pp: *Preprocessor, source: Source) Error!void {
@@ -652,7 +646,7 @@ fn expandFuncMacro(
                 };
                 next = if (next.len > 0) next else &[1]Token{placeHolderToken};
 
-                var pastedToken = try pp.pasteTokens(prev[prev.len - 1], next[0]);
+                var pastedToken = try pp.pasteTokens(prev, next[0]);
                 try buf.append(pastedToken);
 
                 try buf.appendSlice(next[1..]);
@@ -696,25 +690,24 @@ fn expandFuncMacro(
                 else
                     args.items[raw.end];
 
-                var charBuffer = std.ArrayList(u8).init(pp.compilation.gpa);
-                defer charBuffer.deinit();
+                pp.charBuffer.clearRetainingCapacity();
 
                 // TODO pretty print these
-                try charBuffer.append('"');
+                try pp.charBuffer.append('"');
                 for (arg) |tok| {
                     for (pp.expandedSlice(tok)) |c| {
                         if (c == '"')
-                            try charBuffer.appendSlice("\\\"")
+                            try pp.charBuffer.appendSlice("\\\"")
                         else if (c == '\\')
-                            try charBuffer.appendSlice("\\\\")
+                            try pp.charBuffer.appendSlice("\\\\")
                         else
-                            try charBuffer.append(c);
+                            try pp.charBuffer.append(c);
                     }
                 }
-                try charBuffer.appendSlice("\"\n");
+                try pp.charBuffer.appendSlice("\"\n");
 
                 const start = pp.generated.items.len;
-                try pp.generated.appendSlice(charBuffer.items);
+                try pp.generated.appendSlice(pp.charBuffer.items);
 
                 try buf.append(.{
                     .id = .StringLiteral,
@@ -735,7 +728,8 @@ fn expandFuncMacro(
 
 fn shouldExpand(tok: Token, macro: *Macro) bool {
     const macroLoc = switch (macro.*) {
-        .simple, .func => |smacro| smacro.loc,
+        .simple => |smacro| smacro.loc,
+        .func => |smacro| smacro.loc,
         else => unreachable,
     };
 
@@ -921,14 +915,14 @@ fn expandMacroExhaustive(
                                 //std.debug.print("Expanding func: {s}\n", .{pp.expandedSlice(buf.items[idx])});
                                 var expandedArgs = MacroArguments.init(pp.compilation.gpa);
                                 defer expandedArgs.deinit();
-                                try expandedArgs.ensureCapacity(args.items.len);
+                                try expandedArgs.ensureTotalCapacity(args.items.len);
                                 for (args.items) |arg| {
                                     var expandBuffer = ExpandBuffer.init(pp.compilation.gpa);
                                     try expandBuffer.appendSlice(arg);
 
                                     try pp.expandMacroExhaustive(lexer, &expandBuffer, 0, expandBuffer.items.len, false);
 
-                                    expandedArgs.appendAssumeCapacity(expandBuffer.toOwnedSlice());
+                                    expandedArgs.appendAssumeCapacity(try expandBuffer.toOwnedSlice());
                                 }
 
                                 var res = try pp.expandFuncMacro(&funcMacro, &args, &expandedArgs);
@@ -982,7 +976,7 @@ fn expandMacroExhaustive(
             while (i < buf.items.len) {
                 const tok = &buf.items[i];
                 switch (tok.id) {
-                    .empty_arg => {
+                    .EmptyArg => {
                         _ = buf.orderedRemove(i);
                         movingEndIdx -= 1;
                     },
@@ -997,7 +991,9 @@ fn expandMacroExhaustive(
     buf.shrinkAndFree(movingEndIdx);
 }
 
-fn expandMacro2(pp: *Preprocessor, lexer: *Lexer, raw: RawToken) Error!void {
+/// Try to expand a macro after a possible candidate has been read from the `tokenizer`
+/// into the `raw` token passed as argument
+fn expandMacro(pp: *Preprocessor, lexer: *Lexer, raw: RawToken) Error!void {
     var buf = ExpandBuffer.init(pp.compilation.gpa);
     defer buf.deinit();
     try buf.append(tokenFromRaw(raw));
@@ -1011,386 +1007,12 @@ fn expandMacro2(pp: *Preprocessor, lexer: *Lexer, raw: RawToken) Error!void {
     }
 }
 
-fn expandMacro(pp: *Preprocessor, lexer: *Lexer, raw: RawToken) Error!void {
-    if (pp.defines.getPtr(pp.tokSliceSafe(raw))) |some| switch (some.*) {
-        .empty => return,
-        .simple => {
-            pp.expansionLog.clearRetainingCapacity();
-            var buffer = ExpandBuffer.init(pp.compilation.gpa);
-            defer buffer.deinit();
-
-            // add the token to the buffer and expand it
-            try buffer.append(tokenFromRaw(raw));
-            var start: usize = 0;
-            try pp.expandExtra(&buffer, &start);
-
-            // Add the result tokens to the token list and mark that they were expanded.
-            try pp.tokens.ensureUnusedCapacity(pp.compilation.gpa, pp.tokens.len + buffer.items.len);
-            const loc = Source.Location{ .id = raw.source, .byteOffset = raw.start };
-            for (buffer.items) |*r| {
-                try pp.markExpandedFrom(r, loc);
-                pp.tokens.appendAssumeCapacity(r.*);
-            }
-
-            return;
-        },
-
-        .func => |macro| blk: {
-            const start = lexer.index;
-            const lp = lexer.next();
-
-            if (lp.id != .LParen) {
-                lexer.index = start;
-                break :blk;
-            }
-
-            pp.expansionLog.clearRetainingCapacity();
-            var buffer = ExpandBuffer.init(pp.compilation.gpa);
-            defer buffer.deinit();
-
-            // collect the macro name and arguments into a new buffer
-            try buffer.append(tokenFromRaw(raw));
-            try buffer.append(tokenFromRaw(lp));
-
-            var parens: u32 = 0;
-            while (true) {
-                const token = lexer.next();
-                switch (token.id) {
-                    .NewLine => continue,
-                    .Eof => {
-                        try pp.err(token, .unterminated_macro_arg_list);
-                        return;
-                    },
-                    .LParen => parens += 1,
-                    .RParen => {
-                        if (parens == 0) {
-                            try buffer.append(tokenFromRaw(token));
-                            break;
-                        }
-                        parens -= 1;
-                    },
-
-                    else => {},
-                }
-                try buffer.append(tokenFromRaw(token));
-            }
-
-            var startIdx: usize = 0;
-            // Mark that we have seen this macro.
-            try pp.expansionLog.putNoClobber(some, {});
-            try pp.expandFunc(&buffer, &startIdx, macro);
-
-            // add the result tokens to the token list and mark they were expanded,
-            try pp.tokens.ensureUnusedCapacity(pp.compilation.gpa, pp.tokens.len + buffer.items.len);
-            const loc = Source.Location{ .id = raw.source, .byteOffset = raw.start };
-            for (buffer.items) |*r| {
-                try pp.markExpandedFrom(r, loc);
-                pp.tokens.appendAssumeCapacity(r.*);
-            }
-
-            return;
-        },
-    };
-
-    // Not a macro, continue as usual.
-    try pp.tokens.append(pp.compilation.gpa, tokenFromRaw(raw));
-}
-
 // mark that this token has been expanded from `loc`
 fn markExpandedFrom(pp: *Preprocessor, token: *Token, loc: Source.Location) !void {
     const newLoc = try pp.arena.allocator().create(Source.Location);
     newLoc.* = loc;
     newLoc.next = token.loc.next;
     token.loc.next = newLoc;
-}
-
-/// Try to expand a macro in the `source` buffer at `start_index`.
-fn expandExtra(pp: *Preprocessor, source: *ExpandBuffer, start: *usize) Error!void {
-    if (pp.defines.getPtr(pp.expandedSlice(source.items[start.*]))) |some| {
-        if (pp.expansionLog.get(some)) |_| {
-            // If we have already expanded this macro, do not recursively expand it.
-            start.* += 1;
-            return;
-        }
-
-        // Mark that we have seen this macro.
-        try pp.expansionLog.putNoClobber(some, {});
-
-        switch (some.*) {
-            .empty => _ = source.orderedRemove(start.*), // Simply remove the token.
-            .simple => |macro| {
-                _ = source.orderedRemove(start.*);
-                var buffer = ExpandBuffer.init(pp.compilation.gpa);
-                defer buffer.deinit();
-                try buffer.ensureTotalCapacity(macro.tokens.len);
-
-                // add all of the macros tokens to the new buffer handing any concats
-                var i: usize = 0;
-                while (i < macro.tokens.len) : (i += 1) {
-                    const raw = macro.tokens[i];
-                    if (raw.id == .HashHash) {
-                        _ = buffer.pop();
-                        const lhs = tokenFromRaw(macro.tokens[i - 1]);
-                        const rhs = tokenFromRaw(macro.tokens[i + 1]);
-                        i += 1;
-
-                        buffer.appendAssumeCapacity(try pp.pasteTokens(lhs, rhs));
-                    } else {
-                        buffer.appendAssumeCapacity(tokenFromRaw(raw));
-                    }
-                }
-
-                // Try to expand the result tokens.
-                i = 0;
-                while (i < buffer.items.len) {
-                    if (buffer.items[i].id.isMacroIdentifier()) {
-                        try pp.expandExtra(&buffer, &i);
-                    } else {
-                        i += 1;
-                    }
-                }
-
-                // Mark all the tokens before adding them to the source buffer.
-                for (buffer.items) |*tok| try pp.markExpandedFrom(tok, macro.loc);
-                try source.insertSlice(start.*, buffer.items);
-                start.* += buffer.items.len;
-            },
-
-            .func => |macro| return pp.expandFunc(source, start, macro),
-        }
-    } else {
-        start.* += 1;
-    }
-}
-
-/// Try to expand a function like macro in the source buffer at start location.
-fn expandFunc(pp: *Preprocessor, source: *ExpandBuffer, startIdx: *usize, macro: Macro.Func) Error!void {
-    const nameTK = source.items[startIdx.*];
-    const lparenIdx = startIdx.* + 1;
-    if (source.items.len <= lparenIdx or source.items[lparenIdx].id != .LParen) {
-        // Not a macro function call, go over normal identifier.
-        startIdx.* += 1;
-        return;
-    }
-
-    // collect the arguments.
-    // `args_count` starts with 1 since whitespace counts as an argument.
-    var argsCount: u32 = 0;
-    var parens: u32 = 0;
-    const args = for (source.items[lparenIdx + 1 ..], 0..) |tok, i| {
-        switch (tok.id) {
-            .Comma => if (parens == 0) {
-                if (argsCount == 0) argsCount = 2 else argsCount += 1;
-            },
-
-            .LParen => parens += 1,
-            .RParen => {
-                if (parens == 0) break source.items[lparenIdx + 1 ..][0..i];
-                parens -= 1;
-            },
-            else => {},
-        }
-    } else {
-        try pp.compilation.diag.add(.{ .tag = .unterminated_macro_arg_list, .loc = nameTK.loc });
-        startIdx.* += 1;
-        return;
-    };
-
-    if (argsCount == 0 and args.len != 0)
-        argsCount = 1;
-
-    // Validate argument count.
-    const extra = Diagnostics.Message.Extra{ .arguments = .{ .expected = @as(u32, @intCast(macro.params.len)), .actual = argsCount } };
-    if (macro.varArgs and argsCount < macro.params.len) {
-        try pp.compilation.diag.add(.{ .tag = .expected_at_least_arguments, .loc = nameTK.loc, .extra = extra });
-        startIdx.* += 1;
-        return;
-    }
-
-    if (!macro.varArgs and argsCount != macro.params.len) {
-        try pp.compilation.diag.add(.{ .tag = .expected_arguments, .loc = nameTK.loc, .extra = extra });
-        startIdx.* += 1;
-        return;
-    }
-
-    var buf = ExpandBuffer.init(pp.compilation.gpa);
-    defer buf.deinit();
-    try buf.ensureTotalCapacity(macro.tokens.len);
-
-    // 1. Stringification and 2. Parameter replacement
-    var tokenIdx: usize = 0;
-    while (tokenIdx < macro.tokens.len) : (tokenIdx += 1) {
-        const raw = macro.tokens[tokenIdx];
-        switch (raw.id) {
-            .StringifyParam, .StringifyVarArgs => {
-                const targetArg = if (raw.id == .StringifyVarArgs)
-                    getVarArgSlice(args, macro.params.len)
-                else
-                    getArgSlice(args, raw.end);
-
-                pp.charBuffer.items.len = 0; // Safe since we can only be stringifying one parameter at a time.
-
-                // TODO pretty print these
-                try pp.charBuffer.append('"');
-                for (targetArg, 0..) |a, i| {
-                    if (i != 0) try pp.charBuffer.append(' ');
-                    for (pp.expandedSlice(a)) |c| {
-                        if (c == '"')
-                            try pp.charBuffer.appendSlice("\\\"")
-                        else
-                            try pp.charBuffer.append(c);
-                    }
-                }
-                try pp.charBuffer.appendSlice("\"\n");
-
-                const start = pp.generated.items.len;
-                try pp.generated.appendSlice(pp.charBuffer.items);
-
-                try buf.append(.{
-                    .id = .StringLiteral,
-                    .loc = .{ // location of token slice in the generated buffer
-                        .id = .generated,
-                        .byteOffset = @as(u32, @intCast(start)),
-                    },
-                });
-            },
-
-            .MacroParam, .KeywordVarArgs => {
-                const targetArg = if (raw.id == .KeywordVarArgs)
-                    getVarArgSlice(args, macro.params.len)
-                else
-                    getArgSlice(args, raw.end);
-
-                if (targetArg.len == 0)
-                    // This is needed so that we can properly do token pasting.
-                    try buf.append(.{ .id = .EmptyArg, .loc = .{ .id = raw.source, .byteOffset = raw.start } })
-                else {
-                    try buf.ensureTotalCapacity(buf.items.len + targetArg.len);
-                    for (targetArg) |arg| {
-                        var copy = arg;
-                        if (copy.id.isMacroIdentifier())
-                            copy.id = .IdentifierFromParam
-                        else if (copy.id == .HashHash)
-                            copy.id = .HashHashFromParam;
-
-                        buf.appendAssumeCapacity(copy);
-                    }
-                }
-            },
-            else => try buf.append(tokenFromRaw(raw)),
-        }
-    }
-
-    // 3. Concatenation
-    tokenIdx = 0;
-    while (tokenIdx < buf.items.len) : (tokenIdx += 1) {
-        switch (buf.items[tokenIdx].id) {
-            .HashHashFromParam => buf.items[tokenIdx].id = .HashHash,
-            .HashHash => {
-                const prev = buf.items[tokenIdx - 1];
-                const next = buf.items[tokenIdx + 1];
-
-                buf.items[tokenIdx - 1] = try pp.pasteTokens(prev, next);
-                std.mem.copy(Token, buf.items[tokenIdx..], buf.items[tokenIdx + 2 ..]);
-                buf.items.len -= 2;
-                tokenIdx -= 1;
-            },
-            else => {},
-        }
-    }
-
-    // 4. Expand tokens from parameters
-    tokenIdx = 0;
-    while (tokenIdx < buf.items.len) {
-        const token = &buf.items[tokenIdx];
-        switch (token.id) {
-            .EmptyArg => _ = buf.orderedRemove(tokenIdx),
-            .IdentifierFromParam => {
-                token.id = RawToken.getTokenId(pp.compilation, pp.expandedSlice(token.*));
-                try pp.expandExtra(&buf, &tokenIdx);
-            },
-            else => tokenIdx += 1,
-        }
-    }
-
-    // 5. Expand resulting tokens
-    tokenIdx = 0;
-    while (tokenIdx < buf.items.len) {
-        if (buf.items[tokenIdx].id.isMacroIdentifier()) {
-            try pp.expandExtra(&buf, &tokenIdx);
-        } else {
-            tokenIdx += 1;
-        }
-    }
-    // Mark all the tokens before adding them to the source buffer.
-    for (buf.items) |*tok|
-        try pp.markExpandedFrom(tok, macro.loc);
-
-    // Move tokens after the call out of the way.
-    const inputLen = args.len + 3; // +3 for identifier, ( and )
-    if (inputLen == buf.items.len) {
-        // TOOD
-    } else if (inputLen > buf.items.len) {
-        std.mem.copy(Token, source.items[startIdx.* + buf.items.len ..], source.items[startIdx.* + inputLen ..]);
-        source.items.len -= inputLen - buf.items.len;
-    } else {
-        const newLen = source.items.len + buf.items.len - inputLen;
-        try source.ensureTotalCapacity(newLen);
-        const start_len = source.items.len;
-        source.items.len = newLen;
-        std.mem.copyBackwards(Token, source.items[startIdx.* + buf.items.len ..], source.items[startIdx.* + inputLen .. start_len]);
-    }
-
-    // Insert resulting tokens to the source
-    std.mem.copy(Token, source.items[startIdx.*..], buf.items);
-    startIdx.* += buf.items.len;
-}
-
-// get argument at index from a list of tokens.
-fn getArgSlice(args: []const Token, index: u32) []const Token {
-    // TODO this is a mess
-    var commasSeen: usize = 0;
-    var i: usize = 0;
-    var parens: u32 = 0;
-    while (i < args.len) : (i += 1) {
-        switch (args[i].id) {
-            .LParen => parens += 1,
-            .RParen => parens -= 1,
-            else => if (parens != 0) continue,
-        }
-
-        if (parens == 0 and args[i].id == .Comma) {
-            if (index == 0) return args[0..i];
-            commasSeen += 1;
-            continue;
-        }
-
-        if (commasSeen == index) for (args[i..], 0..) |a_2, j| {
-            if (parens == 0 and a_2.id == .Comma) {
-                return args[i..][0..j];
-            }
-        } else return args[i..];
-    } else return args[i..];
-    unreachable;
-}
-
-/// Get var args from after index.
-fn getVarArgSlice(args: []const Token, index: usize) []const Token {
-    if (index == 0) return args;
-    // TODO this is a mess
-    var commasSeen: usize = 0;
-    var parens: u32 = 0;
-    var i: usize = 0;
-    while (i < args.len) : (i += 1) {
-        switch (args[i].id) {
-            .LParen => parens += 1,
-            .RParen => parens -= 1,
-            else => if (parens != 0) continue,
-        }
-        if (parens == 0 and args[i].id == .Comma) commasSeen += 1;
-        if (commasSeen == index) return args[i + 1 ..];
-    }
-    return args[i..];
 }
 
 // TODO there are like 5 tokSlice functions, can we combine them somehow.
