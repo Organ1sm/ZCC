@@ -118,7 +118,7 @@ pub fn preprocess(pp: *Preprocessor, source: Source) Error!void {
     try pp.tokens.ensureUnusedCapacity(pp.compilation.gpa, pp.tokens.len + estimatedTokenCount);
 
     var ifLevel: u8 = 0;
-    var ifKind = std.mem.zeroes(std.PackedIntArray(u2, 256));
+    var ifKind = std.PackedIntArray(u2, 256).init([1]u2{0} ** 256);
     var seenPragmaOnce = false;
     const untilElse = 0;
     const untilEndIf = 1;
