@@ -153,6 +153,7 @@ pub fn preprocess(pp: *Preprocessor, source: Source) Error!void {
                             return pp.compilation.fatal(directive, "too many #if nestings", .{});
 
                         ifLevel = ov[0];
+
                         if (try pp.expr(&lexer)) {
                             ifKind.set(ifLevel, untilEndIf);
                         } else {
@@ -610,18 +611,17 @@ fn expandFuncMacro(
             try varArguments.appendSlice(args.items[i]);
             try expandedVarArguments.appendSlice(expandedArgs.items[i]);
             if (i != expandedArgs.items.len - 1) {
-                const comma = Token{ .id = .Comma, .loc = .{
-                    .id = .generated,
-                } };
+                const comma = Token{
+                    .id = .Comma,
+                    .loc = .{
+                        .id = .generated,
+                    },
+                };
                 try varArguments.append(comma);
                 try expandedVarArguments.append(comma);
             }
         }
     }
-    // for (expandedVarArguments.items) |tok| {
-    //    std.debug.print("{s} ", .{pp.expandedSlice(tok)});
-    //}
-    //std.debug.print("\n", .{});
 
     // token concatenation and expansion phase
     var tokenIdx: usize = 0;
@@ -640,7 +640,7 @@ fn expandFuncMacro(
 
                 const prev = buf.pop();
                 var next = switch (rawNext.id) {
-                    .MacroParam => args.items[rawNext.end],
+                    .MacroParam, .MacroParamNoExpand => args.items[rawNext.end],
                     .KeywordVarArgs => varArguments.items,
                     else => &[1]Token{tokenFromRaw(rawNext)},
                 };
@@ -648,7 +648,6 @@ fn expandFuncMacro(
 
                 var pastedToken = try pp.pasteTokens(prev, next[0]);
                 try buf.append(pastedToken);
-
                 try buf.appendSlice(next[1..]);
                 // skip next token
                 tokenIdx += 1;
@@ -867,6 +866,7 @@ fn expandMacroExhaustive(
                 }
             }
         }
+
         doRescan = false;
         // expansion loop
         var idx: usize = startIdx + advanceIdx;
@@ -941,7 +941,6 @@ fn expandMacroExhaustive(
                         try expandBuffer.appendSlice(arg);
 
                         try pp.expandMacroExhaustive(lexer, &expandBuffer, 0, expandBuffer.items.len, false);
-
                         expandedArgs.appendAssumeCapacity(try expandBuffer.toOwnedSlice());
                     }
 
@@ -973,13 +972,6 @@ fn expandMacroExhaustive(
                 //std.debug.print("Advancing start index by {}\n", .{advanceIdx});
             }
         } // end of replacement phase
-
-        if (doRescan) {
-            //std.debug.print("After expansion: ", .{});
-            //try pp.debugTokenBuf(buf.items);
-        } else {
-            //std.debug.print("No expansions done\n", .{});
-        }
     }
     // end of scanning phase
 
@@ -992,8 +984,8 @@ fn expandMacroExhaustive(
 fn expandMacro(pp: *Preprocessor, lexer: *Lexer, raw: RawToken) Error!void {
     var buf = ExpandBuffer.init(pp.compilation.gpa);
     defer buf.deinit();
-    try buf.append(tokenFromRaw(raw));
 
+    try buf.append(tokenFromRaw(raw));
     try pp.expandMacroExhaustive(lexer, &buf, 0, 1, true);
     //std.debug.print("Result: ", .{});
     //try pp.debugTokenBuf(buf.items);
