@@ -3,6 +3,7 @@ const Parser = @import("../Parser/Parser.zig");
 const Tree = @import("AST.zig");
 const Compilation = @import("../Basic/Compilation.zig");
 const TypeBuilder = @import("TypeBuilder.zig");
+const Attribute = @import("../Lexer/Attribute.zig");
 
 const Type = @This();
 
@@ -16,6 +17,7 @@ data: union {
     expr: *Expr,
     @"enum": *Enum,
     record: *Record,
+    attributed: *Attributed,
     none: void,
 } = .{ .none = {} },
 
@@ -119,6 +121,11 @@ pub const Array = struct {
 pub const Expr = struct {
     node: NodeIndex,
     ty: Type,
+};
+
+pub const Attributed = struct {
+    attributes: []Attribute,
+    base: Type, // base type
 };
 
 pub const Enum = struct {
@@ -236,6 +243,8 @@ pub const Specifier = enum {
     TypeofExpr,
     /// decayed array created with typeof(expression)
     DecayedTypeofExpr,
+    /// data.attributed
+    Attributed,
 };
 
 /// Determine if type matches the given specifier, recursing into typeof
@@ -748,6 +757,8 @@ pub fn sizeof(ty: Type, comp: *const Compilation) ?u64 {
         .TypeofExpr,
         .DecayedTypeofExpr,
         => ty.data.expr.ty.sizeof(comp),
+
+        .Attributed => ty.data.attributed.base.sizeof(comp),
     };
 }
 
@@ -798,6 +809,8 @@ pub fn alignof(ty: Type, comp: *Compilation) u29 {
 
         .TypeofType, .DecayedTypeofType => ty.data.subType.alignof(comp),
         .TypeofExpr, .DecayedTypeofExpr => ty.data.expr.ty.alignof(comp),
+
+        .Attributed => ty.data.attributed.base.alignof(comp),
     };
 }
 
@@ -1154,6 +1167,12 @@ pub fn dump(ty: Type, w: anytype) @TypeOf(w).Error!void {
         .TypeofExpr, .DecayedTypeofExpr => {
             try w.writeAll("typeof(<expr>: ");
             try ty.data.expr.ty.dump(w);
+            try w.writeAll(")");
+        },
+
+        .Attributed => {
+            try w.writeAll("attributed(");
+            try ty.data.attributed.base.dump(w);
             try w.writeAll(")");
         },
 

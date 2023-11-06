@@ -85,6 +85,7 @@ pub const Token = struct {
         .{ "include", .KeywordInclude },
         .{ "define", .KeywordDefine },
         .{ "defined", .KeywordDefined },
+        .{ "__has_attribute", .KeywordHasAttribute },
         .{ "undef", .KeywordUndef },
         .{ "ifdef", .KeywordIfdef },
         .{ "ifndef", .KeywordIfndef },
@@ -108,5 +109,7 @@ pub const Token = struct {
 
         // gcc builtins
         .{ "__builtin_choose_expr", .BuiltinChooseExpr },
+        .{ "__attribute", .KeywordAttribute1 },
+        .{ "__attribute__", .KeywordAttribute2 },
     });
 };

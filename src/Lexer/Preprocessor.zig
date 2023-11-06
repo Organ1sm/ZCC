@@ -7,6 +7,7 @@ const Lexer = @import("Lexer.zig");
 const Parser = @import("../Parser/Parser.zig");
 const Diagnostics = @import("../Basic/Diagnostics.zig");
 const Token = @import("../AST/AST.zig").Token;
+const AttrTag = @import("Attribute.zig").Tag;
 
 const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
@@ -113,6 +114,8 @@ pub fn preprocess(pp: *Preprocessor, source: Source) Error!void {
         .comp = pp.compilation,
     };
 
+    const TrailingWhiteSpace = " \r\t\x0B\x0C";
+
     // Estimate how many new tokens this source will contain.
     const estimatedTokenCount = source.buffer.len / 8;
     try pp.tokens.ensureUnusedCapacity(pp.compilation.gpa, pp.tokens.len + estimatedTokenCount);
@@ -138,7 +141,7 @@ pub fn preprocess(pp: *Preprocessor, source: Source) Error!void {
                         }
 
                         var slice = lexer.buffer[start..lexer.index];
-                        slice = std.mem.trim(u8, slice, " \t\x0B\x0C");
+                        slice = std.mem.trim(u8, slice, TrailingWhiteSpace);
 
                         try pp.compilation.diag.add(.{
                             .tag = .error_directive,
@@ -208,7 +211,7 @@ pub fn preprocess(pp: *Preprocessor, source: Source) Error!void {
                         }
 
                         var slice = lexer.buffer[start..lexer.index];
-                        slice = std.mem.trim(u8, slice, " \r\t\x0B\x0C");
+                        slice = std.mem.trim(u8, slice, TrailingWhiteSpace);
 
                         if (std.mem.eql(u8, slice, "once")) {
                             const prev = try pp.pragmaOnce.fetchPut(lexer.source, {});
@@ -430,10 +433,43 @@ fn expr(pp: *Preprocessor, lexer: *Lexer) Error!bool {
                 }
             }
 
-            if (pp.defines.get(pp.tokSliceSafe(macroToken))) |_| {
+            if (macroToken.id.isFeatureCheck() or pp.defines.get(pp.tokSliceSafe(macroToken)) != null) {
                 token.id = .One;
             } else {
                 token.id = .Zero;
+            }
+        } else if (token.id == .KeywordHasAttribute and pp.defines.get(pp.tokSliceSafe(token)) == null) {
+            const lparen = lexer.next();
+            if (lparen.id != .LParen) {
+                const extra = Diagnostics.Message.Extra{
+                    .tokenId = .{ .expected = .LParen, .actual = token.id },
+                };
+                try pp.compilation.diag.add(.{
+                    .tag = .missing_token,
+                    .loc = .{ .id = lparen.source, .byteOffset = lparen.start },
+                    .extra = extra,
+                });
+                return false;
+            }
+
+            const attrToken = lexer.next();
+            if (!attrToken.id.isMacroIdentifier()) {
+                try pp.err(attrToken, .feature_check_requires_identifier);
+                return false;
+            }
+
+            const rparen = lexer.next();
+            if (rparen.id != .RParen) {
+                try pp.err(rparen, .missing_paren_param_list);
+                try pp.err(lparen, .to_match_paren);
+                return false;
+            }
+
+            const attrName = pp.tokSliceSafe(attrToken);
+            if (AttrTag.fromString(attrName) == null) {
+                token.id = .Zero;
+            } else {
+                token.id = .One;
             }
         }
 
@@ -488,6 +524,7 @@ fn expr(pp: *Preprocessor, lexer: *Lexer) Error!bool {
         .paramBuffer = undefined,
         .enumBuffer = undefined,
         .recordBuffer = undefined,
+        .attrBuffer = undefined,
     };
 
     return parser.macroExpr();
@@ -1102,6 +1139,9 @@ fn define(pp: *Preprocessor, lexer: *Lexer) Error!void {
         try pp.err(macroName, .macro_name_must_be_identifier);
         return skipToNewLine(lexer);
     }
+
+    if (macroName.id.isFeatureCheck())
+        try pp.err(macroName, .builtin_macro_redefined);
 
     var first = lexer.next();
     first.id.simplifyMacroKeyword();
