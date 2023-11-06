@@ -83,6 +83,8 @@ pub const Specifier = union(enum) {
     TypeofExpr: *Type.Expr,
     DecayedTypeofExpr: *Type.Expr,
 
+    Attributed: *Type.Attributed,
+
     pub fn toString(spec: Specifier) ?[]const u8 {
         return switch (spec) {
             Specifier.None => unreachable,
@@ -283,6 +285,11 @@ pub fn finish(b: @This(), p: *Parser) Parser.Error!Type {
             ty.specifier = .DecayedTypeofExpr;
             ty.data = .{ .expr = data };
         },
+
+        Specifier.Attributed => |data| {
+            ty.specifier = .Attributed;
+            ty.data = .{ .attributed = data };
+        },
     }
 
     try b.qual.finish(p, &ty);
@@ -315,7 +322,17 @@ pub fn cannotCombine(b: @This(), p: *Parser, sourceToken: TokenIndex) Compilatio
 pub fn combineFromTypeof(b: *@This(), p: *Parser, new: Type, sourceToken: TokenIndex) Compilation.Error!void {
     if (b.typeof != null) return p.errStr(.cannot_combine_spec, sourceToken, "typeof");
     if (b.specifier != .None) return p.errStr(.invalid_typeof, sourceToken, b.specifier.toString().?);
-    b.typeof = new;
+
+    const inner = switch (new.specifier) {
+        .TypeofType => new.data.subType.*,
+        .TypeofExpr => new.data.expr.ty,
+        else => unreachable,
+    };
+
+    b.typeof = switch (inner.specifier) {
+        .Attributed => inner.data.attributed.base,
+        else => new,
+    };
 }
 
 pub fn combine(b: *@This(), p: *Parser, new: Specifier, sourceToken: TokenIndex) Compilation.Error!void {
@@ -513,5 +530,7 @@ pub fn fromType(ty: Type) Specifier {
         .DecayedTypeofType => .{ .DecayedTypeofType = ty.data.subType },
         .TypeofExpr => .{ .TypeofExpr = ty.data.expr },
         .DecayedTypeofExpr => .{ .DecayedTypeofExpr = ty.data.expr },
+
+        .Attributed => .{ .Attributed = ty.data.attributed },
     };
 }

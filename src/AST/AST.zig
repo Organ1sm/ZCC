@@ -5,6 +5,7 @@ const Source = @import("../Basic/Source.zig");
 const Lexer = @import("../Lexer/Lexer.zig");
 const TokenType = @import("../Basic/TokenType.zig").TokenType;
 const AstTag = @import("AstTag.zig").Tag;
+const Attribute = @import("../Lexer/Attribute.zig");
 
 const AST = @This();
 
@@ -148,7 +149,7 @@ pub fn isLValue(nodes: Node.List.Slice, extra: []const NodeIndex, valueMap: Valu
 
 pub fn dumpString(bytes: []const u8, tag: AstTag, writer: anytype) !void {
     switch (tag) {
-        .StringLiteralExpr => try writer.print("\"{}\"", .{std.zig.fmtEscapes(bytes[0..bytes.len - 1])}),
+        .StringLiteralExpr => try writer.print("\"{}\"", .{std.zig.fmtEscapes(bytes[0 .. bytes.len - 1])}),
         else => unreachable,
     }
 }
@@ -218,6 +219,16 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
     }
 
     try w.writeAll("\n" ++ RESET);
+    if (ty.specifier == .Attributed) {
+        for (ty.data.attributed.attributes) |attr| {
+            const attrName = tree.tokSlice(attr.name);
+            try w.writeByteNTimes(' ', level + half);
+            try w.print(ATTRIBUTE ++ "attr: {s}\n" ++ RESET, .{attrName});
+            if (attr.params != .none) {
+                try tree.dumpNode(attr.params, level + delta, w);
+            }
+        }
+    }
 
     switch (tag) {
         .Invalid => unreachable,
@@ -269,6 +280,7 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
         .EnumDecl,
         .StructDecl,
         .UnionDecl,
+        .AttrParams,
         => {
             for (tree.data[data.range.start..data.range.end], 0..) |stmt, i| {
                 if (i != 0)
@@ -285,6 +297,7 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
         .EnumDeclTwo,
         .StructDeclTwo,
         .UnionDeclTwo,
+        .AttrParamsTwo,
         => {
             if (data.BinaryExpr.lhs != .none) try tree.dumpNode(data.BinaryExpr.lhs, level + delta, w);
             if (data.BinaryExpr.rhs != .none) try tree.dumpNode(data.BinaryExpr.rhs, level + delta, w);
@@ -356,6 +369,7 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
         .ContinueStmt,
         .BreakStmt,
         .ImplicitReturn,
+        .NullStmt,
         => {},
 
         .ReturnStmt => {
@@ -509,6 +523,11 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
             try w.writeAll("data: " ++ LITERAL);
             try dumpString(tree.strings[data.String.index..][0..data.String.len], tag, w);
             try w.writeAll("\n" ++ RESET);
+        },
+
+        .AttrArgIdentifier => {
+            try w.writeByteNTimes(' ', level + half);
+            try w.print(ATTRIBUTE ++ "name: {s}\n" ++ RESET, .{tree.tokSlice(data.DeclarationRef)});
         },
 
         .CallExpr => {

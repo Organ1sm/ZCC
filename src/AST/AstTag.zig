@@ -109,7 +109,11 @@ pub const Tag = enum(u8) {
     /// goto first;
     GotoStmt,
     ContinueStmt,
+    /// break; first and second unused
     BreakStmt,
+    /// null statement (just a semicolon); first and second unused
+    NullStmt,
+    /// return first; first may be null
     ReturnStmt,
 
     // ====== Expr ======
@@ -299,6 +303,13 @@ pub const Tag = enum(u8) {
     ArrayFillerExpr,
     /// Inserted in record and scalar initilizers for represent unspecified fields.
     DefaultInitExpr,
+
+    /// Attribute argument identifier
+    AttrArgIdentifier,
+    /// rhs can be none
+    AttrParamsTwo,
+    /// range
+    AttrParams,
 
     /// Convert a literal 0 to a null pointer
     NullToPointer,

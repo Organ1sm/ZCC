@@ -265,7 +265,7 @@ pub fn generateBuiltinMacros(comp: *Compilation) !Source {
         \\
     );
 
-    if (comp.target.cpu.arch.endian() == .Little)
+    if (comp.target.cpu.arch.endian() == .little)
         try w.writeAll(
             \\#define __BYTE_ORDER__ __ORDER_LITTLE_ENDIAN__
             \\#define __LITTLE_ENDIAN__ 1
