@@ -19,54 +19,34 @@ const MaxIncludeDepth = 200;
 
 const Error = Compilation.Error;
 
-const Macro = union(enum) {
-    /// #define Foo
-    empty,
-
-    /// #define Add a + b
-    simple: Simple,
-
-    /// #define Add(a, b) ((a)+(b))
-    func: Func,
-
-    const Simple = struct {
-        tokens: []const RawToken,
-        loc: Source.Location,
-    };
-
-    const Func = struct {
-        /// Parameters of the function type macro
-        params: []const []const u8,
-        /// Token constituting the macro body
-        tokens: []const RawToken,
-        varArgs: bool,
-        loc: Source.Location,
-    };
+const Macro = struct {
+    /// Parameters of the function type macro
+    params: []const []const u8,
+    /// Token constituting the macro body
+    tokens: []const RawToken,
+    /// If the function type macro has variable number of arguments
+    varArgs: bool,
+    /// Is a funtion type macro
+    isFunc: bool,
+    /// Location of macro in the source
+    loc: Source.Location,
 
     fn eql(a: Macro, b: Macro, pp: *Preprocessor) bool {
-        if (std.meta.activeTag(a) != b) return false;
-        switch (a) {
-            .empty => {},
-            .simple => {
-                const as = a.simple;
-                const bs = b.simple;
-                if (as.tokens.len != bs.tokens.len) return false;
-                for (as.tokens, 0..) |t, i|
-                    if (!tokEql(pp, t, bs.tokens[i])) return false;
-            },
+        if (a.tokens.len != b.tokens.len)
+            return false;
 
-            .func => {
-                const aFunc = a.func;
-                const bFunc = b.func;
-                if (aFunc.varArgs != bFunc.varArgs) return false;
-                if (aFunc.params.len != bFunc.params.len) return false;
-                if (aFunc.tokens.len != bFunc.tokens.len) return false;
-                for (aFunc.params, 0..) |p, i|
-                    if (!std.mem.eql(u8, p, bFunc.params[i])) return false;
-                for (aFunc.tokens, 0..) |t, i|
-                    if (!tokEql(pp, t, bFunc.tokens[i])) return false;
-            },
+        for (a.tokens, 0..) |t, i|
+            if (!tokEql(pp, t, b.tokens[i]))
+                return false;
+
+        if (a.isFunc and b.isFunc) {
+            if (a.varArgs != b.varArgs) return false;
+            if (a.params.len != b.params.len) return false;
+            for (a.params, 0..) |p, i|
+                if (!std.mem.eql(u8, p, b.params[i]))
+                    return false;
         }
+
         return true;
     }
 
@@ -605,7 +585,7 @@ fn skipToNewLine(lexer: *Lexer) void {
 const ExpandBuffer = std.ArrayList(Token);
 const MacroArguments = std.ArrayList([]const Token);
 
-fn expandObjMacro(pp: *Preprocessor, simpleMacro: *const Macro.Simple) Error!ExpandBuffer {
+fn expandObjMacro(pp: *Preprocessor, simpleMacro: *const Macro) Error!ExpandBuffer {
     var buff = ExpandBuffer.init(pp.compilation.gpa);
     try buff.ensureTotalCapacity(simpleMacro.tokens.len);
 
@@ -627,7 +607,7 @@ fn expandObjMacro(pp: *Preprocessor, simpleMacro: *const Macro.Simple) Error!Exp
 
 fn expandFuncMacro(
     pp: *Preprocessor,
-    funcMacro: *const Macro.Func,
+    funcMacro: *const Macro,
     args: *const MacroArguments,
     expandedArgs: *const MacroArguments,
 ) Error!ExpandBuffer {
@@ -763,12 +743,7 @@ fn expandFuncMacro(
 }
 
 fn shouldExpand(tok: Token, macro: *Macro) bool {
-    const macroLoc = switch (macro.*) {
-        .simple => |smacro| smacro.loc,
-        .func => |smacro| smacro.loc,
-        else => unreachable,
-    };
-
+    const macroLoc = macro.*.loc;
     var maybeLoc = tok.loc.next;
     while (maybeLoc) |loc| {
         if (loc.id == macroLoc.id and loc.byteOffset == macroLoc.byteOffset)
@@ -915,28 +890,8 @@ fn expandMacroExhaustive(
                 idx += 1;
                 continue;
             }
-            switch (macroEntry.?.*) {
-                .empty => idx += 1,
-                .simple => |simpleMacro| {
-                    //std.debug.print("Expanding {s}\n", .{pp.expandedSlice(buf.items[idx])});
-                    const res = try pp.expandObjMacro(&simpleMacro);
-                    defer res.deinit();
-                    var expansion_loc = simpleMacro.loc;
-                    expansion_loc.next = buf.items[idx].loc.next;
-                    for (res.items) |*tok| {
-                        if (buf.items[idx].loc.next) |ln| {
-                            try pp.markExpandedFrom(tok, ln.*);
-                        }
-                        try pp.markExpandedFrom(tok, simpleMacro.loc);
-                    }
-
-                    try buf.replaceRange(idx, 1, res.items);
-                    idx += res.items.len;
-                    movingEndIdx += (res.items.len - 1);
-                    doRescan = true;
-                },
-
-                .func => |funcMacro| {
+            if (macroEntry) |macro| {
+                if (macro.isFunc) {
                     var macroScanIdx = idx;
                     // to be saved in case this doesn't turn out to be a call
                     const args = (try pp.collectMacroFuncArguments(lexer, buf, &macroScanIdx, &movingEndIdx, extendBuffer)) orelse {
@@ -952,18 +907,18 @@ fn expandMacroExhaustive(
 
                     var argsCount = @as(u32, @intCast(args.items.len));
                     // if the macro has zero arguments g() args_count is still 1
-                    if (argsCount == 1 and funcMacro.params.len == 0)
+                    if (argsCount == 1 and macro.params.len == 0)
                         argsCount = 0;
 
                     // Validate argument count.
-                    const extra = Diagnostics.Message.Extra{ .arguments = .{ .expected = @as(u32, @intCast(funcMacro.params.len)), .actual = argsCount } };
-                    if (funcMacro.varArgs and argsCount < funcMacro.params.len) {
+                    const extra = Diagnostics.Message.Extra{ .arguments = .{ .expected = @as(u32, @intCast(macro.params.len)), .actual = argsCount } };
+                    if (macro.varArgs and argsCount < macro.params.len) {
                         try pp.compilation.diag.add(.{ .tag = .expected_at_least_arguments, .loc = buf.items[idx].loc, .extra = extra });
                         idx += 1;
                         continue;
                     }
 
-                    if (!funcMacro.varArgs and argsCount != funcMacro.params.len) {
+                    if (!macro.varArgs and argsCount != macro.params.len) {
                         try pp.compilation.diag.add(.{ .tag = .expected_arguments, .loc = buf.items[idx].loc, .extra = extra });
                         idx += 1;
                         continue;
@@ -981,18 +936,18 @@ fn expandMacroExhaustive(
                         expandedArgs.appendAssumeCapacity(try expandBuffer.toOwnedSlice());
                     }
 
-                    var res = try pp.expandFuncMacro(&funcMacro, &args, &expandedArgs);
+                    var res = try pp.expandFuncMacro(macro, &args, &expandedArgs);
                     defer res.deinit();
                     for (expandedArgs.items) |arg| {
                         pp.compilation.gpa.free(arg);
                     }
-                    var expansionLoc = funcMacro.loc;
+                    var expansionLoc = macro.loc;
                     expansionLoc.next = buf.items[idx].loc.next;
                     for (res.items) |*tok| {
                         if (buf.items[idx].loc.next) |ln| {
                             try pp.markExpandedFrom(tok, ln.*);
                         }
-                        try pp.markExpandedFrom(tok, funcMacro.loc);
+                        try pp.markExpandedFrom(tok, macro.loc);
                     }
 
                     try buf.replaceRange(idx, macroScanIdx - idx + 1, res.items);
@@ -1001,9 +956,25 @@ fn expandMacroExhaustive(
                     movingEndIdx = movingEndIdx + res.items.len - (macroScanIdx - idx + 1);
                     idx += res.items.len;
                     doRescan = true;
-                },
-            }
+                } else {
+                    const res = try pp.expandObjMacro(macro);
+                    defer res.deinit();
 
+                    var expansionLoc = macro.loc;
+                    expansionLoc.next = buf.items[idx].loc.next;
+                    for (res.items) |*tok| {
+                        if (buf.items[idx].loc.next) |ln| {
+                            try pp.markExpandedFrom(tok, ln.*);
+                        }
+                        try pp.markExpandedFrom(tok, macro.loc);
+                    }
+
+                    try buf.replaceRange(idx, 1, res.items);
+                    idx += res.items.len;
+                    movingEndIdx += (res.items.len - 1);
+                    doRescan = true;
+                }
+            }
             if (idx - startIdx == advanceIdx + 1 and !doRescan) {
                 advanceIdx += 1;
                 //std.debug.print("Advancing start index by {}\n", .{advanceIdx});
@@ -1147,7 +1118,13 @@ fn define(pp: *Preprocessor, lexer: *Lexer) Error!void {
     first.id.simplifyMacroKeyword();
 
     if (first.id == .NewLine or first.id == .Eof) {
-        return pp.defineMacro(macroName, .empty);
+        return pp.defineMacro(macroName, .{
+            .params = undefined,
+            .tokens = undefined,
+            .varArgs = false,
+            .isFunc = false,
+            .loc = undefined,
+        });
     } else if (first.start == macroName.end) {
         if (first.id == .LParen)
             return pp.defineFunc(lexer, macroName, first);
@@ -1179,10 +1156,13 @@ fn define(pp: *Preprocessor, lexer: *Lexer) Error!void {
     }
 
     const list = try pp.arena.allocator().dupe(RawToken, pp.tokenBuffer.items);
-    try pp.defineMacro(macroName, .{ .simple = .{
+    try pp.defineMacro(macroName, .{
         .loc = .{ .id = macroName.source, .byteOffset = macroName.start },
         .tokens = list,
-    } });
+        .params = undefined,
+        .isFunc = false,
+        .varArgs = false,
+    });
 }
 
 /// Handle a function like #define directive
@@ -1303,12 +1283,13 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: RawToken, lParen: Raw
 
     const paramList = try pp.arena.allocator().dupe([]const u8, params.items);
     const tokenList = try pp.arena.allocator().dupe(RawToken, pp.tokenBuffer.items);
-    try pp.defineMacro(macroName, .{ .func = .{
+    try pp.defineMacro(macroName, .{
+        .isFunc = true,
         .params = paramList,
         .varArgs = varArgs,
         .tokens = tokenList,
         .loc = .{ .id = macroName.source, .byteOffset = macroName.start },
-    } });
+    });
 }
 
 fn include(pp: *Preprocessor, lexer: *Lexer) Error!void {
