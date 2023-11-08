@@ -577,7 +577,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
             else => {
                 if (initD.d.oldTypeFunc == null) {
                     try p.err(.expected_fn_body);
-                    break :fndef;
+                    return true;
                 }
             },
         }
@@ -674,11 +674,15 @@ fn parseDeclaration(p: *Parser) Error!bool {
             }
         }
 
-        const body = try p.parseCompoundStmt(true);
+        const body = (try p.parseCompoundStmt(true)) orelse {
+            std.debug.assert(initD.d.oldTypeFunc != null);
+            try p.err(.expected_fn_body);
+            return true;
+        };
         const node = try p.addNode(.{
             .type = initD.d.type,
             .tag = try declSpec.validateFnDef(p),
-            .data = .{ .Declaration = .{ .name = initD.d.name, .node = body.? } },
+            .data = .{ .Declaration = .{ .name = initD.d.name, .node = body } },
         });
         try p.declBuffer.append(node);
 
