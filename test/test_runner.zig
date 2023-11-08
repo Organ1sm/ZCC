@@ -133,6 +133,8 @@ pub fn main() !void {
         var pp = zcc.Preprocessor.init(&comp);
         defer pp.deinit();
 
+        try pp.addBuiltinMacros();
+
         try pp.preprocess(builtinMacros);
         try pp.preprocess(testRunnerMacros);
         pp.preprocess(file) catch |err| {

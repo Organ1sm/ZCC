@@ -28,11 +28,16 @@ const Macro = struct {
     varArgs: bool,
     /// Is a funtion type macro
     isFunc: bool,
+    /// Is a predefined macro
+    isBuiltin: bool = false,
     /// Location of macro in the source
     loc: Source.Location,
 
     fn eql(a: Macro, b: Macro, pp: *Preprocessor) bool {
         if (a.tokens.len != b.tokens.len)
+            return false;
+
+        if (a.isBuiltin != b.isBuiltin)
             return false;
 
         for (a.tokens, 0..) |t, i|
@@ -64,6 +69,26 @@ pragmaOnce: std.AutoHashMap(Source.ID, void),
 tokenBuffer: RawTokenList,
 charBuffer: std.ArrayList(u8),
 includeDepth: u8 = 0,
+
+const FeatureCheckMacros = struct {
+    const hasAttribute = Macro{
+        .params = &[1][]const u8{"X"},
+        .tokens = &[1]RawToken{.{
+            .id = .MacroParamHasAttribute,
+            .source = .generated,
+            .start = 0,
+            .end = 0,
+        }},
+        .varArgs = false,
+        .isFunc = true,
+        .isBuiltin = true,
+        .loc = .{ .id = .generated },
+    };
+};
+
+pub fn addBuiltinMacros(pp: *Preprocessor) !void {
+    try pp.defines.put("__has_attribute", FeatureCheckMacros.hasAttribute);
+}
 
 pub fn init(comp: *Compilation) Preprocessor {
     return .{
@@ -418,39 +443,6 @@ fn expr(pp: *Preprocessor, lexer: *Lexer) Error!bool {
             } else {
                 token.id = .Zero;
             }
-        } else if (token.id == .KeywordHasAttribute and pp.defines.get(pp.tokSliceSafe(token)) == null) {
-            const lparen = lexer.next();
-            if (lparen.id != .LParen) {
-                const extra = Diagnostics.Message.Extra{
-                    .tokenId = .{ .expected = .LParen, .actual = token.id },
-                };
-                try pp.compilation.diag.add(.{
-                    .tag = .missing_token,
-                    .loc = .{ .id = lparen.source, .byteOffset = lparen.start },
-                    .extra = extra,
-                });
-                return false;
-            }
-
-            const attrToken = lexer.next();
-            if (!attrToken.id.isMacroIdentifier()) {
-                try pp.err(attrToken, .feature_check_requires_identifier);
-                return false;
-            }
-
-            const rparen = lexer.next();
-            if (rparen.id != .RParen) {
-                try pp.err(rparen, .missing_paren_param_list);
-                try pp.err(lparen, .to_match_paren);
-                return false;
-            }
-
-            const attrName = pp.tokSliceSafe(attrToken);
-            if (AttrTag.fromString(attrName) == null) {
-                token.id = .Zero;
-            } else {
-                token.id = .One;
-            }
         }
 
         try pp.expandMacro(lexer, token);
@@ -607,6 +599,7 @@ fn expandObjMacro(pp: *Preprocessor, simpleMacro: *const Macro) Error!ExpandBuff
 
 fn expandFuncMacro(
     pp: *Preprocessor,
+    loc: Source.Location,
     funcMacro: *const Macro,
     args: *const MacroArguments,
     expandedArgs: *const MacroArguments,
@@ -733,6 +726,31 @@ fn expandFuncMacro(
                     },
                 });
             },
+
+            .MacroParamHasAttribute => {
+                const arg = expandedArgs.items[0];
+                if (arg.len == 0) {
+                    const extra = Diagnostics.Message.Extra{ .arguments = .{ .expected = 1, .actual = @as(u32, @intCast(arg.len)) } };
+                    try pp.compilation.diag.add(.{ .tag = .expected_arguments, .loc = loc, .extra = extra });
+                    try buf.append(.{ .id = .Zero, .loc = loc });
+                    break;
+                }
+
+                const actual = arg[0];
+                if (actual.id != .Identifier) {
+                    try pp.compilation.diag.add(.{ .tag = .feature_check_requires_identifier, .loc = actual.loc });
+                    try buf.append(.{ .id = .Zero, .loc = actual.loc });
+                    break;
+                }
+
+                const attrName = pp.expandedSlice(actual);
+                const resultId: TokenType = if (AttrTag.fromString(attrName) == null) .Zero else .One;
+                try buf.append(.{
+                    .id = resultId,
+                    .loc = loc,
+                });
+            },
+
             else => {
                 try buf.append(tokenFromRaw(raw));
             },
@@ -792,6 +810,14 @@ fn collectMacroFuncArguments(
             .NewLine => {},
             .LParen => break,
             else => {
+                if (nameToken.id.isFeatureCheck()) {
+                    const extra = Diagnostics.Message.Extra{ .tokenId = .{ .expected = .LParen, .actual = nameToken.id } };
+                    try pp.compilation.diag.add(.{
+                        .tag = .missing_token,
+                        .loc = token.loc,
+                        .extra = extra,
+                    });
+                }
                 // Not a macro function call, go over normal identifier, rewind
                 lexer.index = initialLexerIdx;
                 endIdx.* = oldEnd;
@@ -885,8 +911,9 @@ fn expandMacroExhaustive(
         //std.debug.print("Scanning ", .{});
         //try pp.debugTokenBuf(buf.items[start_idx+advance_index .. moving_end_idx]);
         while (idx < movingEndIdx) {
-            const macroEntry = pp.defines.getPtr(pp.expandedSlice(buf.items[idx]));
-            if (macroEntry == null or !shouldExpand(buf.items[idx], macroEntry.?)) {
+            const macroToken = buf.items[idx];
+            const macroEntry = pp.defines.getPtr(pp.expandedSlice(macroToken));
+            if (macroEntry == null or !shouldExpand(macroToken, macroEntry.?)) {
                 idx += 1;
                 continue;
             }
@@ -936,7 +963,7 @@ fn expandMacroExhaustive(
                         expandedArgs.appendAssumeCapacity(try expandBuffer.toOwnedSlice());
                     }
 
-                    var res = try pp.expandFuncMacro(macro, &args, &expandedArgs);
+                    var res = try pp.expandFuncMacro(macroToken.loc, macro, &args, &expandedArgs);
                     defer res.deinit();
                     for (expandedArgs.items) |arg| {
                         pp.compilation.gpa.free(arg);
@@ -1005,6 +1032,7 @@ fn expandMacro(pp: *Preprocessor, lexer: *Lexer, raw: RawToken) Error!void {
 
 // mark that this token has been expanded from `loc`
 fn markExpandedFrom(pp: *Preprocessor, token: *Token, loc: Source.Location) !void {
+    if (loc.id == .generated) return;
     const newLoc = try pp.arena.allocator().create(Source.Location);
     newLoc.* = loc;
     newLoc.next = token.loc.next;
@@ -1088,7 +1116,7 @@ fn defineMacro(pp: *Preprocessor, nameToken: RawToken, macro: Macro) Error!void 
     const gop = try pp.defines.getOrPut(name);
     if (gop.found_existing and !gop.value_ptr.eql(macro, pp)) {
         try pp.compilation.diag.add(.{
-            .tag = .macro_redefined,
+            .tag = if (gop.value_ptr.isBuiltin) .builtin_macro_redefined else .macro_redefined,
             .loc = .{ .id = nameToken.source, .byteOffset = nameToken.start },
             .extra = .{ .str = name },
         });
@@ -1110,9 +1138,6 @@ fn define(pp: *Preprocessor, lexer: *Lexer) Error!void {
         try pp.err(macroName, .macro_name_must_be_identifier);
         return skipToNewLine(lexer);
     }
-
-    if (macroName.id.isFeatureCheck())
-        try pp.err(macroName, .builtin_macro_redefined);
 
     var first = lexer.next();
     first.id.simplifyMacroKeyword();

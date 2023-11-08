@@ -231,6 +231,8 @@ fn processSource(comp: *Compilation, source: Source, builtinMacro: Source, userD
     var pp = Preprocessor.init(comp);
     defer pp.deinit();
 
+    try pp.addBuiltinMacros();
+
     try pp.preprocess(builtinMacro);
     try pp.preprocess(userDefinedMacros);
     try pp.preprocess(source);
