@@ -43,6 +43,11 @@ void foo(void) {
         int *z = y;
         z = y;
     }
+    {
+        char *x = 0;
+        const char *y = x;
+        y = x;
+    }
 }
 
 

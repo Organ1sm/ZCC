@@ -2461,7 +2461,9 @@ fn coerceInit(p: *Parser, item: *Result, token: TokenIndex, target: Type) !void 
                 try p.errStr(.incompatible_ptr_init, token, try p.typePairStrExtra(target, eMsg, item.ty));
                 try item.ptrCast(p, unqualType);
             } else if (!unqualType.eql(item.ty, true)) {
-                try p.errStr(.ptr_init_discards_quals, token, try p.typePairStrExtra(target, eMsg, item.ty));
+                if (!unqualType.getElemType().qual.hasQuals(item.ty.getElemType().qual))
+                    try p.errStr(.ptr_init_discards_quals, token, try p.typePairStrExtra(target, eMsg, item.ty));
+
                 try item.ptrCast(p, unqualType);
             }
         } else {
@@ -3215,6 +3217,11 @@ fn nodeIsNoreturn(p: *Parser, node: NodeIndex) bool {
             return p.nodeIsNoreturn(p.data.items[data.range.end - 1]);
         },
 
+        .LabeledStmt => {
+            const data = p.nodes.items(.data)[@intFromEnum(node)];
+            return p.nodeIsNoreturn(data.Declaration.node);
+        },
+
         else => return false,
     }
 }
@@ -3463,7 +3470,8 @@ fn assignExpr(p: *Parser) Error!Result {
             if (!unqualType.eql(rhs.ty, false)) {
                 try p.errStr(.incompatible_ptr_assign, token, try p.typePairStrExtra(lhs.ty, eMsg, rhs.ty));
             } else if (!unqualType.eql(rhs.ty, true)) {
-                try p.errStr(.ptr_assign_discards_quals, token, try p.typePairStrExtra(lhs.ty, eMsg, rhs.ty));
+                if (!unqualType.getElemType().qual.hasQuals(rhs.ty.getElemType().qual))
+                    try p.errStr(.ptr_assign_discards_quals, token, try p.typePairStrExtra(lhs.ty, eMsg, rhs.ty));
                 try rhs.ptrCast(p, unqualType);
             }
         } else {
