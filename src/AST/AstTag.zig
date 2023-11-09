@@ -185,6 +185,8 @@ pub const Tag = enum(u8) {
     CastExpr,
     /// &lhs
     AddrOfExpr,
+    /// &&DeclRef
+    AddrOfLabel,
     /// *lhs
     DerefExpr,
     /// +lhs

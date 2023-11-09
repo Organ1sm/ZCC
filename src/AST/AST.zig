@@ -361,7 +361,7 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
             }
         },
 
-        .GotoStmt => {
+        .GotoStmt, .AddrOfLabel => {
             try w.writeByteNTimes(' ', level + half);
             try w.print("label: " ++ LITERAL ++ "{s}\n" ++ RESET, .{tree.tokSlice(data.DeclarationRef)});
         },
