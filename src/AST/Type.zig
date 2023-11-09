@@ -420,10 +420,11 @@ pub fn isRecord(ty: Type) bool {
 /// added by typeof() operations, which is useful when determining the elemType of
 /// arrays and pointers.
 pub fn canonicalize(ty: Type, qualHandling: enum { standard, preserve_quals }) Type {
-    if (!ty.isTypeof())
-        return ty;
-
     var cur = ty;
+    if (cur.specifier == .Attributed)
+        cur = cur.data.attributed.base;
+    if (!cur.isTypeof()) return cur;
+
     var qual = cur.qual;
     while (true) {
         switch (cur.specifier) {

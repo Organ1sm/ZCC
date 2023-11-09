@@ -998,7 +998,7 @@ fn expandMacroExhaustive(
 
                     try buf.replaceRange(idx, 1, res.items);
                     idx += res.items.len;
-                    movingEndIdx += (res.items.len - 1);
+                    movingEndIdx = movingEndIdx + res.items.len - 1;
                     doRescan = true;
                 }
             }
