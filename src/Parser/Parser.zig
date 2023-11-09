@@ -3951,6 +3951,7 @@ fn parseBuiltinChooseExpr(p: *Parser) Error!Result {
 
 /// unaryExpr
 ///  : primaryExpr suffixExpr*
+///  | '&&' identifier
 ///  | ('&' | '*' | '+' | '-' | '~' | '!' | '++' | '--') castExpr
 ///  | keyword_sizeof unaryExpr
 ///  | keyword_sizeof '(' type_name ')'
@@ -3980,6 +3981,30 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
 
             try operand.un(p, .AddrOfExpr);
             return operand;
+        },
+
+        .AmpersandAmpersand => {
+            const addressToken = p.index;
+            p.index += 1;
+            const nameToken = try p.expectToken(.Identifier);
+            try p.errToken(.gnu_label_as_value, addressToken);
+
+            const str = p.tokSlice(nameToken);
+            if (p.findLabel(str) == null)
+                try p.labels.append(.{ .unresolvedGoto = nameToken });
+
+            const elemType = try p.arena.create(Type);
+            elemType.* = .{ .specifier = .Void };
+
+            const resultType = Type{ .specifier = .Pointer, .data = .{ .subType = elemType } };
+            return Result{
+                .node = try p.addNode(.{
+                    .tag = .AddrOfLabel,
+                    .data = .{ .DeclarationRef = nameToken },
+                    .type = resultType,
+                }),
+                .ty = resultType,
+            };
         },
 
         .Asterisk => {
