@@ -71,23 +71,34 @@ charBuffer: std.ArrayList(u8),
 includeDepth: u8 = 0,
 
 const FeatureCheckMacros = struct {
-    const hasAttribute = Macro{
-        .params = &[1][]const u8{"X"},
-        .tokens = &[1]RawToken{.{
-            .id = .MacroParamHasAttribute,
+    const args = [1][]const u8{"X"};
+    const hasAttribute = [1]RawToken{makeFeatCheckMacro(.MacroParamHasAttribute)};
+    const hasWarning = [1]RawToken{makeFeatCheckMacro(.MacroParamHasWarning)};
+
+    fn makeFeatCheckMacro(id: TokenType) RawToken {
+        return .{
+            .id = id,
             .source = .generated,
             .start = 0,
             .end = 0,
-        }},
-        .varArgs = false,
-        .isFunc = true,
-        .isBuiltin = true,
-        .loc = .{ .id = .generated },
-    };
+        };
+    }
 };
 
+pub fn addBuiltinMacro(pp: *Preprocessor, name: []const u8, tokens: []const RawToken) !void {
+    try pp.defines.put(name, .{
+        .params = &FeatureCheckMacros.args,
+        .tokens = tokens,
+        .varArgs = false,
+        .isFunc = true,
+        .loc = .{ .id = .generated },
+        .isBuiltin = true,
+    });
+}
+
 pub fn addBuiltinMacros(pp: *Preprocessor) !void {
-    try pp.defines.put("__has_attribute", FeatureCheckMacros.hasAttribute);
+    try pp.addBuiltinMacro("__has_attribute", &FeatureCheckMacros.hasAttribute);
+    try pp.addBuiltinMacro("__has_warning", &FeatureCheckMacros.hasWarning);
 }
 
 pub fn init(comp: *Compilation) Preprocessor {
@@ -597,6 +608,42 @@ fn expandObjMacro(pp: *Preprocessor, simpleMacro: *const Macro) Error!ExpandBuff
     return buff;
 }
 
+fn handleBuiltinMacro(pp: *Preprocessor, builtin: TokenType, paramTokens: []const Token) Error!TokenType {
+    switch (builtin) {
+        .MacroParamHasAttribute => {
+            if (paramTokens.len != 1 or paramTokens[0].id != .Identifier) {
+                try pp.compilation.diag.add(.{ .tag = .feature_check_requires_identifier, .loc = paramTokens[0].loc });
+                return .Zero;
+            }
+            const attrName = pp.expandedSlice(paramTokens[0]);
+            return if (AttrTag.fromString(attrName) == null) .Zero else .One;
+        },
+
+        .MacroParamHasWarning => {
+            const charbufferTop = pp.charBuffer.items.len;
+            defer pp.charBuffer.items.len = charbufferTop;
+
+            for (paramTokens) |tok| {
+                if (tok.id != .StringLiteral) {
+                    const extra = Diagnostics.Message.Extra{ .str = "__has_warning" };
+                    try pp.compilation.diag.add(.{ .tag = .expected_str_literal_in, .loc = tok.loc, .extra = extra });
+                    return .Zero;
+                }
+                const str = pp.expandedSlice(tok);
+                try pp.charBuffer.appendSlice(str[1 .. str.len - 1]);
+            }
+            const actualParam = pp.charBuffer.items[charbufferTop..];
+            if (!std.mem.startsWith(u8, actualParam, "-W")) {
+                try pp.compilation.diag.add(.{ .tag = .malformed_warning_check, .loc = paramTokens[0].loc });
+                return .Zero;
+            }
+            const warningName = actualParam[2..];
+            return if (Diagnostics.warningExists(warningName)) .One else .Zero;
+        },
+        else => unreachable,
+    }
+}
+
 fn expandFuncMacro(
     pp: *Preprocessor,
     loc: Source.Location,
@@ -727,24 +774,16 @@ fn expandFuncMacro(
                 });
             },
 
-            .MacroParamHasAttribute => {
+            .MacroParamHasAttribute, .MacroParamHasWarning => {
                 const arg = expandedArgs.items[0];
                 if (arg.len == 0) {
-                    const extra = Diagnostics.Message.Extra{ .arguments = .{ .expected = 1, .actual = @as(u32, @intCast(arg.len)) } };
+                    const extra = Diagnostics.Message.Extra{ .arguments = .{ .expected = 1, .actual = 0 } };
                     try pp.compilation.diag.add(.{ .tag = .expected_arguments, .loc = loc, .extra = extra });
                     try buf.append(.{ .id = .Zero, .loc = loc });
                     break;
                 }
 
-                const actual = arg[0];
-                if (actual.id != .Identifier) {
-                    try pp.compilation.diag.add(.{ .tag = .feature_check_requires_identifier, .loc = actual.loc });
-                    try buf.append(.{ .id = .Zero, .loc = actual.loc });
-                    break;
-                }
-
-                const attrName = pp.expandedSlice(actual);
-                const resultId: TokenType = if (AttrTag.fromString(attrName) == null) .Zero else .One;
+                const resultId = try pp.handleBuiltinMacro(raw.id, arg);
                 try buf.append(.{
                     .id = resultId,
                     .loc = loc,

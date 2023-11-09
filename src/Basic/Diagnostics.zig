@@ -67,6 +67,7 @@ const Options = struct {
     @"ignored-attributes": Kind = .warning,
     @"builtin-macro-redefined": Kind = .warning,
     @"gnu-label-as-value": Kind = .off,
+    @"malformed-warning-check": Kind = .warning,
 };
 
 pub const Tag = enum {
@@ -186,6 +187,7 @@ pub const Tag = enum {
     previous_definition,
     expected_identifier,
     expected_str_literal,
+    expected_str_literal_in,
     parameter_missing,
     empty_record,
     wrong_tag,
@@ -289,6 +291,7 @@ pub const Tag = enum {
     member_expr_not_ptr,
     member_expr_ptr,
     no_such_member,
+    malformed_warning_check,
 };
 
 list: std.ArrayList(Message),
@@ -384,6 +387,15 @@ const MsgWriter = struct {
         }
     }
 };
+
+pub fn warningExists(name: []const u8) bool {
+    inline for (std.meta.fields(Options)) |f| {
+        if (std.mem.eql(u8, f.name, name))
+            return true;
+    }
+
+    return false;
+}
 
 pub fn add(diag: *Diagnostics, msg: Message) Compilation.Error!void {
     const kind = diag.tagKind(msg.tag);
@@ -603,6 +615,7 @@ pub fn renderExtra(comp: *Compilation, m: anytype) void {
             .previous_definition => m.write("previous definition is here"),
             .expected_identifier => m.write("expected identifier"),
             .expected_str_literal => m.write("expected string literal for diagnostic message in static_assert"),
+            .expected_str_literal_in => m.print("expected string literal in '{s}'", .{msg.extra.str}),
             .parameter_missing => m.print("parameter named '{s}' is missing", .{msg.extra.str}),
             .empty_record => m.print("empty {s} is a GNU extension", .{msg.extra.str}),
             .wrong_tag => m.print("use of '{s}' with tag type that does not match previous definition", .{msg.extra.str}),
@@ -709,6 +722,7 @@ pub fn renderExtra(comp: *Compilation, m: anytype) void {
             .member_expr_not_ptr => m.print("member reference type '{s}' is not a pointer; did you mean to use '.'?", .{msg.extra.str}),
             .member_expr_ptr => m.print("member reference type '{s}' is a pointer; did you mean to use '->'?", .{msg.extra.str}),
             .no_such_member => m.print("no member named {s}", .{msg.extra.str}),
+            .malformed_warning_check => m.write("__has_warning expected option name (e.g. \"-Wundef\")"),
         }
 
         m.end(lcs);
@@ -845,6 +859,7 @@ fn tagKind(diag: *Diagnostics, tag: Tag) Kind {
         .redefinition,
         .expected_identifier,
         .expected_str_literal,
+        .expected_str_literal_in,
         .parameter_missing,
         .wrong_tag,
         .expected_parens_around_typename,
@@ -983,6 +998,7 @@ fn tagKind(diag: *Diagnostics, tag: Tag) Kind {
         .ignored_attribute => diag.options.@"ignored-attributes",
         .builtin_macro_redefined => diag.options.@"builtin-macro-redefined",
         .gnu_label_as_value => diag.options.@"gnu-label-as-value",
+        .malformed_warning_check => diag.options.@"malformed-warning-check",
     };
 
     if (kind == .@"error" and diag.fatalErrors)

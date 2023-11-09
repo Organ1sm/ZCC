@@ -86,6 +86,7 @@ pub const Token = struct {
         .{ "define", .KeywordDefine },
         .{ "defined", .KeywordDefined },
         .{ "__has_attribute", .KeywordHasAttribute },
+        .{ "__has_warning", .KeywordHasWarning },
         .{ "undef", .KeywordUndef },
         .{ "ifdef", .KeywordIfdef },
         .{ "ifndef", .KeywordIfndef },
