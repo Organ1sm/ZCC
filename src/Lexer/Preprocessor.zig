@@ -449,7 +449,7 @@ fn expr(pp: *Preprocessor, lexer: *Lexer) Error!bool {
                 }
             }
 
-            if (macroToken.id.isFeatureCheck() or pp.defines.get(pp.tokSliceSafe(macroToken)) != null) {
+            if (pp.defines.get(pp.tokSliceSafe(macroToken)) != null) {
                 token.id = .One;
             } else {
                 token.id = .Zero;
@@ -837,6 +837,7 @@ fn collectMacroFuncArguments(
     startIdx: *usize,
     endIdx: *usize,
     extendBuffer: bool,
+    isBuiltin: bool,
 ) Error!(?MacroArguments) {
     const nameToken = buf.items[startIdx.*];
     const initialLexerIdx = lexer.index;
@@ -849,14 +850,8 @@ fn collectMacroFuncArguments(
             .NewLine => {},
             .LParen => break,
             else => {
-                if (nameToken.id.isFeatureCheck()) {
-                    const extra = Diagnostics.Message.Extra{ .tokenId = .{ .expected = .LParen, .actual = nameToken.id } };
-                    try pp.compilation.diag.add(.{
-                        .tag = .missing_token,
-                        .loc = token.loc,
-                        .extra = extra,
-                    });
-                }
+                if (isBuiltin) 
+                    try pp.compilation.diag.add(.{ .tag = .missing_lparen_builtin, .loc = token.loc });
                 // Not a macro function call, go over normal identifier, rewind
                 lexer.index = initialLexerIdx;
                 endIdx.* = oldEnd;
@@ -960,7 +955,7 @@ fn expandMacroExhaustive(
                 if (macro.isFunc) {
                     var macroScanIdx = idx;
                     // to be saved in case this doesn't turn out to be a call
-                    const args = (try pp.collectMacroFuncArguments(lexer, buf, &macroScanIdx, &movingEndIdx, extendBuffer)) orelse {
+                    const args = (try pp.collectMacroFuncArguments(lexer, buf, &macroScanIdx, &movingEndIdx, extendBuffer, macro.isBuiltin)) orelse {
                         idx += 1;
                         continue;
                     };
