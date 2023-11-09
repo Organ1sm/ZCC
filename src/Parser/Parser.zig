@@ -4292,12 +4292,12 @@ fn parseSuffixExpr(p: *Parser, lhs: Result) Error!Result {
         .Period => {
             p.index += 1;
             const name = try p.expectToken(.Identifier);
-            // TODO validate type
+            const fieldType = try p.getFeildAccessField(lhs.ty, name, false);
             return Result{
-                .ty = lhs.ty,
+                .ty = fieldType,
                 .node = try p.addNode(.{
                     .tag = .MemberAccessExpr,
-                    .type = lhs.ty,
+                    .type = fieldType,
                     .data = .{ .Member = .{ .lhs = lhs.node, .name = name } },
                 }),
             };
@@ -4306,12 +4306,12 @@ fn parseSuffixExpr(p: *Parser, lhs: Result) Error!Result {
         .Arrow => {
             p.index += 1;
             const name = try p.expectToken(.Identifier);
-            // TODO validate type / deref
+            const fieldType = try p.getFeildAccessField(lhs.ty, name, true);
             return Result{
-                .ty = lhs.ty,
+                .ty = fieldType,
                 .node = try p.addNode(.{
                     .tag = .MemberAccessPtrExpr,
-                    .type = lhs.ty,
+                    .type = fieldType,
                     .data = .{ .Member = .{ .lhs = lhs.node, .name = name } },
                 }),
             };
@@ -4357,6 +4357,42 @@ fn parseSuffixExpr(p: *Parser, lhs: Result) Error!Result {
 
         else => return Result{},
     }
+}
+
+fn getFeildAccessField(
+    p: *Parser,
+    exprType: Type,
+    fieldNameToken: TokenIndex,
+    isArrow: bool,
+) !Type {
+    const isPtr = exprType.get(.Pointer) != null;
+    const exprBaseType = if (isPtr) exprType.getElemType() else exprType;
+    const recordType = exprBaseType.canonicalize(.standard);
+
+    switch (recordType.specifier) {
+        .Struct, .Union => {},
+        else => {
+            try p.errStr(.expected_record_ty, fieldNameToken, try p.typeStr(exprType));
+            return error.ParsingFailed;
+        },
+    }
+    if (isArrow and !isPtr) try p.errStr(.member_expr_not_ptr, fieldNameToken, try p.typeStr(exprType));
+    if (!isArrow and isPtr) try p.errStr(.member_expr_ptr, fieldNameToken, try p.typeStr(exprType));
+
+    // TODO deal with anonymous structs
+    const fieldName = p.tokSlice(fieldNameToken);
+    const field = recordType.getField(fieldName) orelse {
+        const stringsTop = p.strings.items.len;
+        defer p.strings.items.len = stringsTop;
+
+        try p.strings.writer().print("'{s}' in '", .{fieldName});
+        try exprType.print(p.strings.writer());
+        try p.strings.append('\'');
+
+        try p.errStr(.no_such_member, fieldNameToken, try p.arena.dupe(u8, p.strings.items[stringsTop..]));
+        return error.ParsingFailed;
+    };
+    return field.f.ty;
 }
 
 fn reportParam(p: *Parser, paramToken: TokenIndex, arg: Result, argCount: u32, params: []Type.Function.Param) Error!void {

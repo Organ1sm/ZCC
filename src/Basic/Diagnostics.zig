@@ -285,6 +285,10 @@ pub const Tag = enum {
     missing_token,
     feature_check_requires_identifier,
     gnu_label_as_value,
+    expected_record_ty,
+    member_expr_not_ptr,
+    member_expr_ptr,
+    no_such_member,
 };
 
 list: std.ArrayList(Message),
@@ -701,6 +705,10 @@ pub fn renderExtra(comp: *Compilation, m: anytype) void {
                 msg.extra.tokenId.actual.symbol(),
             }),
             .gnu_label_as_value => m.write("use of GNU address-of-label extension"),
+            .expected_record_ty => m.print("member reference base type '{s}' is not a structure or union", .{msg.extra.str}),
+            .member_expr_not_ptr => m.print("member reference type '{s}' is not a pointer; did you mean to use '.'?", .{msg.extra.str}),
+            .member_expr_ptr => m.print("member reference type '{s}' is a pointer; did you mean to use '->'?", .{msg.extra.str}),
+            .no_such_member => m.print("no member named {s}", .{msg.extra.str}),
         }
 
         m.end(lcs);
@@ -901,6 +909,10 @@ fn tagKind(diag: *Diagnostics, tag: Tag) Kind {
         .cannot_apply_attribute_to_statement,
         .missing_token,
         .feature_check_requires_identifier,
+        .expected_record_ty,
+        .member_expr_not_ptr,
+        .member_expr_ptr,
+        .no_such_member,
         => .@"error",
 
         .to_match_paren,
