@@ -962,8 +962,6 @@ fn declSpecifier(p: *Parser, isParam: bool) Error!?DeclSpec {
     return d;
 }
 
-const InitDeclarator = struct { d: Declarator, initializer: NodeIndex = .none };
-
 /// attribute
 ///  : attrIdentifier
 ///  | attrIdentifier '(' identifier ')'
@@ -1096,6 +1094,8 @@ fn parseAttributeSpecifier(p: *Parser, context: Attribute.ParseContext) Error!vo
     }
 }
 
+const InitDeclarator = struct { d: Declarator, initializer: NodeIndex = .none };
+
 /// initDeclarator : declarator ('=' initializer)?
 fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec) Error!?InitDeclarator {
     var initD = InitDeclarator{ .d = (try p.declarator(declSpec.type, .normal)) orelse return null };
@@ -1130,7 +1130,16 @@ fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec) Error!?InitDeclarator {
     }
 
     const name = initD.d.name;
-    if (declSpec.storageClass != .typedef and initD.d.type.hasIncompleteSize()) {
+    if (declSpec.storageClass != .typedef and initD.d.type.hasIncompleteSize()) incomplete: {
+        const specifier = initD.d.type.canonicalize(.standard).specifier;
+        if (declSpec.storageClass == .@"extern") switch (specifier) {
+            .Struct, .Union, .Enum => break :incomplete,
+            .IncompleteArray => {
+                initD.d.type.decayArray();
+                break :incomplete;
+            },
+            else => {},
+        };
         try p.errStr(.variable_incomplete_ty, name, try p.typeStr(initD.d.type));
         return initD;
     }
@@ -2457,7 +2466,7 @@ fn coerceInit(p: *Parser, item: *Result, token: TokenIndex, target: Type) !void 
             try p.errStr(.implicit_int_to_ptr, token, try p.typePairStrExtra(item.ty, " to ", target));
             try item.ptrCast(p, unqualType);
         } else if (item.ty.isPointer()) {
-            if (!unqualType.eql(item.ty, false)) {
+            if (!item.ty.isVoidStar() and !unqualType.isVoidStar() and !unqualType.eql(item.ty, false)) {
                 try p.errStr(.incompatible_ptr_init, token, try p.typePairStrExtra(target, eMsg, item.ty));
                 try item.ptrCast(p, unqualType);
             } else if (!unqualType.eql(item.ty, true)) {
@@ -3179,10 +3188,12 @@ fn parseReturnStmt(p: *Parser) Error!?NodeIndex {
             try p.errStr(.incompatible_return, eToken, try p.typeStr(expr.ty));
         }
     } else if (returnType.isPointer()) {
-        if (expr.ty.isInt()) {
+        if (expr.isZero()) {
+            try expr.nullCast(p, returnType);
+        } else if (expr.ty.isInt()) {
             try p.errStr(.implicit_int_to_ptr, eToken, try p.typePairStrExtra(expr.ty, " to ", returnType));
             try expr.intCast(p, returnType);
-        } else if (!returnType.eql(expr.ty, false)) {
+        } else if (!expr.ty.isVoidStar() and !returnType.isVoidStar() and !returnType.eql(expr.ty, false)) {
             try p.errStr(.incompatible_return, eToken, try p.typeStr(expr.ty));
         }
     } else if (returnType.isRecord()) { // enum.isInt() == true
@@ -4409,7 +4420,9 @@ fn parseCallExpr(p: *Parser, lhs: Result) Error!Result {
                     else
                         try p.reportParam(paramToken, arg, argCount, params);
                 } else if (paramType.isPointer()) {
-                    if (arg.ty.isInt()) {
+                    if (arg.isZero()) {
+                        try arg.nullCast(p, paramType);
+                    } else if (arg.ty.isInt()) {
                         try p.errStr(
                             .implicit_int_to_ptr,
                             paramToken,
@@ -4417,7 +4430,7 @@ fn parseCallExpr(p: *Parser, lhs: Result) Error!Result {
                         );
                         try p.errToken(.parameter_here, params[argCount].nameToken);
                         try arg.intCast(p, paramType);
-                    } else if (!paramType.eql(arg.ty, false)) {
+                    } else if (!arg.ty.isVoidStar() and !paramType.isVoidStar() and !paramType.eql(arg.ty, false)) {
                         try p.reportParam(paramToken, arg, argCount, params);
                     }
                 } else if (paramType.isRecord()) {
