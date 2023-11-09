@@ -196,26 +196,12 @@ pub const TokenType = enum(u8) {
     KeywordPragma,
     KeywordLine,
     KeywordVarArgs,
-    KeywordHasAttribute,
-    KeywordHasWarning,
-
-    pub fn isFeatureCheck(id: TokenType) bool {
-        // TODO: implement __has_c_attribute,
-        //                 __has_builtin,
-        //                 __has_include,
-        return switch (id) {
-            .KeywordHasAttribute, .KeywordHasWarning => true,
-            else => false,
-        };
-    }
 
     pub fn isMacroIdentifier(id: TokenType) bool {
         return switch (id) {
             .KeywordInclude,
             .KeywordDefine,
             .KeywordDefined,
-            .KeywordHasAttribute,
-            .KeywordHasWarning,
             .KeywordIfdef,
             .KeywordUndef,
             .KeywordIfndef,
@@ -294,8 +280,6 @@ pub const TokenType = enum(u8) {
             .KeywordInclude,
             .KeywordDefine,
             .KeywordDefined,
-            .KeywordHasAttribute,
-            .KeywordHasWarning,
             .KeywordUndef,
             .KeywordIfdef,
             .KeywordIfndef,
@@ -462,8 +446,6 @@ pub const TokenType = enum(u8) {
             .KeywordInclude => "include",
             .KeywordDefine => "define",
             .KeywordDefined => "defined",
-            .KeywordHasAttribute => "__has_attribute",
-            .KeywordHasWarning => "__has_warning",
             .KeywordUndef => "undef",
             .KeywordIfdef => "ifdef",
             .KeywordIfndef => "ifndef",
