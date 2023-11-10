@@ -74,6 +74,7 @@ const FeatureCheckMacros = struct {
     const args = [1][]const u8{"X"};
     const hasAttribute = [1]RawToken{makeFeatCheckMacro(.MacroParamHasAttribute)};
     const hasWarning = [1]RawToken{makeFeatCheckMacro(.MacroParamHasWarning)};
+    const isIdentifier = [1]RawToken{makeFeatCheckMacro(.MacroParamIsIdentifier)};
 
     fn makeFeatCheckMacro(id: TokenType) RawToken {
         return .{
@@ -99,6 +100,7 @@ pub fn addBuiltinMacro(pp: *Preprocessor, name: []const u8, tokens: []const RawT
 pub fn addBuiltinMacros(pp: *Preprocessor) !void {
     try pp.addBuiltinMacro("__has_attribute", &FeatureCheckMacros.hasAttribute);
     try pp.addBuiltinMacro("__has_warning", &FeatureCheckMacros.hasWarning);
+    try pp.addBuiltinMacro("__is_identifier", &FeatureCheckMacros.isIdentifier);
 }
 
 pub fn init(comp: *Compilation) Preprocessor {
@@ -640,6 +642,16 @@ fn handleBuiltinMacro(pp: *Preprocessor, builtin: TokenType, paramTokens: []cons
             const warningName = actualParam[2..];
             return if (Diagnostics.warningExists(warningName)) .One else .Zero;
         },
+
+        .MacroParamIsIdentifier => {
+            if (paramTokens.len > 1) {
+                const extra = Diagnostics.Message.Extra{ .tokenId = .{ .expected = .RParen, .actual = paramTokens[1].id } };
+                try pp.compilation.diag.add(.{ .tag = .missing_tok_builtin, .loc = paramTokens[1].loc, .extra = extra });
+                return .Zero;
+            }
+            return if (paramTokens[0].id == .Identifier) .One else .Zero;
+        },
+
         else => unreachable,
     }
 }
@@ -774,7 +786,10 @@ fn expandFuncMacro(
                 });
             },
 
-            .MacroParamHasAttribute, .MacroParamHasWarning => {
+            .MacroParamHasAttribute,
+            .MacroParamHasWarning,
+            .MacroParamIsIdentifier,
+            => {
                 const arg = expandedArgs.items[0];
                 if (arg.len == 0) {
                     const extra = Diagnostics.Message.Extra{ .arguments = .{ .expected = 1, .actual = 0 } };
@@ -850,8 +865,10 @@ fn collectMacroFuncArguments(
             .NewLine => {},
             .LParen => break,
             else => {
-                if (isBuiltin) 
-                    try pp.compilation.diag.add(.{ .tag = .missing_lparen_builtin, .loc = token.loc });
+                if (isBuiltin) {
+                    const extra = Diagnostics.Message.Extra{ .tokenId = .{ .expected = .LParen, .actual = token.id } };
+                    try pp.compilation.diag.add(.{ .tag = .missing_tok_builtin, .loc = token.loc, .extra = extra });
+                }
                 // Not a macro function call, go over normal identifier, rewind
                 lexer.index = initialLexerIdx;
                 endIdx.* = oldEnd;
