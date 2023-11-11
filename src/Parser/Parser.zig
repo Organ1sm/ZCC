@@ -2153,7 +2153,9 @@ pub fn initializer(p: *Parser, initType: Type) Error!Result {
     _ = try p.initializerItem(&il, initType);
 
     const res = try p.convertInitList(il, initType);
-    return Result{ .ty = p.nodes.items(.type)[@intFromEnum(res)], .node = res };
+    var resType = p.nodes.items(.type)[@intFromEnum(res)];
+    resType.qual = initType.qual;
+    return Result{ .ty = resType, .node = res };
 }
 
 /// initializerItems : designation? initializer (',' designation? initializer)* ','?
@@ -2416,28 +2418,8 @@ fn coerceInit(p: *Parser, item: *Result, token: TokenIndex, target: Type) !void 
     var unqualType = target.canonicalize(.standard);
     unqualType.qual = .{};
     const eMsg = " from incompatible type ";
-    if (unqualType.isArray()) {
-        if (!item.ty.isArray()) {
-            try p.errStr(.incompatible_init, token, try p.typePairStrExtra(target, eMsg, item.ty));
-        } else if (unqualType.is(.Array)) {
-            std.debug.assert(item.ty.is(.Array));
-            var len = item.ty.data.array.len;
-            if (p.nodeIs(item.node, .StringLiteralExpr)) {
-                if (len - 1 > unqualType.data.array.len)
-                    try p.errToken(.str_init_too_long, token);
-            } else if (len > unqualType.data.array.len) {
-                try p.errStr(
-                    .arr_init_too_long,
-                    token,
-                    try p.typePairStrExtra(target, " with array of type ", item.ty),
-                );
-            }
-        }
-        return;
-    }
-
     try item.lvalConversion(p);
-    if (target.is(.Bool)) {
+    if (unqualType.is(.Bool)) {
         // this is ridiculous but it's what clang does
         if (item.ty.isInt() or item.ty.isFloat() or item.ty.isPointer()) {
             try item.boolCast(p, unqualType);
@@ -3394,7 +3376,8 @@ fn assignExpr(p: *Parser) Error!Result {
     try rhs.expect(p);
     try rhs.lvalConversion(p);
 
-    if (!AST.isLValue(p.nodes.slice(), p.data.items, p.valueMap, lhs.node) or lhs.ty.isConst()) {
+    var isConst: bool = undefined;
+    if (!AST.isLValueExtra(p.nodes.slice(), p.data.items, p.valueMap, lhs.node, &isConst) or isConst) {
         try p.errToken(.not_assignable, token);
         return error.ParsingFailed;
     }
@@ -4029,6 +4012,7 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
                 try p.errToken(.indirection_ptr, index);
             }
 
+            operand.ty.qual = .{};
             try operand.un(p, .DerefExpr);
             return operand;
         },
