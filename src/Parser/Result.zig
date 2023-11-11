@@ -215,7 +215,7 @@ pub fn adjustTypes(a: *Result, token: TokenIndex, b: *Result, p: *Parser, kind: 
                 try p.errStr(.comparison_ptr_int, token, try p.typePairStr(a.ty, b.ty));
 
             if (aIsPtr and bIsPtr) {
-                if (!a.ty.eql(b.ty, false))
+                if (!a.ty.isVoidStar() and !b.ty.isVoidStar() and !a.ty.eql(b.ty, false))
                     try p.errStr(.comparison_distinct_ptr, token, try p.typePairStr(a.ty, b.ty));
             } else if (aIsPtr) {
                 try b.ptrCast(p, a.ty);

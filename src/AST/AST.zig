@@ -110,34 +110,75 @@ pub const Node = struct {
 };
 
 pub fn isLValue(nodes: Node.List.Slice, extra: []const NodeIndex, valueMap: ValueMap, node: NodeIndex) bool {
+    var isConst: bool = undefined;
+    return isLValueExtra(nodes, extra, valueMap, node, &isConst);
+}
+
+pub fn isLValueExtra(
+    nodes: Node.List.Slice,
+    extra: []const NodeIndex,
+    valueMap: ValueMap,
+    node: NodeIndex,
+    isConst: *bool,
+) bool {
+    isConst.* = false;
     switch (nodes.items(.tag)[@intFromEnum(node)]) {
-        .CompoundLiteralExpr,
-        .StringLiteralExpr,
-        .MemberAccessPtrExpr,
-        .ArrayAccessExpr,
-        .DeclRefExpr,
-        => return true,
+        .CompoundLiteralExpr => {
+            isConst.* = nodes.items(.type)[@intFromEnum(node)].isConst();
+            return true;
+        },
+
+        .StringLiteralExpr => return true,
+        .MemberAccessPtrExpr => {
+            const lhsExpr = nodes.items(.data)[@intFromEnum(node)].Member.lhs;
+            const ptrExpr = nodes.items(.type)[@intFromEnum(lhsExpr)];
+            if (ptrExpr.isPointer())
+                isConst.* = ptrExpr.getElemType().isConst();
+
+            return true;
+        },
+
+        .ArrayAccessExpr => {
+            const lhsExpr = nodes.items(.data)[@intFromEnum(node)].BinaryExpr.lhs;
+            if (lhsExpr != .none) {
+                const arrayType = nodes.items(.type)[@intFromEnum(lhsExpr)];
+                if (arrayType.isPointer() or arrayType.isArray())
+                    isConst.* = arrayType.getElemType().isConst();
+            }
+            return true;
+        },
+
+        .DeclRefExpr => {
+            const declType = nodes.items(.type)[@intFromEnum(node)];
+            isConst.* = declType.isConst();
+            return true;
+        },
 
         .DerefExpr => {
             const data = nodes.items(.data)[@intFromEnum(node)];
-            return !nodes.items(.type)[@intFromEnum(data.UnaryExpr)].isFunc();
+            const operandType = nodes.items(.type)[@intFromEnum(data.UnaryExpr)];
+            if (operandType.isFunc())
+                return false;
+            if (operandType.isPointer() or operandType.isArray())
+                isConst.* = operandType.getElemType().isConst();
+            return true;
         },
 
         .MemberAccessExpr => {
             const data = nodes.items(.data)[@intFromEnum(node)];
-            return isLValue(nodes, extra, valueMap, data.Member.lhs);
+            return isLValueExtra(nodes, extra, valueMap, data.Member.lhs, isConst);
         },
 
         .ParenExpr => {
             const data = nodes.items(.data)[@intFromEnum(node)];
-            return isLValue(nodes, extra, valueMap, data.UnaryExpr);
+            return isLValueExtra(nodes, extra, valueMap, data.UnaryExpr, isConst);
         },
 
         .BuiltinChooseExpr => {
             const data = nodes.items(.data)[@intFromEnum(node)];
             if (valueMap.get(data.If3.cond)) |val| {
                 const offset = @intFromBool(val == 0);
-                return isLValue(nodes, extra, valueMap, extra[data.If3.body + offset]);
+                return isLValueExtra(nodes, extra, valueMap, extra[data.If3.body + offset], isConst);
             }
 
             return false;
