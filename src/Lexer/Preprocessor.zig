@@ -968,13 +968,13 @@ fn expandMacroExhaustive(
                 idx += 1;
                 continue;
             }
-            if (macroEntry) |macro| {
+            if (macroEntry) |macro| macroHandler: {
                 if (macro.isFunc) {
                     var macroScanIdx = idx;
                     // to be saved in case this doesn't turn out to be a call
                     const args = (try pp.collectMacroFuncArguments(lexer, buf, &macroScanIdx, &movingEndIdx, extendBuffer, macro.isBuiltin)) orelse {
                         idx += 1;
-                        continue;
+                        break :macroHandler;
                     };
                     defer {
                         for (args.items) |item| {
