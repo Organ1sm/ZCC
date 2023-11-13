@@ -108,6 +108,8 @@ pub const Tag = enum(u8) {
 
     /// goto first;
     GotoStmt,
+    /// goto *un;
+    ComputedGotoStmt,
     ContinueStmt,
     /// break; first and second unused
     BreakStmt,
