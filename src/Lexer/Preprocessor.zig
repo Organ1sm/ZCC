@@ -234,7 +234,7 @@ pub fn preprocess(pp: *Preprocessor, source: Source) Error!void {
 
                     .KeywordElIf => {
                         if (ifLevel == 0) {
-                            try pp.err(directive, .else_without_if);
+                            try pp.addError(directive, .else_without_if);
                             ifLevel += 1;
                             ifKind.set(ifLevel, untilElse);
                         }
@@ -248,7 +248,7 @@ pub fn preprocess(pp: *Preprocessor, source: Source) Error!void {
 
                             untilEndIf => try pp.skip(&lexer, .untilEndIf),
                             untilEndIfSeenElse => {
-                                try pp.err(directive, .elif_after_else);
+                                try pp.addError(directive, .elif_after_else);
                                 skipToNewLine(&lexer);
                             },
                             else => unreachable,
@@ -259,7 +259,7 @@ pub fn preprocess(pp: *Preprocessor, source: Source) Error!void {
                         try pp.expectNewLine(&lexer);
 
                         if (ifLevel == 0) {
-                            try pp.err(directive, .else_without_if);
+                            try pp.addError(directive, .else_without_if);
                             continue;
                         }
 
@@ -267,7 +267,7 @@ pub fn preprocess(pp: *Preprocessor, source: Source) Error!void {
                             untilElse => ifKind.set(ifLevel, untilEndIfSeenElse),
                             untilEndIf => try pp.skip(&lexer, .untilEndIfSeenElse),
                             untilEndIfSeenElse => {
-                                try pp.err(directive, .else_after_else);
+                                try pp.addError(directive, .else_after_else);
                                 skipToNewLine(&lexer);
                             },
                             else => unreachable,
@@ -277,7 +277,7 @@ pub fn preprocess(pp: *Preprocessor, source: Source) Error!void {
                     .KeywordEndIf => {
                         try pp.expectNewLine(&lexer);
                         if (ifLevel == 0) {
-                            try pp.err(directive, .else_without_if);
+                            try pp.addError(directive, .else_without_if);
                             continue;
                         }
                         ifLevel -= 1;
@@ -286,7 +286,7 @@ pub fn preprocess(pp: *Preprocessor, source: Source) Error!void {
                     .KeywordLine => {
                         const digits = lexer.next();
                         if (digits.id != .IntegerLiteral)
-                            try pp.err(digits, .line_simple_digit);
+                            try pp.addError(digits, .line_simple_digit);
 
                         if (digits.id == .Eof or digits.id == .NewLine)
                             continue;
@@ -296,7 +296,7 @@ pub fn preprocess(pp: *Preprocessor, source: Source) Error!void {
                             continue;
 
                         if (name.id != .StringLiteral)
-                            try pp.err(name, .line_invalid_filename);
+                            try pp.addError(name, .line_invalid_filename);
 
                         try pp.expectNewLine(&lexer);
                     },
@@ -304,11 +304,11 @@ pub fn preprocess(pp: *Preprocessor, source: Source) Error!void {
                     .NewLine => {},
                     .Eof => {
                         if (ifLevel != 0)
-                            try pp.err(directive, .unterminated_conditional_directive);
+                            try pp.addError(directive, .unterminated_conditional_directive);
                         return;
                     },
                     else => {
-                        try pp.err(token, .invalid_preprocessing_directive);
+                        try pp.addError(token, .invalid_preprocessing_directive);
                         try pp.expectNewLine(&lexer);
                     },
                 }
@@ -317,7 +317,7 @@ pub fn preprocess(pp: *Preprocessor, source: Source) Error!void {
             .NewLine => startOfLine = true,
             .Eof => {
                 if (ifLevel != 0)
-                    try pp.err(token, .unterminated_conditional_directive);
+                    try pp.addError(token, .unterminated_conditional_directive);
                 return;
             },
 
@@ -361,7 +361,7 @@ fn tokenFromRaw(raw: RawToken) Token {
     };
 }
 
-fn err(pp: *Preprocessor, raw: RawToken, tag: Diagnostics.Tag) !void {
+fn addError(pp: *Preprocessor, raw: RawToken, tag: Diagnostics.Tag) !void {
     try pp.compilation.addDiagnostic(.{
         .tag = tag,
         .loc = .{
@@ -375,7 +375,7 @@ fn err(pp: *Preprocessor, raw: RawToken, tag: Diagnostics.Tag) !void {
 fn expectMacroName(pp: *Preprocessor, lexer: *Lexer) Error!?[]const u8 {
     const macroName = lexer.next();
     if (!macroName.id.isMacroIdentifier()) {
-        try pp.err(macroName, .macro_name_missing);
+        try pp.addError(macroName, .macro_name_missing);
         skipToNewLine(lexer);
         return null;
     }
@@ -393,7 +393,7 @@ fn expectNewLine(pp: *Preprocessor, lexer: *Lexer) Error!void {
 
         if (!sentErr) {
             sentErr = true;
-            try pp.err(token, .extra_tokens_directive_end);
+            try pp.addError(token, .extra_tokens_directive_end);
         }
     }
 }
@@ -407,7 +407,7 @@ fn expr(pp: *Preprocessor, lexer: *Lexer) Error!bool {
         var token = lexer.next();
         if (token.id == .NewLine or token.id == .Eof) {
             if (pp.tokens.len == start) {
-                try pp.err(token, .expected_value_in_expr);
+                try pp.addError(token, .expected_value_in_expr);
                 try pp.expectNewLine(lexer);
                 return false;
             }
@@ -420,13 +420,13 @@ fn expr(pp: *Preprocessor, lexer: *Lexer) Error!bool {
             const macroToken = if (first.id == .LParen) lexer.next() else first;
 
             if (!macroToken.id.isMacroIdentifier())
-                try pp.err(macroToken, .macro_name_missing);
+                try pp.addError(macroToken, .macro_name_missing);
 
             if (first.id == .LParen) {
                 const rParen = lexer.next();
                 if (rParen.id != .RParen) {
-                    try pp.err(rParen, .closing_paren);
-                    try pp.err(first, .to_match_paren);
+                    try pp.addError(rParen, .closing_paren);
+                    try pp.addError(first, .to_match_paren);
                 }
             }
 
@@ -514,7 +514,7 @@ fn skip(pp: *Preprocessor, lexer: *Lexer, cont: enum { untilElse, untilEndIf, un
                         continue;
 
                     if (cont == .untilEndIfSeenElse) {
-                        try pp.err(directive, .else_after_else);
+                        try pp.addError(directive, .else_after_else);
                         continue;
                     }
 
@@ -527,7 +527,7 @@ fn skip(pp: *Preprocessor, lexer: *Lexer, cont: enum { untilElse, untilEndIf, un
                         continue;
 
                     if (cont == .untilEndIfSeenElse) {
-                        try pp.err(directive, .elif_after_else);
+                        try pp.addError(directive, .elif_after_else);
                         continue;
                     }
 
@@ -554,7 +554,7 @@ fn skip(pp: *Preprocessor, lexer: *Lexer, cont: enum { untilElse, untilEndIf, un
         }
     } else {
         const eof = lexer.next();
-        return pp.err(eof, .unterminated_conditional_directive);
+        return pp.addError(eof, .unterminated_conditional_directive);
     }
 }
 
@@ -1177,12 +1177,12 @@ fn define(pp: *Preprocessor, lexer: *Lexer) Error!void {
     // get the macro name and validate.
     const macroName = lexer.next();
     if (macroName.id == .KeywordDefined) {
-        try pp.err(macroName, .defined_as_macro_name);
+        try pp.addError(macroName, .defined_as_macro_name);
         return skipToNewLine(lexer);
     }
 
     if (!macroName.id.isMacroIdentifier()) {
-        try pp.err(macroName, .macro_name_must_be_identifier);
+        try pp.addError(macroName, .macro_name_must_be_identifier);
         return skipToNewLine(lexer);
     }
 
@@ -1200,9 +1200,9 @@ fn define(pp: *Preprocessor, lexer: *Lexer) Error!void {
     } else if (first.start == macroName.end) {
         if (first.id == .LParen)
             return pp.defineFunc(lexer, macroName, first);
-        try pp.err(first, .whitespace_after_macro_name);
+        try pp.addError(first, .whitespace_after_macro_name);
     } else if (first.id == .HashHash) {
-        try pp.err(first, .hash_hash_at_start);
+        try pp.addError(first, .hash_hash_at_start);
     }
 
     pp.tokenBuffer.items.len = 0;
@@ -1215,7 +1215,7 @@ fn define(pp: *Preprocessor, lexer: *Lexer) Error!void {
             .HashHash => {
                 const next = lexer.next();
                 if (next.id == .NewLine or next.id == .Eof) {
-                    try pp.err(token, .hash_hash_at_end);
+                    try pp.addError(token, .hash_hash_at_end);
                     break;
                 }
 
@@ -1252,27 +1252,27 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: RawToken, lParen: Raw
 
         if (params.items.len != 0) {
             if (token.id != .Comma)
-                try pp.err(token, .invalid_token_param_list)
+                try pp.addError(token, .invalid_token_param_list)
             else
                 token = lexer.next();
         }
 
         if (token.id == .Eof)
-            return pp.err(token, .unterminated_macro_param_list);
+            return pp.addError(token, .unterminated_macro_param_list);
 
         if (token.id == .Ellipsis) {
             varArgs = true;
             const rParen = lexer.next();
             if (rParen.id != .RParen) {
-                try pp.err(rParen, .missing_paren_param_list);
-                try pp.err(lParen, .to_match_paren);
+                try pp.addError(rParen, .missing_paren_param_list);
+                try pp.addError(lParen, .to_match_paren);
             }
 
             break;
         }
 
         if (!token.id.isMacroIdentifier()) {
-            try pp.err(token, .invalid_token_param_list);
+            try pp.addError(token, .invalid_token_param_list);
             continue;
         }
 
@@ -1309,7 +1309,7 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: RawToken, lParen: Raw
                     }
                 }
 
-                try pp.err(param, .hash_not_followed_param);
+                try pp.addError(param, .hash_not_followed_param);
                 token = param;
             },
 
@@ -1318,7 +1318,7 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: RawToken, lParen: Raw
                 const next = lexer.next();
 
                 if (next.id == .NewLine or next.id == .Eof) {
-                    try pp.err(token, .hash_hash_at_end);
+                    try pp.addError(token, .hash_hash_at_end);
                     continue;
                 }
 
@@ -1475,7 +1475,7 @@ fn findIncludeSource(pp: *Preprocessor, lexer: *Lexer) !Source {
         }
 
         try pp.compilation.addDiagnostic(.{ .tag = .header_str_closing, .loc = .{ .id = first.source, .byteOffset = first.start } });
-        try pp.err(first, .header_str_match);
+        try pp.addError(first, .header_str_match);
     }
 
     // Try expand if the argument is a macro
@@ -1486,7 +1486,7 @@ fn findIncludeSource(pp: *Preprocessor, lexer: *Lexer) !Source {
     switch (fileNameTK.id) {
         .StringLiteral, .MacroString => {},
         else => {
-            try pp.err(first, .expected_filename);
+            try pp.addError(first, .expected_filename);
             try pp.expectNewLine(lexer);
             return error.InvalidInclude;
         },
@@ -1496,13 +1496,13 @@ fn findIncludeSource(pp: *Preprocessor, lexer: *Lexer) !Source {
     const newLine = lexer.next();
     if ((newLine.id != .NewLine and newLine.id != .Eof) or pp.tokens.len > start + 1) {
         skipToNewLine(lexer);
-        try pp.err(first, .extra_tokens_directive_end);
+        try pp.addError(first, .extra_tokens_directive_end);
     }
 
     // check for empty filename
     const tkSlice = pp.expandedSlice(fileNameTK);
     if (tkSlice.len < 3) {
-        try pp.err(first, .empty_filename);
+        try pp.addError(first, .empty_filename);
         return error.InvalidInclude;
     }
 
