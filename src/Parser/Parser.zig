@@ -48,9 +48,14 @@ attrBuffer: std.ArrayList(Attribute),
 // configuration
 noEval: bool = false,
 inMacro: bool = false,
+containsAddresssOfLabel: bool = false,
 returnType: ?Type = null,
 funcName: TokenIndex = 0,
 labelCount: u32 = 0,
+/// location of first computed goto in function currently being parsed
+/// if a computed goto is used, the function must contain an
+/// address-of-label expression (tracked with ContainsAddressOfLabel)
+computedGotoTok: ?TokenIndex = null,
 
 const Label = union(enum) {
     unresolvedGoto: TokenIndex,
@@ -692,8 +697,15 @@ fn parseDeclaration(p: *Parser) Error!bool {
                 if (item == .unresolvedGoto)
                     try p.errStr(.undeclared_label, item.unresolvedGoto, p.tokSlice(item.unresolvedGoto));
 
+                if (p.computedGotoTok) |gotoToken| {
+                    if (!p.containsAddresssOfLabel)
+                        try p.errToken(.invalid_computed_goto, gotoToken);
+                }
+
                 p.labels.items.len = 0;
                 p.labelCount = 0;
+                p.containsAddresssOfLabel = false;
+                p.computedGotoTok = null;
             }
         }
 
@@ -2641,7 +2653,7 @@ fn convertInitList(p: *Parser, il: InitList, initType: Type) Error!NodeIndex {
 ///  | keyword_while '(' expr ')' stmt
 ///  | keyword_do stmt while '(' expr ')' ';'
 ///  | keyword_for '(' (decl | expr? ';') expr? ';' expr? ')' stmt
-///  | keyword_goto IDENTIFIER ';'
+///  | keyword_goto ( IDENTIFIER | ( '*' expr)) ';'
 ///  | keyword_continue ';'
 ///  | keyword_break ';'
 ///  | keyword_return expr? ';'
@@ -2668,18 +2680,38 @@ fn stmt(p: *Parser) Error!NodeIndex {
     if (p.eat(.KeywordFor)) |_|
         return p.parseForStmt();
 
-    if (p.eat(.KeywordGoto)) |_| {
-        const nameToken = try p.expectToken(.Identifier);
-        const str = p.tokSlice(nameToken);
+    if (p.eat(.KeywordGoto)) |gotoToken| {
+        if (p.eat(.Asterisk)) |_| {
+            const expr = p.index;
+            var e = try p.parseExpr();
+            try e.expect(p);
+            try e.lvalConversion(p);
+            p.computedGotoTok = gotoToken;
+            if (!e.ty.isPointer()) {
+                if (!e.ty.isInt()) {
+                    try p.errStr(.incompatible_param, expr, try p.typeStr(e.ty));
+                    return error.ParsingFailed;
+                }
 
-        if (p.findLabel(str) == null)
-            try p.labels.append(.{ .unresolvedGoto = nameToken });
+                const elemType = try p.arena.create(Type);
+                elemType.* = .{ .specifier = .Void, .qual = .{ .@"const" = true } };
+                const resultType = Type{
+                    .specifier = .Pointer,
+                    .data = .{ .subType = elemType },
+                };
 
-        _ = try p.expectToken(.Semicolon);
-        return try p.addNode(.{
-            .tag = .GotoStmt,
-            .data = .{ .DeclarationRef = nameToken },
-        });
+                if (e.isZero()) {
+                    try e.nullCast(p, resultType);
+                } else {
+                    try p.errStr(.implicit_int_to_ptr, expr, try p.typePairStrExtra(e.ty, " to ", resultType));
+                    try e.ptrCast(p, resultType);
+                }
+            }
+
+            try e.un(p, .ComputedGotoStmt);
+            _ = try p.expectToken(.Semicolon);
+            return e.node;
+        }
     }
 
     if (p.eat(.KeywordContinue)) |cont| {
@@ -3982,6 +4014,7 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
             p.index += 1;
             const nameToken = try p.expectToken(.Identifier);
             try p.errToken(.gnu_label_as_value, addressToken);
+            p.containsAddresssOfLabel = true;
 
             const str = p.tokSlice(nameToken);
             if (p.findLabel(str) == null)

@@ -636,6 +636,7 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
 
         .CastExpr,
         .AddrOfExpr,
+        .ComputedGotoStmt,
         .DerefExpr,
         .PlusExpr,
         .NegateExpr,
