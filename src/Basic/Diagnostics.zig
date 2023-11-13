@@ -68,6 +68,7 @@ const Options = struct {
     @"builtin-macro-redefined": Kind = .warning,
     @"gnu-label-as-value": Kind = .off,
     @"malformed-warning-check": Kind = .warning,
+    @"#pragma-messages": Kind = .warning,
 };
 
 pub const Tag = enum {
@@ -293,6 +294,9 @@ pub const Tag = enum {
     no_such_member,
     malformed_warning_check,
     invalid_computed_goto,
+    pragma_warning_message,
+    pragma_error_message,
+    pragma_requires_string_literal,
 };
 
 list: std.ArrayList(Message),
@@ -722,6 +726,8 @@ pub fn renderExtra(comp: *Compilation, m: anytype) void {
             .no_such_member => m.print("no member named {s}", .{msg.extra.str}),
             .malformed_warning_check => m.write("__has_warning expected option name (e.g. \"-Wundef\")"),
             .invalid_computed_goto => m.write("computed goto in function with no address-of-label expressions"),
+            .pragma_warning_message, .pragma_error_message => m.write(msg.extra.str),
+            .pragma_requires_string_literal => m.print("pragma {s} requires string literal", .{msg.extra.str}),
         }
 
         m.end(lcs);
@@ -928,6 +934,8 @@ fn tagKind(diag: *Diagnostics, tag: Tag) Kind {
         .member_expr_ptr,
         .no_such_member,
         .invalid_computed_goto,
+        .pragma_requires_string_literal,
+        .pragma_error_message,
         => .@"error",
 
         .to_match_paren,
@@ -999,6 +1007,7 @@ fn tagKind(diag: *Diagnostics, tag: Tag) Kind {
         .builtin_macro_redefined => diag.options.@"builtin-macro-redefined",
         .gnu_label_as_value => diag.options.@"gnu-label-as-value",
         .malformed_warning_check => diag.options.@"malformed-warning-check",
+        .pragma_warning_message => diag.options.@"#pragma-messages",
     };
 
     if (kind == .@"error" and diag.fatalErrors)

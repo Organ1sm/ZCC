@@ -140,7 +140,7 @@ pub fn preprocess(pp: *Preprocessor, source: Source) Error!void {
 
     var ifLevel: u8 = 0;
     var ifKind = std.PackedIntArray(u2, 256).init([1]u2{0} ** 256);
-    var seenPragmaOnce = false;
+    var pragmaState: PragmaState = .{};
     const untilElse = 0;
     const untilEndIf = 1;
     const untilEndIfSeenElse = 2;
@@ -221,30 +221,9 @@ pub fn preprocess(pp: *Preprocessor, source: Source) Error!void {
 
                     .KeywordDefine => try pp.define(&lexer),
                     .KeywordInclude => try pp.include(&lexer),
-                    .KeywordPragma => {
-                        const start = lexer.index;
-                        while (lexer.index < lexer.buffer.len) : (lexer.index += 1) {
-                            if (lexer.buffer[lexer.index] == '\n')
-                                break;
-                        }
-
-                        var slice = lexer.buffer[start..lexer.index];
-                        slice = std.mem.trim(u8, slice, TrailingWhiteSpace);
-
-                        if (std.mem.eql(u8, slice, "once")) {
-                            const prev = try pp.pragmaOnce.fetchPut(lexer.source, {});
-                            if (prev != null and !seenPragmaOnce) {
-                                return;
-                            } else {
-                                seenPragmaOnce = true;
-                            }
-                        } else {
-                            try pp.compilation.diag.add(.{
-                                .tag = .unsupported_pragma,
-                                .loc = .{ .id = token.source, .byteOffset = token.start },
-                                .extra = .{ .str = slice },
-                            });
-                        }
+                    .KeywordPragma => pp.pragma(&lexer, token, &pragmaState) catch |er| switch (er) {
+                        error.PragmaOnce => return,
+                        else => |e| return e,
                     },
 
                     .KeywordUndef => {
@@ -610,6 +589,26 @@ fn expandObjMacro(pp: *Preprocessor, simpleMacro: *const Macro) Error!ExpandBuff
     return buff;
 }
 
+/// Join a series of string literal tokens into a single string without
+/// leading or trailing quotes.
+/// The returned slice is invalidated if pp.charBuffer changes.
+fn pasteStringsUnsafe(pp: *Preprocessor, comptime TokType: type, toks: []const TokType) ![]const u8 {
+    if (toks.len == 0) return error.ExpectedStringLiteral;
+    const charBufferTop = pp.charBuffer.items.len;
+    defer pp.charBuffer.items.len = charBufferTop;
+
+    for (toks) |tok| {
+        if (tok.id != .StringLiteral) return error.ExpectedStringLiteral;
+        const str = switch (TokType) {
+            Token => pp.expandedSlice(tok),
+            RawToken => pp.tokenSlice(tok),
+            else => unreachable,
+        };
+        try pp.charBuffer.appendSlice(str[1 .. str.len - 1]);
+    }
+    return pp.charBuffer.items[charBufferTop..];
+}
+
 fn handleBuiltinMacro(pp: *Preprocessor, builtin: TokenType, paramTokens: []const Token) Error!TokenType {
     switch (builtin) {
         .MacroParamHasAttribute => {
@@ -622,23 +621,20 @@ fn handleBuiltinMacro(pp: *Preprocessor, builtin: TokenType, paramTokens: []cons
         },
 
         .MacroParamHasWarning => {
-            const charbufferTop = pp.charBuffer.items.len;
-            defer pp.charBuffer.items.len = charbufferTop;
-
-            for (paramTokens) |tok| {
-                if (tok.id != .StringLiteral) {
+            const actualParam = pp.pasteStringsUnsafe(Token, paramTokens) catch |er| switch (er) {
+                error.ExpectedStringLiteral => {
                     const extra = Diagnostics.Message.Extra{ .str = "__has_warning" };
-                    try pp.compilation.diag.add(.{ .tag = .expected_str_literal_in, .loc = tok.loc, .extra = extra });
+                    try pp.compilation.diag.add(.{ .tag = .expected_str_literal_in, .loc = paramTokens[0].loc, .extra = extra });
                     return .Zero;
-                }
-                const str = pp.expandedSlice(tok);
-                try pp.charBuffer.appendSlice(str[1 .. str.len - 1]);
-            }
-            const actualParam = pp.charBuffer.items[charbufferTop..];
+                },
+                else => |e| return e,
+            };
+
             if (!std.mem.startsWith(u8, actualParam, "-W")) {
                 try pp.compilation.diag.add(.{ .tag = .malformed_warning_check, .loc = paramTokens[0].loc });
                 return .Zero;
             }
+
             const warningName = actualParam[2..];
             return if (Diagnostics.warningExists(warningName)) .One else .Zero;
         },
@@ -1380,6 +1376,83 @@ fn include(pp: *Preprocessor, lexer: *Lexer) Error!void {
         return;
 
     try pp.preprocess(newSource);
+}
+
+const Pragmas = enum {
+    once,
+    GCC,
+    clang,
+
+    const PragmaGCC = enum {
+        warning,
+        @"error",
+        diagnostic,
+    };
+};
+const PragmaState = struct {
+    SeenPragmaOnce: bool = false,
+};
+
+/// Handle a GCC pragma. Return true if the pragma is recognized (even if there are errors)
+/// return false if the pragma is unknown
+fn gccPragma(pp: *Preprocessor, pragmaTokens: []const RawToken) !bool {
+    if (pragmaTokens.len == 0) return false;
+    if (std.meta.stringToEnum(Pragmas.PragmaGCC, pp.tokenSlice(pragmaTokens[0]))) |gcc_pragma| {
+        switch (gcc_pragma) {
+            .warning, .@"error" => {
+                const text = pp.pasteStringsUnsafe(RawToken, pragmaTokens[1..]) catch |er| switch (er) {
+                    error.ExpectedStringLiteral => {
+                        const extra = Diagnostics.Message.Extra{ .str = @tagName(gcc_pragma) };
+                        try pp.compilation.diag.add(.{ .tag = .pragma_requires_string_literal, .loc = tokenFromRaw(pragmaTokens[0]).loc, .extra = extra });
+                        return true;
+                    },
+                    else => |e| return e,
+                };
+                const extra = Diagnostics.Message.Extra{ .str = try pp.arena.allocator().dupe(u8, text) };
+                const diagnosticTag: Diagnostics.Tag = if (gcc_pragma == .warning) .pragma_warning_message else .pragma_error_message;
+                try pp.compilation.diag.add(.{ .tag = diagnosticTag, .loc = tokenFromRaw(pragmaTokens[0]).loc, .extra = extra });
+                return true;
+            },
+            .diagnostic => {},
+        }
+    }
+    return false;
+}
+
+/// Handle a pragma directive
+fn pragma(pp: *Preprocessor, lexer: *Lexer, tok: RawToken, pragmaState: *PragmaState) !void {
+    const tokenBuffStart = pp.tokenBuffer.items.len;
+    defer pp.tokenBuffer.items.len = tokenBuffStart;
+
+    while (true) {
+        const nextToken = lexer.next();
+        if (nextToken.id == .NewLine) break;
+        try pp.tokenBuffer.append(nextToken);
+    }
+    const pragmaTokens = pp.tokenBuffer.items[tokenBuffStart..];
+    if (pragmaTokens.len > 0) {
+        if (std.meta.stringToEnum(Pragmas, pp.tokenSlice(pragmaTokens[0]))) |pragmaType| {
+            switch (pragmaType) {
+                .once => {
+                    const prev = try pp.pragmaOnce.fetchPut(lexer.source, {});
+                    if (prev != null and !pragmaState.SeenPragmaOnce) {
+                        return error.PragmaOnce;
+                    } else {
+                        pragmaState.SeenPragmaOnce = true;
+                    }
+                    return;
+                },
+                .GCC => if (try pp.gccPragma(pragmaTokens[1..])) return,
+                .clang => {},
+            }
+        }
+    }
+    const str = if (pragmaTokens.len == 0) "" else lexer.buffer[pragmaTokens[0].start..pragmaTokens[pragmaTokens.len - 1].end];
+    try pp.compilation.diag.add(.{
+        .tag = .unsupported_pragma,
+        .loc = .{ .id = tok.source, .byteOffset = tok.start },
+        .extra = .{ .str = str },
+    });
 }
 
 fn findIncludeSource(pp: *Preprocessor, lexer: *Lexer) !Source {
