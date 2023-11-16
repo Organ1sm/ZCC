@@ -12,6 +12,7 @@ pub const Message = struct {
     tag: Tag,
     loc: Source.Location = .{},
     extra: Extra = .{ .none = {} },
+    kind: Kind = undefined,
 
     pub const Extra = union {
         str: []const u8,
@@ -407,7 +408,9 @@ pub fn add(diag: *Diagnostics, msg: Message) Compilation.Error!void {
     if (kind == .off)
         return;
 
-    try diag.list.append(msg);
+    var copy = msg;
+    copy.kind = kind;
+    try diag.list.append(copy);
 
     if (kind == .@"fatal error" or (kind == .@"error" and diag.fatalErrors))
         return error.FatalError;
@@ -426,7 +429,7 @@ pub fn set(diag: *Diagnostics, name: []const u8, to: Kind) !void {
         }
     }
 
-    try diag.add(.{ .tag = .unknown_warning, .extra = .{ .str = name } });
+    try diag.add(.{ .tag = .unknown_warning, .extra = .{ .str = name }, .kind = .warning });
 }
 
 pub fn setAll(diag: *Diagnostics, to: Kind) void {
@@ -473,9 +476,7 @@ pub fn renderExtra(comp: *Compilation, m: anytype) void {
     var errors: u32 = 0;
     var warnings: u32 = 0;
     for (comp.diag.list.items) |msg| {
-        const kind = comp.diag.tagKind(msg.tag);
-
-        switch (kind) {
+        switch (msg.kind) {
             .@"fatal error", .@"error" => errors += 1,
             .warning => warnings += 1,
             .note => {},
@@ -499,7 +500,7 @@ pub fn renderExtra(comp: *Compilation, m: anytype) void {
             m.location(source.path, lcs.?);
         }
 
-        m.start(kind);
+        m.start(msg.kind);
 
         switch (msg.tag) {
             .todo => m.print("TODO: {s}", .{msg.extra.str}),
