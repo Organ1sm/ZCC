@@ -592,15 +592,22 @@ fn expandObjMacro(pp: *Preprocessor, simpleMacro: *const Macro) Error!ExpandBuff
     return buff;
 }
 
-/// Join a series of string literal tokens into a single string without
-/// leading or trailing quotes.
-/// The returned slice is invalidated if pp.charBuffer changes.
+/// Join a possibly-parenthesized series of string literal tokens into a single string without
+/// leading or trailing quotes. The returned slice is invalidated if pp.char_buf changes.
+/// Returns error.ExpectedStringLiteral if parentheses are not balanced, a non-string-literal
+/// is encountered, or if no string literals are encountered
+/// TODO: destringize (replace all '\\' with a single `\` and all '\"' with a '"')
 fn pasteStringsUnsafe(pp: *Preprocessor, comptime TokType: type, toks: []const TokType) ![]const u8 {
-    if (toks.len == 0) return error.ExpectedStringLiteral;
     const charBufferTop = pp.charBuffer.items.len;
     defer pp.charBuffer.items.len = charBufferTop;
 
-    for (toks) |tok| {
+    var unwrapped = toks;
+    if (toks.len >= 2 and toks[0].id == .LParen and toks[toks.len - 1].id == .RParen)
+        unwrapped = toks[1 .. toks.len - 1];
+    if (unwrapped.len == 0)
+        return error.ExpectedStringLiteral;
+
+    for (unwrapped) |tok| {
         if (tok.id != .StringLiteral) return error.ExpectedStringLiteral;
         const str = switch (TokType) {
             Token => pp.expandedSlice(tok),
