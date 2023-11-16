@@ -126,6 +126,9 @@ pub fn deinit(pp: *Preprocessor) void {
 }
 
 pub fn preprocess(pp: *Preprocessor, source: Source) Error!void {
+    const initialOptions = pp.compilation.diag.options;
+    defer pp.compilation.diag.options = initialOptions;
+
     var lexer = Lexer{
         .buffer = source.buffer,
         .source = source.id,
@@ -1387,11 +1390,47 @@ const Pragmas = enum {
         warning,
         @"error",
         diagnostic,
+
+        const Diagnostics = enum {
+            ignored,
+            warning,
+            @"error",
+            fatal,
+            push,
+            pop,
+        };
     };
 };
 const PragmaState = struct {
     SeenPragmaOnce: bool = false,
 };
+
+fn gccDiagnostic(pp: *Preprocessor, pragmaTokens: []const RawToken) !bool {
+    if (pragmaTokens.len == 0) return false;
+    if (std.meta.stringToEnum(Pragmas.PragmaGCC.Diagnostics, pp.tokenSlice(pragmaTokens[0]))) |diagnostic| {
+        switch (diagnostic) {
+            .ignored, .warning, .@"error", .fatal => {
+                const text = pp.pasteStringsUnsafe(RawToken, pragmaTokens[1..]) catch |err| switch (err) {
+                    error.ExpectedStringLiteral => return false,
+                    else => |e| return e,
+                };
+                if (!std.mem.startsWith(u8, text, "-W")) return false;
+                const new_kind = switch (diagnostic) {
+                    .ignored => Diagnostics.Kind.off,
+                    .warning => Diagnostics.Kind.warning,
+                    .@"error" => Diagnostics.Kind.@"error",
+                    .fatal => Diagnostics.Kind.@"fatal error",
+                    else => unreachable,
+                };
+
+                try pp.compilation.diag.set(text[2..], new_kind);
+                return true;
+            },
+            .push, .pop => {},
+        }
+    }
+    return false;
+}
 
 /// Handle a GCC pragma. Return true if the pragma is recognized (even if there are errors)
 /// return false if the pragma is unknown
@@ -1413,7 +1452,7 @@ fn gccPragma(pp: *Preprocessor, pragmaTokens: []const RawToken) !bool {
                 try pp.compilation.addDiagnostic(.{ .tag = diagnosticTag, .loc = tokenFromRaw(pragmaTokens[0]).loc, .extra = extra });
                 return true;
             },
-            .diagnostic => {},
+            .diagnostic => if (try pp.gccDiagnostic(pragmaTokens[1..])) return true,
         }
     }
     return false;
