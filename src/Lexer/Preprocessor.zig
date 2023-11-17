@@ -129,9 +129,6 @@ pub fn deinit(pp: *Preprocessor) void {
 }
 
 pub fn preprocess(pp: *Preprocessor, source: Source) Error!void {
-    const initialOptions = pp.compilation.diag.options;
-    defer pp.compilation.diag.options = initialOptions;
-
     var lexer = Lexer{
         .buffer = source.buffer,
         .source = source.id,

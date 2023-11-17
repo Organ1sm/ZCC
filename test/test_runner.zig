@@ -94,8 +94,11 @@ pub fn main() !void {
     var passCount: u32 = 0;
     var failCount: u32 = 0;
     var skipCount: u32 = 0;
+    
+    const initialOptions = comp.diag.options;
     for (cases.items) |path| {
         comp.langOpts.standard = .default;
+        comp.diag.options = initialOptions;
         const file = comp.addSource(path) catch |err| {
             failCount += 1;
             progress.log("could not add source '{s}': {s}\n", .{ path, @errorName(err) });
