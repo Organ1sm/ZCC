@@ -298,6 +298,9 @@ pub const Tag = enum {
     pragma_warning_message,
     pragma_error_message,
     pragma_requires_string_literal,
+    poisoned_identifier,
+    pragma_poison_identifier,
+    pragma_poison_macro,
 };
 
 list: std.ArrayList(Message),
@@ -729,6 +732,9 @@ pub fn renderExtra(comp: *Compilation, m: anytype) void {
             .invalid_computed_goto => m.write("computed goto in function with no address-of-label expressions"),
             .pragma_warning_message, .pragma_error_message => m.write(msg.extra.str),
             .pragma_requires_string_literal => m.print("pragma {s} requires string literal", .{msg.extra.str}),
+            .poisoned_identifier => m.write("attempt to use a poisoned identifier"),
+            .pragma_poison_identifier => m.write("can only poison identifier tokens"),
+            .pragma_poison_macro => m.write("poisoning existing macro"),
         }
 
         m.end(lcs);
@@ -937,6 +943,8 @@ fn tagKind(diag: *Diagnostics, tag: Tag) Kind {
         .invalid_computed_goto,
         .pragma_requires_string_literal,
         .pragma_error_message,
+        .poisoned_identifier,
+        .pragma_poison_identifier,
         => .@"error",
 
         .to_match_paren,
@@ -960,6 +968,7 @@ fn tagKind(diag: *Diagnostics, tag: Tag) Kind {
         .func_does_not_return,
         .align_ignored,
         .zero_align_ignored,
+        .pragma_poison_macro,
         => .warning,
 
         .unsupported_pragma => diag.options.@"unsupported-pragma",
