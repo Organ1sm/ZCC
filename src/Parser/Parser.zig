@@ -451,6 +451,10 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
         p.index += 1;
     }
 
+    const rootDecls = try p.declBuffer.toOwnedSlice();
+    if (rootDecls.len == 0)
+        try p.errToken(.empty_translation_unit, p.index - 1);
+
     const data = try p.data.toOwnedSlice();
     errdefer pp.compilation.gpa.free(data);
 
@@ -461,7 +465,7 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
         .generated = pp.generated.items,
         .nodes = p.nodes.toOwnedSlice(),
         .data = data,
-        .rootDecls = try p.declBuffer.toOwnedSlice(),
+        .rootDecls = rootDecls,
         .strings = try p.strings.toOwnedSlice(),
         .valueMap = p.valueMap,
     };
