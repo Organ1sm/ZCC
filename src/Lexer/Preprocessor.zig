@@ -321,6 +321,9 @@ pub fn preprocess(pp: *Preprocessor, source: Source) Error!void {
             .Eof => {
                 if (ifLevel != 0)
                     try pp.addError(token, .unterminated_conditional_directive);
+                if (source.buffer.len > 0 and source.buffer[source.buffer.len - 1] != '\n')
+                    try pp.addError(token, .newline_eof);
+
                 return;
             },
 
