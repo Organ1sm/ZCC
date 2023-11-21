@@ -1495,9 +1495,10 @@ fn pragma(pp: *Preprocessor, lexer: *Lexer, tok: RawToken, pragmaState: *PragmaS
 
     while (true) {
         const nextToken = lexer.next();
-        if (nextToken.id == .NewLine) break;
+        if (nextToken.id == .NewLine or nextToken.id == .Eof) break;
         try pp.tokenBuffer.append(nextToken);
     }
+
     const pragmaTokens = pp.tokenBuffer.items[tokenBuffStart..];
     if (pragmaTokens.len > 0) {
         if (std.meta.stringToEnum(Pragmas, pp.tokenSlice(pragmaTokens[0]))) |pragmaType| {
