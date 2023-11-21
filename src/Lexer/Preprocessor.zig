@@ -1488,41 +1488,41 @@ fn gccPragma(pp: *Preprocessor, pragmaTokens: []const RawToken) !bool {
     return false;
 }
 
+fn handlePragmaOnce(pp: *Preprocessor, lexer: *Lexer, pragmaState: *PragmaState) !void {
+    const newlineOrEof = lexer.next();
+    if (newlineOrEof.id != .NewLine and newlineOrEof.id != .Eof) {
+        try pp.compilation.addDiagnostic(.{
+            .tag = .extra_tokens_directive_end,
+            .loc = .{ .id = newlineOrEof.source, .byteOffset = newlineOrEof.start },
+        });
+        skipToNewLine(lexer);
+    }
+    const prev = try pp.pragmaOnce.fetchPut(lexer.source, {});
+    if (prev != null and !pragmaState.SeenPragmaOnce) {
+        return error.PragmaOnce;
+    }
+    pragmaState.SeenPragmaOnce = true;
+}
+
 /// Handle a pragma directive
-fn pragma(pp: *Preprocessor, lexer: *Lexer, tok: RawToken, pragmaState: *PragmaState) !void {
-    const tokenBuffStart = pp.tokenBuffer.items.len;
-    defer pp.tokenBuffer.items.len = tokenBuffStart;
+fn pragma(pp: *Preprocessor, lexer: *Lexer, pragmaToken: RawToken, pragmaState: *PragmaState) !void {
+    const nameToken = lexer.next();
+    if (nameToken.id == .NewLine or nameToken.id == .Eof)
+        return;
+
+    const name = pp.tokenSlice(nameToken);
+    if (std.mem.eql(u8, name, "once"))
+        return pp.handlePragmaOnce(lexer, pragmaState);
+
+    try pp.tokens.append(pp.compilation.gpa, tokenFromRaw(pragmaToken));
+    try pp.tokens.append(pp.compilation.gpa, tokenFromRaw(nameToken));
 
     while (true) {
         const nextToken = lexer.next();
         if (nextToken.id == .NewLine or nextToken.id == .Eof) break;
         try pp.tokenBuffer.append(nextToken);
+        try pp.tokens.append(pp.compilation.gpa, tokenFromRaw(nextToken));
     }
-
-    const pragmaTokens = pp.tokenBuffer.items[tokenBuffStart..];
-    if (pragmaTokens.len > 0) {
-        if (std.meta.stringToEnum(Pragmas, pp.tokenSlice(pragmaTokens[0]))) |pragmaType| {
-            switch (pragmaType) {
-                .once => {
-                    const prev = try pp.pragmaOnce.fetchPut(lexer.source, {});
-                    if (prev != null and !pragmaState.SeenPragmaOnce) {
-                        return error.PragmaOnce;
-                    } else {
-                        pragmaState.SeenPragmaOnce = true;
-                    }
-                    return;
-                },
-                .GCC => if (try pp.gccPragma(pragmaTokens[1..])) return,
-                .clang => {},
-            }
-        }
-    }
-    const str = if (pragmaTokens.len == 0) "" else lexer.buffer[pragmaTokens[0].start..pragmaTokens[pragmaTokens.len - 1].end];
-    try pp.compilation.addDiagnostic(.{
-        .tag = .unsupported_pragma,
-        .loc = .{ .id = tok.source, .byteOffset = tok.start },
-        .extra = .{ .str = str },
-    });
 }
 
 fn findIncludeSource(pp: *Preprocessor, lexer: *Lexer) !Source {
@@ -1589,6 +1589,8 @@ pub fn prettyPrintTokens(pp: *Preprocessor, w: anytype) !void {
         if (cur.id == .Eof) break;
 
         const slice = pp.expandedSlice(cur);
+        if (cur.id == .KeywordPragma)
+            try w.writeByte('#');
         try w.writeAll(slice);
 
         i += 1;
@@ -1669,4 +1671,41 @@ fn addTestSource(pp: *Preprocessor, path: []const u8, content: []const u8) !Sour
 
     try pp.compilation.sources.put(dupedPath, source);
     return source;
+}
+
+test "Preserve pragma tokens" {
+    var buf = std.ArrayList(u8).init(std.testing.allocator);
+    defer buf.deinit();
+
+    var comp = Compilation.init(std.testing.allocator);
+    defer comp.deinit();
+
+    var pp = Preprocessor.init(&comp);
+    defer pp.deinit();
+
+    const test_text = "#pragma GCC diagnostic error \"-Wnewline-eof\"\n";
+    const test_runner_macros = blk: {
+        const duped_path = try std.testing.allocator.dupe(u8, "<test_runner>");
+        errdefer comp.gpa.free(duped_path);
+
+        const contents = try std.testing.allocator.dupe(u8, test_text);
+        errdefer comp.gpa.free(contents);
+
+        const source = Source{
+            .id = @as(Source.ID, @enumFromInt(comp.sources.count() + 2)),
+            .path = duped_path,
+            .buffer = contents,
+        };
+        try comp.sources.put(duped_path, source);
+        break :blk source;
+    };
+
+    try pp.preprocess(test_runner_macros);
+
+    try pp.tokens.append(pp.compilation.gpa, .{
+        .id = .Eof,
+        .loc = .{ .id = test_runner_macros.id, .byteOffset = @as(u32, @intCast(test_runner_macros.buffer.len)) },
+    });
+    try pp.prettyPrintTokens(buf.writer());
+    try std.testing.expectEqualStrings(test_text, buf.items);
 }
