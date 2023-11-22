@@ -7,6 +7,7 @@ const Diagnostics = @import("../Basic/Diagnostics.zig");
 const Token = @import("../Lexer/Token.zig").Token;
 const LangOpts = @import("LangOpts.zig");
 const Type = @import("../AST/Type.zig");
+const Pragma = @import("../Lexer/Pragma.zig");
 
 const Allocator = std.mem.Allocator;
 const EpochSeconds = std.time.epoch.EpochSeconds;
@@ -25,6 +26,7 @@ systemIncludeDirs: std.ArrayList([]const u8),
 outputName: ?[]const u8 = null,
 builtinHeaderPath: ?[]u8 = null,
 target: std.Target = builtin.target,
+pragmaHandlers: std.StringArrayHashMapUnmanaged(*Pragma) = .{},
 onlyPreprocess: bool = false,
 onlyCompile: bool = false,
 dumpAst: bool = false,
@@ -41,6 +43,9 @@ pub fn init(gpa: Allocator) Compilation {
 }
 
 pub fn deinit(compilation: *Compilation) void {
+    for (compilation.pragmaHandlers.values()) |pragma| {
+        pragma.deinit(pragma, compilation);
+    }
     for (compilation.sources.values()) |source| {
         compilation.gpa.free(source.path);
         compilation.gpa.free(source.buffer);
@@ -50,6 +55,7 @@ pub fn deinit(compilation: *Compilation) void {
     compilation.diag.deinit();
     compilation.includeDirs.deinit();
     compilation.systemIncludeDirs.deinit();
+    compilation.pragmaHandlers.deinit(compilation.gpa);
     if (compilation.builtinHeaderPath) |some| compilation.gpa.free(some);
 }
 
@@ -493,6 +499,44 @@ pub fn addDiagnostic(comp: *Compilation, msg: Diagnostics.Message) Error!void {
     if (comp.langOpts.suppress(msg.tag))
         return;
     return comp.diag.add(msg);
+}
+
+pub fn addPragmaHandler(comp: *Compilation, name: []const u8, handler: *Pragma) Allocator.Error!void {
+    try comp.pragmaHandlers.putNoClobber(comp.gpa, name, handler);
+}
+
+pub fn addDefaultPragmaHandlers(comp: *Compilation) Allocator.Error!void {
+    const GCC = @import("../Lexer/Pragmas/gcc.zig");
+    var gcc = try GCC.init(comp.gpa);
+    errdefer gcc.deinit(gcc, comp);
+
+    const Once = @import("../Lexer/Pragmas/once.zig");
+    var once = try Once.init(comp.gpa);
+    errdefer once.deinit(once, comp);
+
+    try comp.addPragmaHandler("GCC", gcc);
+    try comp.addPragmaHandler("once", once);
+}
+
+pub fn getPragma(comp: *Compilation, name: []const u8) ?*Pragma {
+    return comp.pragmaHandlers.get(name);
+}
+
+const PragmaEvent = enum {
+    BeforePreprocess,
+    BeforeParse,
+    AfterParse,
+};
+
+pub fn pragmaEvent(comp: *Compilation, event: PragmaEvent) void {
+    for (comp.pragmaHandlers.values()) |pragma| {
+        const maybeFunc = switch (event) {
+            .BeforePreprocess => pragma.beforePreprocess,
+            .BeforeParse => pragma.beforeParse,
+            .AfterParse => pragma.afterParse,
+        };
+        if (maybeFunc) |func| func(pragma, comp);
+    }
 }
 
 pub const renderErrors = Diagnostics.render;

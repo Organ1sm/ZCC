@@ -26,6 +26,13 @@ pub fn main() u8 {
     var comp = Compilation.init(gpa);
     defer comp.deinit();
 
+    comp.addDefaultPragmaHandlers() catch |err| switch (err) {
+        error.OutOfMemory => {
+            std.debug.print("Out of Memory\n", .{});
+            return 1;
+        },
+    };
+
     handleArgs(&comp, args) catch |err| switch (err) {
         error.OutOfMemory => {
             std.debug.print("Out of Memory\n", .{});
@@ -307,8 +314,10 @@ fn processSource(comp: *Compilation, source: Source, builtinMacro: Source, userD
 test "simple test" {
     _ = @import("Lexer/Lexer.zig");
     _ = @import("Lexer/Preprocessor.zig");
+    _ = @import("Lexer/Pragma.zig");
     _ = @import("Parser/InitList.zig");
     _ = @import("Basic/Source.zig");
+    _ = @import("Basic/LangOpts.zig");
     _ = @import("Basic/Compilation.zig");
     _ = @import("AST/AST.zig");
     _ = @import("AST/Type.zig");

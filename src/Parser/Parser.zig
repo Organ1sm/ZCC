@@ -52,6 +52,7 @@ containsAddresssOfLabel: bool = false,
 returnType: ?Type = null,
 funcName: TokenIndex = 0,
 labelCount: u32 = 0,
+currPragma: u32 = 0,
 /// location of first computed goto in function currently being parsed
 /// if a computed goto is used, the function must contain an
 /// address-of-label expression (tracked with ContainsAddressOfLabel)
@@ -388,8 +389,27 @@ fn findTag(p: *Parser, kind: TokenType, nameToken: TokenIndex, refKind: enum { r
     return null;
 }
 
+fn pragma(p: *Parser) !bool {
+    var foundPragma = false;
+    while (p.eat(.KeywordPragma) != null) {
+        foundPragma = true;
+        defer p.currPragma += 1;
+
+        const nameToken = p.index;
+        const name = p.tokSlice(nameToken);
+        const pragmaLen = p.pp.pragmaLens.items[p.currPragma];
+        defer p.index += pragmaLen;
+        if (p.pp.compilation.getPragma(name)) |prag| {
+            try prag.parserCB(p, p.index, pragmaLen);
+        }
+    }
+    return foundPragma;
+}
+
 /// root : (decl | staticAssert)*
 pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
+    pp.compilation.pragmaEvent(.BeforeParse);
+
     var arena = std.heap.ArenaAllocator.init(pp.compilation.gpa);
     errdefer arena.deinit();
 
@@ -431,6 +451,8 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
     _ = try p.addNode(.{ .tag = .Invalid, .type = undefined, .data = undefined });
 
     while (p.eat(.Eof) == null) {
+        if (try p.pragma())
+            continue;
         if (p.parseStaticAssert() catch |er| switch (er) {
             error.ParsingFailed => {
                 p.nextExternDecl();
@@ -457,6 +479,8 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
 
     const data = try p.data.toOwnedSlice();
     errdefer pp.compilation.gpa.free(data);
+
+    pp.compilation.pragmaEvent(.AfterParse);
 
     return AST{
         .comp = pp.compilation,
@@ -541,6 +565,7 @@ fn skipTo(p: *Parser, id: TokenType) void {
 ///  | declSpec declarator decl* compoundStmt
 ///  | staticAssert
 fn parseDeclaration(p: *Parser) Error!bool {
+    _ = try p.pragma();
     const firstTokenIndex = p.index;
     const attrBufferTop = p.attrBuffer.items.len;
     defer p.attrBuffer.items.len = attrBufferTop;
@@ -1481,6 +1506,7 @@ fn parseRecordSpec(p: *Parser) Error!*Type.Record {
 /// recordDeclarator : declarator (':' constExpr)?
 fn recordDecls(p: *Parser) Error!void {
     while (true) {
+        if (try p.pragma()) continue;
         if (try p.parseStaticAssert()) continue;
         const baseType = (try p.specQual()) orelse return;
 
@@ -1667,6 +1693,7 @@ fn parseEnumSpec(p: *Parser) Error!*Type.Enum {
 const EnumFieldAndNode = struct { field: Type.Enum.Field, node: NodeIndex };
 /// enumerator : IDENTIFIER ('=' constExpr)
 fn enumerator(p: *Parser) Error!?EnumFieldAndNode {
+    _ = try p.pragma();
     const nameToken = p.eat(.Identifier) orelse {
         if (p.getCurrToken() == .RBrace) return null;
         try p.err(.expected_identifier);
@@ -3099,7 +3126,7 @@ fn parseCompoundStmt(p: *Parser, isFnBody: bool) Error!?NodeIndex {
     var noreturnIdx: ?TokenIndex = null;
     var noreturnLabelCount: u32 = 0;
 
-    while (p.eat(.RBrace) == null) {
+    while (p.eat(.RBrace) == null) : (_ = try p.pragma()) {
         if (p.parseStaticAssert() catch |er| switch (er) {
             error.ParsingFailed => {
                 try p.nextStmt(lBrace);

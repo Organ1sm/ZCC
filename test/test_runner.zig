@@ -64,6 +64,7 @@ pub fn main() !void {
     var comp = zcc.Compilation.init(gpa);
     defer comp.deinit();
 
+    try comp.addDefaultPragmaHandlers();
     try comp.defineSystemIncludes();
 
     const testRunnerMacros = blk: {
@@ -94,7 +95,7 @@ pub fn main() !void {
     var passCount: u32 = 0;
     var failCount: u32 = 0;
     var skipCount: u32 = 0;
-    
+
     const initialOptions = comp.diag.options;
     for (cases.items) |path| {
         comp.langOpts.standard = .default;
@@ -209,8 +210,6 @@ pub fn main() !void {
         }
 
         const expectedTypes = pp.defines.get("EXPECTED_TYPES");
-        if (expectedTypes) |_| pp.compilation.diag.options.@"unused-value" = .off;
-        defer pp.compilation.diag.options.@"unused-value" = .warning;
 
         var tree = try zcc.Parser.parse(&pp);
         defer tree.deinit();

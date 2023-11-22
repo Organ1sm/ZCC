@@ -1,3 +1,5 @@
+#pragma GCC diagnostic ignored "-Wunused-value"
+
 void test_type_resolution(void) {
     1 - 1;
     1L;
@@ -34,5 +36,5 @@ void test_type_resolution(void) {
     "*void" \
     "*void"
 
-#define EXPECTED_ERRORS  "type-resolution.c:22:19: warning: pointer type mismatch ('int *' and 'float *')" \
-    "type-resolution.c:23:19: warning: pointer type mismatch ('int *' and '_Atomic(int) *')" \
+#define EXPECTED_ERRORS  "type-resolution.c:24:19: warning: pointer type mismatch ('int *' and 'float *')" \
+    "type-resolution.c:25:19: warning: pointer type mismatch ('int *' and '_Atomic(int) *')" \

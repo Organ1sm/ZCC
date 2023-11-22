@@ -65,11 +65,17 @@ arena: std.heap.ArenaAllocator,
 defines: DefineMap,
 tokens: Token.List = .{},
 generated: std.ArrayList(u8),
-pragmaOnce: std.AutoHashMap(Source.ID, void),
 tokenBuffer: RawTokenList,
 charBuffer: std.ArrayList(u8),
 includeDepth: u8 = 0,
 poisonedIdentifiers: std.StringHashMap(void),
+/// Counter that is incremented each time preprocess() is called
+/// Can be used to distinguish multiple preprocessings of the same file
+preprocessCount: u32 = 0,
+/// length of the nth pragma. Length is counted as the number of tokens
+/// after the `pragma` keyword. It is always greater than zero, as no tokens
+/// will be saved for a bare `#pragma` with no name.
+pragmaLens: std.ArrayList(u32),
 
 const FeatureCheckMacros = struct {
     const args = [1][]const u8{"X"};
@@ -105,16 +111,19 @@ pub fn addBuiltinMacros(pp: *Preprocessor) !void {
 }
 
 pub fn init(comp: *Compilation) Preprocessor {
-    return .{
+    const pp = Preprocessor{
         .compilation = comp,
         .arena = std.heap.ArenaAllocator.init(comp.gpa),
         .defines = DefineMap.init(comp.gpa),
         .generated = std.ArrayList(u8).init(comp.gpa),
-        .pragmaOnce = std.AutoHashMap(Source.ID, void).init(comp.gpa),
         .tokenBuffer = RawTokenList.init(comp.gpa),
         .charBuffer = std.ArrayList(u8).init(comp.gpa),
         .poisonedIdentifiers = std.StringHashMap(void).init(comp.gpa),
+        .pragmaLens = std.ArrayList(u32).init(comp.gpa),
     };
+
+    comp.pragmaEvent(.BeforePreprocess);
+    return pp;
 }
 
 pub fn deinit(pp: *Preprocessor) void {
@@ -122,13 +131,14 @@ pub fn deinit(pp: *Preprocessor) void {
     pp.tokens.deinit(pp.compilation.gpa);
     pp.arena.deinit();
     pp.generated.deinit();
-    pp.pragmaOnce.deinit();
     pp.tokenBuffer.deinit();
     pp.charBuffer.deinit();
     pp.poisonedIdentifiers.deinit();
+    pp.pragmaLens.deinit();
 }
 
 pub fn preprocess(pp: *Preprocessor, source: Source) Error!void {
+    pp.preprocessCount += 1;
     var lexer = Lexer{
         .buffer = source.buffer,
         .source = source.id,
@@ -143,7 +153,6 @@ pub fn preprocess(pp: *Preprocessor, source: Source) Error!void {
 
     var ifLevel: u8 = 0;
     var ifKind = std.PackedIntArray(u2, 256).init([1]u2{0} ** 256);
-    var pragmaState: PragmaState = .{};
     const untilElse = 0;
     const untilEndIf = 1;
     const untilEndIfSeenElse = 2;
@@ -224,8 +233,19 @@ pub fn preprocess(pp: *Preprocessor, source: Source) Error!void {
 
                     .KeywordDefine => try pp.define(&lexer),
                     .KeywordInclude => try pp.include(&lexer),
-                    .KeywordPragma => pp.pragma(&lexer, token, &pragmaState) catch |er| switch (er) {
-                        error.PragmaOnce => return,
+                    .KeywordPragma => pp.pragma(&lexer, directive) catch |err| switch (err) {
+                        error.StopPreprocessing => return,
+                        error.UnknownPragma => {
+                            const pragmaLen = pp.pragmaLens.items[pp.pragmaLens.items.len - 1];
+                            const nameToken = pp.tokens.get(pp.tokens.len - 1 - pragmaLen);
+                            const name = pp.expandedSlice(nameToken);
+                            try pp.compilation.addDiagnostic(.{
+                                .tag = .unsupported_pragma,
+                                .loc = nameToken.loc,
+                                .extra = .{ .str = name },
+                            });
+                        },
+
                         else => |e| return e,
                     },
 
@@ -603,7 +623,7 @@ fn expandObjMacro(pp: *Preprocessor, simpleMacro: *const Macro) Error!ExpandBuff
 /// Returns error.ExpectedStringLiteral if parentheses are not balanced, a non-string-literal
 /// is encountered, or if no string literals are encountered
 /// TODO: destringize (replace all '\\' with a single `\` and all '\"' with a '"')
-fn pasteStringsUnsafe(pp: *Preprocessor, comptime TokType: type, toks: []const TokType) ![]const u8 {
+fn pasteStringsUnsafe(pp: *Preprocessor, toks: []const Token) ![]const u8 {
     const charBufferTop = pp.charBuffer.items.len;
     defer pp.charBuffer.items.len = charBufferTop;
 
@@ -615,11 +635,7 @@ fn pasteStringsUnsafe(pp: *Preprocessor, comptime TokType: type, toks: []const T
 
     for (unwrapped) |tok| {
         if (tok.id != .StringLiteral) return error.ExpectedStringLiteral;
-        const str = switch (TokType) {
-            Token => pp.expandedSlice(tok),
-            RawToken => pp.tokenSlice(tok),
-            else => unreachable,
-        };
+        const str = pp.expandedSlice(tok);
         try pp.charBuffer.appendSlice(str[1 .. str.len - 1]);
     }
     return pp.charBuffer.items[charBufferTop..];
@@ -637,17 +653,24 @@ fn handleBuiltinMacro(pp: *Preprocessor, builtin: TokenType, paramTokens: []cons
         },
 
         .MacroParamHasWarning => {
-            const actualParam = pp.pasteStringsUnsafe(Token, paramTokens) catch |er| switch (er) {
+            const actualParam = pp.pasteStringsUnsafe(paramTokens) catch |er| switch (er) {
                 error.ExpectedStringLiteral => {
-                    const extra = Diagnostics.Message.Extra{ .str = "__has_warning" };
-                    try pp.compilation.addDiagnostic(.{ .tag = .expected_str_literal_in, .loc = paramTokens[0].loc, .extra = extra });
+                    try pp.compilation.addDiagnostic(.{
+                        .tag = .expected_str_literal_in,
+                        .loc = paramTokens[0].loc,
+                        .extra = .{ .str = "__has_warning" },
+                    });
                     return .Zero;
                 },
                 else => |e| return e,
             };
 
             if (!std.mem.startsWith(u8, actualParam, "-W")) {
-                try pp.compilation.addDiagnostic(.{ .tag = .malformed_warning_check, .loc = paramTokens[0].loc });
+                try pp.compilation.addDiagnostic(.{
+                    .tag = .malformed_warning_check,
+                    .loc = paramTokens[0].loc,
+                    .extra = .{ .str = "__has_warning" },
+                });
                 return .Zero;
             }
 
@@ -1397,132 +1420,30 @@ fn include(pp: *Preprocessor, lexer: *Lexer) Error!void {
     try pp.preprocess(newSource);
 }
 
-const Pragmas = enum {
-    once,
-    GCC,
-    clang,
-
-    const PragmaGCC = enum {
-        warning,
-        @"error",
-        diagnostic,
-        poison,
-
-        const Diagnostics = enum {
-            ignored,
-            warning,
-            @"error",
-            fatal,
-            push,
-            pop,
-        };
-    };
-};
-const PragmaState = struct {
-    SeenPragmaOnce: bool = false,
-};
-
-fn gccDiagnostic(pp: *Preprocessor, pragmaTokens: []const RawToken) !bool {
-    if (pragmaTokens.len == 0) return false;
-    if (std.meta.stringToEnum(Pragmas.PragmaGCC.Diagnostics, pp.tokenSlice(pragmaTokens[0]))) |diagnostic| {
-        switch (diagnostic) {
-            .ignored, .warning, .@"error", .fatal => {
-                const text = pp.pasteStringsUnsafe(RawToken, pragmaTokens[1..]) catch |err| switch (err) {
-                    error.ExpectedStringLiteral => return false,
-                    else => |e| return e,
-                };
-                if (!std.mem.startsWith(u8, text, "-W")) return false;
-                const new_kind = switch (diagnostic) {
-                    .ignored => Diagnostics.Kind.off,
-                    .warning => Diagnostics.Kind.warning,
-                    .@"error" => Diagnostics.Kind.@"error",
-                    .fatal => Diagnostics.Kind.@"fatal error",
-                    else => unreachable,
-                };
-
-                try pp.compilation.diag.set(text[2..], new_kind);
-                return true;
-            },
-            .push, .pop => {},
-        }
-    }
-    return false;
-}
-
-/// Handle a GCC pragma. Return true if the pragma is recognized (even if there are errors)
-/// return false if the pragma is unknown
-fn gccPragma(pp: *Preprocessor, pragmaTokens: []const RawToken) !bool {
-    if (pragmaTokens.len == 0) return false;
-    if (std.meta.stringToEnum(Pragmas.PragmaGCC, pp.tokenSlice(pragmaTokens[0]))) |gcc_pragma| {
-        switch (gcc_pragma) {
-            .warning, .@"error" => {
-                const text = pp.pasteStringsUnsafe(RawToken, pragmaTokens[1..]) catch |er| switch (er) {
-                    error.ExpectedStringLiteral => {
-                        const extra = Diagnostics.Message.Extra{ .str = @tagName(gcc_pragma) };
-                        try pp.compilation.addDiagnostic(.{ .tag = .pragma_requires_string_literal, .loc = tokenFromRaw(pragmaTokens[0]).loc, .extra = extra });
-                        return true;
-                    },
-                    else => |e| return e,
-                };
-                const extra = Diagnostics.Message.Extra{ .str = try pp.arena.allocator().dupe(u8, text) };
-                const diagnosticTag: Diagnostics.Tag = if (gcc_pragma == .warning) .pragma_warning_message else .pragma_error_message;
-                try pp.compilation.addDiagnostic(.{ .tag = diagnosticTag, .loc = tokenFromRaw(pragmaTokens[0]).loc, .extra = extra });
-                return true;
-            },
-            .diagnostic => if (try pp.gccDiagnostic(pragmaTokens[1..])) return true,
-            .poison => {
-                for (pragmaTokens[1..]) |token| {
-                    if (!token.id.isMacroIdentifier()) {
-                        try pp.addError(token, .pragma_poison_identifier);
-                        return true;
-                    }
-                    const str = pp.tokSliceSafe(token);
-                    if (pp.defines.get(str) != null)
-                        try pp.addError(token, .pragma_poison_macro);
-                    try pp.poisonedIdentifiers.put(str, {});
-                }
-                return true;
-            },
-        }
-    }
-    return false;
-}
-
-fn handlePragmaOnce(pp: *Preprocessor, lexer: *Lexer, pragmaState: *PragmaState) !void {
-    const newlineOrEof = lexer.next();
-    if (newlineOrEof.id != .NewLine and newlineOrEof.id != .Eof) {
-        try pp.compilation.addDiagnostic(.{
-            .tag = .extra_tokens_directive_end,
-            .loc = .{ .id = newlineOrEof.source, .byteOffset = newlineOrEof.start },
-        });
-        skipToNewLine(lexer);
-    }
-    const prev = try pp.pragmaOnce.fetchPut(lexer.source, {});
-    if (prev != null and !pragmaState.SeenPragmaOnce) {
-        return error.PragmaOnce;
-    }
-    pragmaState.SeenPragmaOnce = true;
-}
-
 /// Handle a pragma directive
-fn pragma(pp: *Preprocessor, lexer: *Lexer, pragmaToken: RawToken, pragmaState: *PragmaState) !void {
+fn pragma(pp: *Preprocessor, lexer: *Lexer, pragmaToken: RawToken) !void {
     const nameToken = lexer.next();
     if (nameToken.id == .NewLine or nameToken.id == .Eof)
         return;
 
     const name = pp.tokenSlice(nameToken);
-    if (std.mem.eql(u8, name, "once"))
-        return pp.handlePragmaOnce(lexer, pragmaState);
 
     try pp.tokens.append(pp.compilation.gpa, tokenFromRaw(pragmaToken));
+    const pragmaStart = @as(u32, @intCast(pp.tokens.len));
     try pp.tokens.append(pp.compilation.gpa, tokenFromRaw(nameToken));
 
     while (true) {
         const nextToken = lexer.next();
         if (nextToken.id == .NewLine or nextToken.id == .Eof) break;
-        try pp.tokenBuffer.append(nextToken);
         try pp.tokens.append(pp.compilation.gpa, tokenFromRaw(nextToken));
     }
+
+    const pragmaLen = @as(u32, @intCast(pp.tokens.len - pragmaStart));
+    try pp.pragmaLens.append(pragmaLen);
+    if (pp.compilation.getPragma(name)) |prag| {
+        return prag.preprocessorCB(pp, pragmaStart, pragmaLen);
+    }
+    return error.UnknownPragma;
 }
 
 fn findIncludeSource(pp: *Preprocessor, lexer: *Lexer) !Source {
@@ -1585,17 +1506,35 @@ fn findIncludeSource(pp: *Preprocessor, lexer: *Lexer) !Source {
 pub fn prettyPrintTokens(pp: *Preprocessor, w: anytype) !void {
     var i: usize = 0;
     var cur: Token = pp.tokens.get(i);
+    var curPragma: usize = 0;
+    var pragmaEnd: ?usize = null;
     while (true) {
         if (cur.id == .Eof) break;
 
         const slice = pp.expandedSlice(cur);
-        if (cur.id == .KeywordPragma)
-            try w.writeByte('#');
-        try w.writeAll(slice);
 
         i += 1;
         const next = pp.tokens.get(i);
-        if (next.id == .Eof) {
+        if (cur.id == .KeywordPragma) {
+            defer curPragma += 1;
+            const pragmaName = pp.expandedSlice(next);
+            const pragmaLen = pp.pragmaLens.items[curPragma];
+            if (pp.compilation.getPragma(pragmaName)) |prag| {
+                if (!prag.shouldPreserveTokens(pp, @as(u32, @intCast(i)), pragmaLen)) {
+                    i += pragmaLen;
+                    cur = pp.tokens.get(i);
+                    continue;
+                }
+            }
+            try w.writeByte('#');
+            pragmaEnd = i + pragmaLen;
+        }
+        try w.writeAll(slice);
+
+        if (pragmaEnd != null and pragmaEnd.? == i) {
+            try w.writeByte('\n');
+            pragmaEnd = null;
+        } else if (next.id == .Eof or next.id == .KeywordPragma) {
             try w.writeByte('\n');
         } else if (next.loc.next != null or next.loc.id == .generated) {
             // next was expanded from a macro
@@ -1673,39 +1612,76 @@ fn addTestSource(pp: *Preprocessor, path: []const u8, content: []const u8) !Sour
     return source;
 }
 
-test "Preserve pragma tokens" {
-    var buf = std.ArrayList(u8).init(std.testing.allocator);
-    defer buf.deinit();
+test "Preserve pragma tokens sometimes" {
+    const allocator = std.testing.allocator;
+    const Test = struct {
+        fn runPreprocessor(source_text: []const u8) ![]const u8 {
+            var buf = std.ArrayList(u8).init(allocator);
+            defer buf.deinit();
 
-    var comp = Compilation.init(std.testing.allocator);
-    defer comp.deinit();
+            var comp = Compilation.init(allocator);
+            defer comp.deinit();
 
-    var pp = Preprocessor.init(&comp);
-    defer pp.deinit();
+            try comp.addDefaultPragmaHandlers();
 
-    const test_text = "#pragma GCC diagnostic error \"-Wnewline-eof\"\n";
-    const test_runner_macros = blk: {
-        const duped_path = try std.testing.allocator.dupe(u8, "<test_runner>");
-        errdefer comp.gpa.free(duped_path);
+            var pp = Preprocessor.init(&comp);
+            defer pp.deinit();
 
-        const contents = try std.testing.allocator.dupe(u8, test_text);
-        errdefer comp.gpa.free(contents);
+            const test_runner_macros = blk: {
+                const duped_path = try allocator.dupe(u8, "<test_runner>");
+                errdefer comp.gpa.free(duped_path);
 
-        const source = Source{
-            .id = @as(Source.ID, @enumFromInt(comp.sources.count() + 2)),
-            .path = duped_path,
-            .buffer = contents,
-        };
-        try comp.sources.put(duped_path, source);
-        break :blk source;
+                const contents = try allocator.dupe(u8, source_text);
+                errdefer comp.gpa.free(contents);
+
+                const source = Source{
+                    .id = @as(Source.ID, @enumFromInt(comp.sources.count() + 2)),
+                    .path = duped_path,
+                    .buffer = contents,
+                };
+                try comp.sources.put(duped_path, source);
+                break :blk source;
+            };
+
+            try pp.preprocess(test_runner_macros);
+
+            try pp.tokens.append(pp.compilation.gpa, .{
+                .id = .Eof,
+                .loc = .{ .id = test_runner_macros.id, .byteOffset = @as(u32, @intCast(test_runner_macros.buffer.len)) },
+            });
+            try pp.prettyPrintTokens(buf.writer());
+            return allocator.dupe(u8, buf.items);
+        }
+
+        fn check(source_text: []const u8, expected: []const u8) !void {
+            const output = try runPreprocessor(source_text);
+            defer allocator.free(output);
+
+            try std.testing.expectEqualStrings(expected, output);
+        }
     };
 
-    try pp.preprocess(test_runner_macros);
+    // TODO: space between `x` and `;` is an artifact of token prettyprinting
+    const preserve_gcc_diagnostic =
+        \\#pragma GCC diagnostic error "-Wnewline-eof"
+        \\#pragma GCC warning error "-Wnewline-eof"
+        \\int x ;
+        \\#pragma GCC ignored error "-Wnewline-eof"
+        \\
+    ;
+    try Test.check(preserve_gcc_diagnostic, preserve_gcc_diagnostic);
 
-    try pp.tokens.append(pp.compilation.gpa, .{
-        .id = .Eof,
-        .loc = .{ .id = test_runner_macros.id, .byteOffset = @as(u32, @intCast(test_runner_macros.buffer.len)) },
-    });
-    try pp.prettyPrintTokens(buf.writer());
-    try std.testing.expectEqualStrings(test_text, buf.items);
+    const omit_once =
+        \\#pragma once
+        \\int x ;
+        \\#pragma once
+        \\
+    ;
+    try Test.check(omit_once, "int x ;\n");
+
+    const omit_poison =
+        \\#pragma GCC poison foobar
+        \\
+    ;
+    try Test.check(omit_poison, "");
 }
