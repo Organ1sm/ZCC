@@ -3398,12 +3398,17 @@ fn parseExpr(p: *Parser) Error!Result {
     var exprStartIdx = p.index;
     var errStart = p.pp.compilation.diag.list.items.len;
     var lhs = try p.assignExpr();
+
+    if (p.getCurrToken() == .Comma) 
+        try lhs.expect(p);
+
     while (p.eat(.Comma)) |_| {
         try lhs.maybeWarnUnused(p, exprStartIdx, errStart);
         exprStartIdx = p.index;
         errStart = p.pp.compilation.diag.list.items.len;
 
         const rhs = try p.assignExpr();
+        try rhs.expect(p);
         lhs.value = rhs.value;
         lhs.ty = rhs.ty;
         try lhs.bin(p, .CommaExpr, rhs);
