@@ -1521,14 +1521,31 @@ fn recordDecls(p: *Parser) Error!void {
                 nameToken = d.name;
                 ty = d.type;
             }
-            if (p.eat(.Colon)) |_| {
+            if (p.eat(.Colon)) |_| bits: {
                 const res = try p.constExpr();
-                // TODO check using math.cast
-                switch (res.value) {
-                    .unsigned => |v| bits = @as(u32, @intCast(v)),
-                    .signed => |v| bits = @as(u32, @intCast(v)),
-                    .unavailable => unreachable,
+                if (!ty.isInt()) {
+                    try p.errStr(.non_int_bitfield, firstToken, try p.typeStr(ty));
+                    break :bits;
                 }
+
+                if (res.value == .unavailable) {
+                    try p.errToken(.expected_integer_constant_expr, firstToken);
+                    break :bits;
+                } else if (res.value == .signed and res.value.signed < 0) {
+                    try p.errExtra(.negative_bitwidth, firstToken, .{ .signed = res.value.signed });
+                    break :bits;
+                }
+
+                const width = res.asU64();
+                if (width == 0 and nameToken != 0) {
+                    try p.errToken(.zero_width_named_field, nameToken);
+                    break :bits;
+                } else if (width > ty.bitSizeof(p.pp.compilation).?) {
+                    try p.errToken(.bitfield_too_big, nameToken);
+                    break :bits;
+                }
+
+                bits = @as(u32, @truncate(width));
                 bitsNode = res.node;
             }
             if (nameToken == 0 and bitsNode == .none) unnamed: {

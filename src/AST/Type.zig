@@ -771,6 +771,16 @@ pub fn sizeof(ty: Type, comp: *const Compilation) ?u64 {
     };
 }
 
+pub fn bitSizeof(ty: Type, comp: *Compilation) ?u64 {
+    return switch (ty.specifier) {
+        .Bool => 1,
+        .TypeofType, .DecayedTypeofType => ty.data.subType.bitSizeof(comp),
+        .TypeofExpr, .DecayedTypeofExpr => ty.data.expr.ty.bitSizeof(comp),
+        .Attributed => ty.data.attributed.base.bitSizeof(comp),
+        else => 8 * (ty.sizeof(comp) orelse return null),
+    };
+}
+
 /// Get the alignment of a type
 pub fn alignof(ty: Type, comp: *Compilation) u29 {
     if (ty.alignment != 0)
