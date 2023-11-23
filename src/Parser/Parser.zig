@@ -619,12 +619,18 @@ fn parseDeclaration(p: *Parser) Error!bool {
         if (p.returnType != null)
             try p.err(.func_not_in_root);
 
-        // TODO check redefinition
-        try p.scopes.append(.{ .definition = .{
-            .name = p.tokSlice(initD.d.name),
-            .type = initD.d.type,
-            .nameToken = initD.d.name,
-        } });
+        if (p.findSymbol(initD.d.name, .definition)) |sym| {
+            if (sym == .definition) {
+                try p.errStr(.redefinition, initD.d.name, p.tokSlice(initD.d.name));
+                try p.errToken(.previous_definition, sym.definition.nameToken);
+            }
+        } else {
+            try p.scopes.append(.{ .definition = .{
+                .name = p.tokSlice(initD.d.name),
+                .type = initD.d.type,
+                .nameToken = initD.d.name,
+            } });
+        }
 
         const returnType = p.returnType;
         const funcName = p.funcName;
