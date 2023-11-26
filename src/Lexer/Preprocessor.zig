@@ -1362,6 +1362,13 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: RawToken, lParen: Raw
             },
 
             .HashHash => {
+                // if "##" appear at the beginning, the token buffer is still empty in this case
+                // emit error
+                if (pp.tokenBuffer.items.len == 0) {
+                    try pp.addError(token, .hash_hash_at_start);
+                    continue;
+                }
+
                 const start = lexer.index;
                 const next = lexer.next();
 
