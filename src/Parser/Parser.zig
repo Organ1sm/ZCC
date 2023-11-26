@@ -1153,7 +1153,7 @@ const InitDeclarator = struct { d: Declarator, initializer: NodeIndex = .none };
 fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec) Error!?InitDeclarator {
     var initD = InitDeclarator{ .d = (try p.declarator(declSpec.type, .normal)) orelse return null };
 
-    if (p.eat(.Equal)) |eq| {
+    if (p.eat(.Equal)) |eq| init: {
         if (declSpec.storageClass == .typedef or initD.d.funcDeclarator != null)
             try p.errToken(.illegal_initializer, eq)
         else if (initD.d.type.is(.VariableLenArray))
@@ -1165,6 +1165,8 @@ fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec) Error!?InitDeclarator {
 
         var initListExpr = try p.initializer(initD.d.type);
         initD.initializer = initListExpr.node;
+        // int j [] = c; // c -> *int
+        if (!initListExpr.ty.isArray()) break :init;
         if (initD.d.type.specifier == .IncompleteArray) {
             initD.d.type.data.array.len = initListExpr.ty.data.array.len;
             initD.d.type.specifier = .Array;
@@ -1193,6 +1195,10 @@ fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec) Error!?InitDeclarator {
             },
             else => {},
         };
+
+        // if there was an initializer expression it must have contained an error
+        if (initD.initializer != .none)
+            break :incomplete;
         try p.errStr(.variable_incomplete_ty, name, try p.typeStr(initD.d.type));
         return initD;
     }
