@@ -878,11 +878,11 @@ pub fn eql(aParam: Type, bParam: Type, checkQualifiers: bool) bool {
         .StaticArray,
         .IncompleteArray,
         => {
-            if (a.data.array.len != b.data.array.len) return false;
-            if (!a.data.array.elem.eql(b.data.array.elem, checkQualifiers)) return false;
+            if (!std.meta.eql(a.arrayLen(), b.arrayLen())) return false;
+            if (!a.getElemType().eql(b.getElemType(), checkQualifiers)) return false;
         },
 
-        .VariableLenArray => if (!a.data.expr.ty.eql(b.data.expr.ty, checkQualifiers)) return false,
+        .VariableLenArray => if (!a.getElemType().eql(b.getElemType(), checkQualifiers)) return false,
 
         .Union, .Struct => if (a.data.record != b.data.record) return false,
         .Enum => if (a.data.@"enum" != b.data.@"enum") return false,
