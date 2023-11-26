@@ -2341,7 +2341,14 @@ pub fn initializerItem(p: *Parser, il: *InitList, initType: Type) Error!bool {
             defer tempIL.deinit(p.pp.compilation.gpa);
             saw = try p.initializerItem(&tempIL, .{ .specifier = .Void });
         } else if (p.getCurrToken() == .LBrace) {
-            saw = try p.initializerItem(curIL, curType);
+            if (curType.isArray()) {
+                curIL = try curIL.find(p.pp.compilation.gpa, count);
+                curType = curType.getElemType();
+                saw = try p.initializerItem(curIL, curType);
+            } else {
+                // TODO: warning scalar braces
+                saw = try p.initializerItem(curIL, curType);
+            }
         } else if (try p.findScalarInitializer(&curIL, &curType)) {
             saw = try p.initializerItem(curIL, curType);
         } else if (designation) {
@@ -3399,7 +3406,7 @@ fn parseExpr(p: *Parser) Error!Result {
     var errStart = p.pp.compilation.diag.list.items.len;
     var lhs = try p.assignExpr();
 
-    if (p.getCurrToken() == .Comma) 
+    if (p.getCurrToken() == .Comma)
         try lhs.expect(p);
 
     while (p.eat(.Comma)) |_| {

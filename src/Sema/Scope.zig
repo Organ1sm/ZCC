@@ -4,7 +4,6 @@ const Type = @import("../AST/Type.zig");
 const Parser = @import("../Parser/Parser.zig");
 const Result = @import("../Parser/Result.zig");
 
-
 const TokenIndex = AST.TokenIndex;
 const NodeIndex = AST.NodeIndex;
 
@@ -40,7 +39,7 @@ pub const Scope = union(enum) {
 
         const ResultContext = struct {
             pub fn eql(_: ResultContext, a: Result, b: Result) bool {
-                return a.eql(b);
+                return a.asU64() == b.asU64();
             }
             pub fn hash(_: ResultContext, a: Result) u64 {
                 return a.hash();
