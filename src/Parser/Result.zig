@@ -429,14 +429,18 @@ fn usualArithmeticConversion(a: *Result, b: *Result, p: *Parser) Error!void {
     }
 
     // cast to the unsigned type with greater rank
-    if (aIsUnsigned and (@intFromEnum(aPromoted.specifier) >= @intFromEnum(bPromoted.specifier))) {
-        try a.intCast(p, aPromoted);
-        try b.intCast(p, aPromoted);
+    const aLarger = @intFromEnum(aPromoted.specifier) > @intFromEnum(bPromoted.specifier);
+    const bLarger = @intFromEnum(bPromoted.specifier) > @intFromEnum(bPromoted.specifier);
+    if (aIsUnsigned) {
+        const target = if (aLarger) aPromoted else bPromoted;
+        try a.intCast(p, target);
+        try b.intCast(p, target);
         return;
     } else {
-        std.debug.assert(bIsUnsigned and (@intFromEnum(bPromoted.specifier) >= @intFromEnum(aPromoted.specifier)));
-        try a.intCast(p, bPromoted);
-        try b.intCast(p, bPromoted);
+        std.debug.assert(bIsUnsigned);
+        const target = if (bLarger) bPromoted else aPromoted;
+        try a.intCast(p, target);
+        try b.intCast(p, target);
     }
 }
 
