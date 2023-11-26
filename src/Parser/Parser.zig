@@ -3918,12 +3918,16 @@ fn mulExpr(p: *Parser) Error!Result {
         try rhs.expect(p);
 
         if (rhs.isZero() and mul == null and !p.noEval) {
+            const errTag: Diagnostics.Tag = if (p.inMacro) .division_by_zero_macro else .division_by_zero;
             lhs.value = .unavailable;
             if (div != null) {
-                try p.errStr(.division_by_zero, div.?, "division");
+                try p.errStr(errTag, div.?, "division");
             } else {
-                try p.errStr(.division_by_zero, percent.?, "remainder");
+                try p.errStr(errTag, percent.?, "remainder");
             }
+
+            if (p.inMacro)
+                return error.ParsingFailed;
         }
 
         if (try lhs.adjustTypes(percent.?, &rhs, p, if (tag == .ModExpr) .integer else .arithmetic)) {
