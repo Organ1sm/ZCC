@@ -52,7 +52,6 @@ containsAddresssOfLabel: bool = false,
 returnType: ?Type = null,
 funcName: TokenIndex = 0,
 labelCount: u32 = 0,
-currPragma: u32 = 0,
 /// location of first computed goto in function currently being parsed
 /// if a computed goto is used, the function must contain an
 /// address-of-label expression (tracked with ContainsAddressOfLabel)
@@ -393,14 +392,14 @@ fn pragma(p: *Parser) !bool {
     var foundPragma = false;
     while (p.eat(.KeywordPragma) != null) {
         foundPragma = true;
-        defer p.currPragma += 1;
 
         const nameToken = p.index;
         const name = p.tokSlice(nameToken);
-        const pragmaLen = p.pp.pragmaLens.items[p.currPragma];
-        defer p.index += pragmaLen;
+        const endIdx = std.mem.indexOfScalarPos(TokenType, p.tokenIds, p.index, .NewLine).?;
+        const pragmaLen = @as(TokenIndex, @intCast(endIdx)) - p.index;
+        defer p.index += pragmaLen + 1; // skip past .nl as well
         if (p.pp.compilation.getPragma(name)) |prag| {
-            try prag.parserCB(p, p.index, pragmaLen);
+            try prag.parserCB(p, p.index);
         }
     }
     return foundPragma;
@@ -533,9 +532,16 @@ fn nextExternDecl(p: *Parser) void {
             .KeywordTypeof2,
             .Identifier,
             => if (parens == 0) return,
+            .KeywordPragma => p.skipToPragmaSentinel(),
             .Eof => return,
             else => {},
         }
+    }
+}
+
+fn skipToPragmaSentinel(p: *Parser) void {
+    while (true) : (p.index += 1) {
+        if (p.getCurrToken() == .NewLine) return;
     }
 }
 
@@ -552,6 +558,7 @@ fn skipTo(p: *Parser, id: TokenType) void {
                 parens -= 1;
             },
 
+            .KeywordPragma => p.skipToPragmaSentinel(),
             .Eof => return,
             else => {},
         }
@@ -3379,6 +3386,7 @@ fn nextStmt(p: *Parser, lBrace: TokenIndex) !void {
             .KeywordTypeof2,
             .KeywordGccTypeof,
             => if (parens == 0) return,
+            .KeywordPragma => p.skipToPragmaSentinel(),
             else => {},
         }
     }
