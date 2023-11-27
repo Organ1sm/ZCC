@@ -237,7 +237,7 @@ pub fn preprocess(pp: *Preprocessor, source: Source) Error!void {
                         error.StopPreprocessing => return,
                         error.UnknownPragma => {
                             const pragmaLen = pp.pragmaLens.items[pp.pragmaLens.items.len - 1];
-                            const nameToken = pp.tokens.get(pp.tokens.len - 1 - pragmaLen);
+                            const nameToken = pp.tokens.get(pp.tokens.len - pragmaLen);
                             const name = pp.expandedSlice(nameToken);
                             try pp.compilation.addDiagnostic(.{
                                 .tag = .unsupported_pragma,
