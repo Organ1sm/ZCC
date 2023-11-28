@@ -853,7 +853,7 @@ fn shouldExpand(tok: Token, macro: *Macro) bool {
 
 fn nextBufToken(pp: *Preprocessor, lexer: *Lexer, buf: *ExpandBuffer, startIdx: *usize, endIdx: *usize, extendbuffer: bool) Error!Token {
     startIdx.* += 1;
-    if (startIdx.* == buf.items.len and startIdx.* == endIdx.*) {
+    if (startIdx.* == buf.items.len and startIdx.* >= endIdx.*) {
         if (extendbuffer) {
             const rawToken = lexer.next();
             if (rawToken.id.isMacroIdentifier() and pp.poisonedIdentifiers.get(pp.tokSliceSafe(rawToken)) != null)
