@@ -132,6 +132,8 @@ pub const Specifier = union(enum) {
             Specifier.ComplexDouble => "_Complex double",
             Specifier.ComplexLongDouble => "_Complex long double",
 
+            Specifier.Attributed => |attr| TypeBuilder.fromType(attr.base).toString(),
+
             else => null,
         };
     }
