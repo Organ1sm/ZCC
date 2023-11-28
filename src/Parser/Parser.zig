@@ -1161,6 +1161,11 @@ fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec) Error!?InitDeclarator {
     var initD = InitDeclarator{ .d = (try p.declarator(declSpec.type, .normal)) orelse return null };
 
     if (p.eat(.Equal)) |eq| init: {
+        if (initD.d.type.hasIncompleteSize() and !initD.d.type.isArray()) {
+            try p.errStr(.variable_incomplete_ty, initD.d.name, try p.typeStr(initD.d.type));
+            return error.ParsingFailed;
+        }
+
         if (declSpec.storageClass == .typedef or initD.d.funcDeclarator != null)
             try p.errToken(.illegal_initializer, eq)
         else if (initD.d.type.is(.VariableLenArray))
@@ -2662,6 +2667,8 @@ fn convertInitList(p: *Parser, il: InitList, initType: Type) Error!NodeIndex {
         }
         return try p.addNode(arrInitNode);
     } else if (initType.get(.Struct)) |structType| {
+        std.debug.assert(!structType.hasIncompleteSize());
+
         const listBuffTop = p.listBuffer.items.len;
         defer p.listBuffer.items.len = listBuffTop;
 
