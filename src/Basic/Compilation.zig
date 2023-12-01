@@ -431,11 +431,12 @@ pub fn addSource(compilation: *Compilation, path: []const u8) !Source {
     const contents = try file.reader().readAllAlloc(compilation.gpa, std.math.maxInt(u32));
     errdefer compilation.gpa.free(contents);
 
-    const source = Source{
+    var source = Source{
         .id = @as(Source.ID, @enumFromInt(compilation.sources.count() + 2)),
         .path = dupedPath,
         .buffer = contents,
     };
+    source.checkUtf8();
 
     try compilation.sources.put(dupedPath, source);
 

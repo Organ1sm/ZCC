@@ -132,6 +132,14 @@ pub fn deinit(pp: *Preprocessor) void {
 }
 
 pub fn preprocess(pp: *Preprocessor, source: Source) Error!void {
+    if (source.invalidUTF8Loc) |loc| {
+        try pp.compilation.addDiagnostic(.{
+            .tag = .invalid_utf8,
+            .loc = loc,
+        });
+        return error.FatalError;
+    }
+
     pp.preprocessCount += 1;
     var lexer = Lexer{
         .buffer = source.buffer,
