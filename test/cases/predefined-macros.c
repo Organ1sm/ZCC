@@ -11,7 +11,6 @@ void foo(void) {
   (void)__LONG_MAX__;
   (void)__LONG_LONG_MAX__;
   (void)__WCHAR_MAX__;
-  (void)__SIZE_MAX__;
   (void)__PTRDIFF_MAX__;
   (void)__SIZEOF_FLOAT__;
   (void)__SIZEOF_DOUBLE__;

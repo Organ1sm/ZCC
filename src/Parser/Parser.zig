@@ -4992,6 +4992,17 @@ fn parseIntegerLiteral(p: *Parser) Error!Result {
         return res;
     }
 
+    switch (curToken) {
+        .IntegerLiteral,
+        .IntegerLiteral_L,
+        .IntegerLiteral_LL,
+        => {
+            if (value > std.math.maxInt(i64))
+                try p.err(.implicitly_unsigned_literal);
+        },
+        else => {},
+    }
+
     if (base == 10) {
         switch (curToken) {
             .IntegerLiteral => return p.castInt(value, &.{ .Int, .Long, .LongLong }),
