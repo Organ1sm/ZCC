@@ -1959,7 +1959,7 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: Declarator
         if (maxBits > 61) maxBits = 61;
 
         const maxBytes = (@as(u64, 1) << @as(u6, @truncate(maxBits))) - 1;
-        const maxElems = maxBytes / (outer.sizeof(p.pp.compilation) orelse 1);
+        const maxElems = maxBytes / @max(1, outer.sizeof(p.pp.compilation) orelse 1);
 
         switch (size.value) {
             .unavailable => if (size.node != .none) {
