@@ -419,8 +419,12 @@ pub fn getSource(comp: *Compilation, id: Source.ID) Source {
 ///     FileOpenError: If the file failed to open
 ///     FileReadError: If reading the file contents failed
 ///     OutOfMemory: If allocation failed
+///     FileNotFound: If not found the file
 pub fn addSource(compilation: *Compilation, path: []const u8) !Source {
     if (compilation.sources.get(path)) |some| return some;
+
+    if (std.mem.indexOfScalar(u8, path, 0) != null)
+        return error.FileNotFound;
 
     const file = try std.fs.cwd().openFile(path, .{});
     defer file.close();
