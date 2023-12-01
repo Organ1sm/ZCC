@@ -311,6 +311,7 @@ pub const Tag = enum {
     negative_bitwidth,
     zero_width_named_field,
     bitfield_too_big,
+    invalid_utf8,
 };
 
 list: std.ArrayList(Message),
@@ -753,6 +754,7 @@ pub fn renderExtra(comp: *Compilation, m: anytype) void {
             .negative_bitwidth => m.print("bit-field has negative width ({d})", .{msg.extra.signed}),
             .zero_width_named_field => m.write("named bit-field has zero width"),
             .bitfield_too_big => m.write("width of bit-field exceeds width of its type"),
+            .invalid_utf8 => m.write("source file is not valid UTF-8"),
         }
 
         if (comp.diag.getTagOption(msg.tag)) |opt| {
@@ -1035,6 +1037,7 @@ fn tagKind(diag: *Diagnostics, tag: Tag) Kind {
         .zero_width_named_field,
         .bitfield_too_big,
         .division_by_zero_macro,
+        .invalid_utf8,
         => .@"error",
 
         .to_match_paren,
