@@ -72,6 +72,7 @@ pub const Options = struct {
     @"#pragma-messages": Kind = .warning,
     @"newline-eof": Kind = .off,
     @"empty-translation-unit": Kind = .off,
+    @"implicitly-unsigned-literal": Kind = .warning,
 };
 
 pub const Tag = enum {
@@ -312,6 +313,7 @@ pub const Tag = enum {
     zero_width_named_field,
     bitfield_too_big,
     invalid_utf8,
+    implicitly_unsigned_literal,
 };
 
 list: std.ArrayList(Message),
@@ -755,6 +757,7 @@ pub fn renderExtra(comp: *Compilation, m: anytype) void {
             .zero_width_named_field => m.write("named bit-field has zero width"),
             .bitfield_too_big => m.write("width of bit-field exceeds width of its type"),
             .invalid_utf8 => m.write("source file is not valid UTF-8"),
+            .implicitly_unsigned_literal => m.write("integer literal is too large to be represented in a signed integer type, interpreting as unsigned"),
         }
 
         if (comp.diag.getTagOption(msg.tag)) |opt| {
@@ -859,6 +862,8 @@ fn getTagOption(diag: *Diagnostics, tag: Tag) ?[]const u8 {
         .pragma_warning_message => "#pragma-messages",
         .newline_eof => "newline-eof",
         .empty_translation_unit => "empty-translation-unit",
+        .implicitly_unsigned_literal => "implicitly-unsigned-literal",
+
         else => null,
     };
 }
@@ -1116,6 +1121,7 @@ fn tagKind(diag: *Diagnostics, tag: Tag) Kind {
         .pragma_warning_message => diag.options.@"#pragma-messages",
         .newline_eof => diag.options.@"newline-eof",
         .empty_translation_unit => diag.options.@"empty-translation-unit",
+        .implicitly_unsigned_literal => diag.options.@"implicitly-unsigned-literal",
     };
 
     if (kind == .@"error" and diag.fatalErrors)
