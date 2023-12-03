@@ -3716,7 +3716,7 @@ fn logicalAndExpr(p: *Parser) Error!Result {
         try rhs.expect(p);
 
         if (try lhs.adjustTypes(token, &rhs, p, .booleanLogic)) {
-            const res = @intFromBool(lhs.getBool() or rhs.getBool());
+            const res = @intFromBool(lhs.getBool() and rhs.getBool());
             lhs.value = .{ .signed = res };
         }
 
