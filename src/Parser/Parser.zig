@@ -3918,6 +3918,14 @@ fn addExpr(p: *Parser) Error!Result {
     return lhs;
 }
 
+/// Implements C's % operator for signed integers, for evaluating constant expressions
+/// caller guarantees rhs != 0
+/// caller guarantees lhs != std.math.minInt(i64) OR rhs != -1
+fn signedRemainder(lhs: i64, rhs: i64) i64 {
+    if (rhs > 0) return @rem(lhs, rhs);
+    return lhs - @divTrunc(lhs, rhs) * rhs;
+}
+
 /// mulExpr : castExpr (('*' | '/' | '%') castExpr)*´
 fn mulExpr(p: *Parser) Error!Result {
     var lhs = try p.parseCastExpr();
@@ -3955,11 +3963,15 @@ fn mulExpr(p: *Parser) Error!Result {
                     else => unreachable,
                 };
             } else {
-                lhs.value = switch (lhs.value) {
-                    .unsigned => |v| .{ .unsigned = v % rhs.value.unsigned },
-                    .signed => |v| .{ .signed = @rem(v, rhs.value.signed) },
-                    else => unreachable,
-                };
+                if (lhs.value == .signed and lhs.value.signed == std.math.minInt(i64) and rhs.value.signed == -1) {
+                    lhs.value = if (p.inMacro) .{ .signed = 0 } else .unavailable;
+                } else {
+                    lhs.value = switch (lhs.value) {
+                        .unsigned => |v| .{ .unsigned = v % rhs.value.unsigned },
+                        .signed => |v| .{ .signed = signedRemainder(v, rhs.value.signed) },
+                        else => unreachable,
+                    };
+                }
             }
         }
         try lhs.bin(p, tag, rhs);
