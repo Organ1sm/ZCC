@@ -4132,6 +4132,7 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
         },
 
         .Asterisk => {
+            const asteriskLoc = p.index;
             p.index += 1;
             var operand = try p.parseCastExpr();
             try operand.expect(p);
@@ -4141,6 +4142,9 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
             } else if (!operand.ty.isFunc()) {
                 try p.errToken(.indirection_ptr, index);
             }
+
+            if (operand.ty.hasIncompleteSize())
+                try p.errStr(.deref_incomplete_ty_ptr, asteriskLoc, try p.typeStr(operand.ty));
 
             operand.ty.qual = .{};
             try operand.un(p, .DerefExpr);
@@ -4406,7 +4410,7 @@ fn parseSuffixExpr(p: *Parser, lhs: Result) Error!Result {
         .Period => {
             p.index += 1;
             const name = try p.expectToken(.Identifier);
-            const fieldType = try p.getFeildAccessField(lhs.ty, name, false);
+            const fieldType = try p.getFieldAccessField(lhs.ty, name, false);
             return Result{
                 .ty = fieldType,
                 .node = try p.addNode(.{
@@ -4420,7 +4424,7 @@ fn parseSuffixExpr(p: *Parser, lhs: Result) Error!Result {
         .Arrow => {
             p.index += 1;
             const name = try p.expectToken(.Identifier);
-            const fieldType = try p.getFeildAccessField(lhs.ty, name, true);
+            const fieldType = try p.getFieldAccessField(lhs.ty, name, true);
             return Result{
                 .ty = fieldType,
                 .node = try p.addNode(.{
@@ -4473,7 +4477,7 @@ fn parseSuffixExpr(p: *Parser, lhs: Result) Error!Result {
     }
 }
 
-fn getFeildAccessField(
+fn getFieldAccessField(
     p: *Parser,
     exprType: Type,
     fieldNameToken: TokenIndex,
@@ -4490,6 +4494,12 @@ fn getFeildAccessField(
             return error.ParsingFailed;
         },
     }
+
+    if (recordType.hasIncompleteSize()) {
+        try p.errStr(.deref_incomplete_ty_ptr, fieldNameToken - 2, try p.typeStr(exprBaseType));
+        return error.ParsingFailed;
+    }
+
     if (isArrow and !isPtr) try p.errStr(.member_expr_not_ptr, fieldNameToken, try p.typeStr(exprType));
     if (!isArrow and isPtr) try p.errStr(.member_expr_ptr, fieldNameToken, try p.typeStr(exprType));
 
