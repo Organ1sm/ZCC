@@ -314,6 +314,7 @@ pub const Tag = enum {
     bitfield_too_big,
     invalid_utf8,
     implicitly_unsigned_literal,
+    deref_incomplete_ty_ptr,
 };
 
 list: std.ArrayList(Message),
@@ -687,6 +688,7 @@ pub fn renderExtra(comp: *Compilation, m: anytype) void {
             .atomic_incomplete => m.print("atomic cannot be applied to incomplete type '{s}'", .{msg.extra.str}),
             .addr_of_register => m.write("address of register variable requested"),
             .variable_incomplete_ty => m.print("variable has incomplete type '{s}'", .{msg.extra.str}),
+            .deref_incomplete_ty_ptr => m.print("dereferencing pointer to incomplete type '{s}'", .{msg.extra.str}),
             .alignas_on_func => m.write("'_Alignas' attribute only applies to variables and fields"),
             .alignas_on_param => m.write("'_Alignas' attribute cannot be applied to a function parameter"),
             .minimum_alignment => m.print("requested alignment is less than minimum alignment of {d}", .{msg.extra.unsigned}),
@@ -1043,6 +1045,7 @@ fn tagKind(diag: *Diagnostics, tag: Tag) Kind {
         .bitfield_too_big,
         .division_by_zero_macro,
         .invalid_utf8,
+        .deref_incomplete_ty_ptr,
         => .@"error",
 
         .to_match_paren,

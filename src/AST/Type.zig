@@ -609,7 +609,7 @@ pub fn hasIncompleteSize(ty: Type) bool {
         => true,
 
         .Enum => ty.data.@"enum".isIncomplete(),
-        .Struct => ty.data.record.isIncomplete(),
+        .Struct, .Union => ty.data.record.isIncomplete(),
 
         .TypeofType => ty.data.subType.hasIncompleteSize(),
         .TypeofExpr => ty.data.expr.ty.hasIncompleteSize(),
