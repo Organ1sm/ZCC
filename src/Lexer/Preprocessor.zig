@@ -460,6 +460,14 @@ fn expr(pp: *Preprocessor, lexer: *Lexer) Error!bool {
         try pp.expandMacro(lexer, token);
     }
 
+    if (!pp.tokens.items(.id)[start].validPreprocessorExprStart()) {
+        try pp.compilation.addDiagnostic(.{
+            .tag = .invalid_preproc_expr_start,
+            .loc = pp.tokens.items(.loc)[0],
+        });
+        return false;
+    }
+
     for (pp.tokens.items(.id)[start..], 0..) |*tok, i| {
         switch (tok.*) {
             .StringLiteral,
@@ -481,6 +489,37 @@ fn expr(pp: *Preprocessor, lexer: *Lexer) Error!bool {
             => {
                 try pp.compilation.addDiagnostic(.{
                     .tag = .float_literal_in_pp_expr,
+                    .loc = pp.tokens.items(.loc)[i],
+                });
+                return false;
+            },
+
+            .PlusPlus,
+            .MinusMinus,
+            .PlusEqual,
+            .MinusEqual,
+            .AsteriskEqual,
+            .SlashEqual,
+            .PercentEqual,
+            .AngleBracketAngleBracketLeftEqual,
+            .AngleBracketAngleBracketRightEqual,
+            .AmpersandEqual,
+            .CaretEqual,
+            .PipeEqual,
+            .LBracket,
+            .RBracket,
+            .LBrace,
+            .RBrace,
+            .Ellipsis,
+            .Semicolon,
+            .Hash,
+            .HashHash,
+            .Equal,
+            .Arrow,
+            .Period,
+            => {
+                try pp.compilation.addDiagnostic(.{
+                    .tag = .invalid_preproc_operator,
                     .loc = pp.tokens.items(.loc)[i],
                 });
                 return false;
