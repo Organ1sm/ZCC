@@ -675,6 +675,9 @@ fn parseDeclaration(p: *Parser) Error!bool {
                         continue :paramLoop;
                     };
 
+                    if (d.type.hasIncompleteSize() and !d.type.is(.Void))
+                        try p.errStr(.parameter_incomplete_ty, d.name, try p.typeStr(d.type));
+
                     if (d.type.isFunc()) {
                         const elemType = try p.arena.create(Type);
                         elemType.* = d.type;
@@ -711,7 +714,8 @@ fn parseDeclaration(p: *Parser) Error!bool {
             for (initD.d.type.data.func.params) |param| {
                 if (param.ty.hasUnboundVLA())
                     try p.errToken(.unbound_vla, param.nameToken);
-
+                if (param.ty.hasIncompleteSize() and !param.ty.is(.Void))
+                    try p.errStr(.parameter_incomplete_ty, param.nameToken, try p.typeStr(param.ty));
                 if (param.name.len == 0) {
                     try p.errToken(.omitting_parameter_name, param.nameToken);
                     continue;
