@@ -3,6 +3,7 @@ const TokenType = @import("../Basic/TokenType.zig").TokenType;
 const Source = @import("../Basic/Source.zig");
 const LangOpts = @import("../Basic/LangOpts.zig");
 const Compilation = @import("../Basic/Compilation.zig");
+const CharInfo = @import("../Basic/CharInfo.zig");
 
 pub const Token = struct {
     id: TokenType,
@@ -14,14 +15,30 @@ pub const Token = struct {
     /// belong to the implementation namespace, so we always convert them
     /// to keywords.
     /// TODO: add `.keyword_asm` here as GNU extension once that is supported.
-    pub fn getTokenId(comp: *const Compilation, str: []const u8) TokenType {
-        const kw = AllKeywords.get(str) orelse return .Identifier;
+    pub fn getTokenId(comp: *const Compilation, str: []const u8, default: TokenType) TokenType {
+        const kw = AllKeywords.get(str) orelse return default; 
         const standard = comp.langOpts.standard;
         return switch (kw) {
             .KeywordInline => if (standard.isGNU() or standard.atLeast(.c99)) kw else .Identifier,
             .KeywordRestrict => if (standard.atLeast(.c99)) kw else .Identifier,
             .KeywordGccTypeof => if (standard.isGNU()) kw else .Identifier,
             else => kw,
+        };
+    }
+
+    /// Check if codepoint may appear in specified context
+    /// does not check basic character set chars because the tokenizer handles them separately to keep the common
+    /// case on the fast path
+    pub fn mayAppearInIdent(comp: *const Compilation, codepoint: u21, where: enum { start, inside }) bool {
+        return switch (where) {
+            .start => if (comp.langOpts.standard.atLeast(.c11))
+                CharInfo.isC11IdChar(codepoint) and !CharInfo.isC11DisallowedInitialIdChar(codepoint)
+            else
+                CharInfo.isC99IdChar(codepoint) and !CharInfo.isC99DisallowedInitialIDChar(codepoint),
+            .inside => if (comp.langOpts.standard.atLeast(.c11))
+                CharInfo.isC11IdChar(codepoint)
+            else
+                CharInfo.isC99IdChar(codepoint),
         };
     }
 

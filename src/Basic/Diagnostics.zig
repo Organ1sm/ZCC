@@ -27,6 +27,11 @@ pub const Message = struct {
             actual: u32,
         },
 
+        codePoints: struct {
+            actual: u21,
+            resembles: u21,
+        },
+
         unsigned: u64,
         signed: i64,
         none: void,
@@ -73,6 +78,9 @@ pub const Options = struct {
     @"newline-eof": Kind = .off,
     @"empty-translation-unit": Kind = .off,
     @"implicitly-unsigned-literal": Kind = .warning,
+    @"c99-compat": Kind = .off,
+    @"unicode-zero-width": Kind = .warning,
+    @"unicode-homoglyph": Kind = .warning,
 };
 
 pub const Tag = enum {
@@ -318,6 +326,9 @@ pub const Tag = enum {
     deref_incomplete_ty_ptr,
     invalid_preproc_operator,
     invalid_preproc_expr_start,
+    c99_compat,
+    unicode_zero_width,
+    unicode_homoglyph,
 };
 
 list: std.ArrayList(Message),
@@ -766,6 +777,14 @@ pub fn renderExtra(comp: *Compilation, m: anytype) void {
             .implicitly_unsigned_literal => m.write("integer literal is too large to be represented in a signed integer type, interpreting as unsigned"),
             .invalid_preproc_operator => m.write("token is not a valid binary operator in a preprocessor subexpression"),
             .invalid_preproc_expr_start => m.write("invalid token at start of a preprocessor expression"),
+            .c99_compat => m.write("using this character in an identifier is incompatible with C99"),
+            .unicode_zero_width => m.print("identifier contains Unicode character <U+{X:0>4}> that is invisible in some environments", .{
+                msg.extra.codePoints.actual,
+            }),
+            .unicode_homoglyph => m.print("treating Unicode character <U+{X:0>4}> as identifier character rather than as '{u}' symbol", .{
+                msg.extra.codePoints.actual,
+                msg.extra.codePoints.resembles,
+            }),
         }
 
         if (comp.diag.getTagOption(msg.tag)) |opt| {
@@ -871,6 +890,10 @@ fn getTagOption(diag: *Diagnostics, tag: Tag) ?[]const u8 {
         .newline_eof => "newline-eof",
         .empty_translation_unit => "empty-translation-unit",
         .implicitly_unsigned_literal => "implicitly-unsigned-literal",
+
+        .c99_compat => "c99-compat",
+        .unicode_zero_width => "unicode-zero-width",
+        .unicode_homoglyph => "unicode-homoglyph",
 
         else => null,
     };
@@ -1134,6 +1157,10 @@ fn tagKind(diag: *Diagnostics, tag: Tag) Kind {
         .newline_eof => diag.options.@"newline-eof",
         .empty_translation_unit => diag.options.@"empty-translation-unit",
         .implicitly_unsigned_literal => diag.options.@"implicitly-unsigned-literal",
+
+        .c99_compat => diag.options.@"c99-compat",
+        .unicode_zero_width => diag.options.@"unicode-zero-width",
+        .unicode_homoglyph => diag.options.@"unicode-homoglyph",
     };
 
     if (kind == .@"error" and diag.fatalErrors)

@@ -3,8 +3,10 @@ pub const TokenType = enum(u8) {
     NewLine,
     Eof,
 
-    /// identifier containing solely basic charac set characters
+    /// identifier containing solely basic character set characters
     Identifier,
+    /// identifier with at least one extended character
+    ExtendedIdentifier,
 
     // string literals with prefixes
     StringLiteral,
@@ -272,6 +274,7 @@ pub const TokenType = enum(u8) {
             .KeywordAttribute1,
             .KeywordAttribute2,
             .Identifier,
+            .ExtendedIdentifier,
             => return true,
             else => false,
         };
@@ -300,6 +303,7 @@ pub const TokenType = enum(u8) {
         return switch (id) {
             .Invalid,
             .Identifier,
+            .ExtendedIdentifier,
             .StringLiteral,
             .StringLiteralUTF_8,
             .StringLiteralUTF_16,
@@ -468,7 +472,7 @@ pub const TokenType = enum(u8) {
 
     pub fn symbol(id: TokenType) []const u8 {
         return id.lexeMe() orelse switch (id) {
-            .Identifier => "an identifier",
+            .Identifier, .ExtendedIdentifier => "an identifier",
 
             .StringLiteral,
             .StringLiteralUTF_8,
@@ -533,6 +537,7 @@ pub const TokenType = enum(u8) {
             .Tilde,
             .Bang,
             .Identifier,
+            .ExtendedIdentifier,
             .One,
             .Zero,
             => true,
