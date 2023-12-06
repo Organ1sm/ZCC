@@ -14,6 +14,7 @@ const Scope = @import("../Sema/Scope.zig").Scope;
 const Result = @import("Result.zig");
 const InitList = @import("InitList.zig");
 const Attribute = @import("../Lexer/Attribute.zig");
+const CharInfo = @import("../Basic/CharInfo.zig");
 const Token = AST.Token;
 const TokenIndex = AST.TokenIndex;
 const NodeIndex = AST.NodeIndex;
@@ -62,7 +63,66 @@ const Label = union(enum) {
     label: TokenIndex,
 };
 
+fn checkIdentifierCodepoint(comp: *Compilation, codepoint: u21, loc: Source.Location) Compilation.Error!bool {
+    if (codepoint <= 0x7F) return false;
+    var diagnosed = false;
+    if (!CharInfo.isC99IdChar(codepoint)) {
+        try comp.addDiagnostic(.{
+            .tag = .c99_compat,
+            .loc = loc,
+        });
+        diagnosed = true;
+    }
+    if (CharInfo.isInvisible(codepoint)) {
+        try comp.addDiagnostic(.{
+            .tag = .unicode_zero_width,
+            .loc = loc,
+            .extra = .{ .codePoints = .{ .actual = codepoint, .resembles = 0 } },
+        });
+        diagnosed = true;
+    }
+    if (CharInfo.homoglyph(codepoint)) |resembles| {
+        try comp.addDiagnostic(.{
+            .tag = .unicode_homoglyph,
+            .loc = loc,
+            .extra = .{ .codePoints = .{ .actual = codepoint, .resembles = resembles } },
+        });
+        diagnosed = true;
+    }
+    return diagnosed;
+}
+
+fn eatIdentifier(p: *Parser) !?TokenIndex {
+    if (p.getCurrToken() == .Identifier) {
+        defer p.index += 1;
+        return p.index;
+    } else if (p.getCurrToken() == .ExtendedIdentifier) {
+        defer p.index += 1;
+        const slice = p.tokSlice(p.index);
+        var it = std.unicode.Utf8View.initUnchecked(slice).iterator();
+        var loc = p.pp.tokens.items(.loc)[p.index];
+        while (it.nextCodepoint()) |c| {
+            if (try checkIdentifierCodepoint(p.pp.compilation, c, loc)) break;
+            loc.byteOffset += std.unicode.utf8CodepointSequenceLength(c) catch unreachable;
+        }
+        return p.index;
+    }
+    return null;
+}
+
+fn expectIdentifier(p: *Parser) Error!TokenIndex {
+    if (p.getCurrToken() != .Identifier and p.getCurrToken() != .ExtendedIdentifier) {
+        try p.errExtra(.expected_token, p.index, .{ .tokenId = .{
+            .expected = .Identifier,
+            .actual = p.getCurrToken(),
+        } });
+        return error.ParsingFailed;
+    }
+    return (try p.eatIdentifier()) orelse unreachable;
+}
+
 fn eat(p: *Parser, expected: TokenType) ?TokenIndex {
+    std.debug.assert(expected != .Identifier and expected != .ExtendedIdentifier); // use eatIdentifier
     if (p.getCurrToken() == expected) {
         defer p.index += 1;
         return p.index;
@@ -79,6 +139,7 @@ pub fn lookAhead(p: *Parser, n: u32) TokenType {
 }
 
 fn expectToken(p: *Parser, expected: TokenType) Error!TokenIndex {
+    std.debug.assert(expected != .Identifier and expected != .ExtendedIdentifier); // use eatIdentifier
     const actual = p.getCurrToken();
     if (actual != expected) {
         try p.errExtra(
@@ -531,6 +592,7 @@ fn nextExternDecl(p: *Parser) void {
             .KeywordTypeof1,
             .KeywordTypeof2,
             .Identifier,
+            .ExtendedIdentifier,
             => if (parens == 0) return,
             .KeywordPragma => p.skipToPragmaSentinel(),
             .Eof => return,
@@ -1032,7 +1094,7 @@ fn declSpecifier(p: *Parser, isParam: bool) Error!?DeclSpec {
 ///  | attrIdentifier '(' identifier (',' expr)+ ')'
 ///  | attrIdentifier '(' (expr (',' expr)*)? ')'
 fn attribute(p: *Parser) Error!Attribute {
-    const nameToken = try p.expectToken(.Identifier);
+    const nameToken = try p.expectIdentifier();
     switch (p.getCurrToken()) {
         .Comma, .RParen => { // will be consumed in attributeList
             return Attribute{ .name = nameToken };
@@ -1043,7 +1105,7 @@ fn attribute(p: *Parser) Error!Attribute {
             if (p.eat(.RParen)) |_|
                 return Attribute{ .name = nameToken };
 
-            const maybeIdent = p.eat(.Identifier);
+            const maybeIdent = try p.eatIdentifier();
             if (maybeIdent != null and p.eat(.RParen) != null) {
                 const argNode = try p.addNode(.{
                     .tag = .AttrArgIdentifier,
@@ -1377,7 +1439,7 @@ fn parseTypeSpec(p: *Parser, ty: *TypeBuilder) Error!bool {
                 continue;
             },
 
-            .Identifier => {
+            .Identifier, .ExtendedIdentifier => {
                 const typedef = (try p.findTypedef(p.index, ty.specifier != .None)) orelse break;
                 const newSpec = TypeBuilder.fromType(typedef.type);
 
@@ -1395,7 +1457,7 @@ fn parseTypeSpec(p: *Parser, ty: *TypeBuilder) Error!bool {
             else => break,
         }
 
-        p.index += 1;
+        if (try p.eatIdentifier()) |_| {} else p.index += 1;
     }
 
     return p.index != start;
@@ -1434,7 +1496,7 @@ fn parseRecordSpec(p: *Parser) Error!*Type.Record {
 
     try p.parseAttributeSpecifier(.record);
 
-    const maybeIdent = p.eat(.Identifier);
+    const maybeIdent = try p.eatIdentifier();
     const lb = p.eat(.LBrace) orelse {
         const ident = maybeIdent orelse {
             try p.err(.ident_or_l_brace);
@@ -1639,7 +1701,7 @@ fn parseEnumSpec(p: *Parser) Error!*Type.Enum {
 
     try p.parseAttributeSpecifier(.record);
 
-    const maybeID = p.eat(.Identifier);
+    const maybeID = try p.eatIdentifier();
     const lb = p.eat(.LBrace) orelse {
         const ident = maybeID orelse {
             try p.err(.ident_or_l_brace);
@@ -1739,7 +1801,7 @@ const EnumFieldAndNode = struct { field: Type.Enum.Field, node: NodeIndex };
 /// enumerator : IDENTIFIER ('=' constExpr)
 fn enumerator(p: *Parser) Error!?EnumFieldAndNode {
     _ = try p.pragma();
-    const nameToken = p.eat(.Identifier) orelse {
+    const nameToken = try p.eatIdentifier() orelse {
         if (p.getCurrToken() == .RBrace) return null;
         try p.err(.expected_identifier);
         // TODO skip to }
@@ -1875,9 +1937,9 @@ fn declarator(p: *Parser, baseType: Type, kind: DeclaratorKind) Error!?Declarato
     const start = p.index;
     var d = Declarator{ .name = 0, .type = try p.pointer(baseType) };
 
-    if (kind != .abstract and p.getCurrToken() == .Identifier) {
-        d.name = p.index;
-        p.index += 1;
+    const maybeIdent = p.index;
+    if (kind != .abstract and (try p.eatIdentifier()) != null) {
+        d.name = maybeIdent;
         d.type = try p.directDeclarator(d.type, &d, kind);
         return d;
     } else if (p.eat(.LParen)) |lp| blk: {
@@ -2039,7 +2101,7 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: Declarator
                 specifier = .VarArgsFunc;
         } else if (p.getCurrToken() == .RParen) {
             specifier = .OldStyleFunc;
-        } else if (p.getCurrToken() == .Identifier) {
+        } else if (p.getCurrToken() == .Identifier or p.getCurrToken() == .ExtendedIdentifier) {
             d.oldTypeFunc = p.index;
 
             const paramBufferTop = p.paramBuffer.items.len;
@@ -2055,7 +2117,7 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: Declarator
 
             specifier = .OldStyleFunc;
             while (true) {
-                const nameToken = try p.expectToken(.Identifier);
+                const nameToken = try p.expectIdentifier();
                 if (p.findSymbol(nameToken, .definition)) |scope| {
                     try p.errStr(.redefinition_of_parameter, nameToken, p.tokSlice(nameToken));
                     try p.errToken(.previous_definition, scope.param.nameToken);
@@ -2330,7 +2392,7 @@ pub fn initializerItem(p: *Parser, il: *InitList, initType: Type) Error!bool {
                 curType = curType.getElemType();
                 designation = true;
             } else if (p.eat(.Period)) |period| {
-                const identifier = try p.expectToken(.Identifier);
+                const identifier = try p.expectIdentifier();
                 if (!curType.isRecord()) {
                     try p.errStr(.invalid_field_designator, period, try p.typeStr(curType));
                     return error.ParsingFailed;
@@ -2803,6 +2865,17 @@ fn stmt(p: *Parser) Error!NodeIndex {
             _ = try p.expectToken(.Semicolon);
             return e.node;
         }
+
+        const nameToken = try p.expectIdentifier();
+        const str = p.tokSlice(nameToken);
+        if (p.findLabel(str) == null) {
+            try p.labels.append(.{ .unresolvedGoto = nameToken });
+        }
+        _ = try p.expectToken(.Semicolon);
+        return try p.addNode(.{
+            .tag = .GotoStmt,
+            .data = .{ .DeclarationRef = nameToken },
+        });
     }
 
     if (p.eat(.KeywordContinue)) |cont| {
@@ -3126,8 +3199,8 @@ fn parseDefaultStmt(p: *Parser, defaultToken: u32) Error!?NodeIndex {
 /// | keyword_case constExpr ':' stmt
 /// | keyword_default ':' stmt
 fn labeledStmt(p: *Parser) Error!?NodeIndex {
-    if (p.getCurrToken() == .Identifier and p.lookAhead(1) == .Colon) {
-        const nameToken = p.index;
+    if ((p.getCurrToken() == .Identifier or p.getCurrToken() == .ExtendedIdentifier) and p.lookAhead(1) == .Colon) {
+        const nameToken = p.expectIdentifier() catch unreachable;
         const str = p.tokSlice(nameToken);
         if (p.findLabel(str)) |some| {
             try p.errStr(.duplicate_label, nameToken, str);
@@ -3143,7 +3216,7 @@ fn labeledStmt(p: *Parser) Error!?NodeIndex {
             }
         }
 
-        p.index += 2;
+        p.index += 1;
 
         const attrBufferTop = p.attrBuffer.items.len;
         defer p.attrBuffer.items.len = attrBufferTop;
@@ -4125,7 +4198,7 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
         .AmpersandAmpersand => {
             const addressToken = p.index;
             p.index += 1;
-            const nameToken = try p.expectToken(.Identifier);
+            const nameToken = try p.expectIdentifier();
             try p.errToken(.gnu_label_as_value, addressToken);
             p.containsAddresssOfLabel = true;
 
@@ -4425,7 +4498,7 @@ fn parseSuffixExpr(p: *Parser, lhs: Result) Error!Result {
 
         .Period => {
             p.index += 1;
-            const name = try p.expectToken(.Identifier);
+            const name = try p.expectIdentifier();
             const fieldType = try p.getFieldAccessField(lhs.ty, name, false);
             return Result{
                 .ty = fieldType,
@@ -4439,7 +4512,7 @@ fn parseSuffixExpr(p: *Parser, lhs: Result) Error!Result {
 
         .Arrow => {
             p.index += 1;
-            const name = try p.expectToken(.Identifier);
+            const name = try p.expectIdentifier();
             const fieldType = try p.getFieldAccessField(lhs.ty, name, true);
             return Result{
                 .ty = fieldType,
@@ -4696,10 +4769,8 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
     }
 
     switch (p.getCurrToken()) {
-        .Identifier => {
-            const nameToken = p.index;
-            p.index += 1;
-
+        .Identifier, .ExtendedIdentifier => {
+            const nameToken = p.expectIdentifier() catch unreachable;
             const sym = p.findSymbol(nameToken, .reference) orelse {
                 if (p.getCurrToken() == .LParen) {
                     // implicitly declare simple functions as like `puts("foo")`;
