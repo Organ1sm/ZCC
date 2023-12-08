@@ -753,19 +753,16 @@ pub fn sizeof(ty: Type, comp: *const Compilation) ?u64 {
         .DecayedIncompleteArray,
         .DecayedVariableLenArray,
         .DecayedUnspecifiedVariableLenArray,
+        .DecayedTypeofType,
+        .DecayedTypeofExpr,
         => comp.target.ptrBitWidth() >> 3,
 
         .Array => ty.data.array.elem.sizeof(comp).? * ty.data.array.len,
         .Struct, .Union => if (ty.data.record.isIncomplete()) null else ty.data.record.size,
         .Enum => if (ty.data.@"enum".isIncomplete()) null else ty.data.@"enum".tagType.sizeof(comp),
 
-        .TypeofType,
-        .DecayedTypeofType,
-        => ty.data.subType.sizeof(comp),
-
-        .TypeofExpr,
-        .DecayedTypeofExpr,
-        => ty.data.expr.ty.sizeof(comp),
+        .TypeofType => ty.data.subType.sizeof(comp),
+        .TypeofExpr => ty.data.expr.ty.sizeof(comp),
 
         .Attributed => ty.data.attributed.base.sizeof(comp),
     };
