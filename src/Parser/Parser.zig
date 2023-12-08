@@ -2668,6 +2668,10 @@ fn convertInitList(p: *Parser, il: InitList, initType: Type) Error!NodeIndex {
     } else if (initType.is(.VariableLenArray)) {
         return error.ParsingFailed; // vla invalid, reported earlier
     } else if (initType.isArray()) {
+        // array element type invalid, reported earlier
+        if (initType.getElemType().hasIncompleteSize())
+            return error.ParsingFailed;
+
         if (il.node != .none)
             return il.node;
 
