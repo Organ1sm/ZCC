@@ -4232,7 +4232,7 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
                 try p.errToken(.indirection_ptr, index);
             }
 
-            if (operand.ty.hasIncompleteSize())
+            if (operand.ty.hasIncompleteSize() and !operand.ty.is(.Void))
                 try p.errStr(.deref_incomplete_ty_ptr, asteriskLoc, try p.typeStr(operand.ty));
 
             operand.ty.qual = .{};
