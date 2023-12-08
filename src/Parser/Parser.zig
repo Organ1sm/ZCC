@@ -4176,6 +4176,10 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
     const index = p.index;
     switch (p.tokenIds[index]) {
         .Ampersand => {
+            if (p.inMacro) {
+                try p.err(.invalid_preproc_operator);
+                return error.ParsingFailed;
+            }
             p.index += 1;
             var operand = try p.parseCastExpr();
             try operand.expect(p);
