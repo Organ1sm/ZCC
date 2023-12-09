@@ -15,8 +15,8 @@ pub const Token = struct {
     /// belong to the implementation namespace, so we always convert them
     /// to keywords.
     /// TODO: add `.keyword_asm` here as GNU extension once that is supported.
-    pub fn getTokenId(comp: *const Compilation, str: []const u8, default: TokenType) TokenType {
-        const kw = AllKeywords.get(str) orelse return default; 
+    pub fn getTokenId(comp: *const Compilation, str: []const u8) TokenType {
+        const kw = AllKeywords.get(str) orelse return .Identifier;
         const standard = comp.langOpts.standard;
         return switch (kw) {
             .KeywordInline => if (standard.isGNU() or standard.atLeast(.c99)) kw else .Identifier,
