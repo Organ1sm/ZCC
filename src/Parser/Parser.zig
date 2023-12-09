@@ -4648,6 +4648,8 @@ fn parseCallExpr(p: *Parser, lhs: Result) Error!Result {
             var arg = try p.assignExpr();
             try arg.expect(p);
             try arg.lvalConversion(p);
+            if (arg.ty.hasIncompleteSize() and !arg.ty.is(.Void))
+                return error.ParsingFailed;
 
             if (argCount < params.len) {
                 const paramType = params[argCount].ty;
