@@ -68,14 +68,6 @@ const State = enum {
     float_exponent,
     float_exponent_digits,
     float_suffix,
-
-    fn identifierType(tokenState: @This()) TokenType {
-        return switch (tokenState) {
-            .u, .u8, .U, .L, .identifier => .Identifier,
-            .extended_identifier => .ExtendedIdentifier,
-            else => unreachable,
-        };
-    }
 };
 
 pub fn next(self: *Lexer) Token {
@@ -420,11 +412,10 @@ pub fn next(self: *Lexer) Token {
                 'a'...'z', 'A'...'Z', '_', '0'...'9', '$' => {},
                 else => {
                     if (c <= 0x7F or !Token.mayAppearInIdent(self.comp, c, .inside)) {
-                        id = Token.getTokenId(self.comp, self.buffer[start..self.index], state.identifierType());
+                        id = if (state == .identifier) Token.getTokenId(self.comp, self.buffer[start..self.index]) else .ExtendedIdentifier;
                         break;
-                    } else {
-                        state = .extended_identifier;
                     }
+                    state = .extended_identifier;
                 },
             },
 
@@ -851,9 +842,8 @@ pub fn next(self: *Lexer) Token {
     } else if (self.index == self.buffer.len) {
         switch (state) {
             .start, .line_comment => {},
-            .u, .u8, .U, .L, .identifier, .extended_identifier => {
-                id = Token.getTokenId(self.comp, self.buffer[start..self.index], state.identifierType());
-            },
+            .u, .u8, .U, .L, .identifier => id = Token.getTokenId(self.comp, self.buffer[start..self.index]),
+            .extended_identifier => id = .ExtendedIdentifier,
 
             .cr,
             .back_slash,
