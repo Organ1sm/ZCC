@@ -1760,7 +1760,8 @@ fn parseEnumSpec(p: *Parser) Error!*Type.Enum {
         p.enumBuffer.items.len = enumBufferTop;
     }
 
-    while (try p.enumerator()) |fieldAndNode| {
+    var e = Enumerator.init(p);
+    while (try p.enumerator(&e)) |fieldAndNode| {
         try p.enumBuffer.append(fieldAndNode.field);
         try p.listBuffer.append(fieldAndNode.node);
         if (p.eat(.Comma) == null) break;
@@ -1797,25 +1798,46 @@ fn parseEnumSpec(p: *Parser) Error!*Type.Enum {
     return enumType;
 }
 
+const Enumerator = struct {
+    res: Result,
+
+    fn init(p: *Parser) Enumerator {
+        return .{ .res = .{
+            .ty = .{ .specifier = if (p.pp.compilation.langOpts.shortEnums) .SChar else .Int },
+            .value = .{ .signed = 0 },
+        } };
+    }
+
+    /// Increment enumerator value adjusting type if needed.
+    fn incr(e: *Enumerator, _: *Parser) !void {
+        e.res.node = .none;
+        switch (e.res.value) {
+            .unavailable => unreachable,
+            .signed => |*v| v.* += 1,
+            .unsigned => |*v| v.* += 1,
+        }
+        // TODO adjust type if value does not fit current
+    }
+
+    /// Set enumerator value to specified value, adjusting type if needed.
+    fn set(e: *Enumerator, _: *Parser, res: Result) !void {
+        e.res = res;
+        // TODO adjust res type to try to fit with the previous type
+    }
+};
+
 const EnumFieldAndNode = struct { field: Type.Enum.Field, node: NodeIndex };
 /// enumerator : IDENTIFIER ('=' constExpr)
-fn enumerator(p: *Parser) Error!?EnumFieldAndNode {
+fn enumerator(p: *Parser, e: *Enumerator) Error!?EnumFieldAndNode {
     _ = try p.pragma();
     const nameToken = try p.eatIdentifier() orelse {
         if (p.getCurrToken() == .RBrace) return null;
         try p.err(.expected_identifier);
-        // TODO skip to }
+        p.skipTo(.RBrace);
         return error.ParsingFailed;
     };
 
     const name = p.tokSlice(nameToken);
-    var res: Result = .{
-        .ty = .{ .specifier = .Int },
-        .value = .{
-            .unsigned = 0,
-        },
-    };
-
     const attrBufferTop = p.attrBuffer.items.len;
     defer p.attrBuffer.items.len = attrBufferTop;
 
@@ -1823,21 +1845,25 @@ fn enumerator(p: *Parser) Error!?EnumFieldAndNode {
 
     if (p.eat(.Equal)) |_| {
         const specified = try p.constExpr();
-        if (specified.value == .unavailable)
-            try p.errToken(.enum_val_unavailable, nameToken + 2)
-        else
-            res = specified;
+        if (specified.value == .unavailable) {
+            try p.errToken(.enum_val_unavailable, nameToken + 2);
+            try e.incr(p);
+        } else {
+            try e.set(p, specified);
+        }
+    } else {
+        try e.incr(p);
     }
 
     if (p.findSymbol(nameToken, .definition)) |scope| switch (scope) {
-        .enumeration => |e| {
+        .enumeration => |sym| {
             try p.errStr(.redefinition, nameToken, name);
-            try p.errToken(.previous_definition, e.nameToken);
+            try p.errToken(.previous_definition, sym.nameToken);
         },
 
-        .declaration, .definition, .param => |s| {
+        .declaration, .definition, .param => |sym| {
             try p.errStr(.redefinition_different_sym, nameToken, name);
-            try p.errToken(.previous_definition, s.nameToken);
+            try p.errToken(.previous_definition, sym.nameToken);
         },
 
         else => unreachable,
@@ -1845,24 +1871,24 @@ fn enumerator(p: *Parser) Error!?EnumFieldAndNode {
 
     try p.scopes.append(.{ .enumeration = .{
         .name = name,
-        .value = res,
+        .value = e.res,
         .nameToken = nameToken,
     } });
 
     return EnumFieldAndNode{
         .field = .{
             .name = name,
-            .ty = res.ty,
-            .value = res.asU64(),
+            .ty = e.res.ty,
+            .value = e.res.asU64(),
         },
         .node = try p.addNode(
             .{
                 .tag = .EnumFieldDecl,
-                .type = res.ty,
+                .type = e.res.ty,
                 .data = .{
                     .Declaration = .{
                         .name = nameToken,
-                        .node = res.node,
+                        .node = e.res.node,
                     },
                 },
             },
