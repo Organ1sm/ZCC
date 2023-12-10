@@ -15,6 +15,8 @@ void foo(void) {
     enum FOO {BAR, BAZ} y = BAR;
     if (y) return;
     if (!BAZ) return;
+    int a, b;
+    for (a=1,b=1;;);
 }
 
 

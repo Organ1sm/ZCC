@@ -571,6 +571,8 @@ fn nextExternDecl(p: *Parser) void {
             .KeywordRegister,
             .KeywordThreadLocal,
             .KeywordInline,
+            .KeywordGccInline1,
+            .KeywordGccInline2,
             .KeywordNoreturn,
             .KeywordVoid,
             .KeywordBool,
@@ -1057,7 +1059,7 @@ fn declSpecifier(p: *Parser, isParam: bool) Error!?DeclSpec {
                 d.threadLocal = p.index;
             },
 
-            .KeywordInline => {
+            .KeywordInline, .KeywordGccInline1, .KeywordGccInline2 => {
                 if (d.@"inline" != null) {
                     try p.errStr(.duplicate_declspec, p.index, "inline");
                 }
@@ -1520,6 +1522,7 @@ fn parseRecordSpec(p: *Parser) Error!*Type.Record {
     };
 
     // Get forward declared type or create a new one
+    var defined = false;
     const recordType: *Type.Record = if (maybeIdent) |ident| recordTy: {
         if (try p.findTag(p.tokenIds[kindToken], ident, .definition)) |prev| {
             if (!prev.type.data.record.isIncomplete()) {
@@ -1527,6 +1530,7 @@ fn parseRecordSpec(p: *Parser) Error!*Type.Record {
                 try p.errStr(.redefinition, ident, p.tokSlice(ident));
                 try p.errToken(.previous_definition, prev.nameToken);
             } else {
+                defined = true;
                 break :recordTy prev.type.data.record;
             }
         }
@@ -1539,11 +1543,11 @@ fn parseRecordSpec(p: *Parser) Error!*Type.Record {
     };
 
     // declare a symbol for the type
-    if (maybeIdent) |ident| {
+    if (maybeIdent != null and !defined) {
         const sym = Scope.Symbol{
             .name = recordType.name,
             .type = ty,
-            .nameToken = ident,
+            .nameToken = maybeIdent.?,
         };
         try p.scopes.append(if (isStruct) .{ .@"struct" = sym } else .{ .@"union" = sym });
     }
@@ -1721,6 +1725,7 @@ fn parseEnumSpec(p: *Parser) Error!*Type.Enum {
     };
 
     // Get forward declared type or create a new one
+    var defined = false;
     const enumType: *Type.Enum = if (maybeID) |ident| enumTy: {
         if (try p.findTag(.KeywordEnum, ident, .definition)) |prev| {
             if (!prev.type.data.@"enum".isIncomplete()) {
@@ -1728,6 +1733,7 @@ fn parseEnumSpec(p: *Parser) Error!*Type.Enum {
                 try p.errStr(.redefinition, ident, p.tokSlice(ident));
                 try p.errToken(.previous_definition, prev.nameToken);
             } else {
+                defined = true;
                 break :enumTy prev.type.data.@"enum";
             }
         }
@@ -1739,11 +1745,11 @@ fn parseEnumSpec(p: *Parser) Error!*Type.Enum {
         .data = .{ .@"enum" = enumType },
     };
 
-    if (maybeID) |ident| {
+    if (maybeID != null and !defined) {
         try p.scopes.append(.{ .@"enum" = .{
             .name = enumType.name,
             .type = ty,
-            .nameToken = ident,
+            .nameToken = maybeID.?,
         } });
     }
 
@@ -3479,6 +3485,8 @@ fn nextStmt(p: *Parser, lBrace: TokenIndex) !void {
             .KeywordRegister,
             .KeywordThreadLocal,
             .KeywordInline,
+            .KeywordGccInline1,
+            .KeywordGccInline2,
             .KeywordNoreturn,
             .KeywordVoid,
             .KeywordBool,
@@ -3693,7 +3701,7 @@ fn assignExpr(p: *Parser) Error!Result {
             try p.errStr(.implicit_int_to_ptr, token, try p.typePairStrExtra(rhs.ty, " to ", lhs.ty));
             try rhs.ptrCast(p, unqualType);
         } else if (rhs.ty.isPointer()) {
-            if (!unqualType.eql(rhs.ty, false)) {
+            if (!unqualType.isVoidStar() and !rhs.ty.isVoidStar() and !unqualType.eql(rhs.ty, false)) {
                 try p.errStr(.incompatible_ptr_assign, token, try p.typePairStrExtra(lhs.ty, eMsg, rhs.ty));
             } else if (!unqualType.eql(rhs.ty, true)) {
                 if (!unqualType.getElemType().qual.hasQuals(rhs.ty.getElemType().qual))

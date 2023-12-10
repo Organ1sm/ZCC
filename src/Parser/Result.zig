@@ -71,29 +71,33 @@ pub fn maybeWarnUnused(res: Result, p: *Parser, exprStart: TokenIndex, errStart:
     if (p.pp.compilation.diag.list.items.len > errStart)
         return;
 
-    switch (p.nodes.items(.tag)[@intFromEnum(res.node)]) {
-        .Invalid,
-        .AssignExpr,
-        .MulAssignExpr,
-        .DivAssignExpr,
-        .ModAssignExpr,
-        .AddAssignExpr,
-        .SubAssignExpr,
-        .ShlAssignExpr,
-        .ShrAssignExpr,
-        .BitAndAssignExpr,
-        .BitXorAssignExpr,
-        .BitOrAssignExpr,
-        .CallExpr,
-        .CallExprOne,
-        .PreIncExpr,
-        .PreDecExpr,
-        .PostIncExpr,
-        .PostDecExpr,
-        => return,
+    var curNode = res.node;
+    while (true)
+        switch (p.nodes.items(.tag)[@intFromEnum(curNode)]) {
+            .Invalid,
+            .AssignExpr,
+            .MulAssignExpr,
+            .DivAssignExpr,
+            .ModAssignExpr,
+            .AddAssignExpr,
+            .SubAssignExpr,
+            .ShlAssignExpr,
+            .ShrAssignExpr,
+            .BitAndAssignExpr,
+            .BitXorAssignExpr,
+            .BitOrAssignExpr,
+            .CallExpr,
+            .CallExprOne,
+            .PreIncExpr,
+            .PreDecExpr,
+            .PostIncExpr,
+            .PostDecExpr,
+            => return,
 
-        else => {},
-    }
+            .CommaExpr => curNode = p.nodes.items(.data)[@intFromEnum(curNode)].BinaryExpr.rhs,
+
+            else => break,
+        };
 
     try p.errToken(.unused_value, exprStart);
 }
@@ -253,7 +257,9 @@ pub fn adjustTypes(a: *Result, token: TokenIndex, b: *Result, p: *Parser, kind: 
             if (aIsPtr and bIsPtr)
                 return a.adjustCondExprPtrs(token, b, p);
 
-            // TODO struct/record
+            if (a.ty.isRecord() and b.ty.isRecord() and a.ty.eql(b.ty, false))
+                return true;
+
             return a.invalidBinTy(token, b, p);
         },
 
