@@ -571,6 +571,7 @@ pub fn integerPromotion(ty: Type, comp: *Compilation) Type {
 
             .TypeofType => return ty.data.subType.integerPromotion(comp),
             .TypeofExpr => return ty.data.expr.ty.integerPromotion(comp),
+            .Attributed => return ty.data.attributed.base.integerPromotion(comp),
 
             else => unreachable, // not an integer type
         },
