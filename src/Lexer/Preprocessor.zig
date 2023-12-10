@@ -1281,6 +1281,7 @@ fn define(pp: *Preprocessor, lexer: *Lexer) Error!void {
         try pp.addError(first, .whitespace_after_macro_name);
     } else if (first.id == .HashHash) {
         try pp.addError(first, .hash_hash_at_start);
+        return skipToNewLine(lexer);
     }
 
     pp.tokenBuffer.items.len = 0;
@@ -1292,11 +1293,17 @@ fn define(pp: *Preprocessor, lexer: *Lexer) Error!void {
         switch (token.id) {
             .HashHash => {
                 const next = lexer.next();
-                if (next.id == .NewLine or next.id == .Eof) {
-                    try pp.addError(token, .hash_hash_at_end);
-                    break;
+                switch (next.id) {
+                    .NewLine, .Eof => {
+                        try pp.addError(token, .hash_hash_at_end);
+                        return;
+                    },
+                    .HashHash => {
+                        try pp.addError(next, .hash_hash_at_end);
+                        return;
+                    },
+                    else => {},
                 }
-
                 try pp.tokenBuffer.append(token);
                 try pp.tokenBuffer.append(next);
             },
@@ -1329,10 +1336,10 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: RawToken, lParen: Raw
             break;
 
         if (params.items.len != 0) {
-            if (token.id != .Comma)
-                try pp.addError(token, .invalid_token_param_list)
-            else
-                token = lexer.next();
+            if (token.id != .Comma) {
+                try pp.addError(token, .invalid_token_param_list);
+                return skipToNewLine(lexer);
+            } else token = lexer.next();
         }
 
         if (token.id == .Eof)
@@ -1344,6 +1351,7 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: RawToken, lParen: Raw
             if (rParen.id != .RParen) {
                 try pp.addError(rParen, .missing_paren_param_list);
                 try pp.addError(lParen, .to_match_paren);
+                return skipToNewLine(lexer);
             }
 
             break;
@@ -1351,7 +1359,7 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: RawToken, lParen: Raw
 
         if (!token.id.isMacroIdentifier()) {
             try pp.addError(token, .invalid_token_param_list);
-            continue;
+            return skipToNewLine(lexer);
         }
 
         try params.append(pp.tokSliceSafe(token));
@@ -1388,7 +1396,7 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: RawToken, lParen: Raw
                 }
 
                 try pp.addError(param, .hash_not_followed_param);
-                token = param;
+                return skipToNewLine(lexer);
             },
 
             .HashHash => {
@@ -1396,7 +1404,7 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: RawToken, lParen: Raw
                 // emit error
                 if (pp.tokenBuffer.items.len == 0) {
                     try pp.addError(token, .hash_hash_at_start);
-                    continue;
+                    return skipToNewLine(lexer);
                 }
 
                 const start = lexer.index;
@@ -1404,7 +1412,7 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: RawToken, lParen: Raw
 
                 if (next.id == .NewLine or next.id == .Eof) {
                     try pp.addError(token, .hash_hash_at_end);
-                    continue;
+                    return skipToNewLine(lexer);
                 }
 
                 lexer.index = start;
