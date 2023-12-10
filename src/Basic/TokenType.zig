@@ -174,6 +174,8 @@ pub const TokenType = enum(u8) {
     // GCC keywords
     KeywordGccConst1,
     KeywordGccConst2,
+    KeywordGccInline1,
+    KeywordGccInline2,
     KeywordGccVolatile1,
     KeywordGccVolatile2,
     KeywordGccRestrict1,
@@ -443,6 +445,8 @@ pub const TokenType = enum(u8) {
 
             .KeywordGccConst1 => "__const",
             .KeywordGccConst2 => "__const__",
+            .KeywordGccInline1 => "__inline",
+            .KeywordGccInline2 => "__inline__",
             .KeywordGccVolatile1 => "__volatile",
             .KeywordGccVolatile2 => "__volatile__",
             .KeywordGccRestrict1 => "__restrict",

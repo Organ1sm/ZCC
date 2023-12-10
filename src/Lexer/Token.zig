@@ -115,6 +115,8 @@ pub const Token = struct {
         // gcc keywords
         .{ "__const", .KeywordGccConst1 },
         .{ "__const__", .KeywordGccConst2 },
+        .{ "__inline", .KeywordGccInline1 },
+        .{ "__inline__", .KeywordGccInline2 },
         .{ "__volatile", .KeywordGccVolatile1 },
         .{ "__volatile__", .KeywordGccVolatile2 },
         .{ "__restrict", .KeywordGccRestrict1 },

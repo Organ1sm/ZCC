@@ -61,6 +61,12 @@ void foo(void) {
     foo = 0;
 }
 
+void bar(void) {
+    int *a;
+    void *b;
+    a = b;
+    b = a;
+}
 
 #define EXPECTED_ERRORS "assignment.c:2:7: error: expression is not assignable" \
     "assignment.c:4:7: error: expression is not assignable" \
