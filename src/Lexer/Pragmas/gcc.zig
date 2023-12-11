@@ -56,7 +56,7 @@ pub fn init(allocator: std.mem.Allocator) !*Pragma {
 }
 
 pub fn deinit(pragma: *Pragma, comp: *Compilation) void {
-    var self = @fieldParentPtr(GCC, "pragma", pragma);
+    const self = @fieldParentPtr(GCC, "pragma", pragma);
     comp.gpa.destroy(self);
 }
 

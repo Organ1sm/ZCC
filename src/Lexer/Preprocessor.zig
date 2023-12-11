@@ -1581,7 +1581,7 @@ pub fn prettyPrintTokens(pp: *Preprocessor, w: anytype) !void {
         }
         if (cur.id == .KeywordPragma) {
             const pragmaName = pp.expandedSlice(next);
-            const endIdx = std.mem.indexOfScalarPos(TokenType, pp.tokens.items(.id), i, .NewLine).?;
+            const endIdx = std.mem.indexOfScalarPos(TokenType, pp.tokens.items(.id), i, .NewLine) orelse i + 1;
             const pragmaLen = @as(u32, @intCast(endIdx)) - i;
             if (pp.compilation.getPragma(pragmaName)) |prag| {
                 if (!prag.shouldPreserveTokens(pp, @as(u32, @intCast(i)))) {
