@@ -451,12 +451,18 @@ fn findTag(p: *Parser, kind: TokenType, nameToken: TokenIndex, refKind: enum { r
 
 fn pragma(p: *Parser) !bool {
     var foundPragma = false;
-    while (p.eat(.KeywordPragma) != null) {
+    while (p.eat(.KeywordPragma)) |pragmaToken| {
         foundPragma = true;
-
         const nameToken = p.index;
         const name = p.tokSlice(nameToken);
-        const endIdx = std.mem.indexOfScalarPos(TokenType, p.tokenIds, p.index, .NewLine).?;
+        for (p.tokenIds) |h| {
+            std.debug.print("{} ", .{h});
+        }
+        std.debug.print("\n", .{});
+        const endIdx = std.mem.indexOfScalarPos(TokenType, p.tokenIds, p.index, .NewLine) orelse {
+            try p.errToken(.pragma_inside_macro, pragmaToken);
+            return error.ParsingFailed;
+        };
         const pragmaLen = @as(TokenIndex, @intCast(endIdx)) - p.index;
         defer p.index += pragmaLen + 1; // skip past .nl as well
         if (p.pp.compilation.getPragma(name)) |prag| {
@@ -511,8 +517,13 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
     _ = try p.addNode(.{ .tag = .Invalid, .type = undefined, .data = undefined });
 
     while (p.eat(.Eof) == null) {
-        if (try p.pragma())
+        const foundPragma = p.pragma() catch |er| switch (er) {
+            error.ParsingFailed => break,
+            else => |e| return e,
+        };
+        if (foundPragma)
             continue;
+
         if (p.parseStaticAssert() catch |er| switch (er) {
             error.ParsingFailed => {
                 p.nextExternDecl();
@@ -606,6 +617,10 @@ fn nextExternDecl(p: *Parser) void {
 fn skipToPragmaSentinel(p: *Parser) void {
     while (true) : (p.index += 1) {
         if (p.getCurrToken() == .NewLine) return;
+        if (p.getCurrToken() == .Eof) {
+            p.index -= 1;
+            return;
+        }
     }
 }
 

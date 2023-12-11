@@ -312,7 +312,7 @@ pub fn finish(elf: *Elf, file: std.fs.File) !void {
 
     // write strtab section header
     {
-        var sect_header = std.elf.Elf64_Shdr{
+        const sect_header = std.elf.Elf64_Shdr{
             .sh_name = StringTableName,
             .sh_type = std.elf.SHT_STRTAB,
             .sh_flags = 0,
