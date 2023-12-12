@@ -835,6 +835,7 @@ fn expandFuncMacro(
                 // TODO pretty print these
                 try pp.charBuffer.append('"');
                 for (arg) |tok| {
+                    if (tok.id == .Invalid) continue;
                     for (pp.expandedSlice(tok)) |c| {
                         if (c == '"')
                             try pp.charBuffer.appendSlice("\\\"")
