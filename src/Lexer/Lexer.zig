@@ -200,7 +200,7 @@ pub fn next(self: *Lexer) Token {
                     break;
                 },
                 else => {
-                    id = .Invalid;
+                    id = .NewLine;
                     break;
                 },
             },
@@ -226,8 +226,8 @@ pub fn next(self: *Lexer) Token {
                     state = .start;
                 },
                 else => {
-                    id = .Invalid;
-                    break;
+                    start = self.index;
+                    state = .start;
                 },
             },
 
@@ -845,9 +845,11 @@ pub fn next(self: *Lexer) Token {
             .u, .u8, .U, .L, .identifier => id = Token.getTokenId(self.comp, self.buffer[start..self.index]),
             .extended_identifier => id = .ExtendedIdentifier,
 
-            .cr,
+            .cr => id = .NewLine,
             .back_slash,
             .back_slash_cr,
+            => {},
+
             .period2,
             .string_literal,
             .char_literal_start,
