@@ -124,6 +124,7 @@ pub const Token = struct {
         .{ "__alignof", .KeywordGccAlignof1 },
         .{ "__alignof__", .KeywordGccAlignof2 },
         .{ "typeof", .KeywordGccTypeof },
+        .{ "__extension__", .KeywordGccExtension },
 
         // gcc builtins
         .{ "__builtin_choose_expr", .BuiltinChooseExpr },

@@ -183,6 +183,7 @@ pub const TokenType = enum(u8) {
     KeywordGccAlignof1,
     KeywordGccAlignof2,
     KeywordGccTypeof,
+    KeywordGccExtension,
 
     // gcc builtins
     BuiltinChooseExpr,
@@ -274,6 +275,7 @@ pub const TokenType = enum(u8) {
             .KeywordGccRestrict2,
             .KeywordGccAlignof1,
             .KeywordGccAlignof2,
+            .KeywordGccExtension,
             .BuiltinChooseExpr,
             .KeywordAttribute1,
             .KeywordAttribute2,
@@ -455,6 +457,7 @@ pub const TokenType = enum(u8) {
             .KeywordGccRestrict2 => "__restrict__",
             .KeywordGccAlignof1 => "__alignof",
             .KeywordGccAlignof2 => "__alignof__",
+            .KeywordGccExtension => "__extension__",
 
             .KeywordInclude => "include",
             .KeywordDefine => "define",

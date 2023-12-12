@@ -49,6 +49,7 @@ attrBuffer: std.ArrayList(Attribute),
 // configuration
 noEval: bool = false,
 inMacro: bool = false,
+extensionSuppressd: bool = false,
 containsAddresssOfLabel: bool = false,
 returnType: ?Type = null,
 funcName: TokenIndex = 0,
@@ -538,6 +539,21 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
             else => |e| return e,
         }) continue;
 
+        if (p.eat(.KeywordGccExtension)) |_| {
+            const saveExtension = p.extensionSuppressd;
+            defer p.extensionSuppressd = saveExtension;
+
+            p.extensionSuppressd = true;
+
+            if (p.parseDeclaration() catch |er| switch (er) {
+                error.ParsingFailed => {
+                    p.nextExternDecl();
+                    continue;
+                },
+                else => |e| return e,
+            }) continue;
+        }
+
         try p.err(.expected_external_decl);
         p.index += 1;
     }
@@ -600,6 +616,7 @@ fn nextExternDecl(p: *Parser) void {
             .KeywordUnion,
             .KeywordAlignas,
             .KeywordGccTypeof,
+            .KeywordGccExtension,
             .KeywordTypeof1,
             .KeywordTypeof2,
             .Identifier,
@@ -607,6 +624,10 @@ fn nextExternDecl(p: *Parser) void {
             => if (parens == 0) return,
             .KeywordPragma => p.skipToPragmaSentinel(),
             .Eof => return,
+            .Semicolon => if (parens == 0) {
+                p.index += 1;
+                return;
+            },
             else => {},
         }
     }
@@ -1610,87 +1631,117 @@ fn parseRecordSpec(p: *Parser) Error!*Type.Record {
 /// recordDecl
 ///  : specQual+ (recordDeclarator (',' recordDeclarator)*)? ;
 ///  | staticAssert
-/// recordDeclarator : declarator (':' constExpr)?
 fn recordDecls(p: *Parser) Error!void {
     while (true) {
         if (try p.pragma()) continue;
         if (try p.parseStaticAssert()) continue;
-        const baseType = (try p.specQual()) orelse return;
+        if (p.eat(.KeywordGccExtension)) |_| {
+            const saveExtension = p.extensionSuppressd;
+            defer p.extensionSuppressd = saveExtension;
+            p.extensionSuppressd = true;
 
-        while (true) {
-            // 0 means unnamed
-            var nameToken: TokenIndex = 0;
-            var ty = baseType;
-            var bitsNode: NodeIndex = .none;
-            var bits: u32 = 0;
-            const firstToken = p.index;
-            if (try p.declarator(ty, .record)) |d| {
-                nameToken = d.name;
-                ty = d.type;
+            if (p.recordDeclarator() catch |e| switch (e) {
+                error.ParsingFailed => {
+                    p.nextExternDecl();
+                    continue;
+                },
+                else => |er| return er,
+            }) continue;
+
+            try p.err(.expected_type);
+            p.nextExternDecl();
+            continue;
+        }
+
+        if (p.recordDeclarator() catch |e| switch (e) {
+            error.ParsingFailed => {
+                p.nextExternDecl();
+                continue;
+            },
+            else => |er| return er,
+        }) continue;
+        break;
+    }
+}
+
+/// recordDeclarator : declarator (':' constExpr)?
+fn recordDeclarator(p: *Parser) Error!bool {
+    const baseType = (try p.specQual()) orelse return false;
+
+    while (true) {
+        // 0 means unnamed
+        var nameToken: TokenIndex = 0;
+        var ty = baseType;
+        var bitsNode: NodeIndex = .none;
+        var bits: u32 = 0;
+        const firstToken = p.index;
+        if (try p.declarator(ty, .record)) |d| {
+            nameToken = d.name;
+            ty = d.type;
+        }
+        if (p.eat(.Colon)) |_| bits: {
+            const res = try p.constExpr();
+            if (!ty.isInt()) {
+                try p.errStr(.non_int_bitfield, firstToken, try p.typeStr(ty));
+                break :bits;
             }
-            if (p.eat(.Colon)) |_| bits: {
-                const res = try p.constExpr();
-                if (!ty.isInt()) {
-                    try p.errStr(.non_int_bitfield, firstToken, try p.typeStr(ty));
-                    break :bits;
-                }
 
-                if (res.value == .unavailable) {
-                    try p.errToken(.expected_integer_constant_expr, firstToken);
-                    break :bits;
-                } else if (res.value == .signed and res.value.signed < 0) {
-                    try p.errExtra(.negative_bitwidth, firstToken, .{ .signed = res.value.signed });
-                    break :bits;
-                }
-
-                const width = res.asU64();
-                if (width == 0 and nameToken != 0) {
-                    try p.errToken(.zero_width_named_field, nameToken);
-                    break :bits;
-                } else if (width > ty.bitSizeof(p.pp.compilation).?) {
-                    try p.errToken(.bitfield_too_big, nameToken);
-                    break :bits;
-                }
-
-                bits = @as(u32, @truncate(width));
-                bitsNode = res.node;
+            if (res.value == .unavailable) {
+                try p.errToken(.expected_integer_constant_expr, firstToken);
+                break :bits;
+            } else if (res.value == .signed and res.value.signed < 0) {
+                try p.errExtra(.negative_bitwidth, firstToken, .{ .signed = res.value.signed });
+                break :bits;
             }
-            if (nameToken == 0 and bitsNode == .none) unnamed: {
-                if (ty.is(.Enum)) break :unnamed;
-                if (ty.isRecord() and ty.data.record.name[0] == '(') {
-                    // An anonymous record appears as indirect fields on the parent
-                    try p.recordBuffer.append(.{
-                        .name = try p.getAnonymousName(firstToken),
-                        .ty = ty,
-                        .bitWidth = 0,
-                    });
-                    const node = try p.addNode(.{
-                        .tag = .IndirectRecordFieldDecl,
-                        .type = ty,
-                        .data = undefined,
-                    });
-                    try p.declBuffer.append(node);
-                    break; // must be followed by a semicolon
-                }
-                try p.err(.missing_declaration);
-            } else {
+
+            const width = res.asU64();
+            if (width == 0 and nameToken != 0) {
+                try p.errToken(.zero_width_named_field, nameToken);
+                break :bits;
+            } else if (width > ty.bitSizeof(p.pp.compilation).?) {
+                try p.errToken(.bitfield_too_big, nameToken);
+                break :bits;
+            }
+
+            bits = @as(u32, @truncate(width));
+            bitsNode = res.node;
+        }
+        if (nameToken == 0 and bitsNode == .none) unnamed: {
+            if (ty.is(.Enum)) break :unnamed;
+            if (ty.isRecord() and ty.data.record.name[0] == '(') {
+                // An anonymous record appears as indirect fields on the parent
                 try p.recordBuffer.append(.{
-                    .name = if (nameToken != 0) p.tokSlice(nameToken) else try p.getAnonymousName(firstToken),
+                    .name = try p.getAnonymousName(firstToken),
                     .ty = ty,
-                    .bitWidth = bits,
+                    .bitWidth = 0,
                 });
-
                 const node = try p.addNode(.{
-                    .tag = .RecordFieldDecl,
+                    .tag = .IndirectRecordFieldDecl,
                     .type = ty,
-                    .data = .{ .Declaration = .{ .name = nameToken, .node = bitsNode } },
+                    .data = undefined,
                 });
                 try p.declBuffer.append(node);
+                break; // must be followed by a semicolon
             }
-            if (p.eat(.Comma) == null) break;
+            try p.err(.missing_declaration);
+        } else {
+            try p.recordBuffer.append(.{
+                .name = if (nameToken != 0) p.tokSlice(nameToken) else try p.getAnonymousName(firstToken),
+                .ty = ty,
+                .bitWidth = bits,
+            });
+
+            const node = try p.addNode(.{
+                .tag = .RecordFieldDecl,
+                .type = ty,
+                .data = .{ .Declaration = .{ .name = nameToken, .node = bitsNode } },
+            });
+            try p.declBuffer.append(node);
         }
-        _ = try p.expectToken(.Semicolon);
+        if (p.eat(.Comma) == null) break;
     }
+    _ = try p.expectToken(.Semicolon);
+    return true;
 }
 
 // specQual : typeSpec | typeQual | alignSpec
@@ -3283,7 +3334,7 @@ fn labeledStmt(p: *Parser) Error!?NodeIndex {
     } else return null;
 }
 
-/// compoundStmt : '{' ( decl | staticAssert |stmt)* '}'
+/// compoundStmt : '{' ( decl | KeywordGccExtensionDecl |staticAssert |stmt)* '}'
 fn parseCompoundStmt(p: *Parser, isFnBody: bool) Error!?NodeIndex {
     const lBrace = p.eat(.LBrace) orelse return null;
 
@@ -3318,6 +3369,21 @@ fn parseCompoundStmt(p: *Parser, isFnBody: bool) Error!?NodeIndex {
             },
             else => |e| return e,
         }) continue;
+
+        if (p.eat(.KeywordGccExtension)) |ext| {
+            const saveExtension = p.extensionSuppressd;
+            defer p.extensionSuppressd = saveExtension;
+            p.extensionSuppressd = true;
+
+            if (p.parseDeclaration() catch |e| switch (e) {
+                error.ParsingFailed => {
+                    try p.nextStmt(lBrace);
+                    continue;
+                },
+                else => |er| return er,
+            }) continue;
+            p.index = ext;
+        }
 
         const s = p.stmt() catch |er| switch (er) {
             error.ParsingFailed => {
@@ -3520,6 +3586,7 @@ fn nextStmt(p: *Parser, lBrace: TokenIndex) !void {
             .KeywordTypeof1,
             .KeywordTypeof2,
             .KeywordGccTypeof,
+            .KeywordGccExtension,
             => if (parens == 0) return,
             .KeywordPragma => p.skipToPragmaSentinel(),
             else => {},
@@ -4215,7 +4282,7 @@ fn parseBuiltinChooseExpr(p: *Parser) Error!Result {
 /// unaryExpr
 ///  : primaryExpr suffixExpr*
 ///  | '&&' identifier
-///  | ('&' | '*' | '+' | '-' | '~' | '!' | '++' | '--') castExpr
+///  | ('&' | '*' | '+' | '-' | '~' | '!' | '++' | '--' | KeywordGccExtension) castExpr
 ///  | keyword_sizeof unaryExpr
 ///  | keyword_sizeof '(' type_name ')'
 ///  | keyword_alignof '(' type_name ')'
@@ -4492,6 +4559,17 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
             res.value = .{ .unsigned = res.ty.alignof(p.pp.compilation) };
             try res.un(p, .AlignOfExpr);
             return res;
+        },
+
+        .KeywordGccExtension => {
+            p.index += 1;
+            const savedExtension = p.extensionSuppressd;
+            defer p.extensionSuppressd = savedExtension;
+            p.extensionSuppressd = true;
+
+            var child = try p.parseCastExpr();
+            try child.expect(p);
+            return child;
         },
 
         else => {
