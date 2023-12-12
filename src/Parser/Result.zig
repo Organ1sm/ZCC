@@ -95,6 +95,7 @@ pub fn maybeWarnUnused(res: Result, p: *Parser, exprStart: TokenIndex, errStart:
             => return,
 
             .CommaExpr => curNode = p.nodes.items(.data)[@intFromEnum(curNode)].BinaryExpr.rhs,
+            .ParenExpr => curNode = p.nodes.items(.data)[@intFromEnum(curNode)].UnaryExpr,
 
             else => break,
         };
@@ -215,10 +216,9 @@ pub fn adjustTypes(a: *Result, token: TokenIndex, b: *Result, p: *Parser, kind: 
             if (!aIsScalar or !bIsScalar or (aIsFloat and bIsPtr) or (bIsFloat and aIsPtr))
                 return a.invalidBinTy(token, b, p);
 
-            if (aIsInt or bIsInt)
+            if ((aIsInt or bIsInt) and !(a.isZero() or b.isZero())) {
                 try p.errStr(.comparison_ptr_int, token, try p.typePairStr(a.ty, b.ty));
-
-            if (aIsPtr and bIsPtr) {
+            } else if (aIsPtr and bIsPtr) {
                 if (!a.ty.isVoidStar() and !b.ty.isVoidStar() and !a.ty.eql(b.ty, false))
                     try p.errStr(.comparison_distinct_ptr, token, try p.typePairStr(a.ty, b.ty));
             } else if (aIsPtr) {

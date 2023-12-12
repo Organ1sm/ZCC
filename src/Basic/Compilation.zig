@@ -456,7 +456,7 @@ pub fn findInclude(comp: *Compilation, token: Token, filename: []const u8, searc
         const path = if (std.fs.path.dirname(source.path)) |some|
             std.fs.path.join(fib.allocator(), &.{ some, filename }) catch break :blk
         else
-            filename;
+            std.fs.path.join(fib.allocator(), &.{ ".", filename }) catch break :blk;
 
         if (comp.addSource(path)) |some|
             return some

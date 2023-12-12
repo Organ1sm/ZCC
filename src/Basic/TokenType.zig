@@ -266,6 +266,8 @@ pub const TokenType = enum(u8) {
             .KeywordTypeof2,
             .KeywordGccConst1,
             .KeywordGccConst2,
+            .KeywordGccInline1,
+            .KeywordGccInline2,
             .KeywordGccVolatile1,
             .KeywordGccVolatile2,
             .KeywordGccRestrict1,

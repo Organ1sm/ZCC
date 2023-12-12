@@ -298,7 +298,6 @@ fn findTypedef(p: *Parser, nameToken: TokenIndex, notTypeYet: bool) !?Scope.Symb
                 if (std.mem.eql(u8, t.name, name))
                     return t;
             },
-
             .@"struct" => |s| if (std.mem.eql(u8, s.name, name)) {
                 if (notTypeYet)
                     return null;
@@ -317,6 +316,9 @@ fn findTypedef(p: *Parser, nameToken: TokenIndex, notTypeYet: bool) !?Scope.Symb
                 try p.errStr(.must_use_enum, nameToken, name);
                 return e;
             },
+            .definition,
+            .declaration,
+            => |d| if (std.mem.eql(u8, d.name, name)) return null,
 
             else => {},
         }
