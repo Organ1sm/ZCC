@@ -17,7 +17,7 @@ pub fn main() !void {
     const gpa = general_purpose_allocator.allocator();
     defer _ = general_purpose_allocator.deinit();
 
-    var args = try std.process.argsAlloc(gpa);
+    const args = try std.process.argsAlloc(gpa);
     defer std.process.argsFree(gpa, args);
 
     if (args.len != 3) {
@@ -37,7 +37,7 @@ pub fn main() !void {
 
     // collect all cases
     {
-        var casesDir = try std.fs.cwd().openIterableDir(args[1], .{});
+        var casesDir = try std.fs.cwd().openDir(args[1], .{ .iterate = true });
         defer casesDir.close();
 
         var it = casesDir.iterate();

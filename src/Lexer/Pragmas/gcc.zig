@@ -40,12 +40,12 @@ fn beforePreprocess(pragma: *Pragma, comp: *Compilation) void {
 }
 
 fn beforeParse(pragma: *Pragma, comp: *Compilation) void {
-    var self = @fieldParentPtr(GCC, "pragma", pragma);
+    const self = @fieldParentPtr(GCC, "pragma", pragma);
     comp.diag.options = self.originalOptions;
 }
 
 fn afterParse(pragma: *Pragma, comp: *Compilation) void {
-    var self = @fieldParentPtr(GCC, "pragma", pragma);
+    const self = @fieldParentPtr(GCC, "pragma", pragma);
     comp.diag.options = self.originalOptions;
 }
 
