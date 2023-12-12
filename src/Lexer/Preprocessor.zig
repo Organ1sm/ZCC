@@ -787,7 +787,7 @@ fn expandFuncMacro(
                 };
                 next = if (next.len > 0) next else &[1]Token{placeHolderToken};
 
-                var pastedToken = try pp.pasteTokens(prev, next[0]);
+                const pastedToken = try pp.pasteTokens(prev, next[0]);
                 try buf.append(pastedToken);
                 try buf.appendSlice(next[1..]);
                 // skip next token
@@ -960,9 +960,9 @@ fn collectMacroFuncArguments(
     var curArgument = std.ArrayList(Token).init(pp.compilation.gpa);
     defer curArgument.deinit();
 
-    var done = false;
+    const done = false;
     while (!done) {
-        var tok = try nextBufToken(pp, lexer, buf, startIdx, endIdx, extendBuffer);
+        const tok = try nextBufToken(pp, lexer, buf, startIdx, endIdx, extendBuffer);
         switch (tok.id) {
             .Comma => {
                 if (parens == 0)

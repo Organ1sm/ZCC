@@ -455,10 +455,6 @@ fn pragma(p: *Parser) !bool {
         foundPragma = true;
         const nameToken = p.index;
         const name = p.tokSlice(nameToken);
-        for (p.tokenIds) |h| {
-            std.debug.print("{} ", .{h});
-        }
-        std.debug.print("\n", .{});
         const endIdx = std.mem.indexOfScalarPos(TokenType, p.tokenIds, p.index, .NewLine) orelse {
             try p.errToken(.pragma_inside_macro, pragmaToken);
             return error.ParsingFailed;
@@ -853,7 +849,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
         try p.parseAttributeSpecifier(.variable);
         const attrs = p.attrBuffer.items[attrBufferTop..];
         if (attrs.len > 0) {
-            var attributedType = try p.arena.create(Type.Attributed);
+            const attributedType = try p.arena.create(Type.Attributed);
             attributedType.* = .{
                 .attributes = try p.arena.dupe(Attribute, attrs),
                 .base = initD.d.type,
@@ -2325,7 +2321,7 @@ fn paramDecls(p: *Parser) Error!?[]Type.Function.Param {
 
 /// typeName : specQual+ abstractDeclarator
 fn typeName(p: *Parser) Error!?Type {
-    var ty = (try p.specQual()) orelse return null;
+    const ty = (try p.specQual()) orelse return null;
     if (try p.declarator(ty, .abstract)) |some| {
         if (some.oldTypeFunc) |tokenIdx|
             try p.errToken(.invalid_old_style_params, tokenIdx);
@@ -2402,7 +2398,7 @@ pub fn initializerItem(p: *Parser, il: *InitList, initType: Type) Error!bool {
 
     var count: u64 = 0;
     var warnedExcess = false;
-    var isStrInit = false;
+    const isStrInit = false;
     while (true) : (count += 1) {
         errdefer p.skipTo(.RBrace);
         const firstToken = p.index;
@@ -2602,7 +2598,7 @@ fn coerceArrayInit(p: *Parser, item: *Result, token: TokenIndex, target: Type) !
 
     if (target.get(.Array)) |arrayType| {
         std.debug.assert(item.ty.is(.Array));
-        var len = item.ty.arrayLen().?;
+        const len = item.ty.arrayLen().?;
         const arrayLen = arrayType.arrayLen().?;
         if (p.nodeIs(item.node, .StringLiteralExpr)) {
             // the null byte of a string can be dropped
@@ -2972,7 +2968,7 @@ fn stmt(p: *Parser) Error!NodeIndex {
             if (p.getCurrToken() != .KeywordCase and p.getCurrToken() != .KeywordDefault)
                 try p.errToken(.invalid_fallthrough, exprStart);
 
-            var attributedType = try p.arena.create(Type.Attributed);
+            const attributedType = try p.arena.create(Type.Attributed);
             attributedType.* = .{
                 .attributes = try p.arena.dupe(Attribute, attrs),
                 .base = nullNode.type,

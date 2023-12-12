@@ -205,7 +205,7 @@ pub fn finish(elf: *Elf, file: std.fs.File) !void {
     const shOffset = strTabOffset + elf.stringTabLen;
     const shOffsetAligned = std.mem.alignForward(u64, shOffset, 16);
 
-    var elfHeader = std.elf.Elf64_Ehdr{
+    const elfHeader = std.elf.Elf64_Ehdr{
         .e_ident = .{ 0x7F, 'E', 'L', 'F', 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
         .e_type = std.elf.ET.REL, // we only produce relocatables
         .e_machine = elf.obj.comp.target.cpu.arch.toElfMachine(),
@@ -329,7 +329,7 @@ pub fn finish(elf: *Elf, file: std.fs.File) !void {
 
     // write symtab section header
     {
-        var sectHeader = std.elf.Elf64_Shdr{
+        const sectHeader = std.elf.Elf64_Shdr{
             .sh_name = SymbolTableName,
             .sh_type = std.elf.SHT_SYMTAB,
             .sh_flags = 0,

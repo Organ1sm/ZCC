@@ -300,7 +300,7 @@ pub fn adjustTypes(a: *Result, token: TokenIndex, b: *Result, p: *Parser, kind: 
 
 pub fn lvalConversion(res: *Result, p: *Parser) Error!void {
     if (res.ty.isFunc()) {
-        var elemType = try p.arena.create(Type);
+        const elemType = try p.arena.create(Type);
         elemType.* = res.ty;
         res.ty.specifier = .Pointer;
         res.ty.data = .{ .subType = elemType };
