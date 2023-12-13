@@ -1130,7 +1130,29 @@ fn declSpecifier(p: *Parser, isParam: bool) Error!?DeclSpec {
 ///  | attrIdentifier '(' identifier (',' expr)+ ')'
 ///  | attrIdentifier '(' (expr (',' expr)*)? ')'
 fn attribute(p: *Parser) Error!Attribute {
-    const nameToken = try p.expectIdentifier();
+    const nameToken = p.index;
+    switch (p.getCurrToken()) {
+        .Identifier, .KeywordConst, .KeywordGccConst1, .KeywordGccConst2 => {},
+        .ExtendedIdentifier => {
+            const slice = p.tokSlice(p.index);
+            var it = std.unicode.Utf8View.initUnchecked(slice).iterator();
+            var loc = p.pp.tokens.items(.loc)[p.index];
+            while (it.nextCodepoint()) |c| {
+                if (try checkIdentifierCodepoint(p.pp.compilation, c, loc)) break;
+                loc.byteOffset += std.unicode.utf8CodepointSequenceLength(c) catch unreachable;
+            }
+        },
+        else => {
+            try p.errExtra(.expected_token, p.index, .{ .tokenId = .{
+                .expected = .Identifier,
+                .actual = p.getCurrToken(),
+            } });
+            return error.ParsingFailed;
+        },
+    }
+
+    p.index += 1;
+
     switch (p.getCurrToken()) {
         .Comma, .RParen => { // will be consumed in attributeList
             return Attribute{ .name = nameToken };
