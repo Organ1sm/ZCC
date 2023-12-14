@@ -664,7 +664,6 @@ fn skipTo(p: *Parser, id: TokenType) void {
 }
 
 // ====== declarations ======
-
 /// decl
 ///  : declSpec (initDeclarator ( ',' initDeclarator)*)? ';'
 ///  | declSpec declarator decl* compoundStmt
@@ -709,7 +708,6 @@ fn parseDeclaration(p: *Parser) Error!bool {
 
     // check for funtion definition
     if (initD.d.funcDeclarator != null and initD.initializer == .none and initD.d.type.isFunc()) fndef: {
-        try p.parseAttributeSpecifier(.function);
         switch (p.getCurrToken()) {
             .Comma, .Semicolon => break :fndef,
             .LBrace => {},
@@ -868,8 +866,6 @@ fn parseDeclaration(p: *Parser) Error!bool {
             try p.errToken(.invalid_old_style_params, tokenIdx);
 
         const tag = try declSpec.validate(p, &initD.d.type, initD.initializer != .none);
-
-        try p.parseAttributeSpecifier(.variable);
         const attrs = p.attrBuffer.items[attrBufferTop..];
         if (attrs.len > 0) {
             const attributedType = try p.arena.create(Type.Attributed);
@@ -1280,9 +1276,10 @@ fn parseAttributeSpecifier(p: *Parser, context: Attribute.ParseContext) Error!vo
 
 const InitDeclarator = struct { d: Declarator, initializer: NodeIndex = .none };
 
-/// initDeclarator : declarator ('=' initializer)?
+/// initDeclarator : declarator attributeSpecifier? ('=' initializer)?
 fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec) Error!?InitDeclarator {
     var initD = InitDeclarator{ .d = (try p.declarator(declSpec.type, .normal)) orelse return null };
+    try p.parseAttributeSpecifier(if (initD.d.type.isFunc()) .function else .variable);
 
     if (p.eat(.Equal)) |eq| init: {
         if (initD.d.type.hasIncompleteSize() and !initD.d.type.isArray()) {
