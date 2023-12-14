@@ -14,7 +14,6 @@ pub const Token = struct {
     /// double underscore and underscore + capital letter identifiers
     /// belong to the implementation namespace, so we always convert them
     /// to keywords.
-    /// TODO: add `.keyword_asm` here as GNU extension once that is supported.
     pub fn getTokenId(comp: *const Compilation, str: []const u8) TokenType {
         const kw = AllKeywords.get(str) orelse return .Identifier;
         const standard = comp.langOpts.standard;
@@ -22,6 +21,7 @@ pub const Token = struct {
             .KeywordInline => if (standard.isGNU() or standard.atLeast(.c99)) kw else .Identifier,
             .KeywordRestrict => if (standard.atLeast(.c99)) kw else .Identifier,
             .KeywordGccTypeof => if (standard.isGNU()) kw else .Identifier,
+            .KeywordGccAsm => if (standard.isGNU()) kw else .Identifier,
             else => kw,
         };
     }
@@ -125,6 +125,9 @@ pub const Token = struct {
         .{ "__alignof__", .KeywordGccAlignof2 },
         .{ "typeof", .KeywordGccTypeof },
         .{ "__extension__", .KeywordGccExtension },
+        .{ "asm", .KeywordGccAsm },
+        .{ "__asm", .KeywordGccAsm1 },
+        .{ "__asm__", .KeywordGccAsm2 },
 
         // gcc builtins
         .{ "__builtin_choose_expr", .BuiltinChooseExpr },

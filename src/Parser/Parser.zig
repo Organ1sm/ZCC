@@ -471,7 +471,7 @@ fn pragma(p: *Parser) !bool {
     return foundPragma;
 }
 
-/// root : (decl | staticAssert)*
+/// root : (decl | inline assembly ';' | staticAssert)*
 pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
     pp.compilation.pragmaEvent(.BeforeParse);
 
@@ -553,6 +553,14 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
                 else => |e| return e,
             }) continue;
         }
+
+        if (p.assembly(.global) catch |er| switch (er) {
+            error.ParsingFailed => {
+                p.nextExternDecl();
+                continue;
+            },
+            else => |e| return e,
+        }) |_| continue;
 
         try p.err(.expected_external_decl);
         p.index += 1;
@@ -1276,9 +1284,10 @@ fn parseAttributeSpecifier(p: *Parser, context: Attribute.ParseContext) Error!vo
 
 const InitDeclarator = struct { d: Declarator, initializer: NodeIndex = .none };
 
-/// initDeclarator : declarator attributeSpecifier? ('=' initializer)?
+/// initDeclarator : declarator assembly? attributeSpecifier? ('=' initializer)?
 fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec) Error!?InitDeclarator {
     var initD = InitDeclarator{ .d = (try p.declarator(declSpec.type, .normal)) orelse return null };
+    _ = try p.assembly(.decl);
     try p.parseAttributeSpecifier(if (initD.d.type.isFunc()) .function else .variable);
 
     if (p.eat(.Equal)) |eq| init: {
@@ -2913,6 +2922,66 @@ fn convertInitList(p: *Parser, il: InitList, initType: Type) Error!NodeIndex {
     } else {
         unreachable;
     }
+}
+
+/// assembly : keyword_asm asmQual* '(' asmStr ')'
+fn assembly(p: *Parser, kind: enum { global, decl, stmt }) Error!?NodeIndex {
+    switch (p.getCurrToken()) {
+        .KeywordGccAsm, .KeywordGccAsm1, .KeywordGccAsm2 => p.index += 1,
+        else => return null,
+    }
+
+    var @"volatile" = false;
+    var @"inline" = false;
+    var goto = false;
+    while (true) : (p.index += 1) switch (p.getCurrToken()) {
+        .KeywordVolatile, .KeywordGccVolatile1, .KeywordGccVolatile2 => {
+            if (kind != .stmt) try p.errStr(.meaningless_asm_qual, p.index, "volatile");
+            if (@"volatile") try p.errStr(.duplicate_asm_qual, p.index, "volatile");
+            @"volatile" = true;
+        },
+        .KeywordInline, .KeywordGccInline1, .KeywordGccInline2 => {
+            if (kind != .stmt) try p.errStr(.meaningless_asm_qual, p.index, "inline");
+            if (@"inline") try p.errStr(.duplicate_asm_qual, p.index, "inline");
+            @"inline" = true;
+        },
+        .KeywordGoto => {
+            if (kind != .stmt) try p.errStr(.meaningless_asm_qual, p.index, "goto");
+            if (goto) try p.errStr(.duplicate_asm_qual, p.index, "goto");
+            goto = true;
+        },
+        else => break,
+    };
+
+    const lparen = try p.expectToken(.LParen);
+    if (kind != .stmt) {
+        _ = try p.asmString();
+    } else {
+        return p.todo("assembly statements");
+    }
+    try p.expectClosing(lparen, .RParen);
+
+    if (kind != .decl)
+        _ = try p.expectToken(.Semicolon);
+    return .none;
+}
+
+/// Same as stringLiteral but errors on unicode and wide string literals
+fn asmString(p: *Parser) Error!NodeIndex {
+    var i = p.index;
+    while (true) : (i += 1) switch (p.tokenIds[i]) {
+        .StringLiteral => {},
+        .StringLiteralUTF_8, .StringLiteralUTF_16, .StringLiteralUTF_32 => {
+            try p.errStr(.invalid_asm_str, p.index, "unicode");
+            return error.ParsingFailed;
+        },
+        .StringLiteralWide => {
+            try p.errStr(.invalid_asm_str, p.index, "wide");
+            return error.ParsingFailed;
+        },
+        else => break,
+    };
+    return (try p.parseStringLiteral()).node;
 }
 
 // ====== statements ======
