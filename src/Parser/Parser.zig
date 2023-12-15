@@ -1505,18 +1505,8 @@ fn parseTypeSpec(p: *Parser, ty: *TypeBuilder) Error!bool {
 
             .Identifier, .ExtendedIdentifier => {
                 const typedef = (try p.findTypedef(p.index, ty.specifier != .None)) orelse break;
-                const newSpec = TypeBuilder.fromType(typedef.type);
-
-                const errStart = p.pp.compilation.diag.list.items.len;
-                ty.combine(p, newSpec, p.index) catch {
-                    p.pp.compilation.diag.list.items.len = errStart;
+                if (!(try ty.combineTypedef(p, typedef.type, typedef.nameToken)))
                     break;
-                };
-
-                ty.typedef = .{
-                    .token = typedef.nameToken,
-                    .type = typedef.type,
-                };
             },
             else => break,
         }

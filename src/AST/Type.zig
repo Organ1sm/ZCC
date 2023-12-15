@@ -168,7 +168,7 @@ pub const Record = struct {
     pub const Field = struct {
         name: []const u8,
         ty: Type,
-        bitWidth: u32,
+        bitWidth: u32 = 0,
     };
 
     pub fn isIncomplete(r: Record) bool {
