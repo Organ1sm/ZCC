@@ -471,6 +471,82 @@ fn pragma(p: *Parser) !bool {
     return foundPragma;
 }
 
+fn defineVaList(p: *Parser) !void {
+    const Kind = enum { CharPtr, VoidPtr, AArch64VaList, X86_64VaList };
+    const kind: Kind = switch (p.pp.compilation.target.cpu.arch) {
+        .aarch64 => switch (p.pp.compilation.target.os.tag) {
+            .windows => @as(Kind, .CharPtr),
+            .ios, .macos, .tvos, .watchos => .CharPtr,
+            else => .AArch64VaList,
+        },
+        .sparc, .wasm32, .wasm64, .bpfel, .bpfeb, .riscv32, .riscv64, .avr, .spirv32, .spirv64 => .VoidPtr,
+        .powerpc => switch (p.pp.compilation.target.os.tag) {
+            .ios, .macos, .tvos, .watchos, .aix => @as(Kind, .CharPtr),
+            else => return, // unknown
+        },
+        .x86 => .CharPtr,
+        .x86_64 => switch (p.pp.compilation.target.os.tag) {
+            .windows => @as(Kind, .CharPtr),
+            else => .X86_64VaList,
+        },
+        else => return, // unknown
+    };
+
+    var ty: Type = undefined;
+    switch (kind) {
+        .CharPtr => ty = .{ .specifier = .Char },
+        .VoidPtr => ty = .{ .specifier = .Void },
+        .AArch64VaList => {
+            const recordType = try p.arena.create(Type.Record);
+            recordType.* = .{
+                .name = "__va_list_tag",
+                .fields = try p.arena.alloc(Type.Record.Field, 5),
+                .size = 32,
+                .alignment = 8,
+            };
+            const voidType = try p.arena.create(Type);
+            voidType.* = .{ .specifier = .Void };
+            const voidPtr = Type{ .specifier = .Pointer, .data = .{ .subType = voidType } };
+            recordType.fields[0] = .{ .name = "__stack", .ty = voidPtr };
+            recordType.fields[1] = .{ .name = "__gr_top", .ty = voidPtr };
+            recordType.fields[2] = .{ .name = "__vr_top", .ty = voidPtr };
+            recordType.fields[3] = .{ .name = "__gr_offs", .ty = .{ .specifier = .Int } };
+            recordType.fields[4] = .{ .name = "__vr_offs", .ty = .{ .specifier = .Int } };
+            ty = .{ .specifier = .Struct, .data = .{ .record = recordType } };
+        },
+        .X86_64VaList => {
+            const recordType = try p.arena.create(Type.Record);
+            recordType.* = .{
+                .name = "__va_list_tag",
+                .fields = try p.arena.alloc(Type.Record.Field, 4),
+                .size = 24,
+                .alignment = 8,
+            };
+            const voidType = try p.arena.create(Type);
+            voidType.* = .{ .specifier = .Void };
+            const voidPtr = Type{ .specifier = .Pointer, .data = .{ .subType = voidType } };
+            recordType.fields[0] = .{ .name = "gp_offset", .ty = .{ .specifier = .UInt } };
+            recordType.fields[1] = .{ .name = "fp_offset", .ty = .{ .specifier = .UInt } };
+            recordType.fields[2] = .{ .name = "overflow_arg_area", .ty = voidPtr };
+            recordType.fields[3] = .{ .name = "reg_save_area", .ty = voidPtr };
+            ty = .{ .specifier = .Struct, .data = .{ .record = recordType } };
+        },
+    }
+
+    if (kind == .CharPtr or kind == .VoidPtr) {
+        const elemType = try p.arena.create(Type);
+        elemType.* = ty;
+        ty = Type{ .specifier = .Pointer, .data = .{ .subType = elemType } };
+    } else {
+        const arrType = try p.arena.create(Type.Array);
+        arrType.* = .{ .len = 1, .elem = ty };
+        ty = Type{ .specifier = .Array, .data = .{ .array = arrType } };
+    }
+
+    const sym = Scope.Symbol{ .name = "__builtin_va_list", .type = ty, .nameToken = 0 };
+    try p.scopes.append(.{ .typedef = sym });
+}
+
 /// root : (decl | inline assembly ';' | staticAssert)*
 pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
     pp.compilation.pragmaEvent(.BeforeParse);
@@ -514,6 +590,7 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
     }
 
     _ = try p.addNode(.{ .tag = .Invalid, .type = undefined, .data = undefined });
+    try p.defineVaList();
 
     while (p.eat(.Eof) == null) {
         const foundPragma = p.pragma() catch |er| switch (er) {
