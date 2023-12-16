@@ -244,7 +244,7 @@ pub fn next(self: *Lexer) Token {
                     state = .string_literal;
                 },
                 else => {
-                    self.index -= codepointLen;
+                    codepointLen = 0;
                     state = .identifier;
                 },
             },
@@ -255,7 +255,7 @@ pub fn next(self: *Lexer) Token {
                     state = .string_literal;
                 },
                 else => {
-                    self.index -= codepointLen;
+                    codepointLen = 0;
                     state = .identifier;
                 },
             },
@@ -270,7 +270,7 @@ pub fn next(self: *Lexer) Token {
                     state = .string_literal;
                 },
                 else => {
-                    self.index -= codepointLen;
+                    codepointLen = 0;
                     state = .identifier;
                 },
             },
@@ -285,7 +285,7 @@ pub fn next(self: *Lexer) Token {
                     state = .string_literal;
                 },
                 else => {
-                    self.index -= codepointLen;
+                    codepointLen = 0;
                     state = .identifier;
                 },
             },
@@ -378,7 +378,7 @@ pub fn next(self: *Lexer) Token {
                     }
                 },
                 else => {
-                    self.index -= codepointLen;
+                    codepointLen = 0;
                     state = if (string) .string_literal else .char_literal;
                 },
             },
@@ -386,7 +386,7 @@ pub fn next(self: *Lexer) Token {
             .hex_escape => switch (c) {
                 '0'...'9', 'a'...'f', 'A'...'F' => {},
                 else => {
-                    self.index -= codepointLen;
+                    codepointLen = 0;
                     state = if (string) .string_literal else .char_literal;
                 },
             },
@@ -399,12 +399,8 @@ pub fn next(self: *Lexer) Token {
                     }
                 },
                 else => {
-                    if (counter != 0) {
-                        id = .Invalid;
-                        break;
-                    }
-                    self.index -= codepointLen;
-                    state = if (string) .string_literal else .char_literal;
+                    id = .Invalid;
+                    break;
                 },
             },
 
@@ -588,7 +584,7 @@ pub fn next(self: *Lexer) Token {
                 },
                 else => {
                     id = .Period;
-                    self.index -= codepointLen;
+                    self.index -= 1;
                     break;
                 },
             },
@@ -683,16 +679,26 @@ pub fn next(self: *Lexer) Token {
                 'x', 'X' => state = .integer_literal_hex_first,
                 '.' => state = .float_fraction,
                 else => {
-                    state = .integer_suffix;
-                    self.index -= codepointLen;
+                    if (c <= 0x7F) {
+                        state = .integer_suffix;
+                        self.index -= 1;
+                    } else {
+                        id = .IntegerLiteral;
+                        break;
+                    }
                 },
             },
 
             .integer_literal_oct => switch (c) {
                 '0'...'7' => {},
                 else => {
-                    state = .integer_suffix;
-                    self.index -= codepointLen;
+                    if (c <= 0x7F) {
+                        state = .integer_suffix;
+                        self.index -= 1;
+                    } else {
+                        id = .IntegerLiteral;
+                        break;
+                    }
                 },
             },
 
@@ -706,8 +712,13 @@ pub fn next(self: *Lexer) Token {
             .integer_literal_binary => switch (c) {
                 '0', '1' => {},
                 else => {
-                    state = .integer_suffix;
-                    self.index -= codepointLen;
+                    if (c <= 0x7F) {
+                        state = .integer_suffix;
+                        self.index -= 1;
+                    } else {
+                        id = .IntegerLiteral;
+                        break;
+                    }
                 },
             },
 
@@ -725,8 +736,13 @@ pub fn next(self: *Lexer) Token {
                 '.' => state = .float_fraction_hex,
                 'p', 'P' => state = .float_exponent,
                 else => {
-                    state = .integer_suffix;
-                    self.index -= codepointLen;
+                    if (c <= 0x7F) {
+                        state = .integer_suffix;
+                        self.index -= 1;
+                    } else {
+                        id = .IntegerLiteral;
+                        break;
+                    }
                 },
             },
             .integer_literal => switch (c) {
@@ -734,8 +750,13 @@ pub fn next(self: *Lexer) Token {
                 '.' => state = .float_fraction,
                 'e', 'E' => state = .float_exponent,
                 else => {
-                    state = .integer_suffix;
-                    self.index -= codepointLen;
+                    if (c <= 0x7F) {
+                        state = .integer_suffix;
+                        self.index -= 1;
+                    } else {
+                        id = .IntegerLiteral;
+                        break;
+                    }
                 },
             },
             .integer_suffix => switch (c) {
@@ -792,8 +813,13 @@ pub fn next(self: *Lexer) Token {
                 '0'...'9' => {},
                 'e', 'E' => state = .float_exponent,
                 else => {
-                    self.index -= codepointLen;
-                    state = .float_suffix;
+                    if (c <= 0x7F) {
+                        self.index -= 1;
+                        state = .float_suffix;
+                    } else {
+                        id = .FloatLiteral;
+                        break;
+                    }
                 },
             },
             .float_fraction_hex => switch (c) {
@@ -807,7 +833,7 @@ pub fn next(self: *Lexer) Token {
             .float_exponent => switch (c) {
                 '+', '-' => state = .float_exponent_digits,
                 else => {
-                    self.index -= codepointLen;
+                    codepointLen = 0;
                     state = .float_exponent_digits;
                 },
             },
@@ -818,7 +844,7 @@ pub fn next(self: *Lexer) Token {
                         id = .Invalid;
                         break;
                     }
-                    self.index -= codepointLen;
+                    codepointLen = 0;
                     state = .float_suffix;
                 },
             },
@@ -934,15 +960,26 @@ fn expectTokens(source: []const u8, expected: []const TokenType) !void {
 }
 
 test "extended identifiers" {
-    try expectTokens(
-        \\𝓪𝓻𝓸𝓬𝓬 u𝓪𝓻𝓸𝓬𝓬 u8𝓪𝓻𝓸𝓬𝓬 U𝓪𝓻𝓸𝓬𝓬 L𝓪𝓻𝓸𝓬𝓬
-    , &.{
-        .ExtendedIdentifier,
-        .ExtendedIdentifier,
-        .ExtendedIdentifier,
-        .ExtendedIdentifier,
-        .ExtendedIdentifier,
-    });
+    try expectTokens("𝓪𝓻𝓸𝓬𝓬", &.{.ExtendedIdentifier});
+    try expectTokens("u𝓪𝓻𝓸𝓬𝓬", &.{.ExtendedIdentifier});
+    try expectTokens("u8𝓪𝓻𝓸𝓬𝓬", &.{.ExtendedIdentifier});
+    try expectTokens("U𝓪𝓻𝓸𝓬𝓬", &.{.ExtendedIdentifier});
+    try expectTokens("L𝓪𝓻𝓸𝓬𝓬", &.{.ExtendedIdentifier});
+    try expectTokens("1™", &.{ .IntegerLiteral, .ExtendedIdentifier });
+    try expectTokens("1.™", &.{ .FloatLiteral, .ExtendedIdentifier });
+    try expectTokens("..™", &.{ .Period, .Period, .ExtendedIdentifier });
+    try expectTokens("0™", &.{ .IntegerLiteral, .ExtendedIdentifier });
+    try expectTokens("0b\u{E0000}", &.{ .Invalid, .ExtendedIdentifier });
+    try expectTokens("0b0\u{E0000}", &.{ .IntegerLiteral, .ExtendedIdentifier });
+    try expectTokens("01\u{E0000}", &.{ .IntegerLiteral, .ExtendedIdentifier });
+    try expectTokens("010\u{E0000}", &.{ .IntegerLiteral, .ExtendedIdentifier });
+    try expectTokens("0x\u{E0000}", &.{ .Invalid, .ExtendedIdentifier });
+    try expectTokens("0x0\u{E0000}", &.{ .IntegerLiteral, .ExtendedIdentifier });
+    try expectTokens("\"\\0\u{E0000}\"", &.{.StringLiteral});
+    try expectTokens("\"\\x\u{E0000}\"", &.{.StringLiteral});
+    try expectTokens("\"\\u\u{E0000}\"", &.{ .Invalid, .ExtendedIdentifier, .Invalid });
+    try expectTokens("1e\u{E0000}", &.{ .Invalid, .ExtendedIdentifier });
+    try expectTokens("1e1\u{E0000}", &.{ .FloatLiteral, .ExtendedIdentifier });
 }
 
 test "operators" {
