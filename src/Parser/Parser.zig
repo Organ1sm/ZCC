@@ -2986,6 +2986,9 @@ fn convertInitList(p: *Parser, il: InitList, initType: Type) Error!NodeIndex {
         return try p.addNode(unionInitNode);
     } else if (initType.isFunc()) {
         return error.ParsingFailed; // invalid func initializer, reported earlier
+    } else if (initType.is(.Void)) {
+        try p.errStr(.variable_incomplete_ty, il.tok, try p.typeStr(initType));
+        return error.ParsingFailed;
     } else {
         unreachable;
     }
