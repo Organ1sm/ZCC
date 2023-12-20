@@ -780,11 +780,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
     var initD = (try p.parseInitDeclarator(&declSpec)) orelse {
         // eat ';'
         _ = try p.expectToken(.Semicolon);
-
-        if (declSpec.type.is(.Enum))
-            return true;
-
-        if (declSpec.type.isRecord() and declSpec.type.data.record.name[0] != '(')
+        if (declSpec.type.is(.Enum) or (declSpec.type.isRecord() and !declSpec.type.isAnonymousRecord() and !declSpec.type.isTypeof()))
             return true;
 
         try p.errToken(.missing_declaration, firstTokenIndex);
