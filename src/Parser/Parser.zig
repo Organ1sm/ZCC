@@ -948,14 +948,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
 
         const tag = try declSpec.validate(p, &initD.d.type, initD.initializer != .none);
         const attrs = p.attrBuffer.items[attrBufferTop..];
-        if (attrs.len > 0) {
-            const attributedType = try p.arena.create(Type.Attributed);
-            attributedType.* = .{
-                .attributes = try p.arena.dupe(Attribute, attrs),
-                .base = initD.d.type,
-            };
-            initD.d.type = .{ .specifier = .Attributed, .data = .{ .attributed = attributedType } };
-        }
+        initD.d.type = try initD.d.type.withAttributes(p.arena, attrs);
 
         const node = try p.addNode(.{
             .type = initD.d.type,
@@ -3175,12 +3168,7 @@ fn stmt(p: *Parser) Error!NodeIndex {
             if (p.getCurrToken() != .KeywordCase and p.getCurrToken() != .KeywordDefault)
                 try p.errToken(.invalid_fallthrough, exprStart);
 
-            const attributedType = try p.arena.create(Type.Attributed);
-            attributedType.* = .{
-                .attributes = try p.arena.dupe(Attribute, attrs),
-                .base = nullNode.type,
-            };
-            nullNode.type = .{ .specifier = .Attributed, .data = .{ .attributed = attributedType } };
+            nullNode.type = try nullNode.type.withAttributes(p.arena, attrs);
         }
 
         return p.addNode(nullNode);
