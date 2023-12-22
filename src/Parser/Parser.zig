@@ -1750,9 +1750,15 @@ fn recordDecls(p: *Parser) Error!void {
 
 /// recordDeclarator : declarator (':' constExpr)?
 fn recordDeclarator(p: *Parser) Error!bool {
+    const attrBuffTop = p.attrBuffer.items.len;
+    defer p.attrBuffer.items.len = attrBuffTop;
     const baseType = (try p.specQual()) orelse return false;
 
     while (true) {
+        const thisDeclTop = p.attrBuffer.items.len;
+        defer p.attrBuffer.items.len = thisDeclTop;
+
+        try p.parseAttributeSpecifier(.record);
         // 0 means unnamed
         var nameToken: TokenIndex = 0;
         var ty = baseType;
@@ -1763,6 +1769,11 @@ fn recordDeclarator(p: *Parser) Error!bool {
             nameToken = d.name;
             ty = d.type;
         }
+
+        try p.parseAttributeSpecifier(.record);
+        const attrs = p.attrBuffer.items[attrBuffTop..];
+        ty = try ty.withAttributes(p.arena, attrs);
+
         if (p.eat(.Colon)) |_| bits: {
             const res = try p.constExpr();
             if (!ty.isInt()) {
@@ -2162,8 +2173,6 @@ fn declarator(p: *Parser, baseType: Type, kind: DeclaratorKind) Error!?Declarato
 ///  | '[' '*' ']'
 ///  | '(' paramDecls? ')'
 fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: DeclaratorKind) Error!Type {
-    const attrBufferTop = p.attrBuffer.items.len;
-    defer p.attrBuffer.items.len = attrBufferTop;
     if (p.eat(.LBracket)) |lb| {
         var resType = Type{ .specifier = .Pointer };
         var qualsBuilder = Type.Qualifiers.Builder{};
