@@ -60,7 +60,7 @@ pub fn deinit(pragma: *Pragma, comp: *Compilation) void {
     comp.gpa.destroy(self);
 }
 
-fn diagnosticHandler(pp: *Preprocessor, startIdx: TokenIndex) !void {
+fn diagnosticHandler(pp: *Preprocessor, startIdx: TokenIndex) Pragma.Error!void {
     const diagnosticToken = pp.tokens.get(startIdx);
     if (diagnosticToken.id == .NewLine)
         return;
@@ -70,7 +70,7 @@ fn diagnosticHandler(pp: *Preprocessor, startIdx: TokenIndex) !void {
             .ignored, .warning, .@"error", .fatal => {
                 const str = Pragma.pasteTokens(pp, startIdx + 1) catch |err| switch (err) {
                     error.ExpectedStringLiteral => {
-                        return pp.compilation.addDiagnostic(.{
+                        return pp.compilation.diag.add(.{
                             .tag = .pragma_requires_string_literal,
                             .loc = diagnosticToken.loc,
                             .extra = .{ .str = "pragma diagnostic" },
@@ -79,7 +79,7 @@ fn diagnosticHandler(pp: *Preprocessor, startIdx: TokenIndex) !void {
                     else => |e| return e,
                 };
                 if (!std.mem.startsWith(u8, str, "-W")) {
-                    return pp.compilation.addDiagnostic(.{
+                    return pp.compilation.diag.add(.{
                         .tag = .malformed_warning_check,
                         .loc = pp.tokens.get(startIdx + 1).loc,
                         .extra = .{ .str = "pragma diagnostic" },
@@ -111,7 +111,7 @@ fn preprocessorHandler(_: *Pragma, pp: *Preprocessor, startIdx: TokenIndex) Prag
             .warning, .@"error" => {
                 const text = Pragma.pasteTokens(pp, startIdx + 2) catch |err| switch (err) {
                     error.ExpectedStringLiteral => {
-                        return pp.compilation.addDiagnostic(.{
+                        return pp.compilation.diag.add(.{
                             .tag = .pragma_requires_string_literal,
                             .loc = directiveToken.loc,
                             .extra = .{ .str = @tagName(gcc_pragma) },
@@ -121,7 +121,7 @@ fn preprocessorHandler(_: *Pragma, pp: *Preprocessor, startIdx: TokenIndex) Prag
                 };
                 const extra = Diagnostics.Message.Extra{ .str = try pp.arena.allocator().dupe(u8, text) };
                 const diagnosticTag: Diagnostics.Tag = if (gcc_pragma == .warning) .pragma_warning_message else .pragma_error_message;
-                return pp.compilation.addDiagnostic(.{ .tag = diagnosticTag, .loc = directiveToken.loc, .extra = extra });
+                return pp.compilation.diag.add(.{ .tag = diagnosticTag, .loc = directiveToken.loc, .extra = extra });
             },
             .diagnostic => return diagnosticHandler(pp, startIdx + 2),
             .poison => {
@@ -132,14 +132,14 @@ fn preprocessorHandler(_: *Pragma, pp: *Preprocessor, startIdx: TokenIndex) Prag
                         break;
 
                     if (!tok.id.isMacroIdentifier()) {
-                        return pp.compilation.addDiagnostic(.{
+                        return pp.compilation.diag.add(.{
                             .tag = .pragma_poison_identifier,
                             .loc = tok.loc,
                         });
                     }
                     const str = pp.expandedSlice(tok);
                     if (pp.defines.get(str) != null) {
-                        try pp.compilation.addDiagnostic(.{
+                        try pp.compilation.diag.add(.{
                             .tag = .pragma_poison_macro,
                             .loc = tok.loc,
                         });
@@ -162,6 +162,7 @@ fn parserHandler(_: *Pragma, p: *Parser, startIdx: TokenIndex) Compilation.Error
     if (std.mem.eql(u8, name, "diagnostic")) {
         return diagnosticHandler(p.pp, startIdx + 2) catch |err| switch (err) {
             error.UnknownPragma => {}, // handled during preprocessing
+            error.StopPreprocessing => unreachable, // Only used by #pragma once
             else => |e| return e,
         };
     }

@@ -68,22 +68,22 @@ fn checkIdentifierCodepoint(comp: *Compilation, codepoint: u21, loc: Source.Loca
     if (codepoint <= 0x7F) return false;
     var diagnosed = false;
     if (!CharInfo.isC99IdChar(codepoint)) {
-        try comp.addDiagnostic(.{
+        try comp.diag.add(.{
             .tag = .c99_compat,
             .loc = loc,
         });
         diagnosed = true;
     }
     if (CharInfo.isInvisible(codepoint)) {
-        try comp.addDiagnostic(.{
+        try comp.diag.add(.{
             .tag = .unicode_zero_width,
             .loc = loc,
-            .extra = .{ .codePoints = .{ .actual = codepoint, .resembles = 0 } },
+            .extra = .{ .actualCodePoint = codepoint },
         });
         diagnosed = true;
     }
     if (CharInfo.homoglyph(codepoint)) |resembles| {
-        try comp.addDiagnostic(.{
+        try comp.diag.add(.{
             .tag = .unicode_homoglyph,
             .loc = loc,
             .extra = .{ .codePoints = .{ .actual = codepoint, .resembles = resembles } },
@@ -143,19 +143,13 @@ fn expectToken(p: *Parser, expected: TokenType) Error!TokenIndex {
     std.debug.assert(expected != .Identifier and expected != .ExtendedIdentifier); // use eatIdentifier
     const actual = p.getCurrToken();
     if (actual != expected) {
-        try p.errExtra(
-            switch (actual) {
-                .Invalid => .expected_invalid,
-                else => .expected_token,
-            },
-            p.index,
-            .{
-                .tokenId = .{
-                    .expected = expected,
-                    .actual = actual,
-                },
-            },
-        );
+        switch (actual) {
+            .Invalid => try p.errExtra(.expected_invalid, p.index, .{ .expectedTokenId = expected }),
+            else => try p.errExtra(.expected_token, p.index, .{ .tokenId = .{
+                .expected = expected,
+                .actual = actual,
+            } }),
+        }
         return error.ParsingFailed;
     }
 
@@ -167,7 +161,7 @@ fn expectClosing(p: *Parser, opening: TokenIndex, id: TokenType) Error!void {
     _ = p.expectToken(id) catch |e|
         {
         if (e == error.ParsingFailed) {
-            try p.pp.compilation.addDiagnostic(.{
+            try p.pp.compilation.diag.add(.{
                 .tag = switch (id) {
                     .RParen => .to_match_paren,
                     .RBrace => .to_match_brace,
@@ -208,7 +202,7 @@ pub fn errStr(p: *Parser, tag: Diagnostics.Tag, index: TokenIndex, str: []const 
 
 pub fn errExtra(p: *Parser, tag: Diagnostics.Tag, index: TokenIndex, extra: Diagnostics.Message.Extra) Compilation.Error!void {
     @setCold(true);
-    try p.pp.compilation.addDiagnostic(.{
+    try p.pp.compilation.diag.add(.{
         .tag = tag,
         .loc = p.pp.tokens.items(.loc)[index],
         .extra = extra,
@@ -217,8 +211,7 @@ pub fn errExtra(p: *Parser, tag: Diagnostics.Tag, index: TokenIndex, extra: Diag
 
 pub fn errToken(p: *Parser, tag: Diagnostics.Tag, index: TokenIndex) Compilation.Error!void {
     @setCold(true);
-
-    try p.pp.compilation.addDiagnostic(.{
+    try p.pp.compilation.diag.add(.{
         .tag = tag,
         .loc = p.pp.tokens.items(.loc)[index],
     });
