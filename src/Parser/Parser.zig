@@ -3596,11 +3596,13 @@ fn parseReturnStmt(p: *Parser) Error!?NodeIndex {
     if (expr.node == .none) {
         if (!returnType.is(.Void))
             try p.errStr(.func_should_return, retToken, p.tokSlice(p.funcName));
-
+        return try p.addNode(.{ .tag = .ReturnStmt, .data = .{ .UnaryExpr = expr.node } });
+    } else if (returnType.is((.Void))) {
+        try p.errStr(.void_func_returns_value, eToken, p.tokSlice(p.funcName));
         return try p.addNode(.{ .tag = .ReturnStmt, .data = .{ .UnaryExpr = expr.node } });
     }
-    try expr.lvalConversion(p);
 
+    try expr.lvalConversion(p);
     // Return type conversion is done as if it was assignment
     if (returnType.is(.Bool)) {
         // this is ridiculous but it's what clang does
@@ -3638,7 +3640,7 @@ fn parseReturnStmt(p: *Parser) Error!?NodeIndex {
             try p.errStr(.incompatible_return, eToken, try p.typeStr(expr.ty));
         }
     } else {
-        try p.errStr(.incompatible_return, eToken, try p.typeStr(expr.ty));
+        unreachable;
     }
 
     try expr.saveValue(p);
