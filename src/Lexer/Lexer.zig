@@ -15,6 +15,7 @@ comp: *const Compilation,
 const State = enum {
     start,
     cr,
+    whitespace,
     back_slash,
     back_slash_cr,
     u,
@@ -74,10 +75,10 @@ pub fn next(self: *Lexer) Token {
     var state: State = .start;
     var start = self.index;
     var id: TokenType = .Eof;
-    var string = false;
     var counter: u32 = 0;
     var codepointLen: u3 = undefined;
 
+    var returnState = state;
     while (self.index < self.buffer.len) : (self.index += codepointLen) {
         codepointLen = std.unicode.utf8ByteSequenceLength(self.buffer[self.index]) catch unreachable;
         const c = std.unicode.utf8Decode(self.buffer[self.index .. self.index + codepointLen]) catch unreachable;
@@ -181,7 +182,7 @@ pub fn next(self: *Lexer) Token {
                 '0' => state = .zero,
                 '1'...'9' => state = .integer_literal,
                 '\\' => state = .back_slash,
-                '\t', '\x0B', '\x0C', ' ' => start = self.index + 1,
+                '\t', '\x0B', '\x0C', ' ' => state = .whitespace,
                 else => {
                     if (c > 0x7F and Token.mayAppearInIdent(self.comp, c, .start)) {
                         state = .extended_identifier;
@@ -205,10 +206,19 @@ pub fn next(self: *Lexer) Token {
                 },
             },
 
+            .whitespace => switch (c) {
+                '\t', '\x0B', '\x0C', ' ' => {},
+                '\\' => state = .back_slash,
+                else => {
+                    id = .WhiteSpace;
+                    break;
+                },
+            },
+
             .back_slash => switch (c) {
                 '\n' => {
                     start = self.index + 1;
-                    state = .start;
+                    state = .whitespace;
                 },
                 '\r' => state = .back_slash_cr,
                 '\t', '\x0B', '\x0C', ' ' => {
@@ -223,7 +233,7 @@ pub fn next(self: *Lexer) Token {
             .back_slash_cr => switch (c) {
                 '\n' => {
                     start = self.index + 1;
-                    state = .start;
+                    state = .whitespace;
                 },
                 else => {
                     start = self.index;
@@ -292,7 +302,7 @@ pub fn next(self: *Lexer) Token {
 
             .string_literal => switch (c) {
                 '\\' => {
-                    string = true;
+                    returnState = .string_literal;
                     state = .escape_sequence;
                 },
                 '"' => {
@@ -308,7 +318,7 @@ pub fn next(self: *Lexer) Token {
 
             .char_literal_start => switch (c) {
                 '\\' => {
-                    string = false;
+                    returnState = .char_literal;
                     state = .escape_sequence;
                 },
 
@@ -323,7 +333,7 @@ pub fn next(self: *Lexer) Token {
 
             .char_literal => switch (c) {
                 '\\' => {
-                    string = false;
+                    returnState = .string_literal;
                     state = .escape_sequence;
                 },
                 '\'' => {
@@ -339,7 +349,7 @@ pub fn next(self: *Lexer) Token {
 
             .escape_sequence => switch (c) {
                 '\'', '"', '?', '\\', 'a', 'b', 'e', 'f', 'n', 'r', 't', 'v', '\n' => {
-                    state = if (string) .string_literal else .char_literal;
+                    state = returnState;
                 },
                 '\r' => state = .cr_escape,
                 '0'...'7' => {
@@ -362,9 +372,7 @@ pub fn next(self: *Lexer) Token {
             },
 
             .cr_escape => switch (c) {
-                '\n' => {
-                    state = if (string) .string_literal else .char_literal;
-                },
+                '\n' => state = returnState,
                 else => {
                     break;
                 },
@@ -373,13 +381,12 @@ pub fn next(self: *Lexer) Token {
             .octal_escape => switch (c) {
                 '0'...'7' => {
                     counter += 1;
-                    if (counter == 3) {
-                        state = if (string) .string_literal else .char_literal;
-                    }
+                    if (counter == 3)
+                        state = returnState;
                 },
                 else => {
                     codepointLen = 0;
-                    state = if (string) .string_literal else .char_literal;
+                    state = returnState;
                 },
             },
 
@@ -387,16 +394,15 @@ pub fn next(self: *Lexer) Token {
                 '0'...'9', 'a'...'f', 'A'...'F' => {},
                 else => {
                     codepointLen = 0;
-                    state = if (string) .string_literal else .char_literal;
+                    state = returnState;
                 },
             },
 
             .unicode_escape => switch (c) {
                 '0'...'9', 'a'...'f', 'A'...'F' => {
                     counter -= 1;
-                    if (counter == 0) {
-                        state = if (string) .string_literal else .char_literal;
-                    }
+                    if (counter == 0)
+                        state = returnState;
                 },
                 else => {
                     id = .Invalid;
@@ -498,9 +504,7 @@ pub fn next(self: *Lexer) Token {
             },
 
             .angle_bracket_left => switch (c) {
-                '<' => {
-                    state = .angle_bracket_angle_bracket_left;
-                },
+                '<' => state = .angle_bracket_angle_bracket_left,
                 '=' => {
                     id = .AngleBracketLeftEqual;
                     self.index += 1;
@@ -525,9 +529,7 @@ pub fn next(self: *Lexer) Token {
             },
 
             .angle_bracket_right => switch (c) {
-                '>' => {
-                    state = .angle_bracket_angle_bracket_right;
-                },
+                '>' => state = .angle_bracket_angle_bracket_right,
                 '=' => {
                     id = .AngleBracketRightEqual;
                     self.index += 1;
@@ -564,12 +566,8 @@ pub fn next(self: *Lexer) Token {
             },
 
             .period => switch (c) {
-                '.' => {
-                    state = .period2;
-                },
-                '0'...'9' => {
-                    state = .float_fraction;
-                },
+                '.' => state = .period2,
+                '0'...'9' => state = .float_fraction,
                 else => {
                     id = .Period;
                     break;
@@ -640,12 +638,8 @@ pub fn next(self: *Lexer) Token {
             },
 
             .slash => switch (c) {
-                '/' => {
-                    state = .line_comment;
-                },
-                '*' => {
-                    state = .multi_line_comment;
-                },
+                '/' => state = .line_comment,
+                '*' => state = .multi_line_comment,
                 '=' => {
                     id = .SlashEqual;
                     self.index += 1;
@@ -876,6 +870,8 @@ pub fn next(self: *Lexer) Token {
             .back_slash_cr,
             => {},
 
+            .whitespace => id = .WhiteSpace,
+
             .period2,
             .string_literal,
             .char_literal_start,
@@ -938,6 +934,15 @@ pub fn next(self: *Lexer) Token {
     };
 }
 
+pub fn nextNoWhiteSpace(self: *Lexer) Token {
+    var token = self.next();
+    if (token.id != .WhiteSpace) return token;
+
+    token = self.next();
+    std.debug.assert(token.id != .WhiteSpace);
+    return token;
+}
+
 fn expectTokens(source: []const u8, expected: []const TokenType) !void {
     var comp = Compilation.init(std.testing.allocator);
     defer comp.deinit();
@@ -948,8 +953,12 @@ fn expectTokens(source: []const u8, expected: []const TokenType) !void {
         .comp = &comp,
     };
 
-    for (expected) |expectedTokenId| {
+    var i: usize = 0;
+    while (i < expected.len) {
         const token = lexer.next();
+        if (token.id == .WhiteSpace) continue;
+        const expectedTokenId = expected[i];
+        i += 1;
         if (!std.meta.eql(token.id, expectedTokenId)) {
             std.debug.panic("expected {s}, found {s}\n", .{ @tagName(expectedTokenId), @tagName(token.id) });
         }

@@ -1,6 +1,7 @@
 pub const TokenType = enum(u8) {
     Invalid,
     NewLine,
+    WhiteSpace,
     Eof,
 
     /// identifier containing solely basic character set characters
@@ -335,6 +336,7 @@ pub const TokenType = enum(u8) {
             .IntegerLiteral_LL,
             .IntegerLiteral_LLU,
             .MacroString,
+            .WhiteSpace,
             => null,
 
             .Eof,
