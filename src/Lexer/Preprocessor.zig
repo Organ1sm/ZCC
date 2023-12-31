@@ -150,7 +150,7 @@ pub fn preprocess(pp: *Preprocessor, source: Source) Error!void {
 
     // Estimate how many new tokens this source will contain.
     const estimatedTokenCount = source.buffer.len / 8;
-    try pp.tokens.ensureUnusedCapacity(pp.compilation.gpa, pp.tokens.len + estimatedTokenCount);
+    try pp.tokens.ensureTotalCapacity(pp.compilation.gpa, pp.tokens.len + estimatedTokenCount);
 
     var ifLevel: u8 = 0;
     var ifKind = std.PackedIntArray(u2, 256).init([1]u2{0} ** 256);
@@ -313,7 +313,22 @@ pub fn preprocess(pp: *Preprocessor, source: Source) Error!void {
 
                         try pp.expectNewLine(&lexer);
                     },
+                    .IntegerLiteral => {
+                        // # number "file" flags
+                        const name = lexer.nextNoWhiteSpace();
+                        if (name.id == .Eof or name.id == .NewLine) continue;
+                        if (name.id != .StringLiteral) try pp.addError(name, .line_invalid_filename);
 
+                        const flag1 = lexer.nextNoWhiteSpace();
+                        if (flag1.id == .Eof or flag1.id == .NewLine) continue;
+                        const flag2 = lexer.nextNoWhiteSpace();
+                        if (flag2.id == .Eof or flag2.id == .NewLine) continue;
+                        const flag3 = lexer.nextNoWhiteSpace();
+                        if (flag3.id == .Eof or flag3.id == .NewLine) continue;
+                        const flag4 = lexer.nextNoWhiteSpace();
+                        if (flag4.id == .Eof or flag4.id == .NewLine) continue;
+                        try pp.expectNewLine(&lexer);
+                    },
                     .NewLine => {},
                     .Eof => {
                         if (ifLevel != 0)
@@ -853,16 +868,13 @@ fn expandFuncMacro(
                     try buf.append(.{ .id = .EmptyArg, .loc = .{ .id = raw.source, .byteOffset = raw.start } });
                 } else {
                     for (arg) |tok| {
-                        try buf.ensureTotalCapacity(buf.items.len + arg.len);
+                        try buf.ensureUnusedCapacity(arg.len);
                         buf.appendAssumeCapacity(tok);
                     }
                 }
             },
 
-            .KeywordVarArgs => {
-                try buf.ensureTotalCapacity(buf.items.len + expandedVarArguments.items.len);
-                buf.appendSliceAssumeCapacity(expandedVarArguments.items);
-            },
+            .KeywordVarArgs => try buf.appendSlice(expandedVarArguments.items),
 
             .StringifyParam, .StringifyVarArgs => {
                 const arg = if (raw.id == .StringifyVarArgs)
@@ -1198,7 +1210,7 @@ fn expandMacro(pp: *Preprocessor, lexer: *Lexer, raw: RawToken) Error!void {
     try pp.expandMacroExhaustive(lexer, &buf, 0, 1, true);
     //std.debug.print("Result: ", .{});
     //try pp.debugTokenBuf(buf.items);
-    try pp.tokens.ensureTotalCapacity(pp.compilation.gpa, pp.tokens.len + buf.items.len);
+    try pp.tokens.ensureUnusedCapacity(pp.compilation.gpa, buf.items.len);
     for (buf.items) |*r| {
         if (r.id == .WhiteSpace and !pp.compilation.onlyPreprocess) continue;
         pp.tokens.appendAssumeCapacity(r.*);
