@@ -936,10 +936,8 @@ pub fn next(self: *Lexer) Token {
 
 pub fn nextNoWhiteSpace(self: *Lexer) Token {
     var token = self.next();
-    if (token.id != .WhiteSpace) return token;
-
-    token = self.next();
-    std.debug.assert(token.id != .WhiteSpace);
+    while (token.id == .WhiteSpace)
+        token = self.next();
     return token;
 }
 
