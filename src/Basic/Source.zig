@@ -8,7 +8,7 @@ const Source = @This();
 pub const Location = struct {
     id: ID = .unused,
     byteOffset: u32 = 0,
-    next: ?*Location = null,
+    line: u32 = 0,
 };
 
 pub const ID = enum(u32) {
@@ -22,32 +22,23 @@ buffer: []const u8,
 id: ID,
 invalidUTF8Loc: ?Location = null,
 
-/// LCS bundles line, column, and line string data.
-pub const LCS = struct { line: u32, col: u32, str: []const u8 };
+/// LineCol bundles line, column
+const LineCol = struct { line:[]const u8, col: u32 };
 
 /// calculates line number, column, and line string
 /// for a byte offset into the Source.
-pub fn getLineColString(source: Source, byteOffset: u32) LCS {
-    var line: u32 = 1;
-    var col: u32 = 1;
-
-    var i: u32 = 0;
-    while (i < byteOffset) : (i += 1) {
-        if (source.buffer[i] == '\n') {
-            line += 1;
-            col = 1;
-        } else {
-            col += 1;
+pub fn getLineCol(source: Source, byteOffset: u32) LineCol {
+    var start = byteOffset;
+    while (true) : (start - 1) {
+        if (start == 0) break;
+        if (start < source.buffer.len and source.buffer[start] == '\n') {
+            start += 1;
+            break;
         }
     }
 
-    const start = i - (col - 1);
-    while (i < source.buffer.len) : (i += 1) {
-        if (source.buffer[i] == '\n')
-            break;
-    }
-
-    return .{ .line = line, .col = col, .str = source.buffer[start..i] };
+    const col = byteOffset - start + 1;
+    return .{ .line = std.mem.sliceTo(source.buffer[start..], '\n'), .col = col };
 }
 
 /// Returns the first offset, if any, in buf where an invalid utf8 sequence

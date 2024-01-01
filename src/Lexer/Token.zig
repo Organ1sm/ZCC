@@ -8,8 +8,9 @@ const CharInfo = @import("../Basic/CharInfo.zig");
 pub const Token = struct {
     id: TokenType,
     source: Source.ID,
-    start: u32,
-    end: u32,
+    start: u32 = 0,
+    end: u32 = 0,
+    line: u32 = 0,
 
     /// double underscore and underscore + capital letter identifiers
     /// belong to the implementation namespace, so we always convert them

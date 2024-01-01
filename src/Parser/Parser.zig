@@ -169,6 +169,7 @@ fn expectClosing(p: *Parser, opening: TokenIndex, id: TokenType) Error!void {
                     else => unreachable,
                 },
                 .loc = p.pp.tokens.items(.loc)[opening],
+                .expansionLocs = p.pp.tokens.items(.expansionLocs)[opening],
             });
         }
 
@@ -206,6 +207,7 @@ pub fn errExtra(p: *Parser, tag: Diagnostics.Tag, index: TokenIndex, extra: Diag
         .tag = tag,
         .loc = p.pp.tokens.items(.loc)[index],
         .extra = extra,
+        .expansionLocs = p.pp.tokens.items(.expansionLocs)[index],
     });
 }
 
@@ -214,6 +216,7 @@ pub fn errToken(p: *Parser, tag: Diagnostics.Tag, index: TokenIndex) Compilation
     try p.pp.compilation.diag.add(.{
         .tag = tag,
         .loc = p.pp.tokens.items(.loc)[index],
+        .expansionLocs = p.pp.tokens.items(.expansionLocs)[index],
     });
 }
 
@@ -1579,7 +1582,7 @@ fn parseTypeSpec(p: *Parser, ty: *TypeBuilder) Error!bool {
 fn getAnonymousName(p: *Parser, kindToken: TokenIndex) ![]const u8 {
     const loc = p.pp.tokens.items(.loc)[kindToken];
     const source = p.pp.compilation.getSource(loc.id);
-    const lcs = source.getLineColString(loc.byteOffset);
+    const col = source.getLineCol(loc.byteOffset).col;
 
     const kindStr = switch (p.tokenIds[kindToken]) {
         .KeywordStruct,
@@ -1592,7 +1595,7 @@ fn getAnonymousName(p: *Parser, kindToken: TokenIndex) ![]const u8 {
     return std.fmt.allocPrint(
         p.arena,
         "(anonymous {s} at {s}:{d}:{d})",
-        .{ kindStr, source.path, lcs.line, lcs.col },
+        .{ kindStr, source.path, loc.line, col },
     );
 }
 

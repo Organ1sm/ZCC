@@ -12,6 +12,7 @@ pub const Message = struct {
     tag: Tag,
     loc: Source.Location = .{},
     extra: Extra = .{ .none = {} },
+    expansionLocs: ?[*]Source.Location = null,
     kind: Kind = undefined,
 
     pub const Extra = union {
@@ -1305,19 +1306,28 @@ pub fn deinit(diag: *Diagnostics) void {
 pub fn add(diag: *Diagnostics, msg: Message) Compilation.Error!void {
     const kind = diag.tagKind(msg.tag);
     if (kind == .off) return;
-    try diag.list.append(diag.arena.allocator(), .{ .tag = msg.tag, .kind = kind, .loc = msg.loc, .extra = msg.extra });
+    const copy = msg;
+    try diag.list.append(diag.arena.allocator(), copy);
     if (kind == .@"fatal error" or (kind == .@"error" and diag.fatalErrors))
         return error.FatalError;
 }
 
-pub fn fatal(diag: *Diagnostics, path: []const u8, lcs: Source.LCS, comptime fmt: []const u8, args: anytype) Compilation.Error {
+pub fn fatal(
+    diag: *Diagnostics,
+    path: []const u8,
+    line: []const u8,
+    lineNo: u32,
+    col: u32,
+    comptime fmt: []const u8,
+    args: anytype,
+) Compilation.Error {
     var m = MsgWriter.init(diag.color);
     defer m.deinit();
 
-    m.location(path, lcs);
+    m.location(path, lineNo, col);
     m.start(.@"fatal error");
     m.print(fmt, args);
-    m.end(lcs);
+    m.end(line, col);
     return error.FatalError;
 }
 
@@ -1354,20 +1364,33 @@ pub fn renderExtra(comp: *Compilation, m: anytype) void {
             .default => unreachable,
         }
 
-        var lcs: ?Source.LCS = null;
-        if (msg.loc.id != .unused) {
-            const loc = if (msg.loc.next != null) msg.loc.next.?.* else msg.loc;
-            const source = comp.getSource(loc.id);
-            lcs = source.getLineColString(loc.byteOffset);
-            switch (msg.tag) {
-                .escape_sequence_overflow,
-                .invalid_universal_character,
-                => { // use msg.extra.unsigned for index into string literal
-                    lcs.?.col += @as(u32, @truncate(msg.extra.unsigned));
-                },
-                else => {},
-            }
-            m.location(source.path, lcs.?);
+        var expansionLocs = msg.expansionLocs;
+        var line: ?[]const u8 = null;
+        var col = switch (msg.tag) {
+            .escape_sequence_overflow,
+            .invalid_universal_character,
+            // use msg.extra.unsigned for index into string literal
+            => @as(u32, @truncate(msg.extra.unsigned)),
+            else => 0,
+        };
+        switch (msg.loc.id) {
+            .unused => {},
+            .generated => {
+                const loc = expansionLocs.?[0];
+                expansionLocs = expansionLocs.? + 1;
+                const source = comp.getSource(loc.id);
+                const lineAndCol = source.getLineCol(loc.byteOffset);
+                line = lineAndCol.line;
+                col += lineAndCol.col;
+                m.location(source.path, loc.line, col);
+            },
+            _ => {
+                const source = comp.getSource(msg.loc.id);
+                const lineAndCol = source.getLineCol(msg.loc.byteOffset);
+                line = lineAndCol.line;
+                col += lineAndCol.col;
+                m.location(source.path, msg.loc.line, col);
+            },
         }
 
         m.start(msg.kind);
@@ -1407,31 +1430,27 @@ pub fn renderExtra(comp: *Compilation, m: anytype) void {
             }
         }
 
-        m.end(lcs);
-
-        if (msg.loc.id != .unused) {
-            var maybeLoc = msg.loc.next;
-            if (msg.loc.next != null) maybeLoc = maybeLoc.?.next;
-
-            while (maybeLoc) |loc| {
-                const source = comp.getSource(loc.id);
-                const eLcs = source.getLineColString(loc.byteOffset);
-                m.location(source.path, eLcs);
-                m.start(.note);
-                m.write("expanded from here");
-                m.end(eLcs);
-                maybeLoc = loc.next;
-            }
+        m.end(line, col);
+        var tempToken: Tree.Token = undefined;
+        tempToken.expansionLocs = expansionLocs orelse continue;
+        for (tempToken.exp()) |loc| {
+            const source = comp.getSource(loc.id);
+            const lineAndCol = source.getLineCol(loc.byteOffset);
+            m.location(source.path, loc.line, lineAndCol.col);
+            m.start(.note);
+            m.write("expanded from here");
+            m.end(lineAndCol.line, lineAndCol.col);
         }
     }
-    const w_s: []const u8 = if (warnings == 1) "" else "s";
-    const e_s: []const u8 = if (errors == 1) "" else "s";
+
+    const ws: []const u8 = if (warnings == 1) "" else "s";
+    const es: []const u8 = if (errors == 1) "" else "s";
     if (errors != 0 and warnings != 0) {
-        m.print("{d} warning{s} and {d} error{s} generated.\n", .{ warnings, w_s, errors, e_s });
+        m.print("{d} warning{s} and {d} error{s} generated.\n", .{ warnings, ws, errors, es });
     } else if (warnings != 0) {
-        m.print("{d} warning{s} generated.\n", .{ warnings, w_s });
+        m.print("{d} warning{s} generated.\n", .{ warnings, ws });
     } else if (errors != 0) {
-        m.print("{d} error{s} generated.\n", .{ errors, e_s });
+        m.print("{d} error{s} generated.\n", .{ errors, es });
     }
 
     comp.diag.list.items.len = 0;
@@ -1485,13 +1504,13 @@ const MsgWriter = struct {
         m.w.writeAll(msg) catch {};
     }
 
-    fn location(m: *MsgWriter, path: []const u8, lcs: Source.LCS) void {
+    fn location(m: *MsgWriter, path: []const u8, line: u32, col: u32) void {
         const prefix = if (std.fs.path.dirname(path) == null) "." ++ std.fs.path.sep_str else "";
         if (@import("builtin").os.tag == .windows or !m.color) {
-            m.print("{s}{s}:{d}:{d}: ", .{ prefix, path, lcs.line, lcs.col });
+            m.print("{s}{s}:{d}:{d}: ", .{ prefix, path, line, col });
         } else {
             const BOLD = "\x1b[0m\x1b[1m";
-            m.print(BOLD ++ "{s}{s}:{d}:{d}: ", .{ prefix, path, lcs.line, lcs.col });
+            m.print(BOLD ++ "{s}{s}:{d}:{d}: ", .{ prefix, path, line, col });
         }
     }
 
@@ -1515,24 +1534,21 @@ const MsgWriter = struct {
         }
     }
 
-    fn end(m: *MsgWriter, lcs: ?Source.LCS) void {
+    fn end(m: *MsgWriter, maybeLine: ?[]const u8, col: u32) void {
+        const line = maybeLine orelse
+            {
+            m.write("\n");
+            return;
+        };
         if (@import("builtin").os.tag == .windows or !m.color) {
-            if (lcs == null) {
-                m.write("\n");
-                return;
-            }
-            m.print("\n{s}\n", .{lcs.?.str});
-            m.print("{s: >[1]}^\n", .{ "", lcs.?.col - 1 });
+            m.print("\n{s}\n", .{line});
+            m.print("{s: >[1]}^\n", .{ "", col - 1 });
         } else {
             const GREEN = "\x1b[32;1m";
             const RESET = "\x1b[0m";
-            if (lcs == null) {
-                m.write("\n" ++ RESET);
-                return;
-            }
 
-            m.print("\n" ++ RESET ++ "{s}\n", .{lcs.?.str});
-            m.print("{s: >[1]}" ++ GREEN ++ "^" ++ RESET ++ "\n", .{ "", lcs.?.col - 1 });
+            m.print("\n" ++ RESET ++ "{s}\n", .{line});
+            m.print("{s: >[1]}" ++ GREEN ++ "^" ++ RESET ++ "\n", .{ "", col - 1 });
         }
     }
 };
