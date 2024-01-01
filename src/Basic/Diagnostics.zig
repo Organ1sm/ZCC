@@ -1306,7 +1306,8 @@ pub fn deinit(diag: *Diagnostics) void {
 pub fn add(diag: *Diagnostics, msg: Message) Compilation.Error!void {
     const kind = diag.tagKind(msg.tag);
     if (kind == .off) return;
-    const copy = msg;
+    var copy = msg;
+    copy.kind = kind;
     try diag.list.append(diag.arena.allocator(), copy);
     if (kind == .@"fatal error" or (kind == .@"error" and diag.fatalErrors))
         return error.FatalError;
@@ -1433,7 +1434,7 @@ pub fn renderExtra(comp: *Compilation, m: anytype) void {
         m.end(line, col);
         var tempToken: Tree.Token = undefined;
         tempToken.expansionLocs = expansionLocs orelse continue;
-        for (tempToken.exp()) |loc| {
+        for (tempToken.expansionSlice()) |loc| {
             const source = comp.getSource(loc.id);
             const lineAndCol = source.getLineCol(loc.byteOffset);
             m.location(source.path, loc.line, lineAndCol.col);
@@ -1535,8 +1536,7 @@ const MsgWriter = struct {
     }
 
     fn end(m: *MsgWriter, maybeLine: ?[]const u8, col: u32) void {
-        const line = maybeLine orelse
-            {
+        const line = maybeLine orelse {
             m.write("\n");
             return;
         };

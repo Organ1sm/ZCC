@@ -11,6 +11,7 @@ buffer: []const u8 = undefined,
 index: u32 = 0,
 source: Source.ID,
 comp: *const Compilation,
+line: u32 = 1,
 
 const State = enum {
     start,
@@ -87,6 +88,7 @@ pub fn next(self: *Lexer) Token {
                 '\n' => {
                     id = .NewLine;
                     self.index += 1;
+                    self.line += 1;
                     break;
                 },
 
@@ -198,10 +200,12 @@ pub fn next(self: *Lexer) Token {
                 '\n' => {
                     id = .NewLine;
                     self.index += 1;
+                    self.line += 1;
                     break;
                 },
                 else => {
                     id = .NewLine;
+                    self.line += 1;
                     break;
                 },
             },
@@ -219,6 +223,7 @@ pub fn next(self: *Lexer) Token {
                 '\n' => {
                     start = self.index + 1;
                     state = .whitespace;
+                    self.line += 1;
                 },
                 '\r' => state = .back_slash_cr,
                 '\t', '\x0B', '\x0C', ' ' => {
@@ -234,10 +239,12 @@ pub fn next(self: *Lexer) Token {
                 '\n' => {
                     start = self.index + 1;
                     state = .whitespace;
+                    self.line += 1;
                 },
                 else => {
                     start = self.index;
                     state = .start;
+                    self.line += 1;
                 },
             },
 
@@ -348,8 +355,12 @@ pub fn next(self: *Lexer) Token {
             },
 
             .escape_sequence => switch (c) {
-                '\'', '"', '?', '\\', 'a', 'b', 'e', 'f', 'n', 'r', 't', 'v', '\n' => {
+                '\'', '"', '?', '\\', 'a', 'b', 'e', 'f', 'n', 'r', 't', 'v' => {
                     state = returnState;
+                },
+                '\n' => {
+                    state = returnState;
+                    self.line += 1;
                 },
                 '\r' => state = .cr_escape,
                 '0'...'7' => {
@@ -372,7 +383,10 @@ pub fn next(self: *Lexer) Token {
             },
 
             .cr_escape => switch (c) {
-                '\n' => state = returnState,
+                '\n' => {
+                    state = returnState;
+                    self.line += 1;
+                },
                 else => {
                     break;
                 },
@@ -930,6 +944,7 @@ pub fn next(self: *Lexer) Token {
         .id = id,
         .start = start,
         .end = self.index,
+        .line = self.line,
         .source = self.source,
     };
 }

@@ -15,7 +15,7 @@ var general_purpose_allocator = std.heap.GeneralPurposeAllocator(.{}){};
 
 pub fn main() !void {
     const gpa = general_purpose_allocator.allocator();
-    defer _ = general_purpose_allocator.deinit();
+    defer if (general_purpose_allocator.deinit() == .leak) std.process.exit(1);
 
     const args = try std.process.argsAlloc(gpa);
     defer std.process.argsFree(gpa, args);
@@ -141,9 +141,9 @@ pub fn main() !void {
 
         try pp.addBuiltinMacros();
 
-        try pp.preprocess(builtinMacros);
-        try pp.preprocess(testRunnerMacros);
-        pp.preprocess(file) catch |err| {
+        _ = try pp.preprocess(builtinMacros);
+        _ = try pp.preprocess(testRunnerMacros);
+        const eof = pp.preprocess(file) catch |err| {
             if (!std.unicode.utf8ValidateSlice(file.buffer)) {
                 // non-utf8 files are not preprocessed, so we can't use EXPECTED_ERRORS; instead we
                 // check that the most recent error is .invalid_utf8
@@ -156,10 +156,7 @@ pub fn main() !void {
             progress.log("could not preprocess file '{s}': {s}\n", .{ path, @errorName(err) });
             continue;
         };
-        try pp.tokens.append(gpa, .{
-            .id = .Eof,
-            .loc = .{ .id = file.id, .byteOffset = @as(u32, @intCast(file.buffer.len)) },
-        });
+        try pp.tokens.append(gpa, eof);
 
         if (std.mem.startsWith(u8, file.buffer, "//test preprocess")) {
             comp.renderErrors();

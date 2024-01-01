@@ -29,7 +29,7 @@ const LineCol = struct { line:[]const u8, col: u32 };
 /// for a byte offset into the Source.
 pub fn getLineCol(source: Source, byteOffset: u32) LineCol {
     var start = byteOffset;
-    while (true) : (start - 1) {
+    while (true) : (start -= 1) {
         if (start == 0) break;
         if (start < source.buffer.len and source.buffer[start] == '\n') {
             start += 1;

@@ -47,18 +47,18 @@ pub const Token = struct {
         return locs[0..i];
     }
 
-    pub fn addExpansionLocation(tok: *Token, gpa: *std.mem.Allocator, new: []const Source.Location) !void {
+    pub fn addExpansionLocation(tok: *Token, gpa: std.mem.Allocator, new: []const Source.Location) !void {
         if (new.len == 0 or tok.id == .WhiteSpace) return;
         var list = std.ArrayList(Source.Location).init(gpa);
         defer {
-            std.mem.set(Source.Location, list.items.ptr[list.items.len..list.capacity], .{});
+            @memset(list.items.ptr[list.items.len..list.capacity], .{});
             // add a sentinel since the allocator is not guaranteed
             // to return the exact desired size
-            list.items.ptr[list.capacity - 1].byte_offset = 1;
-            tok.expansion_locs = list.items.ptr;
+            list.items.ptr[list.capacity - 1].byteOffset = 1;
+            tok.expansionLocs = list.items.ptr;
         }
 
-        if (tok.expansion_locs) |locs| {
+        if (tok.expansionLocs) |locs| {
             var i: usize = 0;
             while (locs[i].id != .unused) : (i += 1) {}
             list.items = locs[0..i];
@@ -66,7 +66,7 @@ pub const Token = struct {
             list.capacity = i + 1;
         }
 
-        const minLen = std.math.max(list.items.len + new.len + 1, 4);
+        const minLen = @max(list.items.len + new.len + 1, 4);
         const wantedLen = std.math.ceilPowerOfTwo(usize, minLen) catch
             return error.OutOfMemory;
         try list.ensureTotalCapacity(wantedLen);
