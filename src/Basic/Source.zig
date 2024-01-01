@@ -3,30 +3,32 @@ const std = @import("std");
 /// Contains the file path, contents buffer, and an ID.
 const Source = @This();
 
-/// Location tracks a specific position within a Source.
-/// Has byte offset, line/column info, and next pointer.
+/// Definition of the Location structure, used to track a specific position within a Source.
+/// It includes fields like ID, byte offset, line, and column.
 pub const Location = struct {
     id: ID = .unused,
     byteOffset: u32 = 0,
     line: u32 = 0,
 };
 
+/// Enumeration ID represents the state of a source code file.
 pub const ID = enum(u32) {
     unused = 0,
     generated = 1,
     _,
 };
 
+/// Fields of the Source structure, including file path, content buffer, ID, and invalid UTF-8 location.
 path: []const u8,
 buffer: []const u8,
 id: ID,
 invalidUTF8Loc: ?Location = null,
 
-/// LineCol bundles line, column
-const LineCol = struct { line:[]const u8, col: u32 };
+/// Definition of the LineCol structure bundling line and column information.
+const LineCol = struct { line: []const u8, col: u32 };
 
-/// calculates line number, column, and line string
-/// for a byte offset into the Source.
+/// Function getLineCol calculates line number, column, and line string
+/// for a given byte offset into the Source.
 pub fn getLineCol(source: Source, byteOffset: u32) LineCol {
     var start = byteOffset;
     while (true) : (start -= 1) {

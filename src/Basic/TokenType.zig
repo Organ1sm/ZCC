@@ -105,8 +105,6 @@ pub const TokenType = enum(u8) {
     StringifyParam,
     /// Same as stringify_param, but for var args
     StringifyVarArgs,
-    /// Special token for when empty argument is passed to macro token
-    EmptyArg,
     /// Special token for implementing __has_attribute
     MacroParamHasAttribute,
     /// Special token for implementing __has_warning
@@ -348,7 +346,6 @@ pub const TokenType = enum(u8) {
             .MacroParamIsIdentifier,
             .StringifyParam,
             .StringifyVarArgs,
-            .EmptyArg,
             => "",
 
             .One => "1",
