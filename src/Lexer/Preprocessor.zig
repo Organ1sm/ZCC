@@ -69,10 +69,11 @@ tokenBuffer: RawTokenList,
 charBuffer: std.ArrayList(u8),
 includeDepth: u8 = 0,
 poisonedIdentifiers: std.StringHashMap(void),
-/// Counter that is incremented each time preprocess() is called
-/// Can be used to distinguish multiple preprocessings of the same file
+/// used to implement __COUNTER__ Macro
 counter: u32 = 0,
 expansionSourceLoc: Source.Location = undefined,
+/// Counter that is incremented each time preprocess() is called
+/// Can be used to distinguish multiple preprocessings of the same file
 preprocessCount: u32 = 0,
 /// Memory is retained to avoid allocation on every single token.
 topExpansionBuffer: ExpandBuffer,
@@ -186,13 +187,13 @@ pub fn preprocess(pp: *Preprocessor, source: Source) Error!Token {
                             if (lexer.buffer[lexer.index] == '\n') break;
                         }
 
-                        var slice = lexer.buffer[start..lexer.index];
-                        slice = std.mem.trim(u8, slice, TrailingWhiteSpace);
+                        var message = lexer.buffer[start..lexer.index];
+                        message = std.mem.trim(u8, message, TrailingWhiteSpace);
 
                         try pp.compilation.diag.add(.{
                             .tag = .error_directive,
                             .loc = .{ .id = token.source, .byteOffset = token.start, .line = directive.line },
-                            .extra = .{ .str = slice },
+                            .extra = .{ .str = message },
                         });
                     },
 
