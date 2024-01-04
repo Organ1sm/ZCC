@@ -1399,16 +1399,14 @@ fn define(pp: *Preprocessor, lexer: *Lexer) Error!void {
         try pp.addError(first, .hash_hash_at_start);
         return skipToNewLine(lexer);
     }
-
     first.id.simplifyMacroKeyword();
 
     pp.tokenBuffer.items.len = 0;
-    try pp.tokenBuffer.append(first);
 
     var endIdx: u32 = undefined;
     // Collect the token body and validate any ## found.
+    var token = first;
     while (true) {
-        var token = lexer.next();
         token.id.simplifyMacroKeyword();
         switch (token.id) {
             .HashHash => {
@@ -1433,6 +1431,7 @@ fn define(pp: *Preprocessor, lexer: *Lexer) Error!void {
             },
             else => try pp.tokenBuffer.append(token),
         }
+        token = lexer.next();
     }
 
     const list = try pp.arena.allocator().dupe(RawToken, pp.tokenBuffer.items);
