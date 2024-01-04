@@ -151,7 +151,7 @@ pub fn preprocess(pp: *Preprocessor, source: Source) Error!Token {
         try pp.compilation.diag.add(.{
             .tag = .invalid_utf8,
             .loc = loc,
-        });
+        }, &.{});
         return error.FatalError;
     }
 
@@ -187,6 +187,7 @@ pub fn preprocess(pp: *Preprocessor, source: Source) Error!Token {
                             if (lexer.buffer[lexer.index] == '\n') break;
                         }
 
+                        // #error message
                         var message = lexer.buffer[start..lexer.index];
                         message = std.mem.trim(u8, message, TrailingWhiteSpace);
 
@@ -194,7 +195,7 @@ pub fn preprocess(pp: *Preprocessor, source: Source) Error!Token {
                             .tag = .error_directive,
                             .loc = .{ .id = token.source, .byteOffset = token.start, .line = directive.line },
                             .extra = .{ .str = message },
-                        });
+                        }, &.{});
                     },
 
                     .KeywordIf => {
@@ -427,7 +428,7 @@ fn addError(pp: *Preprocessor, raw: RawToken, tag: Diagnostics.Tag) !void {
             .byteOffset = raw.start,
             .line = raw.line,
         },
-    });
+    }, &.{});
 }
 
 fn fatal(pp: *Preprocessor, raw: RawToken, comptime fmt: []const u8, args: anytype) Compilation.Error {
@@ -513,10 +514,11 @@ fn expr(pp: *Preprocessor, lexer: *Lexer) Error!bool {
     }
 
     if (!pp.tokens.items(.id)[start].validPreprocessorExprStart()) {
+        const token = pp.tokens.get(0);
         try pp.compilation.diag.add(.{
             .tag = .invalid_preproc_expr_start,
-            .loc = pp.tokens.items(.loc)[0],
-        });
+            .loc = token.loc,
+        }, token.expansionSlice());
         return false;
     }
 
@@ -528,10 +530,11 @@ fn expr(pp: *Preprocessor, lexer: *Lexer) Error!bool {
             .StringLiteralUTF_32,
             .StringLiteralWide,
             => {
+                const t = pp.tokens.get(i);
                 try pp.compilation.diag.add(.{
                     .tag = .string_literal_in_pp_expr,
-                    .loc = pp.tokens.items(.loc)[i],
-                });
+                    .loc = t.loc,
+                }, t.expansionSlice());
                 return false;
             },
 
@@ -539,10 +542,11 @@ fn expr(pp: *Preprocessor, lexer: *Lexer) Error!bool {
             .FloatLiteral_F,
             .FloatLiteral_L,
             => {
+                const t = pp.tokens.get(i);
                 try pp.compilation.diag.add(.{
                     .tag = .float_literal_in_pp_expr,
-                    .loc = pp.tokens.items(.loc)[i],
-                });
+                    .loc = t.loc,
+                }, t.expansionSlice());
                 return false;
             },
 
@@ -570,10 +574,11 @@ fn expr(pp: *Preprocessor, lexer: *Lexer) Error!bool {
             .Arrow,
             .Period,
             => {
+                const t = pp.tokens.get(i);
                 try pp.compilation.diag.add(.{
                     .tag = .invalid_preproc_operator,
-                    .loc = pp.tokens.items(.loc)[i],
-                });
+                    .loc = t.loc,
+                }, t.expansionSlice());
                 return false;
             },
 
@@ -777,7 +782,10 @@ fn handleBuiltinMacro(pp: *Preprocessor, builtin: TokenType, paramTokens: []cons
             };
             if (identifier == null and invalid == null) invalid = paramTokens[0];
             if (invalid) |some| {
-                try pp.compilation.diag.add(.{ .tag = .feature_check_requires_identifier, .loc = some.loc });
+                try pp.compilation.diag.add(
+                    .{ .tag = .feature_check_requires_identifier, .loc = some.loc },
+                    some.expansionSlice(),
+                );
                 return .Zero;
             }
             const attrName = pp.expandedSlice(identifier.?);
@@ -791,7 +799,7 @@ fn handleBuiltinMacro(pp: *Preprocessor, builtin: TokenType, paramTokens: []cons
                         .tag = .expected_str_literal_in,
                         .loc = paramTokens[0].loc,
                         .extra = .{ .str = "__has_warning" },
-                    });
+                    }, paramTokens[0].expansionSlice());
                     return .Zero;
                 },
                 else => |e| return e,
@@ -802,7 +810,7 @@ fn handleBuiltinMacro(pp: *Preprocessor, builtin: TokenType, paramTokens: []cons
                     .tag = .malformed_warning_check,
                     .loc = paramTokens[0].loc,
                     .extra = .{ .str = "__has_warning" },
-                });
+                }, paramTokens[0].expansionSlice());
                 return .Zero;
             }
 
@@ -825,7 +833,7 @@ fn handleBuiltinMacro(pp: *Preprocessor, builtin: TokenType, paramTokens: []cons
                     .tag = .missing_tok_builtin,
                     .loc = some.loc,
                     .extra = .{ .expectedTokenId = .RParen },
-                });
+                }, some.expansionSlice());
                 return .Zero;
             }
 
@@ -953,7 +961,7 @@ fn expandFuncMacro(
                 const arg = expandedArgs.items[0];
                 if (arg.len == 0) {
                     const extra = Diagnostics.Message.Extra{ .arguments = .{ .expected = 1, .actual = 0 } };
-                    try pp.compilation.diag.add(.{ .tag = .expected_arguments, .loc = loc, .extra = extra });
+                    try pp.compilation.diag.add(.{ .tag = .expected_arguments, .loc = loc, .extra = extra }, &.{});
                     try buf.append(.{ .id = .Zero, .loc = loc });
                     break;
                 }
@@ -1049,7 +1057,7 @@ fn collectMacroFuncArguments(
                         .tag = .missing_tok_builtin,
                         .loc = token.loc,
                         .extra = .{ .expectedTokenId = .LParen },
-                    });
+                    }, token.expansionSlice());
                 }
                 // Not a macro function call, go over normal identifier, rewind
                 lexer.* = savedLexer;
@@ -1097,7 +1105,10 @@ fn collectMacroFuncArguments(
                 deinitMacroArguments(pp.compilation.gpa, &args);
                 lexer.* = savedLexer;
                 endIdx.* = oldEnd;
-                try pp.compilation.diag.add(.{ .tag = .unterminated_macro_arg_list, .loc = nameToken.loc });
+                try pp.compilation.diag.add(
+                    .{ .tag = .unterminated_macro_arg_list, .loc = nameToken.loc },
+                    nameToken.expansionSlice(),
+                );
                 return null;
             },
 
@@ -1168,13 +1179,19 @@ fn expandMacroExhaustive(
                         .actual = argsCount,
                     } };
                     if (macro.varArgs and argsCount < macro.params.len) {
-                        try pp.compilation.diag.add(.{ .tag = .expected_at_least_arguments, .loc = buf.items[idx].loc, .extra = extra });
+                        try pp.compilation.diag.add(
+                            .{ .tag = .expected_at_least_arguments, .loc = buf.items[idx].loc, .extra = extra },
+                            buf.items[idx].expansionSlice(),
+                        );
                         idx += 1;
                         continue;
                     }
 
                     if (!macro.varArgs and argsCount != macro.params.len) {
-                        try pp.compilation.diag.add(.{ .tag = .expected_arguments, .loc = buf.items[idx].loc, .extra = extra });
+                        try pp.compilation.diag.add(
+                            .{ .tag = .expected_arguments, .loc = buf.items[idx].loc, .extra = extra },
+                            buf.items[idx].expansionSlice(),
+                        );
                         idx += 1;
                         continue;
                     }
@@ -1333,7 +1350,7 @@ fn pasteTokens(pp: *Preprocessor, lhsTokens: *ExpandBuffer, rhsTokens: []const T
             .tag = .pasting_formed_invalid,
             .loc = .{ .id = lhs.loc.id, .byteOffset = lhs.loc.byteOffset },
             .extra = .{ .str = try pp.arena.allocator().dupe(u8, pp.generated.items[start..end]) },
-        });
+        }, lhs.expansionSlice());
     }
     try lhsTokens.append(try pp.makeGeneratedToken(start, pastedToken.id, lhs));
     try bufCopyTokens(lhsTokens, rhsTokens[rhsRest..], &.{});
@@ -1361,7 +1378,7 @@ fn defineMacro(pp: *Preprocessor, nameToken: RawToken, macro: Macro) Error!void 
             .tag = if (gop.value_ptr.isBuiltin) .builtin_macro_redefined else .macro_redefined,
             .loc = .{ .id = nameToken.source, .byteOffset = nameToken.start, .line = nameToken.line },
             .extra = .{ .str = name },
-        });
+        }, &.{});
     }
 
     gop.value_ptr.* = macro;
@@ -1638,7 +1655,7 @@ fn pragma(pp: *Preprocessor, lexer: *Lexer, pragmaToken: RawToken) !void {
         .tag = .unsupported_pragma,
         .loc = .{ .id = nameToken.source, .byteOffset = nameToken.start, .line = nameToken.line },
         .extra = .{ .str = name },
-    });
+    }, &.{});
 }
 
 fn findIncludeSource(pp: *Preprocessor, lexer: *Lexer) !Source {
@@ -1660,7 +1677,7 @@ fn findIncludeSource(pp: *Preprocessor, lexer: *Lexer) !Source {
             }
         }
 
-        try pp.compilation.diag.add(.{ .tag = .header_str_closing, .loc = .{ .id = first.source, .byteOffset = first.start } });
+        try pp.compilation.diag.add(.{ .tag = .header_str_closing, .loc = .{ .id = first.source, .byteOffset = first.start } }, &.{});
         try pp.addError(first, .header_str_match);
     }
 

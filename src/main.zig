@@ -60,6 +60,8 @@ const usage =
     \\  -fno-color-diagnostics  Disable colors in diagnostics
     \\  -fshort-enums           Use the narrowest possible integer type for enums.
     \\  -fno-short-enums        Use "int" as the tag type for enums.
+    \\  -fmacro-backtrace-limit=<limit>
+    \\                          Set limit on how many macro expansion traces are shown in errors (default 6)
     \\  -I <dir>                Add directory to include search path
     \\  -isystem                Add directory to system include search path
     \\  -o <file>               Write output to <file>
@@ -146,6 +148,13 @@ fn handleArgs(comp: *Compilation, args: [][]const u8) !void {
                 comp.langOpts.shortEnums = true;
             } else if (std.mem.eql(u8, arg, "-fno-short-enums")) {
                 comp.langOpts.shortEnums = false;
+            } else if (std.mem.startsWith(u8, arg, "-fmacro-backtrace-limit=")) {
+                const limitStr = arg["-fmacro-backtrace-limit=".len..];
+                var limit = std.fmt.parseInt(u32, limitStr, 10) catch
+                    return comp.diag.fatalNoSrc("-fmacro-backtrace-limit takes a number argument", .{});
+
+                if (limit == 0) limit = std.math.maxInt(u32);
+                comp.diag.macroBacktraceLimit = limit;
             } else if (std.mem.startsWith(u8, arg, "-I")) {
                 var path = arg["-I".len..];
                 if (path.len == 0) {

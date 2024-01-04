@@ -71,7 +71,7 @@ fn checkIdentifierCodepoint(comp: *Compilation, codepoint: u21, loc: Source.Loca
         try comp.diag.add(.{
             .tag = .c99_compat,
             .loc = loc,
-        });
+        }, &.{});
         diagnosed = true;
     }
     if (CharInfo.isInvisible(codepoint)) {
@@ -79,7 +79,7 @@ fn checkIdentifierCodepoint(comp: *Compilation, codepoint: u21, loc: Source.Loca
             .tag = .unicode_zero_width,
             .loc = loc,
             .extra = .{ .actualCodePoint = codepoint },
-        });
+        }, &.{});
         diagnosed = true;
     }
     if (CharInfo.homoglyph(codepoint)) |resembles| {
@@ -87,7 +87,7 @@ fn checkIdentifierCodepoint(comp: *Compilation, codepoint: u21, loc: Source.Loca
             .tag = .unicode_homoglyph,
             .loc = loc,
             .extra = .{ .codePoints = .{ .actual = codepoint, .resembles = resembles } },
-        });
+        }, &.{});
         diagnosed = true;
     }
     return diagnosed;
@@ -161,6 +161,7 @@ fn expectClosing(p: *Parser, opening: TokenIndex, id: TokenType) Error!void {
     _ = p.expectToken(id) catch |e|
         {
         if (e == error.ParsingFailed) {
+            const token = p.pp.tokens.get(opening);
             try p.pp.compilation.diag.add(.{
                 .tag = switch (id) {
                     .RParen => .to_match_paren,
@@ -168,9 +169,8 @@ fn expectClosing(p: *Parser, opening: TokenIndex, id: TokenType) Error!void {
                     .RBracket => .to_match_bracket,
                     else => unreachable,
                 },
-                .loc = p.pp.tokens.items(.loc)[opening],
-                .expansionLocs = p.pp.tokens.items(.expansionLocs)[opening],
-            });
+                .loc = token.loc,
+            }, token.expansionSlice());
         }
 
         return e;
@@ -203,21 +203,21 @@ pub fn errStr(p: *Parser, tag: Diagnostics.Tag, index: TokenIndex, str: []const 
 
 pub fn errExtra(p: *Parser, tag: Diagnostics.Tag, index: TokenIndex, extra: Diagnostics.Message.Extra) Compilation.Error!void {
     @setCold(true);
+    const token = p.pp.tokens.get(index);
     try p.pp.compilation.diag.add(.{
         .tag = tag,
-        .loc = p.pp.tokens.items(.loc)[index],
+        .loc = token.loc,
         .extra = extra,
-        .expansionLocs = p.pp.tokens.items(.expansionLocs)[index],
-    });
+    }, token.expansionSlice());
 }
 
 pub fn errToken(p: *Parser, tag: Diagnostics.Tag, index: TokenIndex) Compilation.Error!void {
     @setCold(true);
+    const token = p.pp.tokens.get(index);
     try p.pp.compilation.diag.add(.{
         .tag = tag,
-        .loc = p.pp.tokens.items(.loc)[index],
-        .expansionLocs = p.pp.tokens.items(.expansionLocs)[index],
-    });
+        .loc = token.loc,
+    }, token.expansionSlice());
 }
 
 pub fn err(p: *Parser, tag: Diagnostics.Tag) Compilation.Error!void {

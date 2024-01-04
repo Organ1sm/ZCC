@@ -12,7 +12,6 @@ pub const Message = struct {
     tag: Tag,
     loc: Source.Location = .{},
     extra: Extra = .{ .none = {} },
-    expansionLocs: ?[*]Source.Location = null,
     kind: Kind = undefined,
 
     pub const Extra = union {
@@ -1252,6 +1251,15 @@ const messages = struct {
         const extra = .str;
         const kind = .@"error";
     };
+    pub const expanded_from_here = struct {
+        const msg = "expanded from here";
+        const kind = .note;
+    };
+    pub const skipping_macro_backtrace = struct {
+        const msg = "(skipping {d} expansions in backtrace; use -fmacro-backtrace-limit=0 to see all)";
+        const extra = .unsigned;
+        const kind = .note;
+    };
 };
 
 list: std.ArrayListUnmanaged(Message) = .{},
@@ -1260,6 +1268,7 @@ color: bool = true,
 fatalErrors: bool = false,
 options: Options = .{},
 errors: u32 = 0,
+macroBacktraceLimit: u32 = 6,
 
 pub fn warningExists(name: []const u8) bool {
     inline for (std.meta.fields(Options)) |f| {
@@ -1282,7 +1291,7 @@ pub fn set(diag: *Diagnostics, name: []const u8, to: Kind) !void {
     try diag.add(.{
         .tag = .unknown_warning,
         .extra = .{ .str = name },
-    });
+    }, &.{});
 }
 
 pub fn setAll(diag: *Diagnostics, to: Kind) void {
@@ -1303,12 +1312,55 @@ pub fn deinit(diag: *Diagnostics) void {
     diag.arena.deinit();
 }
 
-pub fn add(diag: *Diagnostics, msg: Message) Compilation.Error!void {
+pub fn add(diag: *Diagnostics, msg: Message, expansionLocs: []const Source.Location) Compilation.Error!void {
     const kind = diag.tagKind(msg.tag);
     if (kind == .off) return;
     var copy = msg;
     copy.kind = kind;
+
+    if (expansionLocs.len != 0)
+        copy.loc = expansionLocs[expansionLocs.len - 1];
+
     try diag.list.append(diag.arena.allocator(), copy);
+
+    if (expansionLocs.len != 0) {
+        // Add macro backtrace notes in reverse order omitting from the middle if needed.
+        var i = expansionLocs.len - 1;
+        const half = diag.macroBacktraceLimit / 2;
+        const limit = if (i < diag.macroBacktraceLimit) 0 else i - half;
+        try diag.list.ensureUnusedCapacity(diag.arena.allocator(), if (limit == 0) expansionLocs.len else diag.macroBacktraceLimit + 1);
+        while (i > limit) {
+            i -= 1;
+            diag.list.appendAssumeCapacity(.{
+                .tag = .expanded_from_here,
+                .kind = .note,
+                .loc = expansionLocs[i],
+            });
+        }
+        if (limit != 0) {
+            diag.list.appendAssumeCapacity(.{
+                .tag = .skipping_macro_backtrace,
+                .kind = .note,
+                .extra = .{ .unsigned = expansionLocs.len - diag.macroBacktraceLimit },
+            });
+            i = half - 1;
+            while (i > 0) {
+                i -= 1;
+                diag.list.appendAssumeCapacity(.{
+                    .tag = .expanded_from_here,
+                    .kind = .note,
+                    .loc = expansionLocs[i],
+                });
+            }
+        }
+
+        diag.list.appendAssumeCapacity(.{
+            .tag = .expanded_from_here,
+            .kind = .note,
+            .loc = msg.loc,
+        });
+    }
+
     if (kind == .@"fatal error" or (kind == .@"error" and diag.fatalErrors))
         return error.FatalError;
 }
@@ -1365,7 +1417,6 @@ pub fn renderExtra(comp: *Compilation, m: anytype) void {
             .default => unreachable,
         }
 
-        var expansionLocs = msg.expansionLocs;
         var line: ?[]const u8 = null;
         var col = switch (msg.tag) {
             .escape_sequence_overflow,
@@ -1374,24 +1425,12 @@ pub fn renderExtra(comp: *Compilation, m: anytype) void {
             => @as(u32, @truncate(msg.extra.unsigned)),
             else => 0,
         };
-        switch (msg.loc.id) {
-            .unused => {},
-            .generated => {
-                const loc = expansionLocs.?[0];
-                expansionLocs = expansionLocs.? + 1;
-                const source = comp.getSource(loc.id);
-                const lineAndCol = source.getLineCol(loc.byteOffset);
-                line = lineAndCol.line;
-                col += lineAndCol.col;
-                m.location(source.path, loc.line, col);
-            },
-            _ => {
-                const source = comp.getSource(msg.loc.id);
-                const lineAndCol = source.getLineCol(msg.loc.byteOffset);
-                line = lineAndCol.line;
-                col += lineAndCol.col;
-                m.location(source.path, msg.loc.line, col);
-            },
+        if (msg.loc.id != .unused) {
+            const source = comp.getSource(msg.loc.id);
+            const lineAndCol = source.getLineCol(msg.loc.byteOffset);
+            line = lineAndCol.line;
+            col += lineAndCol.col;
+            m.location(source.path, msg.loc.line, col);
         }
 
         m.start(msg.kind);
@@ -1432,16 +1471,6 @@ pub fn renderExtra(comp: *Compilation, m: anytype) void {
         }
 
         m.end(line, col);
-        var tempToken: Tree.Token = undefined;
-        tempToken.expansionLocs = expansionLocs orelse continue;
-        for (tempToken.expansionSlice()) |loc| {
-            const source = comp.getSource(loc.id);
-            const lineAndCol = source.getLineCol(loc.byteOffset);
-            m.location(source.path, loc.line, lineAndCol.col);
-            m.start(.note);
-            m.write("expanded from here");
-            m.end(lineAndCol.line, lineAndCol.col);
-        }
     }
 
     const ws: []const u8 = if (warnings == 1) "" else "s";
@@ -1506,7 +1535,7 @@ const MsgWriter = struct {
     }
 
     fn location(m: *MsgWriter, path: []const u8, line: u32, col: u32) void {
-        const prefix = if (std.fs.path.dirname(path) == null) "." ++ std.fs.path.sep_str else "";
+        const prefix = if (std.fs.path.dirname(path) == null and path[0] != '<') "." ++ std.fs.path.sep_str else "";
         if (@import("builtin").os.tag == .windows or !m.color) {
             m.print("{s}{s}:{d}:{d}: ", .{ prefix, path, line, col });
         } else {
