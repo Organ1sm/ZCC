@@ -258,6 +258,7 @@ fn handleArgs(comp: *Compilation, args: [][]const u8) !void {
 }
 
 fn processSource(comp: *Compilation, source: Source, builtinMacro: Source, userDefinedMacros: Source) !void {
+    comp.generatedBuffer.items.len = 0;
     var pp = Preprocessor.init(comp);
     defer pp.deinit();
 

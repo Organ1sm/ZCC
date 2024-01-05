@@ -97,7 +97,7 @@ fn eatIdentifier(p: *Parser) !?TokenIndex {
     switch (p.getCurrToken()) {
         .Identifier => {},
         .ExtendedIdentifier => {
-            const slice = p.tokSlice(p.index);
+            const slice = p.getTokenSlice(p.index);
             var it = std.unicode.Utf8View.initUnchecked(slice).iterator();
             var loc = p.pp.tokens.items(.loc)[p.index];
 
@@ -121,7 +121,7 @@ fn eatIdentifier(p: *Parser) !?TokenIndex {
 
     // Handle illegal '$' characters in identifiers
     if (!p.pp.compilation.langOpts.dollarsInIdentifiers) {
-        if (p.getCurrToken() == .Invalid and p.tokSlice(p.index)[0] == '$') {
+        if (p.getCurrToken() == .Invalid and p.getTokenSlice(p.index)[0] == '$') {
             try p.err(.dollars_in_identifiers);
             p.index += 1;
             return error.ParsingFailed;
@@ -197,16 +197,13 @@ fn expectClosing(p: *Parser, opening: TokenIndex, id: TokenType) Error!void {
     };
 }
 
-fn tokSlice(p: *Parser, index: TokenIndex) []const u8 {
+fn getTokenSlice(p: *Parser, index: TokenIndex) []const u8 {
     if (p.tokenIds[index].lexeMe()) |some|
         return some;
 
     const loc = p.pp.tokens.items(.loc)[index];
     var lexer = Lexer{
-        .buffer = if (loc.id == .generated)
-            p.pp.generated.items
-        else
-            p.pp.compilation.getSource(loc.id).buffer,
+        .buffer = p.pp.compilation.getSource(loc.id).buffer,
         .comp = p.pp.compilation,
         .index = loc.byteOffset,
         .source = .generated,
@@ -306,7 +303,7 @@ fn addList(p: *Parser, nodes: []const NodeIndex) Allocator.Error!AST.Range {
 }
 
 fn findTypedef(p: *Parser, nameToken: TokenIndex, notTypeYet: bool) !?Scope.Symbol {
-    const name = p.tokSlice(nameToken);
+    const name = p.getTokenSlice(nameToken);
     var i = p.scopes.items.len;
     while (i > 0) {
         i -= 1;
@@ -372,7 +369,7 @@ fn inLoopOrSwitch(p: *Parser) bool {
 fn findLabel(p: *Parser, name: []const u8) ?TokenIndex {
     for (p.labels.items) |item| {
         switch (item) {
-            .label => |l| if (std.mem.eql(u8, p.tokSlice(l), name)) return l,
+            .label => |l| if (std.mem.eql(u8, p.getTokenSlice(l), name)) return l,
             .unresolvedGoto => {},
         }
     }
@@ -409,7 +406,7 @@ fn nodeIs(p: *Parser, node: NodeIndex, tag: AstTag) bool {
 }
 
 fn findSymbol(p: *Parser, nameToken: TokenIndex, refKind: enum { reference, definition }) ?Scope {
-    const name = p.tokSlice(nameToken);
+    const name = p.getTokenSlice(nameToken);
     var i = p.scopes.items.len;
     while (i > 0) {
         i -= 1;
@@ -426,7 +423,7 @@ fn findSymbol(p: *Parser, nameToken: TokenIndex, refKind: enum { reference, defi
 }
 
 fn findTag(p: *Parser, kind: TokenType, nameToken: TokenIndex, refKind: enum { reference, definition }) !?Scope.Symbol {
-    const name = p.tokSlice(nameToken);
+    const name = p.getTokenSlice(nameToken);
     var i = p.scopes.items.len;
     var sawBlock = false;
     while (i > 0) {
@@ -473,7 +470,7 @@ fn pragma(p: *Parser) !bool {
     while (p.eat(.KeywordPragma)) |pragmaToken| {
         foundPragma = true;
         const nameToken = p.index;
-        const name = p.tokSlice(nameToken);
+        const name = p.getTokenSlice(nameToken);
         const endIdx = std.mem.indexOfScalarPos(TokenType, p.tokenIds, p.index, .NewLine) orelse {
             try p.errToken(.pragma_inside_macro, pragmaToken);
             return error.ParsingFailed;
@@ -672,7 +669,7 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
         .comp = pp.compilation,
         .tokens = pp.tokens.slice(),
         .arena = arena,
-        .generated = pp.generated.items,
+        .generated = pp.compilation.generatedBuffer.items,
         .nodes = p.nodes.toOwnedSlice(),
         .data = data,
         .rootDecls = rootDecls,
@@ -821,12 +818,12 @@ fn parseDeclaration(p: *Parser) Error!bool {
 
         if (p.findSymbol(initD.d.name, .definition)) |sym| {
             if (sym == .definition) {
-                try p.errStr(.redefinition, initD.d.name, p.tokSlice(initD.d.name));
+                try p.errStr(.redefinition, initD.d.name, p.getTokenSlice(initD.d.name));
                 try p.errToken(.previous_definition, sym.definition.nameToken);
             }
         } else {
             try p.scopes.append(.{ .definition = .{
-                .name = p.tokSlice(initD.d.name),
+                .name = p.getTokenSlice(initD.d.name),
                 .type = initD.d.type,
                 .nameToken = initD.d.name,
             } });
@@ -887,7 +884,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
 
                     // find and correct parameter types
                     // TODO check for missing declaration and redefinition
-                    const name = p.tokSlice(d.name);
+                    const name = p.getTokenSlice(d.name);
                     for (initD.d.type.data.func.params) |*param| {
                         if (std.mem.eql(u8, param.name, name)) {
                             param.ty = d.type;
@@ -940,7 +937,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
         if (returnType == null) {
             for (p.labels.items) |item| {
                 if (item == .unresolvedGoto)
-                    try p.errStr(.undeclared_label, item.unresolvedGoto, p.tokSlice(item.unresolvedGoto));
+                    try p.errStr(.undeclared_label, item.unresolvedGoto, p.getTokenSlice(item.unresolvedGoto));
 
                 if (p.computedGotoTok) |gotoToken| {
                     if (!p.containsAddresssOfLabel)
@@ -974,7 +971,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
         try p.declBuffer.append(node);
 
         const sym = Scope.Symbol{
-            .name = p.tokSlice(initD.d.name),
+            .name = p.getTokenSlice(initD.d.name),
             .type = initD.d.type,
             .nameToken = initD.d.name,
         };
@@ -1299,7 +1296,7 @@ fn attribute(p: *Parser) Error!Attribute {
 }
 
 fn validateAttr(p: *Parser, attr: Attribute, context: Attribute.ParseContext) Error!bool {
-    const name = p.tokSlice(attr.name);
+    const name = p.getTokenSlice(attr.name);
     if (Attribute.Tag.fromString(name)) |tag| {
         if (tag.allowedInContext(context))
             return true;
@@ -1412,25 +1409,25 @@ fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec) Error!?InitDeclarator {
 
     if (p.findSymbol(name, .definition)) |scope| switch (scope) {
         .enumeration => {
-            try p.errStr(.redefinition_different_sym, name, p.tokSlice(name));
+            try p.errStr(.redefinition_different_sym, name, p.getTokenSlice(name));
             try p.errToken(.previous_definition, scope.enumeration.nameToken);
         },
 
         .declaration => |s| if (!s.type.eql(initD.d.type, true)) {
-            try p.errStr(.redefinition, name, p.tokSlice(name));
+            try p.errStr(.redefinition, name, p.getTokenSlice(name));
             try p.errToken(.previous_definition, s.nameToken);
         },
 
         .definition => |s| if (!s.type.eql(initD.d.type, true)) {
-            try p.errStr(.redefinition_incompatible, name, p.tokSlice(name));
+            try p.errStr(.redefinition_incompatible, name, p.getTokenSlice(name));
             try p.errToken(.previous_definition, s.nameToken);
         } else if (initD.initializer != .none) {
-            try p.errStr(.redefinition, name, p.tokSlice(name));
+            try p.errStr(.redefinition, name, p.getTokenSlice(name));
             try p.errToken(.previous_definition, s.nameToken);
         },
 
         .param => |s| {
-            try p.errStr(.redefinition, name, p.tokSlice(name));
+            try p.errStr(.redefinition, name, p.getTokenSlice(name));
             try p.errToken(.previous_definition, s.nameToken);
         },
 
@@ -1591,7 +1588,7 @@ fn getAnonymousName(p: *Parser, kindToken: TokenIndex) ![]const u8 {
         .KeywordStruct,
         .KeywordUnion,
         .KeywordEnum,
-        => p.tokSlice(kindToken),
+        => p.getTokenSlice(kindToken),
         else => "record field",
     };
 
@@ -1627,7 +1624,7 @@ fn parseRecordSpec(p: *Parser) Error!*Type.Record {
             return prev.type.data.record;
         } else {
             // this is a forward declaration, create a new record type.
-            const recordType = try Type.Record.create(p.arena, p.tokSlice(ident));
+            const recordType = try Type.Record.create(p.arena, p.getTokenSlice(ident));
             const ty = Type{
                 .specifier = if (isStruct) .Struct else .Union,
                 .data = .{ .record = recordType },
@@ -1644,14 +1641,14 @@ fn parseRecordSpec(p: *Parser) Error!*Type.Record {
         if (try p.findTag(p.tokenIds[kindToken], ident, .definition)) |prev| {
             if (!prev.type.data.record.isIncomplete()) {
                 // if the record isn't incomplete, this is a redefinition
-                try p.errStr(.redefinition, ident, p.tokSlice(ident));
+                try p.errStr(.redefinition, ident, p.getTokenSlice(ident));
                 try p.errToken(.previous_definition, prev.nameToken);
             } else {
                 defined = true;
                 break :recordTy prev.type.data.record;
             }
         }
-        break :recordTy try Type.Record.create(p.arena, p.tokSlice(ident));
+        break :recordTy try Type.Record.create(p.arena, p.getTokenSlice(ident));
     } else try Type.Record.create(p.arena, try p.getAnonymousName(kindToken));
 
     const ty = Type{
@@ -1686,7 +1683,7 @@ fn parseRecordSpec(p: *Parser) Error!*Type.Record {
     recordType.alignment = 1;
 
     if (p.recordBuffer.items.len == recordBufferTop)
-        try p.errStr(.empty_record, kindToken, p.tokSlice(kindToken));
+        try p.errStr(.empty_record, kindToken, p.getTokenSlice(kindToken));
 
     try p.expectClosing(lb, .RBrace);
     try p.parseAttributeSpecifier(.record);
@@ -1820,7 +1817,7 @@ fn recordDeclarator(p: *Parser) Error!bool {
             try p.err(.missing_declaration);
         } else {
             try p.recordBuffer.append(.{
-                .name = if (nameToken != 0) p.tokSlice(nameToken) else try p.getAnonymousName(firstToken),
+                .name = if (nameToken != 0) p.getTokenSlice(nameToken) else try p.getAnonymousName(firstToken),
                 .ty = ty,
                 .bitWidth = bits,
             });
@@ -1874,7 +1871,7 @@ fn parseEnumSpec(p: *Parser) Error!*Type.Enum {
         if (try p.findTag(.KeywordEnum, ident, .reference)) |prev| {
             return prev.type.data.@"enum";
         } else {
-            const enumType = try Type.Enum.create(p.arena, p.tokSlice(ident));
+            const enumType = try Type.Enum.create(p.arena, p.getTokenSlice(ident));
             const ty = Type{ .specifier = .Enum, .data = .{ .@"enum" = enumType } };
             const sym = Scope.Symbol{ .name = enumType.name, .type = ty, .nameToken = ident };
             try p.scopes.append(.{ .@"enum" = sym });
@@ -1888,14 +1885,14 @@ fn parseEnumSpec(p: *Parser) Error!*Type.Enum {
         if (try p.findTag(.KeywordEnum, ident, .definition)) |prev| {
             if (!prev.type.data.@"enum".isIncomplete()) {
                 // if the enum isn't incomplete, this is a redefinition
-                try p.errStr(.redefinition, ident, p.tokSlice(ident));
+                try p.errStr(.redefinition, ident, p.getTokenSlice(ident));
                 try p.errToken(.previous_definition, prev.nameToken);
             } else {
                 defined = true;
                 break :enumTy prev.type.data.@"enum";
             }
         }
-        break :enumTy try Type.Enum.create(p.arena, p.tokSlice(ident));
+        break :enumTy try Type.Enum.create(p.arena, p.getTokenSlice(ident));
     } else try Type.Enum.create(p.arena, try p.getAnonymousName(enumTK));
 
     const ty = Type{
@@ -2001,7 +1998,7 @@ fn enumerator(p: *Parser, e: *Enumerator) Error!?EnumFieldAndNode {
         return error.ParsingFailed;
     };
 
-    const name = p.tokSlice(nameToken);
+    const name = p.getTokenSlice(nameToken);
     const attrBufferTop = p.attrBuffer.items.len;
     defer p.attrBuffer.items.len = attrBufferTop;
 
@@ -2307,18 +2304,18 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: Declarator
             while (true) {
                 const nameToken = try p.expectIdentifier();
                 if (p.findSymbol(nameToken, .definition)) |scope| {
-                    try p.errStr(.redefinition_of_parameter, nameToken, p.tokSlice(nameToken));
+                    try p.errStr(.redefinition_of_parameter, nameToken, p.getTokenSlice(nameToken));
                     try p.errToken(.previous_definition, scope.param.nameToken);
                 }
 
                 try p.scopes.append(.{ .param = .{
-                    .name = p.tokSlice(nameToken),
+                    .name = p.getTokenSlice(nameToken),
                     .type = undefined,
                     .nameToken = nameToken,
                 } });
 
                 try p.paramBuffer.append(.{
-                    .name = p.tokSlice(nameToken),
+                    .name = p.getTokenSlice(nameToken),
                     .nameToken = nameToken,
                     .ty = .{ .specifier = .Int },
                 });
@@ -2400,16 +2397,16 @@ fn paramDecls(p: *Parser) Error!?[]Type.Function.Param {
             if (some.name != 0) {
                 if (p.findSymbol(nameToken, .definition)) |scope| {
                     if (scope == .enumeration) {
-                        try p.errStr(.redefinition_of_parameter, nameToken, p.tokSlice(nameToken));
+                        try p.errStr(.redefinition_of_parameter, nameToken, p.getTokenSlice(nameToken));
                         try p.errToken(.previous_definition, scope.enumeration.nameToken);
                     } else {
-                        try p.errStr(.redefinition_of_parameter, nameToken, p.tokSlice(nameToken));
+                        try p.errStr(.redefinition_of_parameter, nameToken, p.getTokenSlice(nameToken));
                         try p.errToken(.previous_definition, scope.param.nameToken);
                     }
                 }
 
                 try p.scopes.append(.{ .param = .{
-                    .name = p.tokSlice(nameToken),
+                    .name = p.getTokenSlice(nameToken),
                     .type = some.type,
                     .nameToken = nameToken,
                 } });
@@ -2449,7 +2446,7 @@ fn paramDecls(p: *Parser) Error!?[]Type.Function.Param {
         try paramDeclSpec.validateParam(p, &paramType);
 
         try p.paramBuffer.append(.{
-            .name = if (nameToken == 0) "" else p.tokSlice(nameToken),
+            .name = if (nameToken == 0) "" else p.getTokenSlice(nameToken),
             .nameToken = if (nameToken == 0) firstToken else nameToken,
             .ty = paramType,
         });
@@ -2585,9 +2582,9 @@ pub fn initializerItem(p: *Parser, il: *InitList, initType: Type) Error!bool {
                     try p.errStr(.invalid_field_designator, period, try p.typeStr(curType));
                     return error.ParsingFailed;
                 }
-                const field = curType.getField(p.tokSlice(identifier)) orelse
+                const field = curType.getField(p.getTokenSlice(identifier)) orelse
                     {
-                    try p.errStr(.no_such_field_designator, period, p.tokSlice(identifier));
+                    try p.errStr(.no_such_field_designator, period, p.getTokenSlice(identifier));
                     return error.ParsingFailed;
                 };
                 curIL = try curIL.find(p.pp.compilation.gpa, field.i);
@@ -3122,7 +3119,7 @@ fn stmt(p: *Parser) Error!NodeIndex {
         }
 
         const nameToken = try p.expectIdentifier();
-        const str = p.tokSlice(nameToken);
+        const str = p.getTokenSlice(nameToken);
         if (p.findLabel(str) == null) {
             try p.labels.append(.{ .unresolvedGoto = nameToken });
         }
@@ -3451,7 +3448,7 @@ fn parseDefaultStmt(p: *Parser, defaultToken: u32) Error!?NodeIndex {
 fn labeledStmt(p: *Parser) Error!?NodeIndex {
     if ((p.getCurrToken() == .Identifier or p.getCurrToken() == .ExtendedIdentifier) and p.lookAhead(1) == .Colon) {
         const nameToken = p.expectIdentifier() catch unreachable;
-        const str = p.tokSlice(nameToken);
+        const str = p.getTokenSlice(nameToken);
         if (p.findLabel(str)) |some| {
             try p.errStr(.duplicate_label, nameToken, str);
             try p.errStr(.previous_label, some, str);
@@ -3461,7 +3458,7 @@ fn labeledStmt(p: *Parser) Error!?NodeIndex {
 
             var i: usize = 0;
             while (i < p.labels.items.len) : (i += 1) {
-                if (p.labels.items[i] == .unresolvedGoto and std.mem.eql(u8, p.tokSlice(p.labels.items[i].unresolvedGoto), str))
+                if (p.labels.items[i] == .unresolvedGoto and std.mem.eql(u8, p.getTokenSlice(p.labels.items[i].unresolvedGoto), str))
                     _ = p.labels.swapRemove(i);
             }
         }
@@ -3564,7 +3561,7 @@ fn parseCompoundStmt(p: *Parser, isFnBody: bool) Error!?NodeIndex {
 
     if (isFnBody and (p.declBuffer.items.len == declBufferTop or !p.nodeIsNoreturn(p.declBuffer.items[p.declBuffer.items.len - 1]))) {
         if (!p.returnType.?.is(.Void))
-            try p.errStr(.func_does_not_return, p.index - 1, p.tokSlice(p.funcName));
+            try p.errStr(.func_does_not_return, p.index - 1, p.getTokenSlice(p.funcName));
 
         try p.declBuffer.append(try p.addNode(.{
             .tag = .ImplicitReturn,
@@ -3601,10 +3598,10 @@ fn parseReturnStmt(p: *Parser) Error!?NodeIndex {
 
     if (expr.node == .none) {
         if (!returnType.is(.Void))
-            try p.errStr(.func_should_return, retToken, p.tokSlice(p.funcName));
+            try p.errStr(.func_should_return, retToken, p.getTokenSlice(p.funcName));
         return try p.addNode(.{ .tag = .ReturnStmt, .data = .{ .UnaryExpr = expr.node } });
     } else if (returnType.is((.Void))) {
-        try p.errStr(.void_func_returns_value, eToken, p.tokSlice(p.funcName));
+        try p.errStr(.void_func_returns_value, eToken, p.getTokenSlice(p.funcName));
         return try p.addNode(.{ .tag = .ReturnStmt, .data = .{ .UnaryExpr = expr.node } });
     }
 
@@ -4476,7 +4473,7 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
             try p.errToken(.gnu_label_as_value, addressToken);
             p.containsAddresssOfLabel = true;
 
-            const str = p.tokSlice(nameToken);
+            const str = p.getTokenSlice(nameToken);
             if (p.findLabel(str) == null)
                 try p.labels.append(.{ .unresolvedGoto = nameToken });
 
@@ -4878,7 +4875,7 @@ fn getFieldAccessField(
     if (!isArrow and isPtr) try p.errStr(.member_expr_ptr, fieldNameToken, try p.typeStr(exprType));
 
     // TODO deal with anonymous structs
-    const fieldName = p.tokSlice(fieldNameToken);
+    const fieldName = p.getTokenSlice(fieldNameToken);
     const field = recordType.getField(fieldName) orelse {
         const stringsTop = p.strings.items.len;
         defer p.strings.items.len = stringsTop;
@@ -5061,7 +5058,7 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
             const sym = p.findSymbol(nameToken, .reference) orelse {
                 if (p.getCurrToken() == .LParen) {
                     // implicitly declare simple functions as like `puts("foo")`;
-                    const name = p.tokSlice(nameToken);
+                    const name = p.getTokenSlice(nameToken);
                     try p.errStr(.implicit_func_decl, nameToken, name);
 
                     const funcType = try p.arena.create(Type.Function);
@@ -5085,7 +5082,7 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
                         .node = try p.addNode(.{ .tag = .DeclRefExpr, .type = ty, .data = .{ .DeclarationRef = nameToken } }),
                     };
                 }
-                try p.errStr(.undeclared_identifier, nameToken, p.tokSlice(nameToken));
+                try p.errStr(.undeclared_identifier, nameToken, p.getTokenSlice(nameToken));
                 return error.ParsingFailed;
             };
 
@@ -5188,7 +5185,7 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
 }
 
 fn parseFloat(p: *Parser, tok: TokenIndex, comptime T: type) Error!T {
-    var bytes = p.tokSlice(tok);
+    var bytes = p.getTokenSlice(tok);
     if (p.tokenIds[tok] != .FloatLiteral)
         bytes = bytes[0 .. bytes.len - 1];
 
@@ -5323,7 +5320,7 @@ fn parseGenericSelection(p: *Parser) Error!Result {
 
 fn parseIntegerLiteral(p: *Parser) Error!Result {
     const curToken = p.getCurrToken();
-    var slice = p.tokSlice(p.index);
+    var slice = p.getTokenSlice(p.index);
 
     defer p.index += 1;
 
@@ -5421,7 +5418,7 @@ fn parseCharLiteral(p: *Parser) Error!Result {
     var val: u32 = 0;
     var overflowReported = false;
     var multichar: u8 = 0;
-    var slice = p.tokSlice(litToken);
+    var slice = p.getTokenSlice(litToken);
     slice = slice[0 .. slice.len - 1];
     var i = std.mem.indexOf(u8, slice, "\'").? + 1;
     while (i < slice.len) : (i += 1) {
@@ -5524,7 +5521,7 @@ fn parseStringLiteral(p: *Parser) Error!Result {
     const index = p.strings.items.len;
 
     while (start < p.index) : (start += 1) {
-        var slice = p.tokSlice(start);
+        var slice = p.getTokenSlice(start);
         slice = slice[0 .. slice.len - 1];
         var i = std.mem.indexOf(u8, slice, "\"").? + 1;
 

@@ -100,6 +100,7 @@ pub fn main() !void {
         comp.langOpts.standard = .default;
         comp.diag.options = initialOptions;
         comp.onlyPreprocess = false;
+        comp.generatedBuffer.items.len = 0;
         const file = comp.addSource(path) catch |err| {
             failCount += 1;
             progress.log("could not add source '{s}': {s}\n", .{ path, @errorName(err) });
@@ -187,7 +188,7 @@ pub fn main() !void {
                 progress.log("invalid TESTS_SKIPPED, definition should contain exactly one integer literal {}\n", .{macro});
                 continue;
             }
-            const tokSlice = pp.tokSliceSafe(macro.tokens[0]);
+            const tokSlice = pp.getTokenSlice(macro.tokens[0]);
             const testsSkipped = try std.fmt.parseInt(u32, tokSlice, 0);
             progress.log("{d} test{s} skipped\n", .{ testsSkipped, if (testsSkipped == 1) @as([]const u8, "") else "s" });
             skipCount += testsSkipped;
@@ -227,7 +228,7 @@ pub fn main() !void {
                 defer i += 1;
                 if (i >= actual.types.items.len) continue;
 
-                const expectedType = std.mem.trim(u8, pp.tokSliceSafe(str), "\"");
+                const expectedType = std.mem.trim(u8, pp.getTokenSlice(str), "\"");
                 const actualType = actual.types.items[i];
                 if (!std.mem.eql(u8, expectedType, actualType)) {
                     failCount += 1;
@@ -275,7 +276,7 @@ pub fn main() !void {
 
                 defer buffer.items.len = 0;
 
-                std.debug.assert((try std.zig.string_literal.parseWrite(buffer.writer(), pp.tokSliceSafe(str))) == .success);
+                std.debug.assert((try std.zig.string_literal.parseWrite(buffer.writer(), pp.getTokenSlice(str))) == .success);
 
                 const expectedError = buffer.items;
                 const index = std.mem.indexOf(u8, m.buf.items, expectedError);
@@ -329,7 +330,7 @@ pub fn main() !void {
 
             defer buffer.items.len = 0;
             // realistically the strings will only contain \" if any escapes so we can use Zig's string parsing
-            std.debug.assert((try std.zig.string_literal.parseWrite(buffer.writer(), pp.tokSliceSafe(macro.tokens[0]))) == .success);
+            std.debug.assert((try std.zig.string_literal.parseWrite(buffer.writer(), pp.getTokenSlice(macro.tokens[0]))) == .success);
             const expectedOutput = buffer.items;
 
             const objName = "testObject.o";

@@ -32,7 +32,7 @@ pub const Token = struct {
     /// case on the fast path
     pub fn mayAppearInIdent(comp: *const Compilation, codepoint: u21, where: enum { start, inside }) bool {
         if (codepoint == '$') return comp.langOpts.dollarsInIdentifiers;
-        if (codepoint < 0x7F) return false;
+        if (codepoint <= 0x7F) return false;
         return switch (where) {
             .start => if (comp.langOpts.standard.atLeast(.c11))
                 CharInfo.isC11IdChar(codepoint) and !CharInfo.isC11DisallowedInitialIdChar(codepoint)

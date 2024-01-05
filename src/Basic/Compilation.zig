@@ -31,6 +31,7 @@ onlyPreprocess: bool = false,
 onlyCompile: bool = false,
 dumpAst: bool = false,
 langOpts: LangOpts = .{},
+generatedBuffer: std.ArrayList(u8),
 
 pub fn init(gpa: Allocator) Compilation {
     return .{
@@ -39,24 +40,26 @@ pub fn init(gpa: Allocator) Compilation {
         .diag = Diagnostics.init(gpa),
         .includeDirs = std.ArrayList([]const u8).init(gpa),
         .systemIncludeDirs = std.ArrayList([]const u8).init(gpa),
+        .generatedBuffer = std.ArrayList(u8).init(gpa),
     };
 }
 
-pub fn deinit(compilation: *Compilation) void {
-    for (compilation.pragmaHandlers.values()) |pragma| {
-        pragma.deinit(pragma, compilation);
-    }
-    for (compilation.sources.values()) |source| {
-        compilation.gpa.free(source.path);
-        compilation.gpa.free(source.buffer);
+pub fn deinit(comp: *Compilation) void {
+    for (comp.pragmaHandlers.values()) |pragma|
+        pragma.deinit(pragma, comp);
+    for (comp.sources.values()) |source| {
+        comp.gpa.free(source.path);
+        comp.gpa.free(source.buffer);
     }
 
-    compilation.sources.deinit();
-    compilation.diag.deinit();
-    compilation.includeDirs.deinit();
-    compilation.systemIncludeDirs.deinit();
-    compilation.pragmaHandlers.deinit(compilation.gpa);
-    if (compilation.builtinHeaderPath) |some| compilation.gpa.free(some);
+    comp.sources.deinit();
+    comp.diag.deinit();
+    comp.includeDirs.deinit();
+    comp.systemIncludeDirs.deinit();
+    comp.pragmaHandlers.deinit(comp.gpa);
+    if (comp.builtinHeaderPath) |some|
+        comp.gpa.free(some);
+    comp.generatedBuffer.deinit();
 }
 
 /// Dec 31 9999 23:59:59
@@ -396,6 +399,11 @@ pub fn defineSystemIncludes(comp: *Compilation) !void {
 }
 
 pub fn getSource(comp: *Compilation, id: Source.ID) Source {
+    if (id == .generated) return .{
+        .path = "<scratch space>",
+        .buffer = comp.generatedBuffer.items,
+        .id = .generated,
+    };
     return comp.sources.values()[@intFromEnum(id) - 2];
 }
 
