@@ -58,6 +58,10 @@ const usage =
     \\  -E                      Only run the preprocessor
     \\  -fcolor-diagnostics     Enable colors in diagnostics
     \\  -fno-color-diagnostics  Disable colors in diagnostics
+    \\  -fdollars-in-identifiers        
+    \\                          Allow '$' in identifiers(default)
+    \\  -fno-dollars-in-identifiers     
+    \\                          Disallow '$' in identifiers
     \\  -fshort-enums           Use the narrowest possible integer type for enums.
     \\  -fno-short-enums        Use "int" as the tag type for enums.
     \\  -fmacro-backtrace-limit=<limit>
@@ -148,6 +152,10 @@ fn handleArgs(comp: *Compilation, args: [][]const u8) !void {
                 comp.langOpts.shortEnums = true;
             } else if (std.mem.eql(u8, arg, "-fno-short-enums")) {
                 comp.langOpts.shortEnums = false;
+            } else if (std.mem.eql(u8, arg, "-fdollars-in-identifiers")) {
+                comp.langOpts.dollarsInIdentifiers = true;
+            } else if (std.mem.eql(u8, arg, "-fno-dollars-in-identifiers")) {
+                comp.langOpts.dollarsInIdentifiers = false;
             } else if (std.mem.startsWith(u8, arg, "-fmacro-backtrace-limit=")) {
                 const limitStr = arg["-fmacro-backtrace-limit=".len..];
                 var limit = std.fmt.parseInt(u32, limitStr, 10) catch

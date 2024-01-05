@@ -283,7 +283,7 @@ pub fn adjustTypes(a: *Result, token: TokenIndex, b: *Result, p: *Parser, kind: 
 
             if (aIsPtr and bIsPtr) {
                 if (!a.ty.eql(b.ty, false))
-                    try p.errStr(.incompatible_pointers, token, try p.typePairStrExtra(a.ty, " to ", b.ty));
+                    try p.errStr(.incompatible_pointers, token, try p.typePairStr(a.ty, b.ty));
                 a.ty = Type.ptrDiffT(p.pp.compilation);
             }
 

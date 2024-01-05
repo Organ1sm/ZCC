@@ -85,6 +85,7 @@ pub const Options = packed struct {
     @"unicode-zero-width": Kind = .default,
     @"unicode-homoglyph": Kind = .default,
     @"return-type": Kind = .default,
+    @"dollar-in-identifier-extension": Kind = .default,
 };
 
 const messages = struct {
@@ -1260,6 +1261,16 @@ const messages = struct {
         const extra = .unsigned;
         const kind = .note;
     };
+    pub const dollar_in_identifier_extension = struct {
+        const msg = "'$' in identifier";
+        const opt = "dollar-in-identifier-extension";
+        const kind = .off;
+        const suppress_language_option = "dollarsInIdentifiers";
+    };
+    pub const dollars_in_identifiers = struct {
+        const msg = "illegal character '$' in identifier";
+        const kind = .@"error";
+    };
 };
 
 list: std.ArrayListUnmanaged(Message) = .{},
@@ -1503,6 +1514,7 @@ fn tagKind(diag: *Diagnostics, tag: Tag) Kind {
             }
             if (@hasDecl(info, "suppress_version")) if (comp.langOpts.standard.atLeast(info.suppress_version)) return .off;
             if (@hasDecl(info, "suppress_gnu")) if (comp.langOpts.standard.isExplicitGNU()) return .off;
+            if (@hasDecl(info, "suppress_language_option")) if (!@field(comp.langOpts, info.suppress_language_option)) return .off;
             if (kind == .@"error" and diag.fatalErrors) kind = .@"fatal error";
             return kind;
         }

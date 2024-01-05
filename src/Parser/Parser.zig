@@ -94,21 +94,41 @@ fn checkIdentifierCodepoint(comp: *Compilation, codepoint: u21, loc: Source.Loca
 }
 
 fn eatIdentifier(p: *Parser) !?TokenIndex {
-    if (p.getCurrToken() == .Identifier) {
-        defer p.index += 1;
-        return p.index;
-    } else if (p.getCurrToken() == .ExtendedIdentifier) {
-        defer p.index += 1;
-        const slice = p.tokSlice(p.index);
-        var it = std.unicode.Utf8View.initUnchecked(slice).iterator();
-        var loc = p.pp.tokens.items(.loc)[p.index];
-        while (it.nextCodepoint()) |c| {
-            if (try checkIdentifierCodepoint(p.pp.compilation, c, loc)) break;
-            loc.byteOffset += std.unicode.utf8CodepointSequenceLength(c) catch unreachable;
-        }
-        return p.index;
+    switch (p.getCurrToken()) {
+        .Identifier => {},
+        .ExtendedIdentifier => {
+            const slice = p.tokSlice(p.index);
+            var it = std.unicode.Utf8View.initUnchecked(slice).iterator();
+            var loc = p.pp.tokens.items(.loc)[p.index];
+
+            if (std.mem.indexOfScalar(u8, slice, '$')) |i| {
+                loc.byteOffset += @as(u32, @intCast(i));
+                try p.pp.compilation.diag.add(.{
+                    .tag = .dollar_in_identifier_extension,
+                    .loc = loc,
+                }, &.{});
+                loc = p.pp.tokens.items(.loc)[p.index];
+            }
+
+            while (it.nextCodepoint()) |c| {
+                if (try checkIdentifierCodepoint(p.pp.compilation, c, loc)) break;
+                loc.byteOffset += std.unicode.utf8CodepointSequenceLength(c) catch unreachable;
+            }
+        },
+        else => return null,
     }
-    return null;
+    p.index += 1;
+
+    // Handle illegal '$' characters in identifiers
+    if (!p.pp.compilation.langOpts.dollarsInIdentifiers) {
+        if (p.getCurrToken() == .Invalid and p.tokSlice(p.index)[0] == '$') {
+            try p.err(.dollars_in_identifiers);
+            p.index += 1;
+            return error.ParsingFailed;
+        }
+    }
+
+    return p.index - 1;
 }
 
 fn expectIdentifier(p: *Parser) Error!TokenIndex {
@@ -1198,26 +1218,9 @@ fn declSpecifier(p: *Parser, isParam: bool) Error!?DeclSpec {
 fn attribute(p: *Parser) Error!Attribute {
     const nameToken = p.index;
     switch (p.getCurrToken()) {
-        .Identifier, .KeywordConst, .KeywordGccConst1, .KeywordGccConst2 => {},
-        .ExtendedIdentifier => {
-            const slice = p.tokSlice(p.index);
-            var it = std.unicode.Utf8View.initUnchecked(slice).iterator();
-            var loc = p.pp.tokens.items(.loc)[p.index];
-            while (it.nextCodepoint()) |c| {
-                if (try checkIdentifierCodepoint(p.pp.compilation, c, loc)) break;
-                loc.byteOffset += std.unicode.utf8CodepointSequenceLength(c) catch unreachable;
-            }
-        },
-        else => {
-            try p.errExtra(.expected_token, p.index, .{ .tokenId = .{
-                .expected = .Identifier,
-                .actual = p.getCurrToken(),
-            } });
-            return error.ParsingFailed;
-        },
+        .KeywordConst, .KeywordGccConst1, .KeywordGccConst2 => p.index += 1,
+        else => _ = try p.expectIdentifier(),
     }
-
-    p.index += 1;
 
     switch (p.getCurrToken()) {
         .Comma, .RParen => { // will be consumed in attributeList

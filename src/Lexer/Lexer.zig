@@ -107,7 +107,7 @@ pub fn next(self: *Lexer) Token {
                 'u' => state = .u,
                 'U' => state = .U,
                 'L' => state = .L,
-                'a'...'t', 'v'...'z', 'A'...'K', 'M'...'T', 'V'...'Z', '_', '$' => state = .identifier,
+                'a'...'t', 'v'...'z', 'A'...'K', 'M'...'T', 'V'...'Z', '_' => state = .identifier,
 
                 '=' => state = .equal,
                 '!' => state = .bang,
@@ -186,7 +186,7 @@ pub fn next(self: *Lexer) Token {
                 '\\' => state = .back_slash,
                 '\t', '\x0B', '\x0C', ' ' => state = .whitespace,
                 else => {
-                    if (c > 0x7F and Token.mayAppearInIdent(self.comp, c, .start)) {
+                    if (Token.mayAppearInIdent(self.comp, c, .start)) {
                         state = .extended_identifier;
                     } else {
                         id = .Invalid;
@@ -425,9 +425,9 @@ pub fn next(self: *Lexer) Token {
             },
 
             .identifier, .extended_identifier => switch (c) {
-                'a'...'z', 'A'...'Z', '_', '0'...'9', '$' => {},
+                'a'...'z', 'A'...'Z', '_', '0'...'9' => {},
                 else => {
-                    if (c <= 0x7F or !Token.mayAppearInIdent(self.comp, c, .inside)) {
+                    if (!Token.mayAppearInIdent(self.comp, c, .inside)) {
                         id = if (state == .identifier) Token.getTokenId(self.comp, self.buffer[start..self.index]) else .ExtendedIdentifier;
                         break;
                     }

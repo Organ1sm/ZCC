@@ -47,8 +47,6 @@ int bar(void) {
 
 int baz = 0xFFFFFFFFFF + 1u;
 
-#define TESTS_SKIPPED 1
-
 #define EXPECTED_ERRORS "binary-expressions.c:3:7: error: invalid operands to binary expression ('long' and 'float')" \
     "binary-expressions.c:6:13: error: invalid operands to binary expression ('char' and 'int *')" \
     "binary-expressions.c:8:9: error: invalid operands to binary expression ('void (*)(void)' and 'void')" \
