@@ -134,6 +134,17 @@ pub const Expr = struct {
 pub const Attributed = struct {
     attributes: []Attribute,
     base: Type, // base type
+
+    fn creat(allocator: std.mem.Allocator, base: Type, attributes: []const Attribute) !*Attributed {
+        const attrType = try allocator.create(Attributed);
+        errdefer allocator.destroy(attrType);
+
+        attrType.* = .{
+            .attributes = try allocator.dupe(Attribute, attributes),
+            .base = base,
+        };
+        return attrType;
+    }
 };
 
 pub const Enum = struct {
@@ -168,7 +179,7 @@ pub const Record = struct {
     pub const Field = struct {
         name: []const u8,
         ty: Type,
-        bitWidth: u32,
+        bitWidth: u32 = 0,
     };
 
     pub fn isIncomplete(r: Record) bool {
@@ -260,6 +271,13 @@ pub const Specifier = enum {
 pub fn is(ty: Type, specifier: Specifier) bool {
     std.debug.assert(specifier != .TypeofExpr and specifier != .TypeofType);
     return ty.get(specifier) != null;
+}
+
+pub fn withAttributes(self: Type, allocator: std.mem.Allocator, attributes: []const Attribute) !Type {
+    if (attributes.len == 0) return self;
+
+    const attributedType = try Type.Attributed.creat(allocator, self, attributes);
+    return Type{ .specifier = .Attributed, .data = .{ .attributed = attributedType } };
 }
 
 pub fn isCallable(ty: Type) ?Type {
@@ -368,7 +386,7 @@ pub fn isReal(ty: Type) bool {
     };
 }
 
-fn isTypeof(ty: Type) bool {
+pub fn isTypeof(ty: Type) bool {
     return switch (ty.specifier) {
         .TypeofType, .TypeofExpr, .DecayedTypeofType, .DecayedTypeofExpr => true,
         else => false,
@@ -423,6 +441,18 @@ pub fn isRecord(ty: Type) bool {
         .TypeofType => ty.data.subType.isRecord(),
         .TypeofExpr => ty.data.expr.ty.isRecord(),
         .Attributed => ty.data.attributed.base.isRecord(),
+        else => false,
+    };
+}
+
+pub fn isAnonymousRecord(ty: Type) bool {
+    return switch (ty.specifier) {
+        // anonymous records can be recognized by their names which are in
+        // the format "(anonymous TAG at path:line:col)".
+        .Struct, .Union => ty.data.record.name[0] == '(',
+        .TypeofType => ty.data.subType.isAnonymousRecord(),
+        .TypeofExpr => ty.data.expr.ty.isAnonymousRecord(),
+        .Attributed => ty.data.attributed.base.isAnonymousRecord(),
         else => false,
     };
 }
@@ -685,6 +715,9 @@ pub fn getField(ty: Type, name: []const u8) ?FieldAndIndex {
                 if (std.mem.eql(u8, name, f.name)) return FieldAndIndex{ .f = f, .i = i };
             }
         },
+        .TypeofType => return ty.data.subType.getField(name),
+        .TypeofExpr => return ty.data.expr.ty.getField(name),
+        .Attributed => return ty.data.attributed.base.getField(name),
         else => unreachable,
     }
     return null;

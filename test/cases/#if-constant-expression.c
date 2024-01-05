@@ -1,5 +1,4 @@
-#define EXPECTED_TOKENS long
-
+//test preprocess
 
 #if defined FOO & !defined(BAZ)
 void
@@ -10,7 +9,6 @@ long
 #if 1 - 1
 #error "foo"
 #endif
-
 
 #if defined BAR ? 1 : 0
 #error foo

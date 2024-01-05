@@ -17,6 +17,9 @@ qual: Qualifiers.Builder = .{},
 alignment: u29 = 0,
 alignToken: ?TokenIndex = null,
 typeof: ?Type = null,
+/// When true an error is returned instead of adding a diagnostic message.
+/// Used for trying to combine typedef types.
+errorOnInvalid: bool = false,
 
 pub const Specifier = union(enum) {
     None,
@@ -309,7 +312,9 @@ pub fn finish(b: @This(), p: *Parser) Parser.Error!Type {
     return ty;
 }
 
-pub fn cannotCombine(b: @This(), p: *Parser, sourceToken: TokenIndex) Compilation.Error!void {
+fn cannotCombine(b: @This(), p: *Parser, sourceToken: TokenIndex) !void {
+    if (b.errorOnInvalid)
+        return error.CannotCombine;
     const prevType = b.finish(p) catch unreachable;
     try p.errExtra(
         .cannot_combine_spec,
@@ -319,6 +324,12 @@ pub fn cannotCombine(b: @This(), p: *Parser, sourceToken: TokenIndex) Compilatio
 
     if (b.typedef) |some|
         try p.errStr(.spec_from_typedef, some.token, try p.typeStr(some.type));
+}
+
+fn duplicateSpec(b: *@This(), p: *Parser, spec: []const u8) !void {
+    if (b.errorOnInvalid)
+        return error.CannotCombine;
+    try p.errStr(.duplicate_declspec, p.index, spec);
 }
 
 pub fn combineFromTypeof(b: *@This(), p: *Parser, new: Type, sourceToken: TokenIndex) Compilation.Error!void {
@@ -337,9 +348,34 @@ pub fn combineFromTypeof(b: *@This(), p: *Parser, new: Type, sourceToken: TokenI
     };
 }
 
+/// Try to combine type from typedef, returns true if successful.
+pub fn combineTypedef(b: *@This(), p: *Parser, typedefType: Type, nameToken: TokenIndex) Compilation.Error!bool {
+    b.errorOnInvalid = true;
+    defer b.errorOnInvalid = false;
+
+    const newSpec = fromType(typedefType);
+    b.combineExtra(p, newSpec, 0) catch |err| switch (err) {
+        error.FatalError => unreachable, // we do not add any diagnostics
+        error.OutOfMemory => unreachable, // we do not add any diagnostics
+        error.CannotCombine => return false,
+    };
+    b.typedef = .{ .token = nameToken, .type = typedefType };
+    return true;
+}
+
 pub fn combine(b: *@This(), p: *Parser, new: Specifier, sourceToken: TokenIndex) Compilation.Error!void {
-    if (b.typeof != null)
+    b.combineExtra(p, new, sourceToken) catch |er| switch (er) {
+        error.CannotCombine => unreachable,
+        else => |e| return e,
+    };
+}
+
+fn combineExtra(b: *@This(), p: *Parser, new: Specifier, sourceToken: TokenIndex) !void {
+    if (b.typeof != null) {
+        if (b.errorOnInvalid)
+            return error.CannotCombine;
         try p.errStr(.invalid_typeof, sourceToken, new.toString().?);
+    }
 
     switch (new) {
         Specifier.Signed => b.specifier = switch (b.specifier) {
@@ -360,8 +396,7 @@ pub fn combine(b: *@This(), p: *Parser, new: Specifier, sourceToken: TokenIndex)
             Specifier.SLongInt,
             Specifier.SLongLong,
             Specifier.SLongLongInt,
-            => return p.errStr(.duplicate_declspec, p.index, "signed"),
-
+            => return b.duplicateSpec(p, "signed"),
             else => return b.cannotCombine(p, sourceToken),
         },
 
@@ -383,8 +418,7 @@ pub fn combine(b: *@This(), p: *Parser, new: Specifier, sourceToken: TokenIndex)
             Specifier.ULongInt,
             Specifier.ULongLong, //
             Specifier.ULongLongInt,
-            => return p.errStr(.duplicate_declspec, p.index, "unsigned"),
-
+            => return b.duplicateSpec(p, "unsigned"),
             else => return b.cannotCombine(p, sourceToken),
         },
 
@@ -392,8 +426,7 @@ pub fn combine(b: *@This(), p: *Parser, new: Specifier, sourceToken: TokenIndex)
             Specifier.None => Specifier.Char,
             Specifier.Unsigned => Specifier.UChar,
             Specifier.Signed => Specifier.SChar,
-            Specifier.Char, Specifier.SChar, Specifier.UChar => return p.errStr(.duplicate_declspec, p.index, "char"),
-
+            Specifier.Char, Specifier.SChar, Specifier.UChar => return b.duplicateSpec(p, "char"),
             else => return b.cannotCombine(p, sourceToken),
         },
 
@@ -423,8 +456,7 @@ pub fn combine(b: *@This(), p: *Parser, new: Specifier, sourceToken: TokenIndex)
             Specifier.LongLongInt,
             Specifier.SLongLongInt,
             Specifier.ULongLongInt,
-            => return p.errStr(.duplicate_declspec, p.index, "int"),
-
+            => return b.duplicateSpec(p, "int"),
             else => return b.cannotCombine(p, sourceToken),
         },
 
@@ -436,16 +468,14 @@ pub fn combine(b: *@This(), p: *Parser, new: Specifier, sourceToken: TokenIndex)
             Specifier.Int => Specifier.LongInt,
             Specifier.SInt => Specifier.SLongInt,
             Specifier.ULong => Specifier.ULongLong,
-            Specifier.LongLong, Specifier.ULongLong => return p.errStr(.duplicate_declspec, p.index, "long"),
-
+            Specifier.LongLong, Specifier.ULongLong => return b.duplicateSpec(p, "long"),
             else => return b.cannotCombine(p, sourceToken),
         },
 
         Specifier.Float => b.specifier = switch (b.specifier) {
             Specifier.None => Specifier.Float,
             Specifier.Complex => Specifier.ComplexFloat,
-
-            Specifier.ComplexFloat, Specifier.Float => return p.errStr(.duplicate_declspec, p.index, "float"),
+            Specifier.ComplexFloat, Specifier.Float => return b.duplicateSpec(p, "float"),
             else => return b.cannotCombine(p, sourceToken),
         },
 
@@ -459,8 +489,7 @@ pub fn combine(b: *@This(), p: *Parser, new: Specifier, sourceToken: TokenIndex)
             Specifier.ComplexLongDouble,
             Specifier.ComplexDouble,
             Specifier.Double,
-            => return p.errStr(.duplicate_declspec, p.index, "double"),
-
+            => return b.duplicateSpec(p, "double"),
             else => return b.cannotCombine(p, sourceToken),
         },
 
@@ -476,8 +505,7 @@ pub fn combine(b: *@This(), p: *Parser, new: Specifier, sourceToken: TokenIndex)
             Specifier.ComplexFloat,
             Specifier.ComplexDouble, //
             Specifier.ComplexLongDouble,
-            => return p.errStr(.duplicate_declspec, p.index, "_Complex"),
-
+            => return b.duplicateSpec(p, "_Complex"),
             else => return b.cannotCombine(p, sourceToken),
         },
 

@@ -72,18 +72,9 @@ const Standard = enum {
 standard: Standard = .default,
 /// -fshort-enums option, makes enums only take up as much space as they need to hold all the values.
 shortEnums: bool = false,
+/// -
+dollarsInIdentifiers: bool = true,
 
 pub fn setStandard(self: *LangOpts, name: []const u8) error{InvalidStandard}!void {
     self.standard = Standard.NameMap.get(name) orelse return error.InvalidStandard;
-}
-
-pub fn suppress(langopts: LangOpts, tag: DiagnosticTag) bool {
-    return switch (tag) {
-        .omitting_parameter_name,
-        .static_assert_missing_message,
-        => langopts.standard.atLeast(.c2x),
-
-        .alignof_expr => langopts.standard.isExplicitGNU(),
-        else => false,
-    };
 }

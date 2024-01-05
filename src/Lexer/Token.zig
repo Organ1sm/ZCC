@@ -8,13 +8,13 @@ const CharInfo = @import("../Basic/CharInfo.zig");
 pub const Token = struct {
     id: TokenType,
     source: Source.ID,
-    start: u32,
-    end: u32,
+    start: u32 = 0,
+    end: u32 = 0,
+    line: u32 = 0,
 
     /// double underscore and underscore + capital letter identifiers
     /// belong to the implementation namespace, so we always convert them
     /// to keywords.
-    /// TODO: add `.keyword_asm` here as GNU extension once that is supported.
     pub fn getTokenId(comp: *const Compilation, str: []const u8) TokenType {
         const kw = AllKeywords.get(str) orelse return .Identifier;
         const standard = comp.langOpts.standard;
@@ -22,6 +22,7 @@ pub const Token = struct {
             .KeywordInline => if (standard.isGNU() or standard.atLeast(.c99)) kw else .Identifier,
             .KeywordRestrict => if (standard.atLeast(.c99)) kw else .Identifier,
             .KeywordGccTypeof => if (standard.isGNU()) kw else .Identifier,
+            .KeywordGccAsm => if (standard.isGNU()) kw else .Identifier,
             else => kw,
         };
     }
@@ -30,6 +31,8 @@ pub const Token = struct {
     /// does not check basic character set chars because the tokenizer handles them separately to keep the common
     /// case on the fast path
     pub fn mayAppearInIdent(comp: *const Compilation, codepoint: u21, where: enum { start, inside }) bool {
+        if (codepoint == '$') return comp.langOpts.dollarsInIdentifiers;
+        if (codepoint <= 0x7F) return false;
         return switch (where) {
             .start => if (comp.langOpts.standard.atLeast(.c11))
                 CharInfo.isC11IdChar(codepoint) and !CharInfo.isC11DisallowedInitialIdChar(codepoint)
@@ -124,6 +127,10 @@ pub const Token = struct {
         .{ "__alignof", .KeywordGccAlignof1 },
         .{ "__alignof__", .KeywordGccAlignof2 },
         .{ "typeof", .KeywordGccTypeof },
+        .{ "__extension__", .KeywordGccExtension },
+        .{ "asm", .KeywordGccAsm },
+        .{ "__asm", .KeywordGccAsm1 },
+        .{ "__asm__", .KeywordGccAsm2 },
 
         // gcc builtins
         .{ "__builtin_choose_expr", .BuiltinChooseExpr },

@@ -31,6 +31,7 @@ onlyPreprocess: bool = false,
 onlyCompile: bool = false,
 dumpAst: bool = false,
 langOpts: LangOpts = .{},
+generatedBuffer: std.ArrayList(u8),
 
 pub fn init(gpa: Allocator) Compilation {
     return .{
@@ -39,24 +40,26 @@ pub fn init(gpa: Allocator) Compilation {
         .diag = Diagnostics.init(gpa),
         .includeDirs = std.ArrayList([]const u8).init(gpa),
         .systemIncludeDirs = std.ArrayList([]const u8).init(gpa),
+        .generatedBuffer = std.ArrayList(u8).init(gpa),
     };
 }
 
-pub fn deinit(compilation: *Compilation) void {
-    for (compilation.pragmaHandlers.values()) |pragma| {
-        pragma.deinit(pragma, compilation);
-    }
-    for (compilation.sources.values()) |source| {
-        compilation.gpa.free(source.path);
-        compilation.gpa.free(source.buffer);
+pub fn deinit(comp: *Compilation) void {
+    for (comp.pragmaHandlers.values()) |pragma|
+        pragma.deinit(pragma, comp);
+    for (comp.sources.values()) |source| {
+        comp.gpa.free(source.path);
+        comp.gpa.free(source.buffer);
     }
 
-    compilation.sources.deinit();
-    compilation.diag.deinit();
-    compilation.includeDirs.deinit();
-    compilation.systemIncludeDirs.deinit();
-    compilation.pragmaHandlers.deinit(compilation.gpa);
-    if (compilation.builtinHeaderPath) |some| compilation.gpa.free(some);
+    comp.sources.deinit();
+    comp.diag.deinit();
+    comp.includeDirs.deinit();
+    comp.systemIncludeDirs.deinit();
+    comp.pragmaHandlers.deinit(comp.gpa);
+    if (comp.builtinHeaderPath) |some|
+        comp.gpa.free(some);
+    comp.generatedBuffer.deinit();
 }
 
 /// Dec 31 9999 23:59:59
@@ -396,6 +399,11 @@ pub fn defineSystemIncludes(comp: *Compilation) !void {
 }
 
 pub fn getSource(comp: *Compilation, id: Source.ID) Source {
+    if (id == .generated) return .{
+        .path = "<scratch space>",
+        .buffer = comp.generatedBuffer.items,
+        .id = .generated,
+    };
     return comp.sources.values()[@intFromEnum(id) - 2];
 }
 
@@ -447,7 +455,7 @@ pub fn addSource(compilation: *Compilation, path: []const u8) !Source {
     return source;
 }
 
-pub fn findInclude(comp: *Compilation, token: Token, filename: []const u8, searchWord: bool) !Source {
+pub fn findInclude(comp: *Compilation, token: Token, filename: []const u8, searchWord: bool) !?Source {
     var pathBuff: [std.fs.MAX_PATH_BYTES]u8 = undefined;
     var fib = std.heap.FixedBufferAllocator.init(&pathBuff);
 
@@ -456,7 +464,7 @@ pub fn findInclude(comp: *Compilation, token: Token, filename: []const u8, searc
         const path = if (std.fs.path.dirname(source.path)) |some|
             std.fs.path.join(fib.allocator(), &.{ some, filename }) catch break :blk
         else
-            filename;
+            std.fs.path.join(fib.allocator(), &.{ ".", filename }) catch break :blk;
 
         if (comp.addSource(path)) |some|
             return some
@@ -490,20 +498,7 @@ pub fn findInclude(comp: *Compilation, token: Token, filename: []const u8, searc
         }
     }
 
-    return comp.fatal(token, "'{s}' not found", .{filename});
-}
-
-pub fn fatal(comp: *Compilation, token: Token, comptime fmt: []const u8, args: anytype) Error {
-    const source = comp.getSource(token.source);
-    const lcs = source.getLineColString(token.start);
-
-    return comp.diag.fatal(source.path, lcs, fmt, args);
-}
-
-pub fn addDiagnostic(comp: *Compilation, msg: Diagnostics.Message) Error!void {
-    if (comp.langOpts.suppress(msg.tag))
-        return;
-    return comp.diag.add(msg);
+    return null;
 }
 
 pub fn addPragmaHandler(comp: *Compilation, name: []const u8, handler: *Pragma) Allocator.Error!void {

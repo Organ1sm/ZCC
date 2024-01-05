@@ -15,7 +15,7 @@ var general_purpose_allocator = std.heap.GeneralPurposeAllocator(.{}){};
 
 pub fn main() !void {
     const gpa = general_purpose_allocator.allocator();
-    defer _ = general_purpose_allocator.deinit();
+    defer if (general_purpose_allocator.deinit() == .leak) std.process.exit(1);
 
     const args = try std.process.argsAlloc(gpa);
     defer std.process.argsFree(gpa, args);
@@ -95,11 +95,12 @@ pub fn main() !void {
     var passCount: u32 = 0;
     var failCount: u32 = 0;
     var skipCount: u32 = 0;
-
     const initialOptions = comp.diag.options;
-    for (cases.items) |path| {
+    next_test: for (cases.items) |path| {
         comp.langOpts.standard = .default;
         comp.diag.options = initialOptions;
+        comp.onlyPreprocess = false;
+        comp.generatedBuffer.items.len = 0;
         const file = comp.addSource(path) catch |err| {
             failCount += 1;
             progress.log("could not add source '{s}': {s}\n", .{ path, @errorName(err) });
@@ -118,6 +119,8 @@ pub fn main() !void {
             if (it.next()) |standard| {
                 try comp.langOpts.setStandard(standard);
             }
+        } else if (std.mem.startsWith(u8, file.buffer, "//test preprocess")) {
+            comp.onlyPreprocess = true;
         }
 
         const builtinMacros = try comp.generateBuiltinMacros();
@@ -139,9 +142,9 @@ pub fn main() !void {
 
         try pp.addBuiltinMacros();
 
-        try pp.preprocess(builtinMacros);
-        try pp.preprocess(testRunnerMacros);
-        pp.preprocess(file) catch |err| {
+        _ = try pp.preprocess(builtinMacros);
+        _ = try pp.preprocess(testRunnerMacros);
+        const eof = pp.preprocess(file) catch |err| {
             if (!std.unicode.utf8ValidateSlice(file.buffer)) {
                 // non-utf8 files are not preprocessed, so we can't use EXPECTED_ERRORS; instead we
                 // check that the most recent error is .invalid_utf8
@@ -154,10 +157,30 @@ pub fn main() !void {
             progress.log("could not preprocess file '{s}': {s}\n", .{ path, @errorName(err) });
             continue;
         };
-        try pp.tokens.append(pp.compilation.gpa, .{
-            .id = .Eof,
-            .loc = .{ .id = file.id, .byteOffset = @as(u32, @intCast(file.buffer.len)) },
-        });
+        try pp.tokens.append(gpa, eof);
+
+        if (std.mem.startsWith(u8, file.buffer, "//test preprocess")) {
+            comp.renderErrors();
+
+            const expectedOutput = blk: {
+                const expandedPath = try std.fs.path.join(gpa, &.{ args[1], "expanded", std.fs.path.basename(path) });
+                defer gpa.free(expandedPath);
+
+                break :blk try std.fs.cwd().readFileAlloc(gpa, expandedPath, std.math.maxInt(u32));
+            };
+            defer gpa.free(expectedOutput);
+
+            var output = std.ArrayList(u8).init(gpa);
+            defer output.deinit();
+
+            try pp.prettyPrintTokens(output.writer());
+
+            if (std.testing.expectEqualStrings(expectedOutput, output.items))
+                passCount += 1
+            else |_|
+                failCount += 1;
+            continue;
+        }
 
         if (pp.defines.get("TESTS_SKIPPED")) |macro| {
             if (macro.isFunc or macro.tokens.len != 1 or macro.tokens[0].id != .IntegerLiteral) {
@@ -165,55 +188,10 @@ pub fn main() !void {
                 progress.log("invalid TESTS_SKIPPED, definition should contain exactly one integer literal {}\n", .{macro});
                 continue;
             }
-            const tokSlice = pp.tokSliceSafe(macro.tokens[0]);
+            const tokSlice = pp.getTokenSlice(macro.tokens[0]);
             const testsSkipped = try std.fmt.parseInt(u32, tokSlice, 0);
             progress.log("{d} test{s} skipped\n", .{ testsSkipped, if (testsSkipped == 1) @as([]const u8, "") else "s" });
             skipCount += testsSkipped;
-            continue;
-        }
-
-        if (pp.defines.get("EXPECTED_TOKENS")) |macro| {
-            comp.renderErrors();
-
-            if (macro.isFunc) {
-                failCount += 1;
-                progress.log("invalid EXPECTED_TOKENS {}\n", .{macro});
-                continue;
-            }
-
-            const expectedTokens = macro.tokens;
-            if (pp.tokens.len - 1 != expectedTokens.len) {
-                failCount += 1;
-                print(
-                    "EXPECTED_TOKENS count differs: expected {d} found {d}\n",
-                    .{ expectedTokens.len, pp.tokens.len - 1 },
-                );
-                continue;
-            }
-
-            var i: usize = 0;
-            while (true) : (i += 1) {
-                const tok = pp.tokens.get(i);
-                if (tok.id == .Eof) {
-                    if (comp.diag.errors != 0)
-                        failCount += 1
-                    else
-                        passCount += 1;
-
-                    break;
-                }
-
-                const expected = pp.tokSliceSafe(expectedTokens[i]);
-                const actual = pp.expandedSlice(tok);
-                if (!std.mem.eql(u8, expected, actual)) {
-                    failCount += 1;
-                    progress.log(
-                        "unexpected token found: expected '{s}' found '{s}'\n",
-                        .{ expected, actual },
-                    );
-                    break;
-                }
-            }
             continue;
         }
 
@@ -238,21 +216,19 @@ pub fn main() !void {
 
             try actual.dump(&tree, testFn.Declaration.node, gpa);
 
-            if (types.tokens.len != actual.types.items.len) {
-                failCount += 1;
-                progress.log("EXPECTED_TYPES count of {d} does not match function statement length of {d}\n", .{
-                    types.tokens.len,
-                    actual.types.items.len,
-                });
-                break;
-            }
-            for (types.tokens, 0..) |str, i| {
+            var i: usize = 0;
+            for (types.tokens) |str| {
+                if (str.id == .WhiteSpace) continue;
                 if (str.id != .StringLiteral) {
                     failCount += 1;
                     progress.log("EXPECTED_TYPES tokens must be string literals (found {s})\n", .{@tagName(str.id)});
-                    break;
+                    continue :next_test;
                 }
-                const expectedType = std.mem.trim(u8, pp.tokSliceSafe(str), "\"");
+
+                defer i += 1;
+                if (i >= actual.types.items.len) continue;
+
+                const expectedType = std.mem.trim(u8, pp.getTokenSlice(str), "\"");
                 const actualType = actual.types.items[i];
                 if (!std.mem.eql(u8, expectedType, actualType)) {
                     failCount += 1;
@@ -260,8 +236,16 @@ pub fn main() !void {
                         expectedType,
                         actualType,
                     });
-                    break;
+                    continue :next_test;
                 }
+            }
+            if (i != actual.types.items.len) {
+                failCount += 1;
+                progress.log(
+                    "EXPECTED_TYPES count differs: expected {d} found {d}\n",
+                    .{ i, actual.types.items.len },
+                );
+                continue;
             }
         }
 
@@ -278,30 +262,21 @@ pub fn main() !void {
                 continue;
             }
 
-            if (macro.tokens.len != expectedCount) {
-                failCount += 1;
-                progress.log(
-                    \\EXPECTED_ERRORS missing errors, expected {d} found {d},
-                    \\=== actual output ===
-                    \\{s}
-                    \\
-                    \\
-                ,
-                    .{ macro.tokens.len, expectedCount, m.buf.items },
-                );
-                continue;
-            }
-
+            var count: usize = 0;
             for (macro.tokens) |str| {
+                if (str.id == .WhiteSpace) continue;
                 if (str.id != .StringLiteral) {
                     failCount += 1;
                     progress.log("EXPECTED_ERRORS tokens must be string literals (found {s})\n", .{@tagName(str.id)});
                     break;
                 }
 
+                defer count += 1;
+                if (count >= expectedCount) continue;
+
                 defer buffer.items.len = 0;
 
-                std.debug.assert((try std.zig.string_literal.parseWrite(buffer.writer(), pp.tokSliceSafe(str))) == .success);
+                std.debug.assert((try std.zig.string_literal.parseWrite(buffer.writer(), pp.getTokenSlice(str))) == .success);
 
                 const expectedError = buffer.items;
                 const index = std.mem.indexOf(u8, m.buf.items, expectedError);
@@ -317,12 +292,22 @@ pub fn main() !void {
                         \\
                         \\
                     , .{ expectedError, m.buf.items });
-                    break;
+                    continue :next_test;
                 }
-            } else {
-                passCount += 1;
-                progress.log("passed\n", .{});
             }
+            if (count != expectedCount) {
+                failCount += 1;
+                progress.log(
+                    \\EXPECTED_ERRORS missing errors, expected {d} found {d},
+                    \\=== actual output ===
+                    \\{s}
+                    \\
+                    \\
+                , .{ count, expectedCount, m.buf.items });
+                continue;
+            }
+            passCount += 1;
+            progress.log("passed\n", .{});
             continue;
         }
 
@@ -345,7 +330,7 @@ pub fn main() !void {
 
             defer buffer.items.len = 0;
             // realistically the strings will only contain \" if any escapes so we can use Zig's string parsing
-            std.debug.assert((try std.zig.string_literal.parseWrite(buffer.writer(), pp.tokSliceSafe(macro.tokens[0]))) == .success);
+            std.debug.assert((try std.zig.string_literal.parseWrite(buffer.writer(), pp.getTokenSlice(macro.tokens[0]))) == .success);
             const expectedOutput = buffer.items;
 
             const objName = "testObject.o";
@@ -358,13 +343,13 @@ pub fn main() !void {
 
                 try obj.finish(outFile);
             }
-            var child = std.ChildProcess.init(&.{ args[2], "run", "-lc", objName }, comp.gpa);
+            var child = std.ChildProcess.init(&.{ args[2], "run", "-lc", objName }, gpa);
             child.stdout_behavior = .Pipe;
 
             try child.spawn();
 
-            const stdout = try child.stdout.?.reader().readAllAlloc(comp.gpa, std.math.maxInt(u16));
-            defer comp.gpa.free(stdout);
+            const stdout = try child.stdout.?.reader().readAllAlloc(gpa, std.math.maxInt(u16));
+            defer gpa.free(stdout);
 
             switch (try child.wait()) {
                 .Exited => |code| if (code != 0) {
@@ -431,21 +416,21 @@ const MsgWriter = struct {
         m.buf.writer().writeAll(msg) catch {};
     }
 
-    pub fn location(m: *MsgWriter, path: []const u8, lcs: zcc.Source.LCS) void {
-        m.print("{s}:{d}:{d}: ", .{ path, lcs.line, lcs.col });
+    pub fn location(m: *MsgWriter, path: []const u8, line: u32, col: u32) void {
+        m.print("{s}:{d}:{d}: ", .{ path, line, col });
     }
 
     pub fn start(m: *MsgWriter, kind: zcc.Diagnostics.Kind) void {
         m.print("{s}: ", .{@tagName(kind)});
     }
 
-    pub fn end(m: *MsgWriter, lcs: ?zcc.Source.LCS) void {
-        if (lcs == null) {
+    pub fn end(m: *MsgWriter, maybeLine: ?[]const u8, col: u32) void {
+        const line = maybeLine orelse {
             m.write("\n");
             return;
-        }
-        m.print("\n{s}\n", .{lcs.?.str});
-        m.print("{s: >[1]}^\n", .{ "", lcs.?.col - 1 });
+        };
+        m.print("\n{s}\n", .{line});
+        m.print("{s: >[1]}^\n", .{ "", col - 1 });
     }
 };
 
