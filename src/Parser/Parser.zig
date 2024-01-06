@@ -2554,6 +2554,7 @@ pub fn initializerItem(p: *Parser, il: *InitList, initType: Type) Error!bool {
                     return error.ParsingFailed;
                 }
 
+                const exprToken = p.index;
                 const indexRes = try p.constExpr();
                 try p.expectClosing(lbr, .RBracket);
                 const indexUnchecked = switch (indexRes.value) {
@@ -2563,7 +2564,10 @@ pub fn initializerItem(p: *Parser, il: *InitList, initType: Type) Error!bool {
                         return error.ParsingFailed;
                     } else @as(u64, @intCast(val)),
 
-                    .unavailable => unreachable,
+                    .unavailable => {
+                        try p.errToken(.expected_integer_constant_expr, exprToken);
+                        return error.ParsingFailed;
+                    },
                 };
 
                 const maxLen = curType.arrayLen() orelse std.math.maxInt(usize);
