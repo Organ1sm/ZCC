@@ -1271,6 +1271,10 @@ const messages = struct {
         const msg = "illegal character '$' in identifier";
         const kind = .@"error";
     };
+    pub const pragma_operator_string_literal = struct {
+        const msg = "_Pragma requires exactly one string literal token";
+        const kind = .@"error";
+    };
 };
 
 list: std.ArrayListUnmanaged(Message) = .{},

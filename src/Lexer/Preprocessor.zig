@@ -18,6 +18,11 @@ const DefineMap = std.StringHashMap(Macro);
 const RawTokenList = std.ArrayList(RawToken);
 const MaxIncludeDepth = 200;
 
+/// Errors that can be returned when expanding a macro.
+/// error.UnknownPragma can occur within Preprocessor.pragma() but
+/// it is handled there and doesn't escape that function
+const MacroError = Error || error{StopPreprocessing};
+
 const Macro = struct {
     /// Parameters of the function type macro
     params: []const []const u8,
@@ -86,6 +91,7 @@ const FeatureCheckMacros = struct {
     const file = [1]RawToken{makeFeatCheckMacro(.MacroFile)};
     const line = [1]RawToken{makeFeatCheckMacro(.MacroLine)};
     const counter = [1]RawToken{makeFeatCheckMacro(.MacroCounter)};
+    const pragmaOperator = [1]RawToken{makeFeatCheckMacro(.MacroParamPragmaOperator)};
 
     fn makeFeatCheckMacro(id: TokenType) RawToken {
         return .{
@@ -110,6 +116,7 @@ pub fn addBuiltinMacros(pp: *Preprocessor) !void {
     try pp.addBuiltinMacro("__has_attribute", true, &FeatureCheckMacros.hasAttribute);
     try pp.addBuiltinMacro("__has_warning", true, &FeatureCheckMacros.hasWarning);
     try pp.addBuiltinMacro("__is_identifier", true, &FeatureCheckMacros.isIdentifier);
+    try pp.addBuiltinMacro("_Pragma", true, &FeatureCheckMacros.pragmaOperator);
     try pp.addBuiltinMacro("__FILE__", false, &FeatureCheckMacros.file);
     try pp.addBuiltinMacro("__LINE__", false, &FeatureCheckMacros.line);
     try pp.addBuiltinMacro("__COUNTER__", false, &FeatureCheckMacros.counter);
@@ -145,6 +152,14 @@ pub fn deinit(pp: *Preprocessor) void {
 
 /// Preprocess a source file, returns eof token.
 pub fn preprocess(pp: *Preprocessor, source: Source) Error!Token {
+    return pp.preprocessExtra(source) catch |err| switch (err) {
+        // This cannot occur in the main file and is handled in `include`.
+        error.StopPreprocessing => unreachable,
+        else => |e| return e,
+    };
+}
+
+fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!Token {
     if (source.invalidUTF8Loc) |loc| {
         try pp.compilation.diag.add(.{
             .tag = .invalid_utf8,
@@ -306,11 +321,7 @@ pub fn preprocess(pp: *Preprocessor, source: Source) Error!Token {
 
                     .KeywordDefine => try pp.define(&lexer),
                     .KeywordInclude => try pp.include(&lexer),
-                    .KeywordPragma => pp.pragma(&lexer, directive) catch |err| switch (err) {
-                        // this cannot occur in the main file so it is guaranteed to be ignored
-                        error.StopPreprocessing => return @as(Token, undefined),
-                        else => |e| return e,
-                    },
+                    .KeywordPragma => try pp.pragma(&lexer, directive, null, &.{}),
 
                     .KeywordLine => {
                         const digits = lexer.nextNoWhiteSpace();
@@ -456,7 +467,7 @@ fn expectNewLine(pp: *Preprocessor, lexer: *Lexer) Error!void {
 }
 
 /// Consume all tokens until a newline and parse the result into a boolean.
-fn expr(pp: *Preprocessor, lexer: *Lexer) Error!bool {
+fn expr(pp: *Preprocessor, lexer: *Lexer) MacroError!bool {
     const start = pp.tokens.len;
     defer {
         for (pp.tokens.items(.expansionLocs)[start..]) |loc|
@@ -757,7 +768,96 @@ fn pasteStringsUnsafe(pp: *Preprocessor, toks: []const Token) ![]const u8 {
     return pp.charBuffer.items[charBufferTop..];
 }
 
-fn handleBuiltinMacro(pp: *Preprocessor, builtin: TokenType, paramTokens: []const Token) Error!bool {
+/// Handle the _Pragma operator (implemented as a builtin macro)
+fn pragmaOperator(pp: *Preprocessor, argToken: Token, operatorLoc: Source.Location) !void {
+    const argSlice = pp.expandedSlice(argToken);
+    const content = argSlice[1 .. argSlice.len - 1];
+    const directive = "#pragma ";
+
+    pp.charBuffer.clearRetainingCapacity();
+    const totalLen = directive.len + content.len + 1; // destringify can never grow the string, + 1 for newline
+    try pp.charBuffer.ensureUnusedCapacity(totalLen);
+    pp.charBuffer.appendSliceAssumeCapacity(directive);
+    pp.destringify(content);
+    pp.charBuffer.appendAssumeCapacity('\n');
+
+    const start = pp.compilation.generatedBuffer.items.len;
+    try pp.compilation.generatedBuffer.appendSlice(pp.charBuffer.items);
+    var tempLexer = Lexer{
+        .buffer = pp.compilation.generatedBuffer.items,
+        .comp = pp.compilation,
+        .index = @as(u32, @intCast(start)),
+        .source = .generated,
+        .line = pp.generatedLine,
+    };
+    pp.generatedLine += 1;
+
+    const hashToken = tempLexer.next();
+    std.debug.assert(hashToken.id == .Hash);
+
+    const pragmaToken = tempLexer.next();
+    std.debug.assert(pragmaToken.id == .KeywordPragma);
+
+    try pp.pragma(&tempLexer, pragmaToken, operatorLoc, argToken.expansionSlice());
+}
+
+/// Inverts the output of the preprocessor stringify (#) operation
+/// (except all whitespace is condensed to a single space)
+/// writes output to pp.char_buf; assumes capacity is sufficient
+/// backslash backslash -> backslash
+/// backslash doublequote -> doublequote
+/// All other characters remain the same
+fn destringify(pp: *Preprocessor, str: []const u8) void {
+    var state: enum { start, backslachSeen } = .start;
+    for (str) |c| {
+        switch (c) {
+            '\\' => {
+                if (state == .backslachSeen) pp.charBuffer.appendAssumeCapacity(c);
+                state = if (state == .start) .backslachSeen else .start;
+            },
+            else => {
+                if (state == .backslachSeen and c != '"') pp.charBuffer.appendAssumeCapacity('\\');
+                pp.charBuffer.appendAssumeCapacity(c);
+                state = .start;
+            },
+        }
+    }
+}
+
+/// Stringify `tokens` into pp.char_buf.
+/// See https://gcc.gnu.org/onlinedocs/gcc-11.2.0/cpp/Stringizing.html#Stringizing
+fn stringify(pp: *Preprocessor, tokens: []const Token) !void {
+    try pp.charBuffer.append('"');
+
+    var wsState: enum { start, need, notNeeded } = .start;
+    for (tokens) |tok| {
+        if (tok.id == .NewLine) continue;
+        if (tok.id == .WhiteSpace) {
+            if (wsState == .start) continue;
+            wsState = .need;
+            continue;
+        }
+        if (wsState == .need) try pp.charBuffer.append(' ');
+        wsState = .notNeeded;
+
+        for (pp.expandedSlice(tok)) |c| {
+            if (c == '"')
+                try pp.charBuffer.appendSlice("\\\"")
+            else if (c == '\\')
+                try pp.charBuffer.appendSlice("\\\\")
+            else
+                try pp.charBuffer.append(c);
+        }
+    }
+    try pp.charBuffer.appendSlice("\"\n");
+}
+
+fn handleBuiltinMacro(
+    pp: *Preprocessor,
+    builtin: TokenType,
+    paramTokens: []const Token,
+    srcLoc: Source.Location,
+) Error!bool {
     switch (builtin) {
         .MacroParamHasAttribute => {
             var invalid: ?Token = null;
@@ -767,9 +867,12 @@ fn handleBuiltinMacro(pp: *Preprocessor, builtin: TokenType, paramTokens: []cons
                     if (identifier) |_| invalid = tok else identifier = tok;
                 },
                 .WhiteSpace => continue,
-                else => invalid = tok,
+                else => {
+                    invalid = tok;
+                    break;
+                },
             };
-            if (identifier == null and invalid == null) invalid = paramTokens[0];
+            if (identifier == null and invalid == null) invalid = .{ .id = .Eof, .loc = srcLoc };
             if (invalid) |some| {
                 try pp.compilation.diag.add(
                     .{ .tag = .feature_check_requires_identifier, .loc = some.loc },
@@ -816,7 +919,7 @@ fn handleBuiltinMacro(pp: *Preprocessor, builtin: TokenType, paramTokens: []cons
                     if (identifier) |_| invalid = tok else identifier = tok;
                 },
             };
-            if (identifier == null and invalid == null) invalid = paramTokens[0];
+            if (identifier == null and invalid == null) invalid = .{ .id = .Eof, .loc = srcLoc };
             if (invalid) |some| {
                 try pp.compilation.diag.add(.{
                     .tag = .missing_tok_builtin,
@@ -840,9 +943,10 @@ fn expandFuncMacro(
     funcMacro: *const Macro,
     args: *const MacroArguments,
     expandedArgs: *const MacroArguments,
-) Error!ExpandBuffer {
+) MacroError!ExpandBuffer {
     var buf = ExpandBuffer.init(pp.compilation.gpa);
     try buf.ensureTotalCapacity(funcMacro.tokens.len);
+    errdefer buf.deinit();
 
     var expandedVarArguments = ExpandBuffer.init(pp.compilation.gpa);
     var varArguments = ExpandBuffer.init(pp.compilation.gpa);
@@ -913,29 +1017,7 @@ fn expandFuncMacro(
                     args.items[raw.end];
 
                 pp.charBuffer.clearRetainingCapacity();
-
-                try pp.charBuffer.append('"');
-                var wsState: enum { start, need, notNeed } = .start;
-                for (arg) |tok| {
-                    if (tok.id == .NewLine) continue;
-                    if (tok.id == .WhiteSpace) {
-                        if (wsState == .start) continue;
-                        wsState = .need;
-                        continue;
-                    }
-                    if (wsState == .need)
-                        try pp.charBuffer.append(' ');
-                    wsState = .notNeed;
-                    for (pp.expandedSlice(tok)) |c| {
-                        if (c == '"')
-                            try pp.charBuffer.appendSlice("\\\"")
-                        else if (c == '\\')
-                            try pp.charBuffer.appendSlice("\\\\")
-                        else
-                            try pp.charBuffer.append(c);
-                    }
-                }
-                try pp.charBuffer.appendSlice("\"\n");
+                try pp.stringify(arg);
 
                 const start = pp.compilation.generatedBuffer.items.len;
                 try pp.compilation.generatedBuffer.appendSlice(pp.charBuffer.items);
@@ -953,11 +1035,35 @@ fn expandFuncMacro(
                     try pp.compilation.diag.add(.{ .tag = .expected_arguments, .loc = loc, .extra = extra }, &.{});
                     try buf.append(.{ .id = .Zero, .loc = loc });
                     break :blk false;
-                } else try pp.handleBuiltinMacro(raw.id, arg);
+                } else try pp.handleBuiltinMacro(raw.id, arg, loc);
 
                 const start = pp.compilation.generatedBuffer.items.len;
                 try pp.compilation.generatedBuffer.writer().print("{}\n", .{@intFromBool(result)});
                 try buf.append(try pp.makeGeneratedToken(start, .IntegerLiteral, tokenFromRaw(raw)));
+            },
+
+            .MacroParamPragmaOperator => {
+                const paramTokens = expandedArgs.items[0];
+                // Clang and GCC require exactly one token (so, no parentheses or string pasting)
+                // even though their error messages indicate otherwise. Ours is slightly more
+                // descriptive.
+                var invalid: ?Token = null;
+                var string: ?Token = null;
+                for (paramTokens) |tok| switch (tok.id) {
+                    .StringLiteral => {
+                        if (string) |_| invalid = tok else string = tok;
+                    },
+                    .WhiteSpace => continue,
+                    else => {
+                        invalid = tok;
+                        break;
+                    },
+                };
+                if (string == null and invalid == null) invalid = .{ .loc = loc, .id = .Eof };
+                if (invalid) |some| try pp.compilation.diag.add(
+                    .{ .tag = .pragma_operator_string_literal, .loc = some.loc },
+                    some.expansionSlice(),
+                ) else try pp.pragmaOperator(string.?, loc);
             },
 
             .WhiteSpace => if (pp.compilation.onlyPreprocess)
@@ -1115,7 +1221,7 @@ fn expandMacroExhaustive(
     startIdx: usize,
     endIdx: usize,
     extendBuffer: bool,
-) Error!void {
+) MacroError!void {
     var movingEndIdx = endIdx;
     var advanceIdx: usize = 0;
     // rescan loop
@@ -1245,7 +1351,7 @@ fn expandMacroExhaustive(
 
 /// Try to expand a macro after a possible candidate has been read from the `tokenizer`
 /// into the `raw` token passed as argument
-fn expandMacro(pp: *Preprocessor, lexer: *Lexer, raw: RawToken) Error!void {
+fn expandMacro(pp: *Preprocessor, lexer: *Lexer, raw: RawToken) MacroError!void {
     const sourceToken = tokenFromRaw(raw);
     if (!raw.id.isMacroIdentifier())
         return pp.tokens.append(pp.compilation.gpa, sourceToken);
@@ -1589,7 +1695,7 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: RawToken, lParen: Raw
     });
 }
 
-fn include(pp: *Preprocessor, lexer: *Lexer) Error!void {
+fn include(pp: *Preprocessor, lexer: *Lexer) MacroError!void {
     const newSource = pp.findIncludeSource(lexer) catch |er| switch (er) {
         error.InvalidInclude => return,
         else => |e| return e,
@@ -1600,20 +1706,46 @@ fn include(pp: *Preprocessor, lexer: *Lexer) Error!void {
     if (pp.includeDepth > MaxIncludeDepth)
         return;
 
-    _ = try pp.preprocess(newSource);
+    _ = pp.preprocessExtra(newSource) catch |err| switch (err) {
+        error.StopPreprocessing => {},
+        else => |e| return e,
+    };
+}
+
+/// tokens that are part of a pragma directive can happen in 3 ways:
+///     1. directly in the text via `#pragma ...`
+///     2. Via a string literal argument to `_Pragma`
+///     3. Via a stringified macro argument which is used as an argument to `_Pragma`
+/// operator_loc: Location of `_Pragma`; null if this is from #pragma
+/// arg_locs: expansion locations of the argument to _Pragma. empty if #pragma or a raw string literal was used
+fn makePragmaToken(pp: *Preprocessor, raw: RawToken, operatorLoc: ?Source.Location, argLocs: []const Source.Location) !Token {
+    var tok = tokenFromRaw(raw);
+    if (operatorLoc) |loc|
+        try tok.addExpansionLocation(pp.compilation.gpa, &.{loc});
+
+    try tok.addExpansionLocation(pp.compilation.gpa, argLocs);
+    return tok;
 }
 
 /// Handle a pragma directive
-fn pragma(pp: *Preprocessor, lexer: *Lexer, pragmaToken: RawToken) !void {
+fn pragma(
+    pp: *Preprocessor,
+    lexer: *Lexer,
+    pragmaToken: RawToken,
+    operatorLoc: ?Source.Location,
+    argLocs: []const Source.Location,
+) !void {
     const nameToken = lexer.nextNoWhiteSpace();
     if (nameToken.id == .NewLine or nameToken.id == .Eof)
         return;
 
     const name = pp.getTokenSlice(nameToken);
 
-    try pp.tokens.append(pp.compilation.gpa, tokenFromRaw(pragmaToken));
+    try pp.tokens.append(pp.compilation.gpa, try pp.makePragmaToken(pragmaToken, operatorLoc, argLocs));
     const pragmaStart = @as(u32, @intCast(pp.tokens.len));
-    try pp.tokens.append(pp.compilation.gpa, tokenFromRaw(nameToken));
+
+    const pragmaNameToken = try pp.makePragmaToken(nameToken, operatorLoc, argLocs);
+    try pp.tokens.append(pp.compilation.gpa, pragmaNameToken);
 
     while (true) {
         const nextToken = lexer.next();
@@ -1625,7 +1757,7 @@ fn pragma(pp: *Preprocessor, lexer: *Lexer, pragmaToken: RawToken) !void {
             });
             break;
         }
-        try pp.tokens.append(pp.compilation.gpa, tokenFromRaw(nextToken));
+        try pp.tokens.append(pp.compilation.gpa, try pp.makePragmaToken(nextToken, operatorLoc, argLocs));
         if (nextToken.id == .NewLine)
             break;
     }
@@ -1638,9 +1770,9 @@ fn pragma(pp: *Preprocessor, lexer: *Lexer, pragmaToken: RawToken) !void {
     }
     return pp.compilation.diag.add(.{
         .tag = .unsupported_pragma,
-        .loc = .{ .id = nameToken.source, .byteOffset = nameToken.start, .line = nameToken.line },
+        .loc = pragmaNameToken.loc,
         .extra = .{ .str = name },
-    }, &.{});
+    }, pragmaNameToken.expansionSlice());
 }
 
 fn findIncludeSource(pp: *Preprocessor, lexer: *Lexer) !Source {
@@ -1856,4 +1988,34 @@ test "Preserve pragma tokens sometimes" {
         \\
     ;
     try Test.check(omit_poison, "");
+}
+
+test "destringify" {
+    const allocator = std.testing.allocator;
+    const Test = struct {
+        fn testDestringify(pp: *Preprocessor, stringified: []const u8, destringified: []const u8) !void {
+            pp.charBuffer.clearRetainingCapacity();
+            try pp.charBuffer.ensureUnusedCapacity(stringified.len);
+            pp.destringify(stringified);
+            try std.testing.expectEqualStrings(destringified, pp.charBuffer.items);
+        }
+    };
+    var comp = Compilation.init(allocator);
+    defer comp.deinit();
+    var pp = Preprocessor.init(&comp);
+    defer pp.deinit();
+
+    try Test.testDestringify(&pp, "hello\tworld\n", "hello\tworld\n");
+    try Test.testDestringify(&pp,
+        \\ \"FOO BAR BAZ\"
+    ,
+        \\ "FOO BAR BAZ"
+    );
+    try Test.testDestringify(&pp,
+        \\ \\t\\n
+        \\
+    ,
+        \\ \t\n
+        \\
+    );
 }
