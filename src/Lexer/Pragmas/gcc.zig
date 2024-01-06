@@ -127,7 +127,16 @@ fn preprocessorHandler(_: *Pragma, pp: *Preprocessor, startIdx: TokenIndex) Prag
                     directiveToken.expansionSlice(),
                 );
             },
-            .diagnostic => return diagnosticHandler(pp, startIdx + 2),
+            .diagnostic => return diagnosticHandler(pp, startIdx + 2) catch |err| switch (err) {
+                error.UnknownPragma => {
+                    const tok = pp.tokens.get(startIdx + 2);
+                    return pp.compilation.diag.add(.{
+                        .tag = .unknown_gcc_pragma_directive,
+                        .loc = tok.loc,
+                    }, tok.expansionSlice());
+                },
+                else => |e| return e,
+            },
             .poison => {
                 var i: usize = 2;
                 while (true) : (i += 1) {
@@ -153,8 +162,12 @@ fn preprocessorHandler(_: *Pragma, pp: *Preprocessor, startIdx: TokenIndex) Prag
                 return;
             },
         }
+    } else {
+        return pp.compilation.diag.add(.{
+            .tag = .unknown_gcc_pragma,
+            .loc = directiveToken.loc,
+        }, directiveToken.expansionSlice());
     }
-    return error.UnknownPragma;
 }
 
 fn parserHandler(_: *Pragma, p: *Parser, startIdx: TokenIndex) Compilation.Error!void {

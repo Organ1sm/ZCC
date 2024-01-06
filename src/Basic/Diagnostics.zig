@@ -86,6 +86,7 @@ pub const Options = packed struct {
     @"unicode-homoglyph": Kind = .default,
     @"return-type": Kind = .default,
     @"dollar-in-identifier-extension": Kind = .default,
+    @"unknown-pragmas": Kind = .default,
 };
 
 const messages = struct {
@@ -1274,6 +1275,15 @@ const messages = struct {
     pub const pragma_operator_string_literal = struct {
         const msg = "_Pragma requires exactly one string literal token";
         const kind = .@"error";
+    };
+    pub const unknown_gcc_pragma = struct {
+        const msg = "pragma GCC expected 'error', 'warning', 'diagnostic', 'poison'";
+        const kind = .warning;
+    };
+    pub const unknown_gcc_pragma_directive = struct {
+        const msg = "pragma GCC diagnostic expected 'error', 'warning', 'ignored', 'fatal', 'push', or 'pop'";
+        const opt = "unknown-pragmas";
+        const kind = .warning;
     };
 };
 
