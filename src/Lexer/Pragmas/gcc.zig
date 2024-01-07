@@ -18,6 +18,7 @@ pragma: Pragma = .{
     .preserveTokens = preserveTokens,
 },
 originalOptions: Diagnostics.Options = .{},
+optionsStack: std.ArrayListUnmanaged(Diagnostics.Options) = .{},
 
 const Directive = enum {
     warning,
@@ -42,11 +43,13 @@ fn beforePreprocess(pragma: *Pragma, comp: *Compilation) void {
 fn beforeParse(pragma: *Pragma, comp: *Compilation) void {
     const self = @fieldParentPtr(GCC, "pragma", pragma);
     comp.diag.options = self.originalOptions;
+    self.optionsStack.items.len = 0;
 }
 
 fn afterParse(pragma: *Pragma, comp: *Compilation) void {
     const self = @fieldParentPtr(GCC, "pragma", pragma);
     comp.diag.options = self.originalOptions;
+    self.optionsStack.items.len = 0;
 }
 
 pub fn init(allocator: std.mem.Allocator) !*Pragma {
@@ -57,127 +60,131 @@ pub fn init(allocator: std.mem.Allocator) !*Pragma {
 
 pub fn deinit(pragma: *Pragma, comp: *Compilation) void {
     const self = @fieldParentPtr(GCC, "pragma", pragma);
+    self.optionsStack.deinit(comp.gpa);
     comp.gpa.destroy(self);
 }
 
-fn diagnosticHandler(pp: *Preprocessor, startIdx: TokenIndex) Pragma.Error!void {
+fn diagnosticHandler(self: *GCC, pp: *Preprocessor, startIdx: TokenIndex) Pragma.Error!void {
     const diagnosticToken = pp.tokens.get(startIdx);
     if (diagnosticToken.id == .NewLine)
         return;
 
-    if (std.meta.stringToEnum(Directive.Diagnostics, pp.expandedSlice(diagnosticToken))) |diagnostic| {
-        switch (diagnostic) {
-            .ignored, .warning, .@"error", .fatal => {
-                const str = Pragma.pasteTokens(pp, startIdx + 1) catch |err| switch (err) {
-                    error.ExpectedStringLiteral => {
-                        return pp.compilation.diag.add(.{
-                            .tag = .pragma_requires_string_literal,
-                            .loc = diagnosticToken.loc,
-                            .extra = .{ .str = "pragma diagnostic" },
-                        }, diagnosticToken.expansionSlice());
-                    },
-                    else => |e| return e,
-                };
-                if (!std.mem.startsWith(u8, str, "-W")) {
-                    const next = pp.tokens.get(startIdx + 1);
-                    return pp.compilation.diag.add(.{
-                        .tag = .malformed_warning_check,
-                        .loc = next.loc,
-                        .extra = .{ .str = "pragma diagnostic" },
-                    }, next.expansionSlice());
-                }
-                const newKind = switch (diagnostic) {
-                    .ignored => Diagnostics.Kind.off,
-                    .warning => Diagnostics.Kind.warning,
-                    .@"error" => Diagnostics.Kind.@"error",
-                    .fatal => Diagnostics.Kind.@"fatal error",
-                    else => unreachable,
-                };
+    const diagnostic = std.meta.stringToEnum(Directive.Diagnostics, pp.expandedSlice(diagnosticToken)) orelse
+        return error.UnknownPragma;
 
-                return pp.compilation.diag.set(str[2..], newKind);
-            },
-            .push, .pop => {},
-        }
+    switch (diagnostic) {
+        .ignored, .warning, .@"error", .fatal => {
+            const str = Pragma.pasteTokens(pp, startIdx + 1) catch |err| switch (err) {
+                error.ExpectedStringLiteral => {
+                    return pp.compilation.diag.add(.{
+                        .tag = .pragma_requires_string_literal,
+                        .loc = diagnosticToken.loc,
+                        .extra = .{ .str = "pragma diagnostic" },
+                    }, diagnosticToken.expansionSlice());
+                },
+                else => |e| return e,
+            };
+            if (!std.mem.startsWith(u8, str, "-W")) {
+                const next = pp.tokens.get(startIdx + 1);
+                return pp.compilation.diag.add(.{
+                    .tag = .malformed_warning_check,
+                    .loc = next.loc,
+                    .extra = .{ .str = "pragma diagnostic" },
+                }, next.expansionSlice());
+            }
+            const newKind = switch (diagnostic) {
+                .ignored => Diagnostics.Kind.off,
+                .warning => Diagnostics.Kind.warning,
+                .@"error" => Diagnostics.Kind.@"error",
+                .fatal => Diagnostics.Kind.@"fatal error",
+                else => unreachable,
+            };
+
+            try pp.compilation.diag.set(str[2..], newKind);
+        },
+        .push => try self.optionsStack.append(pp.compilation.gpa, pp.compilation.diag.options),
+        .pop => pp.compilation.diag.options = self.optionsStack.popOrNull() orelse self.originalOptions,
     }
-    return error.UnknownPragma;
 }
 
-fn preprocessorHandler(_: *Pragma, pp: *Preprocessor, startIdx: TokenIndex) Pragma.Error!void {
+fn preprocessorHandler(pragma: *Pragma, pp: *Preprocessor, startIdx: TokenIndex) Pragma.Error!void {
+    var self = @fieldParentPtr(GCC, "pragma", pragma);
     const directiveToken = pp.tokens.get(startIdx + 1);
     if (directiveToken.id == .NewLine)
         return;
 
-    if (std.meta.stringToEnum(Directive, pp.expandedSlice(directiveToken))) |gcc_pragma| {
-        switch (gcc_pragma) {
-            .warning, .@"error" => {
-                const text = Pragma.pasteTokens(pp, startIdx + 2) catch |err| switch (err) {
-                    error.ExpectedStringLiteral => {
-                        return pp.compilation.diag.add(.{
-                            .tag = .pragma_requires_string_literal,
-                            .loc = directiveToken.loc,
-                            .extra = .{ .str = @tagName(gcc_pragma) },
-                        }, directiveToken.expansionSlice());
-                    },
-                    else => |e| return e,
-                };
-                const extra = Diagnostics.Message.Extra{ .str = try pp.arena.allocator().dupe(u8, text) };
-                const diagnosticTag: Diagnostics.Tag = if (gcc_pragma == .warning) .pragma_warning_message else .pragma_error_message;
-                return pp.compilation.diag.add(
-                    .{ .tag = diagnosticTag, .loc = directiveToken.loc, .extra = extra },
-                    directiveToken.expansionSlice(),
-                );
-            },
-            .diagnostic => return diagnosticHandler(pp, startIdx + 2) catch |err| switch (err) {
-                error.UnknownPragma => {
-                    const tok = pp.tokens.get(startIdx + 2);
-                    return pp.compilation.diag.add(.{
-                        .tag = .unknown_gcc_pragma_directive,
-                        .loc = tok.loc,
-                    }, tok.expansionSlice());
-                },
-                else => |e| return e,
-            },
-            .poison => {
-                var i: usize = 2;
-                while (true) : (i += 1) {
-                    const tok = pp.tokens.get(startIdx + i);
-                    if (tok.id == .NewLine)
-                        break;
-
-                    if (!tok.id.isMacroIdentifier()) {
-                        return pp.compilation.diag.add(.{
-                            .tag = .pragma_poison_identifier,
-                            .loc = tok.loc,
-                        }, tok.expansionSlice());
-                    }
-                    const str = pp.expandedSlice(tok);
-                    if (pp.defines.get(str) != null) {
-                        try pp.compilation.diag.add(.{
-                            .tag = .pragma_poison_macro,
-                            .loc = tok.loc,
-                        }, tok.expansionSlice());
-                    }
-                    try pp.poisonedIdentifiers.put(str, {});
-                }
-                return;
-            },
-        }
-    } else {
+    const gccPragma = std.meta.stringToEnum(Directive, pp.expandedSlice(directiveToken)) orelse
+        {
         return pp.compilation.diag.add(.{
             .tag = .unknown_gcc_pragma,
             .loc = directiveToken.loc,
         }, directiveToken.expansionSlice());
+    };
+    switch (gccPragma) {
+        .warning, .@"error" => {
+            const text = Pragma.pasteTokens(pp, startIdx + 2) catch |err| switch (err) {
+                error.ExpectedStringLiteral => {
+                    return pp.compilation.diag.add(.{
+                        .tag = .pragma_requires_string_literal,
+                        .loc = directiveToken.loc,
+                        .extra = .{ .str = @tagName(gccPragma) },
+                    }, directiveToken.expansionSlice());
+                },
+                else => |e| return e,
+            };
+            const extra = Diagnostics.Message.Extra{ .str = try pp.arena.allocator().dupe(u8, text) };
+            const diagnosticTag: Diagnostics.Tag = if (gccPragma == .warning) .pragma_warning_message else .pragma_error_message;
+            return pp.compilation.diag.add(
+                .{ .tag = diagnosticTag, .loc = directiveToken.loc, .extra = extra },
+                directiveToken.expansionSlice(),
+            );
+        },
+        .diagnostic => return self.diagnosticHandler(pp, startIdx + 2) catch |err| switch (err) {
+            error.UnknownPragma => {
+                const tok = pp.tokens.get(startIdx + 2);
+                return pp.compilation.diag.add(.{
+                    .tag = .unknown_gcc_pragma_directive,
+                    .loc = tok.loc,
+                }, tok.expansionSlice());
+            },
+            else => |e| return e,
+        },
+        .poison => {
+            var i: usize = 2;
+            while (true) : (i += 1) {
+                const tok = pp.tokens.get(startIdx + i);
+                if (tok.id == .NewLine)
+                    break;
+
+                if (!tok.id.isMacroIdentifier()) {
+                    return pp.compilation.diag.add(.{
+                        .tag = .pragma_poison_identifier,
+                        .loc = tok.loc,
+                    }, tok.expansionSlice());
+                }
+                const str = pp.expandedSlice(tok);
+                if (pp.defines.get(str) != null) {
+                    try pp.compilation.diag.add(.{
+                        .tag = .pragma_poison_macro,
+                        .loc = tok.loc,
+                    }, tok.expansionSlice());
+                }
+                try pp.poisonedIdentifiers.put(str, {});
+            }
+            return;
+        },
     }
 }
 
-fn parserHandler(_: *Pragma, p: *Parser, startIdx: TokenIndex) Compilation.Error!void {
+fn parserHandler(pragma: *Pragma, p: *Parser, startIdx: TokenIndex) Compilation.Error!void {
+    var self = @fieldParentPtr(GCC, "pragma", pragma);
     const directiveToken = p.pp.tokens.get(startIdx + 1);
     if (directiveToken.id == .NewLine)
         return;
 
     const name = p.pp.expandedSlice(directiveToken);
     if (std.mem.eql(u8, name, "diagnostic")) {
-        return diagnosticHandler(p.pp, startIdx + 2) catch |err| switch (err) {
+        return self.diagnosticHandler(p.pp, startIdx + 2) catch |err| switch (err) {
             error.UnknownPragma => {}, // handled during preprocessing
             error.StopPreprocessing => unreachable, // Only used by #pragma once
             else => |e| return e,
