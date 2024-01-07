@@ -1149,6 +1149,11 @@ const messages = struct {
         const extra = .str;
         const kind = .@"error";
     };
+    pub const pragma_message = struct {
+        const msg = "#pragma message: {s}";
+        const extra = .str;
+        const kind = .note;
+    };
     pub const pragma_requires_string_literal = struct {
         const msg = "pragma {s} requires string literal";
         const extra = .str;
