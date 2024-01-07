@@ -50,7 +50,14 @@ pub fn getLineCol(source: Source, byteOffset: u32) LineCol {
         }
     }
 
-    const col = byteOffset - start + 1;
+    const col = col: {
+        var i: usize = start;
+        var col: u32 = 1;
+        while (i < byteOffset) : (col += 1) { // TODO this is still incorrect, but better
+            i += std.unicode.utf8ByteSequenceLength(source.buffer[i]) catch unreachable;
+        }
+        break :col col;
+    };
     return .{ .line = std.mem.sliceTo(source.buffer[start..], '\n'), .col = col };
 }
 

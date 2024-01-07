@@ -5412,21 +5412,37 @@ fn parseIntegerLiteral(p: *Parser) Error!Result {
 }
 
 fn parseCharLiteral(p: *Parser) Error!Result {
-    const litToken = p.index;
+    defer p.index += 1;
     const ty: Type = switch (p.getCurrToken()) {
         .CharLiteral => .{ .specifier = .Int },
-        else => return p.todo("unicode char literals"),
+        .CharLiteralWide => Type.wideChar(p.pp.compilation),
+        .CharLiteralUTF_16 => .{ .specifier = .UShort },
+        .CharLiteralUTF_32 => .{ .specifier = .ULong },
+        else => unreachable,
     };
-    p.index += 1;
+
+    const max: u32 = switch (p.getCurrToken()) {
+        .CharLiteral => std.math.maxInt(u8),
+        .CharLiteralWide => std.math.maxInt(u32), // TODO correct
+        .CharLiteralUTF_16 => std.math.maxInt(u16),
+        .CharLiteralUTF_32 => std.math.maxInt(u32),
+        else => unreachable,
+    };
+    var multichar: u8 = switch (p.getCurrToken()) {
+        .CharLiteral => 0,
+        .CharLiteralWide => 4,
+        .CharLiteralUTF_16 => 2,
+        .CharLiteralUTF_32 => 2,
+        else => unreachable,
+    };
 
     var val: u32 = 0;
     var overflowReported = false;
-    var multichar: u8 = 0;
-    var slice = p.getTokenSlice(litToken);
+    var slice = p.getTokenSlice(p.index);
     slice = slice[0 .. slice.len - 1];
     var i = std.mem.indexOf(u8, slice, "\'").? + 1;
     while (i < slice.len) : (i += 1) {
-        var c = slice[i];
+        var c: u32 = slice[i];
         switch (c) {
             '\\' => {
                 i += 1;
@@ -5442,30 +5458,67 @@ fn parseCharLiteral(p: *Parser) Error!Result {
                     'e' => c = 0x1B,
                     'f' => c = 0x0C,
                     'v' => c = 0x0B,
-                    'x' => c = try p.parseNumberEscape(litToken, 16, slice, &i),
-                    '0'...'7' => c = try p.parseNumberEscape(litToken, 8, slice, &i),
+                    'x' => c = try p.parseNumberEscape(p.index, 16, slice, &i),
+                    '0'...'7' => c = try p.parseNumberEscape(p.index, 8, slice, &i),
                     'u', 'U' => return p.todo("unicode escapes in char literals"),
                     else => unreachable,
                 }
             },
-            else => {},
-        }
-
-        const mulOV = @mulWithOverflow(val, 0xff);
-        if (mulOV[1] != 0 and !overflowReported) {
-            try p.errExtra(.char_lit_too_wide, litToken, .{ .unsigned = i });
-            overflowReported = true;
-        }
-        val = mulOV[0] + c;
-
-        switch (multichar) {
-            0 => multichar = 1,
-            1 => {
-                multichar = 2;
-                try p.errToken(.multichar_literal, litToken);
+            // These are safe since the source is checked to be valid utf8.
+            0b1100_0000...0b1101_1111 => {
+                c &= 0b00011111;
+                c <<= 6;
+                c |= slice[i + 1] & 0b00111111;
+                i += 1;
+            },
+            0b1110_0000...0b1110_1111 => {
+                c &= 0b00001111;
+                c <<= 6;
+                c |= slice[i + 1] & 0b00111111;
+                c <<= 6;
+                c |= slice[i + 2] & 0b00111111;
+                i += 2;
+            },
+            0b1111_0000...0b1111_0111 => {
+                c &= 0b00000111;
+                c <<= 6;
+                c |= slice[i + 1] & 0b00111111;
+                c <<= 6;
+                c |= slice[i + 2] & 0b00111111;
+                c <<= 6;
+                c |= slice[i + 3] & 0b00111111;
+                i += 3;
             },
             else => {},
         }
+
+        if (c > max)
+            try p.err(.char_too_large);
+
+        switch (multichar) {
+            0, 2, 4 => multichar += 1,
+            1 => {
+                multichar = 99;
+                try p.err(.multichar_literal);
+            },
+            3 => {
+                try p.err(.unicode_multichar_literal);
+                return error.ParsingFailed;
+            },
+            5 => {
+                try p.err(.wide_multichar_literal);
+                val = 0;
+                multichar = 6;
+            },
+            6 => val = 0,
+            else => {},
+        }
+        const mulOV = @mulWithOverflow(val, max);
+        if (mulOV[1] != 0 and !overflowReported) {
+            try p.errExtra(.char_lit_too_wide, p.index, .{ .unsigned = i });
+            overflowReported = true;
+        }
+        val = mulOV[0] + c;
     }
 
     return Result{
