@@ -674,10 +674,15 @@ pub fn next(self: *Lexer) Token {
             },
             .multi_line_comment => switch (c) {
                 '*' => state = .multi_line_comment_asterisk,
+                '\n' => self.line += 1,
                 else => {},
             },
             .multi_line_comment_asterisk => switch (c) {
                 '/' => state = .start,
+                '\n' => {
+                    self.line += 1;
+                    state = .multi_line_comment;
+                },
                 else => state = .multi_line_comment,
             },
 
