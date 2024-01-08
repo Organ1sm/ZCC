@@ -402,7 +402,7 @@ fn nodeIs(p: *Parser, node: NodeIndex, tag: AstTag) bool {
     while (true) {
         const curTag = tags[@intFromEnum(cur)];
         if (curTag == .ParenExpr) {
-            cur = data[@intFromEnum(cur)].UnaryExpr;
+            cur = data[@intFromEnum(cur)].unExpr;
         } else if (curTag == tag) {
             return true;
         } else {
@@ -929,7 +929,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
         const node = try p.addNode(.{
             .type = initD.d.type,
             .tag = try declSpec.validateFnDef(p),
-            .data = .{ .Declaration = .{ .name = initD.d.name, .node = body } },
+            .data = .{ .decl = .{ .name = initD.d.name, .node = body } },
         });
         try p.declBuffer.append(node);
 
@@ -966,7 +966,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
         const node = try p.addNode(.{
             .type = initD.d.type,
             .tag = tag,
-            .data = .{ .Declaration = .{ .name = initD.d.name, .node = initD.initializer } },
+            .data = .{ .decl = .{ .name = initD.d.name, .node = initD.initializer } },
         });
         try p.declBuffer.append(node);
 
@@ -1036,7 +1036,7 @@ fn parseStaticAssert(p: *Parser) Error!bool {
             var buffer = std.ArrayList(u8).init(p.pp.compilation.gpa);
             defer buffer.deinit();
 
-            const data = p.nodes.items(.data)[@intFromEnum(str.node)].String;
+            const data = p.nodes.items(.data)[@intFromEnum(str.node)].string;
             try buffer.ensureUnusedCapacity(data.len);
             try AST.dumpString(
                 p.strings.items[data.index..][0..data.len],
@@ -1055,7 +1055,7 @@ fn parseStaticAssert(p: *Parser) Error!bool {
     const node = try p.addNode(.{
         .tag = .StaticAssert,
         .data = .{
-            .BinaryExpr = .{
+            .binExpr = .{
                 .lhs = res.node,
                 .rhs = str.node,
             },
@@ -1234,7 +1234,7 @@ fn attribute(p: *Parser) Error!Attribute {
                 const argNode = try p.addNode(.{
                     .tag = .AttrArgIdentifier,
                     .type = .{ .specifier = .Void },
-                    .data = .{ .DeclarationRef = maybeIdent.? },
+                    .data = .{ .declRef = maybeIdent.? },
                 });
                 return Attribute{
                     .name = nameToken,
@@ -1248,7 +1248,7 @@ fn attribute(p: *Parser) Error!Attribute {
                 const argNode = try p.addNode(.{
                     .tag = .AttrArgIdentifier,
                     .type = .{ .specifier = .Void },
-                    .data = .{ .DeclarationRef = ident },
+                    .data = .{ .declRef = ident },
                 });
                 try p.listBuffer.append(argNode);
             } else {
@@ -1275,12 +1275,12 @@ fn attribute(p: *Parser) Error!Attribute {
             var node: AST.Node = .{
                 .tag = .AttrParamsTwo,
                 .type = .{ .specifier = .Void },
-                .data = .{ .BinaryExpr = .{ .lhs = items[0], .rhs = .none } },
+                .data = .{ .binExpr = .{ .lhs = items[0], .rhs = .none } },
             };
             switch (items.len) {
                 0 => unreachable,
                 1 => {},
-                2 => node.data.BinaryExpr.rhs = items[1],
+                2 => node.data.binExpr.rhs = items[1],
                 else => {
                     node.tag = .AttrParams;
                     node.data = .{ .range = try p.addList(items) };
@@ -1692,13 +1692,13 @@ fn parseRecordSpec(p: *Parser) Error!*Type.Record {
     var node: AST.Node = .{
         .tag = if (isStruct) .StructDeclTwo else .UnionDeclTwo,
         .type = ty,
-        .data = .{ .BinaryExpr = .{ .lhs = .none, .rhs = .none } },
+        .data = .{ .binExpr = .{ .lhs = .none, .rhs = .none } },
     };
     const recordDLS = p.declBuffer.items[declBufferTop..];
     switch (recordDLS.len) {
         0 => {},
-        1 => node.data = .{ .BinaryExpr = .{ .lhs = recordDLS[0], .rhs = .none } },
-        2 => node.data = .{ .BinaryExpr = .{ .lhs = recordDLS[0], .rhs = recordDLS[1] } },
+        1 => node.data = .{ .binExpr = .{ .lhs = recordDLS[0], .rhs = .none } },
+        2 => node.data = .{ .binExpr = .{ .lhs = recordDLS[0], .rhs = recordDLS[1] } },
         else => {
             node.tag = if (isStruct) .StructDecl else .UnionDecl;
             node.data = .{ .range = try p.addList(recordDLS) };
@@ -1825,7 +1825,7 @@ fn recordDeclarator(p: *Parser) Error!bool {
             const node = try p.addNode(.{
                 .tag = .RecordFieldDecl,
                 .type = ty,
-                .data = .{ .Declaration = .{ .name = nameToken, .node = bitsNode } },
+                .data = .{ .decl = .{ .name = nameToken, .node = bitsNode } },
             });
             try p.declBuffer.append(node);
         }
@@ -1941,14 +1941,14 @@ fn parseEnumSpec(p: *Parser) Error!*Type.Enum {
     var node: AST.Node = .{
         .tag = .EnumDeclTwo,
         .type = ty,
-        .data = .{ .BinaryExpr = .{ .lhs = .none, .rhs = .none } },
+        .data = .{ .binExpr = .{ .lhs = .none, .rhs = .none } },
     };
 
     const fieldNodes = p.listBuffer.items[listBufferTop..];
     switch (fieldNodes.len) {
         0 => {},
-        1 => node.data = .{ .BinaryExpr = .{ .lhs = fieldNodes[0], .rhs = .none } },
-        2 => node.data = .{ .BinaryExpr = .{ .lhs = fieldNodes[0], .rhs = fieldNodes[1] } },
+        1 => node.data = .{ .binExpr = .{ .lhs = fieldNodes[0], .rhs = .none } },
+        2 => node.data = .{ .binExpr = .{ .lhs = fieldNodes[0], .rhs = fieldNodes[1] } },
         else => {
             node.tag = .EnumDecl;
             node.data = .{ .range = try p.addList(fieldNodes) };
@@ -2047,7 +2047,7 @@ fn enumerator(p: *Parser, e: *Enumerator) Error!?EnumFieldAndNode {
                 .tag = .EnumFieldDecl,
                 .type = e.res.ty,
                 .data = .{
-                    .Declaration = .{
+                    .decl = .{
                         .name = nameToken,
                         .node = e.res.node,
                     },
@@ -2875,7 +2875,7 @@ fn convertInitList(p: *Parser, il: InitList, initType: Type) Error!NodeIndex {
                 const elem = try p.addNode(.{
                     .tag = .ArrayFillerExpr,
                     .type = elemType,
-                    .data = .{ .Int = init.index - start },
+                    .data = .{ .int = init.index - start },
                 });
                 try p.listBuffer.append(elem);
             }
@@ -2888,7 +2888,7 @@ fn convertInitList(p: *Parser, il: InitList, initType: Type) Error!NodeIndex {
         var arrInitNode: AST.Node = .{
             .tag = .ArrayInitExprTwo,
             .type = initType,
-            .data = .{ .BinaryExpr = .{ .lhs = .none, .rhs = .none } },
+            .data = .{ .binExpr = .{ .lhs = .none, .rhs = .none } },
         };
 
         if (initType.specifier == .IncompleteArray) {
@@ -2909,7 +2909,7 @@ fn convertInitList(p: *Parser, il: InitList, initType: Type) Error!NodeIndex {
             const elem = try p.addNode(.{
                 .tag = .ArrayFillerExpr,
                 .type = elemType,
-                .data = .{ .Int = maxItems - start },
+                .data = .{ .int = maxItems - start },
             });
             try p.listBuffer.append(elem);
         }
@@ -2917,8 +2917,8 @@ fn convertInitList(p: *Parser, il: InitList, initType: Type) Error!NodeIndex {
         const items = p.listBuffer.items[listBuffTop..];
         switch (items.len) {
             0 => {},
-            1 => arrInitNode.data.BinaryExpr.lhs = items[0],
-            2 => arrInitNode.data.BinaryExpr = .{ .lhs = items[0], .rhs = items[1] },
+            1 => arrInitNode.data.binExpr.lhs = items[0],
+            2 => arrInitNode.data.binExpr = .{ .lhs = items[0], .rhs = items[1] },
             else => {
                 arrInitNode.tag = .ArrayInitExpr;
                 arrInitNode.data = .{ .range = try p.addList(items) };
@@ -2946,13 +2946,13 @@ fn convertInitList(p: *Parser, il: InitList, initType: Type) Error!NodeIndex {
         var structInitNode: AST.Node = .{
             .tag = .StructInitExprTwo,
             .type = initType,
-            .data = .{ .BinaryExpr = .{ .lhs = .none, .rhs = .none } },
+            .data = .{ .binExpr = .{ .lhs = .none, .rhs = .none } },
         };
         const items = p.listBuffer.items[listBuffTop..];
         switch (items.len) {
             0 => {},
-            1 => structInitNode.data.BinaryExpr.lhs = items[0],
-            2 => structInitNode.data.BinaryExpr = .{ .lhs = items[0], .rhs = items[1] },
+            1 => structInitNode.data.binExpr.lhs = items[0],
+            2 => structInitNode.data.binExpr = .{ .lhs = items[0], .rhs = items[1] },
             else => {
                 structInitNode.tag = .StructInitExpr;
                 structInitNode.data = .{ .range = try p.addList(items) };
@@ -2963,12 +2963,12 @@ fn convertInitList(p: *Parser, il: InitList, initType: Type) Error!NodeIndex {
         var unionInitNode: AST.Node = .{
             .tag = .UnionInitExpr,
             .type = initType,
-            .data = .{ .UnionInit = .{ .fieldIndex = 0, .node = .none } },
+            .data = .{ .unionInit = .{ .fieldIndex = 0, .node = .none } },
         };
         if (unionType.data.record.fields.len == 0) {
             // do nothing for empty unions
         } else if (il.list.items.len == 0) {
-            unionInitNode.data.UnionInit.node = try p.addNode(.{
+            unionInitNode.data.unionInit.node = try p.addNode(.{
                 .tag = .DefaultInitExpr,
                 .type = initType,
                 .data = undefined,
@@ -2976,7 +2976,7 @@ fn convertInitList(p: *Parser, il: InitList, initType: Type) Error!NodeIndex {
         } else {
             const init = il.list.items[0];
             const fieldType = unionType.data.record.fields[init.index].ty;
-            unionInitNode.data.UnionInit = .{
+            unionInitNode.data.unionInit = .{
                 .fieldIndex = @as(u32, @truncate(init.index)),
                 .node = try p.convertInitList(init.list, fieldType),
             };
@@ -3130,7 +3130,7 @@ fn stmt(p: *Parser) Error!NodeIndex {
         _ = try p.expectToken(.Semicolon);
         return try p.addNode(.{
             .tag = .GotoStmt,
-            .data = .{ .DeclarationRef = nameToken },
+            .data = .{ .declRef = nameToken },
         });
     }
 
@@ -3208,20 +3208,23 @@ fn parseIfStmt(p: *Parser) Error!NodeIndex {
     const elseTK = if (p.eat(.KeywordElse)) |_| try p.stmt() else .none;
 
     if (then != .none and elseTK != .none) {
-        return try p.addNode(.{ .tag = .IfThenElseStmt, .data = .{
-            .If3 = .{
-                .cond = cond.node,
-                .body = (try p.addList(&.{ then, elseTK })).start,
+        return try p.addNode(.{
+            .tag = .IfThenElseStmt,
+            .data = .{
+                .if3 = .{
+                    .cond = cond.node,
+                    .body = (try p.addList(&.{ then, elseTK })).start,
+                },
             },
-        } });
+        });
     } else if (then == .none and elseTK != .none) {
         return try p.addNode(.{
             .tag = .IfElseStmt,
-            .data = .{ .BinaryExpr = .{ .lhs = cond.node, .rhs = elseTK } },
+            .data = .{ .binExpr = .{ .lhs = cond.node, .rhs = elseTK } },
         });
     } else return try p.addNode(.{
         .tag = .IfThenStmt,
-        .data = .{ .BinaryExpr = .{ .lhs = cond.node, .rhs = then } },
+        .data = .{ .binExpr = .{ .lhs = cond.node, .rhs = then } },
     });
 }
 
@@ -3279,13 +3282,13 @@ fn parseForStmt(p: *Parser) Error!NodeIndex {
     } else if (init.node == .none and cond.node == .none and incr.node == .none) {
         return try p.addNode(.{
             .tag = .ForEverStmt,
-            .data = .{ .UnaryExpr = body },
+            .data = .{ .unExpr = body },
         });
     } else {
         return try p.addNode(.{
             .tag = .ForStmt,
             .data = .{
-                .If3 = .{
+                .if3 = .{
                     .cond = body,
                     .body = (try p.addList(&.{ init.node, cond.node, incr.node })).start,
                 },
@@ -3316,7 +3319,7 @@ fn parseWhileStmt(p: *Parser) Error!NodeIndex {
 
     return try p.addNode(.{
         .tag = .WhileStmt,
-        .data = .{ .BinaryExpr = .{ .rhs = cond.node, .lhs = body } },
+        .data = .{ .binExpr = .{ .rhs = cond.node, .lhs = body } },
     });
 }
 
@@ -3345,7 +3348,7 @@ fn parseDoWhileStmt(p: *Parser) Error!NodeIndex {
     _ = try p.expectToken(.Semicolon);
     return try p.addNode(.{
         .tag = .WhileStmt,
-        .data = .{ .BinaryExpr = .{ .rhs = cond.node, .lhs = body } },
+        .data = .{ .binExpr = .{ .rhs = cond.node, .lhs = body } },
     });
 }
 
@@ -3376,7 +3379,7 @@ fn parseSwitchStmt(p: *Parser) Error!NodeIndex {
 
     return try p.addNode(.{
         .tag = .SwitchStmt,
-        .data = .{ .BinaryExpr = .{ .lhs = cond.node, .rhs = body } },
+        .data = .{ .binExpr = .{ .lhs = cond.node, .rhs = body } },
     });
 }
 
@@ -3387,10 +3390,12 @@ fn parseCaseStmt(p: *Parser, caseToken: u32) Error!?NodeIndex {
     const s = try p.stmt();
     const node = try p.addNode(.{
         .tag = .CaseStmt,
-        .data = .{ .BinaryExpr = .{
-            .lhs = val.node,
-            .rhs = s,
-        } },
+        .data = .{
+            .binExpr = .{
+                .lhs = val.node,
+                .rhs = s,
+            },
+        },
     });
 
     if (p.findSwitch()) |some| {
@@ -3425,7 +3430,7 @@ fn parseDefaultStmt(p: *Parser, defaultToken: u32) Error!?NodeIndex {
 
     const node = try p.addNode(.{
         .tag = .DefaultStmt,
-        .data = .{ .UnaryExpr = s },
+        .data = .{ .unExpr = s },
     });
 
     if (p.findSwitch()) |some| {
@@ -3476,7 +3481,7 @@ fn labeledStmt(p: *Parser) Error!?NodeIndex {
 
         return try p.addNode(.{
             .tag = .LabeledStmt,
-            .data = .{ .Declaration = .{ .name = nameToken, .node = try p.stmt() } },
+            .data = .{ .decl = .{ .name = nameToken, .node = try p.stmt() } },
         });
     } else if (p.eat(.KeywordCase)) |case| {
         return p.parseCaseStmt(case);
@@ -3581,13 +3586,13 @@ fn parseCompoundStmt(p: *Parser, isFnBody: bool) Error!?NodeIndex {
 
     var node: AST.Node = .{
         .tag = .CompoundStmtTwo,
-        .data = .{ .BinaryExpr = .{ .lhs = .none, .rhs = .none } },
+        .data = .{ .binExpr = .{ .lhs = .none, .rhs = .none } },
     };
     const statements = p.declBuffer.items[declBufferTop..];
     switch (statements.len) {
         0 => {},
-        1 => node.data = .{ .BinaryExpr = .{ .lhs = statements[0], .rhs = .none } },
-        2 => node.data = .{ .BinaryExpr = .{ .lhs = statements[0], .rhs = statements[1] } },
+        1 => node.data = .{ .binExpr = .{ .lhs = statements[0], .rhs = .none } },
+        2 => node.data = .{ .binExpr = .{ .lhs = statements[0], .rhs = statements[1] } },
         else => {
             node.tag = .CompoundStmt;
             node.data = .{ .range = try p.addList(statements) };
@@ -3608,10 +3613,10 @@ fn parseReturnStmt(p: *Parser) Error!?NodeIndex {
     if (expr.node == .none) {
         if (!returnType.is(.Void))
             try p.errStr(.func_should_return, retToken, p.getTokenSlice(p.func.name));
-        return try p.addNode(.{ .tag = .ReturnStmt, .data = .{ .UnaryExpr = expr.node } });
+        return try p.addNode(.{ .tag = .ReturnStmt, .data = .{ .unExpr = expr.node } });
     } else if (returnType.is((.Void))) {
         try p.errStr(.void_func_returns_value, eToken, p.getTokenSlice(p.func.name));
-        return try p.addNode(.{ .tag = .ReturnStmt, .data = .{ .UnaryExpr = expr.node } });
+        return try p.addNode(.{ .tag = .ReturnStmt, .data = .{ .unExpr = expr.node } });
     }
 
     try expr.lvalConversion(p);
@@ -3656,21 +3661,21 @@ fn parseReturnStmt(p: *Parser) Error!?NodeIndex {
     }
 
     try expr.saveValue(p);
-    return try p.addNode(.{ .tag = .ReturnStmt, .data = .{ .UnaryExpr = expr.node } });
+    return try p.addNode(.{ .tag = .ReturnStmt, .data = .{ .unExpr = expr.node } });
 }
 
 fn nodeIsNoreturn(p: *Parser, node: NodeIndex) bool {
     switch (p.nodes.items(.tag)[@intFromEnum(node)]) {
         .BreakStmt, .ContinueStmt, .ReturnStmt => return true,
         .IfThenElseStmt => {
-            const data = p.data.items[p.nodes.items(.data)[@intFromEnum(node)].If3.body..];
+            const data = p.data.items[p.nodes.items(.data)[@intFromEnum(node)].if3.body..];
             return p.nodeIsNoreturn(data[0]) and p.nodeIsNoreturn(data[1]);
         },
 
         .CompoundStmtTwo => {
             const data = p.nodes.items(.data)[@intFromEnum(node)];
-            if (data.BinaryExpr.rhs != .none) return p.nodeIsNoreturn(data.BinaryExpr.rhs);
-            if (data.BinaryExpr.lhs != .none) return p.nodeIsNoreturn(data.BinaryExpr.lhs);
+            if (data.binExpr.rhs != .none) return p.nodeIsNoreturn(data.binExpr.rhs);
+            if (data.binExpr.lhs != .none) return p.nodeIsNoreturn(data.binExpr.lhs);
             return false;
         },
 
@@ -3681,7 +3686,7 @@ fn nodeIsNoreturn(p: *Parser, node: NodeIndex) bool {
 
         .LabeledStmt => {
             const data = p.nodes.items(.data)[@intFromEnum(node)];
-            return p.nodeIsNoreturn(data.Declaration.node);
+            return p.nodeIsNoreturn(data.decl.node);
         },
 
         else => return false,
@@ -4019,7 +4024,7 @@ fn conditionalExpr(p: *Parser) Error!Result {
     cond.node = try p.addNode(.{
         .tag = .CondExpr,
         .type = cond.ty,
-        .data = .{ .If3 = .{ .cond = cond.node, .body = (try p.addList(&.{ thenExpr.node, elseExpr.node })).start } },
+        .data = .{ .if3 = .{ .cond = cond.node, .body = (try p.addList(&.{ thenExpr.node, elseExpr.node })).start } },
     });
 
     return cond;
@@ -4431,7 +4436,7 @@ fn parseBuiltinChooseExpr(p: *Parser) Error!Result {
     cond.node = try p.addNode(.{
         .tag = .BuiltinChooseExpr,
         .type = cond.ty,
-        .data = .{ .If3 = .{ .cond = cond.node, .body = (try p.addList(&.{ thenExpr.node, elseExpr.node })).start } },
+        .data = .{ .if3 = .{ .cond = cond.node, .body = (try p.addList(&.{ thenExpr.node, elseExpr.node })).start } },
     });
 
     return cond;
@@ -4493,7 +4498,7 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
             return Result{
                 .node = try p.addNode(.{
                     .tag = .AddrOfLabel,
-                    .data = .{ .DeclarationRef = nameToken },
+                    .data = .{ .declRef = nameToken },
                     .type = resultType,
                 }),
                 .ty = resultType,
@@ -4796,7 +4801,7 @@ fn parseSuffixExpr(p: *Parser, lhs: Result) Error!Result {
                 .node = try p.addNode(.{
                     .tag = .MemberAccessExpr,
                     .type = fieldType,
-                    .data = .{ .Member = .{ .lhs = lhs.node, .name = name } },
+                    .data = .{ .member = .{ .lhs = lhs.node, .name = name } },
                 }),
             };
         },
@@ -4810,7 +4815,7 @@ fn parseSuffixExpr(p: *Parser, lhs: Result) Error!Result {
                 .node = try p.addNode(.{
                     .tag = .MemberAccessPtrExpr,
                     .type = fieldType,
-                    .data = .{ .Member = .{ .lhs = lhs.node, .name = name } },
+                    .data = .{ .member = .{ .lhs = lhs.node, .name = name } },
                 }),
             };
         },
@@ -5017,13 +5022,13 @@ fn parseCallExpr(p: *Parser, lhs: Result) Error!Result {
     var callNode: AST.Node = .{
         .tag = .CallExprOne,
         .type = ty.returnType(),
-        .data = .{ .BinaryExpr = .{ .lhs = lhs.node, .rhs = .none } },
+        .data = .{ .binExpr = .{ .lhs = lhs.node, .rhs = .none } },
     };
 
     const args = p.listBuffer.items[listBufferTop..];
     switch (argCount) {
         0 => {},
-        1 => callNode.data.BinaryExpr.rhs = args[1], //args[0]  == lhs.node
+        1 => callNode.data.binExpr.rhs = args[1], //args[0]  == lhs.node
         else => {
             callNode.tag = .CallExpr;
             callNode.data = .{ .range = try p.addList(args) };
@@ -5076,7 +5081,7 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
                     const node = try p.addNode(.{
                         .type = ty,
                         .tag = .FnProto,
-                        .data = .{ .Declaration = .{ .name = nameToken } },
+                        .data = .{ .decl = .{ .name = nameToken } },
                     });
 
                     try p.declBuffer.append(node);
@@ -5088,7 +5093,7 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
 
                     return Result{
                         .ty = ty,
-                        .node = try p.addNode(.{ .tag = .DeclRefExpr, .type = ty, .data = .{ .DeclarationRef = nameToken } }),
+                        .node = try p.addNode(.{ .tag = .DeclRefExpr, .type = ty, .data = .{ .declRef = nameToken } }),
                     };
                 }
                 try p.errStr(.undeclared_identifier, nameToken, p.getTokenSlice(nameToken));
@@ -5101,7 +5106,7 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
                     res.node = try p.addNode(.{
                         .tag = .EnumerationRef,
                         .type = res.ty,
-                        .data = .{ .DeclarationRef = nameToken },
+                        .data = .{ .declRef = nameToken },
                     });
 
                     return res;
@@ -5112,7 +5117,7 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
                     .node = try p.addNode(.{
                         .tag = .DeclRefExpr,
                         .type = s.type,
-                        .data = .{ .DeclarationRef = nameToken },
+                        .data = .{ .declRef = nameToken },
                     }),
                 },
 
@@ -5126,7 +5131,7 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
             var tok = p.index;
             if (p.func.ident) |some| {
                 ty = some.ty;
-                tok = p.nodes.items(.data)[@intFromEnum(some.node)].Declaration.name;
+                tok = p.nodes.items(.data)[@intFromEnum(some.node)].decl.name;
             } else if (p.func.type) |_| {
                 const start = p.strings.items.len;
                 try p.strings.appendSlice(p.getTokenSlice(p.func.name));
@@ -5149,7 +5154,7 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
                 .node = try p.addNode(.{
                     .tag = .DeclRefExpr,
                     .type = ty,
-                    .data = .{ .DeclarationRef = tok },
+                    .data = .{ .declRef = tok },
                 }),
             };
         },
@@ -5182,7 +5187,7 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
                 .node = try p.addNode(.{
                     .tag = .DeclRefExpr,
                     .type = ty,
-                    .data = .{ .DeclarationRef = p.index },
+                    .data = .{ .declRef = p.index },
                 }),
             };
         },
@@ -5209,7 +5214,7 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
                     .{
                         .tag = .DoubleLiteral,
                         .type = ty,
-                        .data = .{ .Double = try p.parseFloat(p.index, f64) },
+                        .data = .{ .double = try p.parseFloat(p.index, f64) },
                     },
                 ),
             };
@@ -5224,7 +5229,7 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
                     .{
                         .tag = .FloatLiteral,
                         .type = ty,
-                        .data = .{ .Float = try p.parseFloat(p.index, f32) },
+                        .data = .{ .float = try p.parseFloat(p.index, f32) },
                     },
                 ),
             };
@@ -5235,14 +5240,14 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
         .Zero => {
             p.index += 1;
             var res: Result = .{ .value = .{ .signed = 0 } };
-            res.node = try p.addNode(.{ .tag = .IntLiteral, .type = res.ty, .data = .{ .Int = 0 } });
+            res.node = try p.addNode(.{ .tag = .IntLiteral, .type = res.ty, .data = .{ .int = 0 } });
             return res;
         },
 
         .One => {
             p.index += 1;
             var res: Result = .{ .value = .{ .signed = 1 } };
-            res.node = try p.addNode(.{ .tag = .IntLiteral, .type = res.ty, .data = .{ .Int = 1 } });
+            res.node = try p.addNode(.{ .tag = .IntLiteral, .type = res.ty, .data = .{ .int = 1 } });
             return res;
         },
 
@@ -5271,7 +5276,7 @@ fn makePredefinedIdentifier(p: *Parser, start: usize) !Result {
     const strLit = try p.addNode(.{
         .tag = .StringLiteralExpr,
         .type = ty,
-        .data = .{ .String = .{ .index = @as(u32, @intCast(start)), .len = @as(u32, @intCast(len)) } },
+        .data = .{ .string = .{ .index = @as(u32, @intCast(start)), .len = @as(u32, @intCast(len)) } },
     });
     return Result{
         .ty = ty,
@@ -5279,7 +5284,7 @@ fn makePredefinedIdentifier(p: *Parser, start: usize) !Result {
             .tag = .ImplicitStaticVar,
             .type = ty,
             .data = .{
-                .Declaration = .{
+                .decl = .{
                     .name = p.index,
                     .node = strLit,
                 },
@@ -5327,7 +5332,7 @@ fn castInt(p: *Parser, val: u64, specs: []const Type.Specifier) Error!Result {
         res.ty = .{ .specifier = .ULongLong };
     }
 
-    res.node = try p.addNode(.{ .tag = .IntLiteral, .type = res.ty, .data = .{ .Int = val } });
+    res.node = try p.addNode(.{ .tag = .IntLiteral, .type = res.ty, .data = .{ .int = val } });
     return res;
 }
 
@@ -5375,7 +5380,7 @@ fn parseGenericSelection(p: *Parser) Error!Result {
             try p.listBuffer.append(try p.addNode(.{
                 .tag = .GenericAssociationExpr,
                 .type = ty,
-                .data = .{ .UnaryExpr = chosen.node },
+                .data = .{ .unExpr = chosen.node },
             }));
         } else if (p.eat(.KeywordDefault)) |tok| {
             if (defaultToken) |prev| {
@@ -5391,7 +5396,7 @@ fn parseGenericSelection(p: *Parser) Error!Result {
 
             try p.listBuffer.append(try p.addNode(.{
                 .tag = .GenericDefaultExpr,
-                .data = .{ .UnaryExpr = chosen.node },
+                .data = .{ .unExpr = chosen.node },
             }));
         } else {
             if (p.listBuffer.items.len == listBufferTop + 1) {
@@ -5409,7 +5414,7 @@ fn parseGenericSelection(p: *Parser) Error!Result {
     var genericNode: AST.Node = .{
         .tag = .GenericExprOne,
         .type = chosen.ty,
-        .data = .{ .BinaryExpr = .{ .lhs = controlling.node, .rhs = chosen.node } },
+        .data = .{ .binExpr = .{ .lhs = controlling.node, .rhs = chosen.node } },
     };
 
     const associations = p.listBuffer.items[listBufferTop..];
@@ -5473,7 +5478,7 @@ fn parseIntegerLiteral(p: *Parser) Error!Result {
     if (overflow) {
         try p.err(.int_literal_too_big);
         var res: Result = .{ .ty = .{ .specifier = .ULongLong }, .value = .{ .unsigned = value } };
-        res.node = try p.addNode(.{ .tag = .IntLiteral, .type = res.ty, .data = .{ .Int = value } });
+        res.node = try p.addNode(.{ .tag = .IntLiteral, .type = res.ty, .data = .{ .int = value } });
         return res;
     }
 
@@ -5627,7 +5632,7 @@ fn parseCharLiteral(p: *Parser) Error!Result {
         .node = try p.addNode(.{
             .tag = .IntLiteral,
             .type = ty,
-            .data = .{ .Int = val },
+            .data = .{ .int = val },
         }),
     };
 }
@@ -5728,7 +5733,7 @@ fn parseStringLiteral(p: *Parser) Error!Result {
     res.node = try p.addNode(.{
         .tag = .StringLiteralExpr,
         .type = res.ty,
-        .data = .{ .String = .{ .index = @as(u32, @intCast(index)), .len = @as(u32, @intCast(len)) } },
+        .data = .{ .string = .{ .index = @as(u32, @intCast(index)), .len = @as(u32, @intCast(len)) } },
     });
 
     return res;

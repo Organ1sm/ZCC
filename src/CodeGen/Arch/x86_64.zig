@@ -33,7 +33,7 @@ pub fn genFn(c: *Codegen, decl: Tree.NodeIndex, data: *std.ArrayList(u8)) Codege
         0x89,
         0xe5, // mov rbp, rsp
     });
-    _ = try func.genNode(c.nodeData[@intFromEnum(decl)].Declaration.node);
+    _ = try func.genNode(c.nodeData[@intFromEnum(decl)].decl.node);
     // all functions are guaranteed to end in a return statement so no extra work required here
 }
 
@@ -131,8 +131,8 @@ fn genNode(func: *Fn, node: Tree.NodeIndex) Codegen.Error!Value {
     switch (func.c.nodeTag[@intFromEnum(node)]) {
         .StaticAssert => return Value{ .none = {} },
         .CompoundStmtTwo => {
-            if (data.BinaryExpr.lhs != .none) _ = try func.genNode(data.BinaryExpr.lhs);
-            if (data.BinaryExpr.rhs != .none) _ = try func.genNode(data.BinaryExpr.rhs);
+            if (data.binExpr.lhs != .none) _ = try func.genNode(data.binExpr.lhs);
+            if (data.binExpr.rhs != .none) _ = try func.genNode(data.binExpr.rhs);
             return Value{ .none = {} };
         },
 
@@ -142,24 +142,24 @@ fn genNode(func: *Fn, node: Tree.NodeIndex) Codegen.Error!Value {
             return Value{ .none = {} };
         },
 
-        .CallExprOne => if (data.BinaryExpr.rhs != .none)
-            return func.genCall(data.BinaryExpr.lhs, &.{data.BinaryExpr.rhs})
+        .CallExprOne => if (data.binExpr.rhs != .none)
+            return func.genCall(data.binExpr.lhs, &.{data.binExpr.rhs})
         else
-            return func.genCall(data.BinaryExpr.lhs, &.{}),
+            return func.genCall(data.binExpr.lhs, &.{}),
 
         .CallExpr => return func.genCall(func.c.tree.data[data.range.start], func.c.tree.data[data.range.start + 1 .. data.range.end]),
 
         .FunctionToPointer,
         .ArrayToPointer,
-        => return func.genNode(data.UnaryExpr), // no-op
+        => return func.genNode(data.unExpr), // no-op
 
         .DeclRefExpr => {
             // TODO locals and arguments
-            return Value{ .symbol = func.c.tree.tokSlice(data.DeclarationRef) };
+            return Value{ .symbol = func.c.tree.getTokenSlice(data.declRef) };
         },
 
         .ReturnStmt => {
-            const value = try func.genNode(data.UnaryExpr);
+            const value = try func.genNode(data.unExpr);
             try func.setReg(value, x86_64.CABIIntReturnRegs[0]);
             try func.data.appendSlice(&.{
                 0x5d, // pop rbp
@@ -177,9 +177,9 @@ fn genNode(func: *Fn, node: Tree.NodeIndex) Codegen.Error!Value {
             return Value{ .none = {} };
         },
 
-        .IntLiteral => return Value{ .immediate = @as(i64, @intCast(data.Int)) },
+        .IntLiteral => return Value{ .immediate = @as(i64, @intCast(data.int)) },
         .StringLiteralExpr => {
-            const strBytes = func.c.tree.strings[data.String.index..][0..data.String.len];
+            const strBytes = func.c.tree.strings[data.string.index..][0..data.string.len];
             const section = try func.c.obj.getSection(.strings);
             const start = section.items.len;
             try section.appendSlice(strBytes);

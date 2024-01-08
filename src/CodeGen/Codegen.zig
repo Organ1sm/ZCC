@@ -55,7 +55,7 @@ pub fn generateTree(comp: *Compilation, tree: Tree) Compilation.Error!*Object {
             .ExternVar,
             .ThreadlocalExternVar,
             => {
-                const name = c.tree.tokSlice(c.nodeData[@intFromEnum(decl)].Declaration.name);
+                const name = c.tree.getTokenSlice(c.nodeData[@intFromEnum(decl)].decl.name);
                 _ = try c.obj.declareSymbol(.undefined, name, .Strong, .external, 0, 0);
             },
 
@@ -99,7 +99,7 @@ fn genFn(c: *Codegen, decl: NodeIndex) Error!void {
         .x86_64 => try x86_64.genFn(c, decl, data),
         else => unreachable,
     }
-    const name = c.tree.tokSlice(c.nodeData[@intFromEnum(decl)].Declaration.name);
+    const name = c.tree.getTokenSlice(c.nodeData[@intFromEnum(decl)].decl.name);
     _ = try c.obj.declareSymbol(section, name, .Strong, .func, startLen, data.items.len - startLen);
 }
 
