@@ -246,7 +246,7 @@ pub fn dumpString(bytes: []const u8, tag: AstTag, writer: anytype) !void {
 }
 
 pub fn getTokenSlice(tree: AST, index: TokenIndex) []const u8 {
-    if (tree.tokens.items(.id)[index].lexeMe()) |some|
+    if (tree.tokens.items(.id)[index].getTokenText()) |some|
         return some;
 
     const loc = tree.tokens.items(.loc)[index];
