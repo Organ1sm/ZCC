@@ -5469,10 +5469,10 @@ fn parseIntegerLiteral(p: *Parser) Error!Result {
             value = mulOV[0];
         }
 
-        const addOV = @addWithOverflow(value, digit);
-        if (addOV[1] != 0)
+        const sum, const overflowed = @addWithOverflow(value, digit);
+        if (overflowed != 0)
             overflow = true;
-        value = addOV[0];
+        value = sum;
     }
 
     if (overflow) {

@@ -554,14 +554,14 @@ pub fn add(a: *Result, tok: TokenIndex, b: Result, p: *Parser) !void {
             switch (size) {
                 1, 2 => unreachable, // promoted to int
                 4 => {
-                    const ov = @addWithOverflow(@as(u32, @truncate(v.*)), @as(u32, @truncate(b.value.unsigned)));
-                    isOverflow = ov[1] == 1;
-                    v.* = ov[0];
+                    const sum, const overflowed = @addWithOverflow(@as(u32, @truncate(v.*)), @as(u32, @truncate(b.value.unsigned)));
+                    isOverflow = (overflowed == 1);
+                    v.* = sum;
                 },
                 8 => {
-                    const ov = @addWithOverflow(v.*, b.value.unsigned);
-                    isOverflow = ov[1] == 1;
-                    v.* = ov[0];
+                    const sum, const overflowed = @addWithOverflow(v.*, b.value.unsigned);
+                    isOverflow = (overflowed == 1);
+                    v.* = sum;
                 },
                 else => unreachable,
             }
@@ -574,14 +574,14 @@ pub fn add(a: *Result, tok: TokenIndex, b: Result, p: *Parser) !void {
             switch (size) {
                 1, 2 => unreachable, // promoted to int
                 4 => {
-                    const ov = @addWithOverflow(@as(i32, @truncate(v.*)), @as(i32, @truncate(b.value.signed)));
-                    isOverflow = ov[1] == 1;
-                    v.* = ov[0];
+                    const sum, const overflowed = @addWithOverflow(@as(i32, @truncate(v.*)), @as(i32, @truncate(b.value.signed)));
+                    isOverflow = (overflowed == 1);
+                    v.* = sum;
                 },
                 8 => {
-                    const ov = @addWithOverflow(v.*, b.value.signed);
-                    isOverflow = ov[1] == 1;
-                    v.* = ov[0];
+                    const sum, const overflowed = @addWithOverflow(v.*, b.value.signed);
+                    isOverflow = (overflowed == 1);
+                    v.* = sum;
                 },
                 else => unreachable,
             }

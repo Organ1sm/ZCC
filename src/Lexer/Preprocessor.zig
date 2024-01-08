@@ -217,11 +217,11 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!Token {
                     },
 
                     .KeywordIf => {
-                        const ov = @addWithOverflow(ifLevel, 1);
-                        if (ov[1] != 0)
+                        const sum, const overflowed = @addWithOverflow(ifLevel, 1);
+                        if (overflowed != 0)
                             return pp.fatal(directive, "too many #if nestings", .{});
 
-                        ifLevel = ov[0];
+                        ifLevel = sum;
 
                         if (try pp.expr(&lexer)) {
                             ifKind.set(ifLevel, untilEndIf);
@@ -232,11 +232,11 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!Token {
                     },
 
                     .KeywordIfdef => {
-                        const ov = @addWithOverflow(ifLevel, 1);
-                        if (ov[1] != 0)
+                        const sum, const overflowed = @addWithOverflow(ifLevel, 1);
+                        if (overflowed != 0)
                             return pp.fatal(directive, "too many #if nestings", .{});
 
-                        ifLevel = ov[0];
+                        ifLevel = sum;
 
                         const macroName = try pp.expectMacroName(&lexer) orelse continue;
                         try pp.expectNewLine(&lexer);
@@ -250,11 +250,11 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!Token {
                     },
 
                     .KeywordIfndef => {
-                        const ov = @addWithOverflow(ifLevel, 1);
-                        if (ov[1] != 0)
+                        const sum, const overflowed = @addWithOverflow(ifLevel, 1);
+                        if (overflowed != 0)
                             return pp.fatal(directive, "too many #if nestings", .{});
 
-                        ifLevel = ov[0];
+                        ifLevel = sum;
 
                         const macroName = try pp.expectMacroName(&lexer) orelse continue;
                         try pp.expectNewLine(&lexer);
