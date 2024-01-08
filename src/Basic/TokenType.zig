@@ -331,7 +331,7 @@ pub const TokenType = enum(u8) {
         }
     }
 
-    pub fn lexeMe(id: TokenType) ?[]const u8 {
+    pub fn getTokenText(id: TokenType) ?[]const u8 {
         return switch (id) {
             .Invalid,
             .Identifier,
@@ -553,7 +553,7 @@ pub const TokenType = enum(u8) {
             .IntegerLiteral_LLU,
             => "an integer literal",
 
-            else => id.lexeMe().?, // handled in lexeme
+            else => id.getTokenText().?, // handled in lexeme
         };
     }
 

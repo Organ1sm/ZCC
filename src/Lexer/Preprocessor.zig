@@ -404,9 +404,9 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!Token {
 }
 
 /// Get raw token source string.
-/// Returned slice is invalidated when comp.generated_buf is updated.
+/// Returned slice is invalidated when comp.generatedBuffer is updated.
 pub fn getTokenSlice(pp: *Preprocessor, token: RawToken) []const u8 {
-    if (token.id.lexeMe()) |some|
+    if (token.id.getTokenText()) |some|
         return some;
 
     const source = pp.compilation.getSource(token.source);
@@ -498,6 +498,7 @@ fn expr(pp: *Preprocessor, lexer: *Lexer) MacroError!bool {
                 const first = lexer.nextNoWhiteSpace();
                 const macroToken = if (first.id == .LParen) lexer.next() else first;
 
+                // validate the macro name
                 if (!macroToken.id.isMacroIdentifier())
                     try pp.addError(macroToken, .macro_name_missing);
 
@@ -1390,7 +1391,7 @@ fn expandMacro(pp: *Preprocessor, lexer: *Lexer, raw: RawToken) MacroError!void 
 
 /// Get expanded token source string.
 pub fn expandedSlice(pp: *Preprocessor, token: Token) []const u8 {
-    if (token.id.lexeMe()) |some|
+    if (token.id.getTokenText()) |some|
         return some;
 
     var lexer = Lexer{

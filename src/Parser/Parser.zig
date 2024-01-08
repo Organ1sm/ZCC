@@ -204,7 +204,7 @@ fn expectClosing(p: *Parser, opening: TokenIndex, id: TokenType) Error!void {
 }
 
 fn getTokenSlice(p: *Parser, index: TokenIndex) []const u8 {
-    if (p.tokenIds[index].lexeMe()) |some|
+    if (p.tokenIds[index].getTokenText()) |some|
         return some;
 
     const loc = p.pp.tokens.items(.loc)[index];
@@ -1147,7 +1147,7 @@ fn declSpecifier(p: *Parser, isParam: bool) Error!?DeclSpec {
                         .KeywordTypedef,
                         .KeywordAuto,
                         .KeywordRegister,
-                        => try p.errStr(.cannot_combine_spec, p.index, token.lexeMe().?),
+                        => try p.errStr(.cannot_combine_spec, p.index, token.getTokenText().?),
 
                         else => {},
                     }
