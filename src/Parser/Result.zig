@@ -94,8 +94,8 @@ pub fn maybeWarnUnused(res: Result, p: *Parser, exprStart: TokenIndex, errStart:
             .PostDecExpr,
             => return,
 
-            .CommaExpr => curNode = p.nodes.items(.data)[@intFromEnum(curNode)].BinaryExpr.rhs,
-            .ParenExpr => curNode = p.nodes.items(.data)[@intFromEnum(curNode)].UnaryExpr,
+            .CommaExpr => curNode = p.nodes.items(.data)[@intFromEnum(curNode)].binExpr.rhs,
+            .ParenExpr => curNode = p.nodes.items(.data)[@intFromEnum(curNode)].unExpr,
 
             else => break,
         };
@@ -107,7 +107,7 @@ pub fn bin(lhs: *Result, p: *Parser, tag: AstTag, rhs: Result) !void {
     lhs.node = try p.addNode(.{
         .tag = tag,
         .type = lhs.ty,
-        .data = .{ .BinaryExpr = .{ .lhs = lhs.node, .rhs = rhs.node } },
+        .data = .{ .binExpr = .{ .lhs = lhs.node, .rhs = rhs.node } },
     });
 }
 
@@ -115,7 +115,7 @@ pub fn un(operand: *Result, p: *Parser, tag: AstTag) Error!void {
     operand.node = try p.addNode(.{
         .tag = tag,
         .type = operand.ty,
-        .data = .{ .UnaryExpr = operand.node },
+        .data = .{ .unExpr = operand.node },
     });
 }
 
@@ -384,7 +384,7 @@ pub fn toVoid(res: *Result, p: *Parser) Error!void {
         res.node = try p.addNode(.{
             .tag = .ToVoid,
             .type = res.ty,
-            .data = .{ .UnaryExpr = res.node },
+            .data = .{ .unExpr = res.node },
         });
     }
 }

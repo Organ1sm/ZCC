@@ -187,7 +187,7 @@ pub fn main() !void {
             var actual = StmtTypeDumper.init(gpa);
             defer actual.deinit(gpa);
 
-            try actual.dump(&tree, testFn.Declaration.node, gpa);
+            try actual.dump(&tree, testFn.decl.node, gpa);
 
             var i: usize = 0;
             for (types.tokens) |str| {
@@ -446,8 +446,8 @@ const StmtTypeDumper = struct {
 
         switch (tag) {
             .CompoundStmtTwo => {
-                try self.dumpNode(tree, data.BinaryExpr.lhs, &m);
-                try self.dumpNode(tree, data.BinaryExpr.rhs, &m);
+                try self.dumpNode(tree, data.binExpr.lhs, &m);
+                try self.dumpNode(tree, data.binExpr.rhs, &m);
             },
 
             .CompoundStmt => {
