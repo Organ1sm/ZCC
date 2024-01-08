@@ -8,6 +8,7 @@ const Parser = @import("../Parser/Parser.zig");
 const Diagnostics = @import("../Basic/Diagnostics.zig");
 const Token = @import("../AST/AST.zig").Token;
 const AttrTag = @import("Attribute.zig").Tag;
+const Features = @import("Features.zig");
 
 const Allocator = std.mem.Allocator;
 const Error = Compilation.Error;
@@ -83,10 +84,12 @@ preprocessCount: u32 = 0,
 /// Memory is retained to avoid allocation on every single token.
 topExpansionBuffer: ExpandBuffer,
 
-const FeatureCheckMacros = struct {
+const BuiltinMacros = struct {
     const args = [1][]const u8{"X"};
     const hasAttribute = [1]RawToken{makeFeatCheckMacro(.MacroParamHasAttribute)};
     const hasWarning = [1]RawToken{makeFeatCheckMacro(.MacroParamHasWarning)};
+    const hasFeature = [1]RawToken{makeFeatCheckMacro(.MacroParamHasFeature)};
+    const hasExtension = [1]RawToken{makeFeatCheckMacro(.MacroParamHasExtension)};
     const isIdentifier = [1]RawToken{makeFeatCheckMacro(.MacroParamIsIdentifier)};
     const file = [1]RawToken{makeFeatCheckMacro(.MacroFile)};
     const line = [1]RawToken{makeFeatCheckMacro(.MacroLine)};
@@ -103,7 +106,7 @@ const FeatureCheckMacros = struct {
 
 pub fn addBuiltinMacro(pp: *Preprocessor, name: []const u8, isFunc: bool, tokens: []const RawToken) !void {
     try pp.defines.put(name, .{
-        .params = &FeatureCheckMacros.args,
+        .params = &BuiltinMacros.args,
         .tokens = tokens,
         .varArgs = false,
         .isFunc = isFunc,
@@ -113,13 +116,15 @@ pub fn addBuiltinMacro(pp: *Preprocessor, name: []const u8, isFunc: bool, tokens
 }
 
 pub fn addBuiltinMacros(pp: *Preprocessor) !void {
-    try pp.addBuiltinMacro("__has_attribute", true, &FeatureCheckMacros.hasAttribute);
-    try pp.addBuiltinMacro("__has_warning", true, &FeatureCheckMacros.hasWarning);
-    try pp.addBuiltinMacro("__is_identifier", true, &FeatureCheckMacros.isIdentifier);
-    try pp.addBuiltinMacro("_Pragma", true, &FeatureCheckMacros.pragmaOperator);
-    try pp.addBuiltinMacro("__FILE__", false, &FeatureCheckMacros.file);
-    try pp.addBuiltinMacro("__LINE__", false, &FeatureCheckMacros.line);
-    try pp.addBuiltinMacro("__COUNTER__", false, &FeatureCheckMacros.counter);
+    try pp.addBuiltinMacro("__has_attribute", true, &BuiltinMacros.hasAttribute);
+    try pp.addBuiltinMacro("__has_warning", true, &BuiltinMacros.hasWarning);
+    try pp.addBuiltinMacro("__has_feature", true, &BuiltinMacros.hasFeature);
+    try pp.addBuiltinMacro("__has_extension", true, &BuiltinMacros.hasExtension);
+    try pp.addBuiltinMacro("__is_identifier", true, &BuiltinMacros.isIdentifier);
+    try pp.addBuiltinMacro("_Pragma", true, &BuiltinMacros.pragmaOperator);
+    try pp.addBuiltinMacro("__FILE__", false, &BuiltinMacros.file);
+    try pp.addBuiltinMacro("__LINE__", false, &BuiltinMacros.line);
+    try pp.addBuiltinMacro("__COUNTER__", false, &BuiltinMacros.counter);
 }
 
 pub fn init(comp: *Compilation) Preprocessor {
@@ -859,7 +864,10 @@ fn handleBuiltinMacro(
     srcLoc: Source.Location,
 ) Error!bool {
     switch (builtin) {
-        .MacroParamHasAttribute => {
+        .MacroParamHasAttribute,
+        .MacroParamHasFeature,
+        .MacroParamHasExtension,
+        => {
             var invalid: ?Token = null;
             var identifier: ?Token = null;
             for (paramTokens) |tok| switch (tok.id) {
@@ -880,8 +888,15 @@ fn handleBuiltinMacro(
                 );
                 return false;
             }
-            const attrName = pp.expandedSlice(identifier.?);
-            return (AttrTag.fromString(attrName) != null);
+
+            const identifierStr = pp.expandedSlice(identifier.?);
+
+            return switch (builtin) {
+                .MacroParamHasAttribute => AttrTag.fromString(identifierStr) != null,
+                .MacroParamHasFeature => Features.hasFeature(pp.compilation, identifierStr),
+                .MacroParamHasExtension => Features.hasExtension(pp.compilation, identifierStr),
+                else => unreachable,
+            };
         },
 
         .MacroParamHasWarning => {
@@ -1027,6 +1042,8 @@ fn expandFuncMacro(
 
             .MacroParamHasAttribute,
             .MacroParamHasWarning,
+            .MacroParamHasFeature,
+            .MacroParamHasExtension,
             .MacroParamIsIdentifier,
             => {
                 const arg = expandedArgs.items[0];

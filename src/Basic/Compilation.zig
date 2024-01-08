@@ -389,9 +389,11 @@ pub fn defineSystemIncludes(comp: *Compilation) !void {
         defer baseDir.close();
 
         baseDir.access("include/stddef.h", .{}) catch continue;
+
         const path = try std.fs.path.join(comp.gpa, &.{ dirname, "include" });
         comp.builtinHeaderPath = path;
         try comp.systemIncludeDirs.append(path);
+
         break;
     } else return error.ZccIncludeNotFound;
 
@@ -548,3 +550,25 @@ pub fn pragmaEvent(comp: *Compilation, event: PragmaEvent) void {
 }
 
 pub const renderErrors = Diagnostics.render;
+
+/// Determines whether the current compilation target supports
+/// Thread Local Storage (TLS) or not.
+///
+/// On Darwin(Apple) platforms, it depends on the macOS version.
+/// For other platforms, it depends on the CPU architecture.
+///
+/// Returns true if the target supports TLS, false otherwise.
+pub fn isTlsSupported(comp: *Compilation) bool {
+    if (comp.target.isDarwin()) {
+        var supported = false;
+        switch (comp.target.os.tag) {
+            .macos => supported = !(comp.target.os.isAtLeast(.macos, .{ .major = 10, .minor = 7, .patch = 0 }) orelse false),
+            else => {},
+        }
+        return supported;
+    }
+    return switch (comp.target.cpu.arch) {
+        .tce, .tcele, .bpfel, .bpfeb, .msp430, .nvptx, .nvptx64, .x86, .arm, .armeb, .thumb, .thumbeb => false,
+        else => true,
+    };
+}
