@@ -87,6 +87,7 @@ pub const Options = packed struct {
     @"return-type": Kind = .default,
     @"dollar-in-identifier-extension": Kind = .default,
     @"unknown-pragmas": Kind = .default,
+    @"predefined-identifier-outside-function": Kind = .default,
 };
 
 const messages = struct {
@@ -1300,6 +1301,11 @@ const messages = struct {
     pub const unknown_gcc_pragma_directive = struct {
         const msg = "pragma GCC diagnostic expected 'error', 'warning', 'ignored', 'fatal', 'push', or 'pop'";
         const opt = "unknown-pragmas";
+        const kind = .warning;
+    };
+    pub const predefined_top_level = struct {
+        const msg = "predefined identifier is only valid inside function";
+        const opt = "predefined-identifier-outside-function";
         const kind = .warning;
     };
 };

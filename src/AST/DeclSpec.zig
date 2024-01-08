@@ -82,7 +82,7 @@ pub fn validate(d: DeclSpec, p: *Parser, ty: *Type, hasInit: bool) Error!AstTag 
             .none, //
             .@"extern",
             => {},
-            .static => |tokenIdx| if (p.returnType != null) try p.errToken(.static_func_not_global, tokenIdx),
+            .static => |tokenIdx| if (p.func.type != null) try p.errToken(.static_func_not_global, tokenIdx),
             .typedef => unreachable,
 
             .auto, //
@@ -119,7 +119,7 @@ pub fn validate(d: DeclSpec, p: *Parser, ty: *Type, hasInit: bool) Error!AstTag 
         if (d.noreturn) |tokenIndex|
             try p.errStr(.func_spec_non_func, tokenIndex, "_Noreturn");
         switch (d.storageClass) {
-            .auto, .register => if (p.returnType == null) try p.err(.illegal_storage_on_global),
+            .auto, .register => if (p.func.type == null) try p.err(.illegal_storage_on_global),
             .typedef => return AstTag.TypeDef,
             else => {},
         }
