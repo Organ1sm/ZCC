@@ -430,6 +430,13 @@ fn combineExtra(b: *@This(), p: *Parser, new: Specifier, sourceToken: TokenIndex
             else => return b.cannotCombine(p, sourceToken),
         },
 
+        Specifier.Short => b.specifier = switch (b.specifier) {
+            Specifier.None => Specifier.Short,
+            Specifier.Unsigned => Specifier.UShort,
+            Specifier.Signed => Specifier.SShort,
+            else => return b.cannotCombine(p, sourceToken),
+        },
+
         Specifier.Int => b.specifier = switch (b.specifier) {
             Specifier.None => Specifier.Int,
             Specifier.Signed => Specifier.SInt,

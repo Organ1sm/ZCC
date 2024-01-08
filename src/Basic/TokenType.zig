@@ -109,6 +109,10 @@ pub const TokenType = enum(u8) {
     MacroParamHasAttribute,
     /// Special token for implementing __has_warning
     MacroParamHasWarning,
+    /// Special token for implementing __has_feature
+    MacroParamHasFeature,
+    /// Special token for implementing __has_extension
+    MacroParamHasExtension,
     /// Special token for implementing __is_identifier
     MacroParamIsIdentifier,
     /// Special token for implementing __FILE__
@@ -351,6 +355,8 @@ pub const TokenType = enum(u8) {
             .MacroParamNoExpand,
             .MacroParamHasAttribute,
             .MacroParamHasWarning,
+            .MacroParamHasFeature,
+            .MacroParamHasExtension,
             .MacroParamIsIdentifier,
             .MacroFile,
             .MacroLine,
