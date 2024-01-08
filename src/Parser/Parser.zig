@@ -51,13 +51,19 @@ noEval: bool = false,
 inMacro: bool = false,
 extensionSuppressd: bool = false,
 containsAddresssOfLabel: bool = false,
-returnType: ?Type = null,
-funcName: TokenIndex = 0,
 labelCount: u32 = 0,
 /// location of first computed goto in function currently being parsed
 /// if a computed goto is used, the function must contain an
 /// address-of-label expression (tracked with ContainsAddressOfLabel)
 computedGotoTok: ?TokenIndex = null,
+
+/// Various variables that are different for each function.
+func: struct {
+    type: ?Type = null,
+    name: TokenIndex = 0,
+    ident: ?Result = null,
+    prettyIdent: ?Result = null,
+} = .{},
 
 const Label = union(enum) {
     unresolvedGoto: TokenIndex,
@@ -776,7 +782,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
     try p.parseAttributeSpecifier(.any);
 
     var declSpec = if (try p.declSpecifier(false)) |some| some else blk: {
-        if (p.returnType != null) {
+        if (p.func.type != null) {
             p.index = firstTokenIndex;
             return false;
         }
@@ -813,7 +819,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
             },
         }
 
-        if (p.returnType != null)
+        if (p.func.type != null)
             try p.err(.func_not_in_root);
 
         if (p.findSymbol(initD.d.name, .definition)) |sym| {
@@ -829,15 +835,9 @@ fn parseDeclaration(p: *Parser) Error!bool {
             } });
         }
 
-        const returnType = p.returnType;
-        const funcName = p.funcName;
-        p.returnType = initD.d.type.data.func.returnType;
-        p.funcName = initD.d.name;
-
-        defer {
-            p.returnType = returnType;
-            p.funcName = funcName;
-        }
+        const func = p.func;
+        defer p.func = func;
+        p.func = .{ .type = initD.d.type, .name = initD.d.name };
 
         const scopesTop = p.scopes.items.len;
         defer p.scopes.items.len = scopesTop;
@@ -934,7 +934,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
         try p.declBuffer.append(node);
 
         // check gotos
-        if (returnType == null) {
+        if (func.type == null) {
             for (p.labels.items) |item| {
                 if (item == .unresolvedGoto)
                     try p.errStr(.undeclared_label, item.unresolvedGoto, p.getTokenSlice(item.unresolvedGoto));
@@ -2214,7 +2214,7 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: Declarator
 
         switch (size.value) {
             .unavailable => if (size.node != .none) {
-                if (p.returnType == null and kind != .param)
+                if (p.func.type == null and kind != .param)
                     try p.errToken(.variable_len_array_file_scope, lb);
 
                 const exprType = try p.arena.create(Type.Expr);
@@ -3564,14 +3564,19 @@ fn parseCompoundStmt(p: *Parser, isFnBody: bool) Error!?NodeIndex {
     }
 
     if (isFnBody and (p.declBuffer.items.len == declBufferTop or !p.nodeIsNoreturn(p.declBuffer.items[p.declBuffer.items.len - 1]))) {
-        if (!p.returnType.?.is(.Void))
-            try p.errStr(.func_does_not_return, p.index - 1, p.getTokenSlice(p.funcName));
+        if (!p.func.type.?.returnType().is(.Void))
+            try p.errStr(.func_does_not_return, p.index - 1, p.getTokenSlice(p.func.name));
 
         try p.declBuffer.append(try p.addNode(.{
             .tag = .ImplicitReturn,
-            .type = p.returnType.?,
+            .type = p.func.type.?.returnType(),
             .data = undefined,
         }));
+    }
+
+    if (isFnBody) {
+        if (p.func.ident) |some| try p.declBuffer.insert(declBufferTop, some.node);
+        if (p.func.prettyIdent) |some| try p.declBuffer.insert(declBufferTop, some.node);
     }
 
     var node: AST.Node = .{
@@ -3598,14 +3603,14 @@ fn parseReturnStmt(p: *Parser) Error!?NodeIndex {
     const eToken = p.index;
     var expr = try p.parseExpr();
     _ = try p.expectToken(.Semicolon);
-    const returnType = p.returnType.?;
+    const returnType = p.func.type.?.returnType();
 
     if (expr.node == .none) {
         if (!returnType.is(.Void))
-            try p.errStr(.func_should_return, retToken, p.getTokenSlice(p.funcName));
+            try p.errStr(.func_should_return, retToken, p.getTokenSlice(p.func.name));
         return try p.addNode(.{ .tag = .ReturnStmt, .data = .{ .UnaryExpr = expr.node } });
     } else if (returnType.is((.Void))) {
-        try p.errStr(.void_func_returns_value, eToken, p.getTokenSlice(p.funcName));
+        try p.errStr(.void_func_returns_value, eToken, p.getTokenSlice(p.func.name));
         return try p.addNode(.{ .tag = .ReturnStmt, .data = .{ .UnaryExpr = expr.node } });
     }
 
@@ -5011,7 +5016,7 @@ fn parseCallExpr(p: *Parser, lhs: Result) Error!Result {
 
     var callNode: AST.Node = .{
         .tag = .CallExprOne,
-        .type = ty.data.func.returnType,
+        .type = ty.returnType(),
         .data = .{ .BinaryExpr = .{ .lhs = lhs.node, .rhs = .none } },
     };
 
@@ -5115,6 +5120,73 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
             }
         },
 
+        .MacroFunc, .MacroFunction => {
+            defer p.index += 1;
+            var ty: Type = undefined;
+            var tok = p.index;
+            if (p.func.ident) |some| {
+                ty = some.ty;
+                tok = p.nodes.items(.data)[@intFromEnum(some.node)].Declaration.name;
+            } else if (p.func.type) |_| {
+                const start = p.strings.items.len;
+                try p.strings.appendSlice(p.getTokenSlice(p.func.name));
+                try p.strings.append(0);
+                const predef = try p.makePredefinedIdentifier(start);
+                ty = predef.ty;
+                p.func.ident = predef;
+            } else {
+                const start = p.strings.items.len;
+                try p.strings.append(0);
+                const predef = try p.makePredefinedIdentifier(start);
+                ty = predef.ty;
+                p.func.ident = predef;
+                try p.declBuffer.append(predef.node);
+            }
+            if (p.func.type == null)
+                try p.err(.predefined_top_level);
+            return Result{
+                .ty = ty,
+                .node = try p.addNode(.{
+                    .tag = .DeclRefExpr,
+                    .type = ty,
+                    .data = .{ .DeclarationRef = tok },
+                }),
+            };
+        },
+
+        .MacroPrettyFunc => {
+            defer p.index += 1;
+            var ty: Type = undefined;
+            if (p.func.prettyIdent) |some| {
+                ty = some.ty;
+            } else if (p.func.type) |funcType| {
+                const start = p.strings.items.len;
+                try Type.printNamed(funcType, p.getTokenSlice(p.func.name), p.strings.writer());
+                try p.strings.append(0);
+                const predef = try p.makePredefinedIdentifier(start);
+                ty = predef.ty;
+                p.func.prettyIdent = predef;
+            } else {
+                const start = p.strings.items.len;
+                try p.strings.appendSlice("top level\x00");
+                const predef = try p.makePredefinedIdentifier(start);
+                ty = predef.ty;
+                p.func.prettyIdent = predef;
+                try p.declBuffer.append(predef.node);
+            }
+
+            if (p.func.type == null)
+                try p.err(.predefined_top_level);
+            return Result{
+                .ty = ty,
+                .node = try p.addNode(.{
+                    .tag = .DeclRefExpr,
+                    .type = ty,
+                    .data = .{ .DeclarationRef = p.index },
+                }),
+            };
+        },
+
         .StringLiteral,
         .StringLiteralUTF_8,
         .StringLiteralUTF_16,
@@ -5186,6 +5258,34 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
 
         else => return Result{},
     }
+}
+
+fn makePredefinedIdentifier(p: *Parser, start: usize) !Result {
+    const len = p.strings.items.len - start;
+
+    const elemType = .{ .specifier = .Char, .qual = .{ .@"const" = true } };
+    const arrType = try p.arena.create(Type.Array);
+    arrType.* = .{ .elem = elemType, .len = len };
+    const ty: Type = .{ .specifier = .Array, .data = .{ .array = arrType } };
+
+    const strLit = try p.addNode(.{
+        .tag = .StringLiteralExpr,
+        .type = ty,
+        .data = .{ .String = .{ .index = @as(u32, @intCast(start)), .len = @as(u32, @intCast(len)) } },
+    });
+    return Result{
+        .ty = ty,
+        .node = try p.addNode(.{
+            .tag = .ImplicitStaticVar,
+            .type = ty,
+            .data = .{
+                .Declaration = .{
+                    .name = p.index,
+                    .node = strLit,
+                },
+            },
+        }),
+    };
 }
 
 fn parseFloat(p: *Parser, tok: TokenIndex, comptime T: type) Error!T {

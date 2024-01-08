@@ -570,6 +570,7 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
         .Var,
         .ExternVar,
         .StaticVar,
+        .ImplicitStaticVar,
         .ThreadlocalVar,
         .ThreadlocalExternVar,
         .ThreadlocalStaticVar,

@@ -114,6 +114,9 @@ pub const Token = struct {
         .{ "pragma", .KeywordPragma },
         .{ "line", .KeywordLine },
         .{ "__VA_ARGS__", .KeywordVarArgs },
+        .{ "__func__", .MacroFunc },
+        .{ "__FUNCTION__", .MacroFunction },
+        .{ "__PRETTY_FUNCTION__", .MacroPrettyFunc },
 
         // gcc keywords
         .{ "__const", .KeywordGccConst1 },

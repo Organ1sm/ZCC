@@ -35,6 +35,8 @@ pub const Tag = enum(u8) {
     Var,
     ExternVar,
     StaticVar,
+    // same as static_var, used for __func__, __FUNCTION__ and __PRETTY_FUNCTION__
+    ImplicitStaticVar,
     ThreadlocalVar,
     ThreadlocalExternVar,
     ThreadlocalStaticVar,
@@ -337,6 +339,7 @@ pub const Tag = enum(u8) {
             .FloatCast,
             .ToVoid,
             .ImplicitReturn,
+            .ImplicitStaticVar,
             .QualCast,
             .NullToPointer,
             .ArrayFillerExpr,
