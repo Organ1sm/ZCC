@@ -211,9 +211,13 @@ fn handleArgs(comp: *Compilation, args: [][]const u8) !void {
                 comp.langOpts.setStandard(standard) catch return comp.diag.fatalNoSrc("Invalid standard '{s}'", .{standard});
             } else if (std.mem.startsWith(u8, arg, "--target=")) {
                 const triple = arg["--target=".len..];
-                const cross = std.zig.CrossTarget.parse(.{ .arch_os_abi = triple }) catch
+                const query = std.Target.Query.parse(.{ .arch_os_abi = triple }) catch {
                     return comp.diag.fatalNoSrc("Invalid target '{s}'", .{triple});
-                comp.target = cross.toTarget(); // TODO deprecated
+                };
+                const target = std.zig.system.resolveTargetQuery(query) catch |e| {
+                    return comp.diag.fatalNoSrc("unable to resolve target: {s}", .{@errorName(e)});
+                };
+                comp.target = target;
             } else if (std.mem.eql(u8, arg, "--dump-ast")) {
                 comp.dumpAst = true;
             } else {

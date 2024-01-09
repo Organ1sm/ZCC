@@ -15,10 +15,10 @@ pub fn build(b: *std.Build) void {
     // set a preferred release mode, allowing the user to decide how to optimize.
     const mode = b.standardOptimizeOption(.{});
 
-    const depsModule = b.createModule(.{ .source_file = .{ .path = "deps/lib.zig" } });
+    const depsModule = b.createModule(.{ .root_source_file = .{ .path = "deps/lib.zig" } });
     const zccModule = b.addModule("zcc", .{
-        .source_file = .{ .path = "src/zcc.zig" },
-        .dependencies = &.{.{
+        .root_source_file = .{ .path = "src/zcc.zig" },
+        .imports = &.{.{
             .name = "deps",
             .module = depsModule,
         }},
@@ -30,9 +30,9 @@ pub fn build(b: *std.Build) void {
         // complicated build scripts, this could be a generated file.
         .root_source_file = .{ .path = "src/main.zig" },
         .target = target,
-        .optimize = mode,
+        .optimize = .Debug,
     });
-    exe.addModule("deps", depsModule);
+    exe.root_module.addImport("deps", depsModule);
 
     // This declares intent for the executable to be installed into the
     // standard location when the user invokes the "install" step (the default
@@ -75,15 +75,17 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = mode,
     });
-    unit_tests.addModule("deps", depsModule);
+    unit_tests.root_module.addImport("deps", depsModule);
     const run_unit_tests = b.addRunArtifact(unit_tests);
     test_step.dependOn(&run_unit_tests.step);
 
     const integration_tests = b.addExecutable(.{
         .name = "test-runner",
         .root_source_file = .{ .path = "test/test_runner.zig" },
+        .target = target,
+        .optimize = mode,
     });
-    integration_tests.addModule("zcc", zccModule);
+    integration_tests.root_module.addImport("zcc", zccModule);
 
     const integration_test_runner = b.addRunArtifact(integration_tests);
     integration_test_runner.addArg(b.pathFromRoot("test/cases"));

@@ -616,11 +616,16 @@ fn expr(pp: *Preprocessor, lexer: *Lexer) MacroError!bool {
     return parser.macroExpr();
 }
 
+/// Skip until #else #elif #endif, return last directive token id.
+/// Also skips nested #if ... #endifs.
 fn skip(
     pp: *Preprocessor,
     lexer: *Lexer,
     cont: enum { untilElse, untilEndIf, untilEndIfSeenElse },
 ) Error!void {
+    // ifsSeen tracks the level of nested #if/#ifdef/#ifndef
+    // directives. It is incremented when entering a conditional
+    // block and decremented when exiting #endif.
     var ifsSeen: u32 = 0;
     var lineStart = true;
     while (lexer.index < lexer.buffer.len) {
