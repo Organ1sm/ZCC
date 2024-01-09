@@ -683,6 +683,7 @@ pub fn next(self: *Lexer) Token {
                     self.line += 1;
                     state = .multi_line_comment;
                 },
+                '*' => {},
                 else => state = .multi_line_comment,
             },
 
