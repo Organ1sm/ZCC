@@ -2586,8 +2586,7 @@ pub fn initializerItem(p: *Parser, il: *InitList, initType: Type) Error!bool {
                     try p.errStr(.invalid_field_designator, period, try p.typeStr(curType));
                     return error.ParsingFailed;
                 }
-                const field = curType.getField(p.getTokenSlice(identifier)) orelse
-                    {
+                const field = curType.getField(p.getTokenSlice(identifier)) orelse {
                     try p.errStr(.no_such_field_designator, period, p.getTokenSlice(identifier));
                     return error.ParsingFailed;
                 };
@@ -2614,13 +2613,18 @@ pub fn initializerItem(p: *Parser, il: *InitList, initType: Type) Error!bool {
             defer tempIL.deinit(p.pp.compilation.gpa);
             saw = try p.initializerItem(&tempIL, .{ .specifier = .Void });
         } else if (p.getCurrToken() == .LBrace) {
-            if (curType.isArray()) {
-                curIL = try curIL.find(p.pp.compilation.gpa, count);
-                curType = curType.getElemType();
+            if (try p.findAggregateInitializer(&curIL, &curType)) {
                 saw = try p.initializerItem(curIL, curType);
             } else {
-                // TODO: warning scalar braces
+                // discard further values
+                var tempIL = InitList{};
+                defer tempIL.deinit(p.pp.compilation.gpa);
+
                 saw = try p.initializerItem(curIL, curType);
+                saw = try p.initializerItem(&tempIL, .{ .specifier = .Void });
+                if (!warnedExcess)
+                    try p.errToken(if (initType.isArray()) .excess_array_init else .excess_struct_init, firstToken);
+                warnedExcess = true;
             }
         } else if (try p.findScalarInitializer(&curIL, &curType)) {
             saw = try p.initializerItem(curIL, curType);
@@ -2724,6 +2728,41 @@ fn findScalarInitializer(p: *Parser, il: **InitList, ty: *Type) Error!bool {
         return false;
     }
     return il.*.node == .none;
+}
+
+fn findAggregateInitializer(p: *Parser, il: **InitList, ty: *Type) Error!bool {
+    if (ty.isArray()) {
+        var index = il.*.list.items.len;
+        if (index != 0) index = il.*.list.items[index - 1].index + 1;
+
+        const arr_ty = ty.*;
+        const maxElems = arr_ty.arrayLen() orelse std.math.maxInt(usize);
+        const elemType = arr_ty.getElemType();
+        if (index < maxElems) {
+            ty.* = elemType;
+            il.* = try il.*.find(p.pp.compilation.gpa, index);
+            return true;
+        }
+        return false;
+    } else if (ty.get(.Struct)) |structType| {
+        var index = il.*.list.items.len;
+        if (index != 0) index = il.*.list.items[index - 1].index + 1;
+
+        const maxElems = structType.data.record.fields.len;
+        if (index < maxElems) {
+            ty.* = structType.data.record.fields[index].ty;
+            il.* = try il.*.find(p.pp.compilation.gpa, index);
+            return true;
+        }
+        return false;
+    } else if (ty.get(.Union)) |unionType| {
+        ty.* = unionType.data.record.fields[0].ty;
+        il.* = try il.*.find(p.pp.compilation.gpa, 0);
+        return true;
+    } else {
+        try p.err(.too_many_scalar_init_braces);
+        return il.*.node == .none;
+    }
 }
 
 fn coerceArrayInit(p: *Parser, item: *Result, token: TokenIndex, target: Type) !bool {
