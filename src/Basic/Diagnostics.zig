@@ -1032,6 +1032,10 @@ const messages = struct {
         const extra = .str;
         const kind = .@"error";
     };
+    pub const array_init_str = struct {
+        const msg = "array initializer must be an initializer list or wide string literal";
+        const kind = .@"error";
+    };
     pub const initializer_overrides = struct {
         const msg = "initializer overrides previous initialization";
         const opt = "initializer-overrides";

@@ -2730,13 +2730,18 @@ fn coerceArrayInit(p: *Parser, item: *Result, token: TokenIndex, target: Type) !
     if (!target.isArray())
         return false;
 
-    if (!item.ty.isArray()) {
-        const eMsg = " from incompatible type ";
-        try p.errStr(.incompatible_init, token, try p.typePairStrExtra(target, eMsg, item.ty));
+    const isStrLiteral = p.nodeIs(item.node, .StringLiteralExpr);
+    if (!isStrLiteral and !p.nodeIs(item.node, .CompoundLiteralExpr)) {
+        try p.errToken(.array_init_str, token);
         return true; // do not do further coercion
     }
 
-    if (!target.getElemType().eql(item.ty.getElemType(), false)) {
+    const targetSpec = target.getElemType().canonicalize(.standard).specifier;
+    const itemSpec = item.ty.getElemType().canonicalize(.standard).specifier;
+    const compatible = target.getElemType().eql(item.ty.getElemType(), false) or
+        (isStrLiteral and itemSpec == .Char and (targetSpec == .UChar or targetSpec == .SChar));
+
+    if (!compatible) {
         const eMsg = " with array of type ";
         try p.errStr(.incompatible_array_init, token, try p.typePairStrExtra(target, eMsg, item.ty));
         return true; // do not do further coercion
@@ -2746,7 +2751,7 @@ fn coerceArrayInit(p: *Parser, item: *Result, token: TokenIndex, target: Type) !
         std.debug.assert(item.ty.is(.Array));
         const len = item.ty.arrayLen().?;
         const arrayLen = arrayType.arrayLen().?;
-        if (p.nodeIs(item.node, .StringLiteralExpr)) {
+        if (isStrLiteral) {
             // the null byte of a string can be dropped
             if (len - 1 > arrayLen)
                 try p.errToken(.str_init_too_long, token);
