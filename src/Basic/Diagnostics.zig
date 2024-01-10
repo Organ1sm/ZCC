@@ -88,6 +88,7 @@ pub const Options = packed struct {
     @"dollar-in-identifier-extension": Kind = .default,
     @"unknown-pragmas": Kind = .default,
     @"predefined-identifier-outside-function": Kind = .default,
+    @"many-braces-around-scalar-init": Kind = .default,
 };
 
 const messages = struct {
@@ -1310,6 +1311,11 @@ const messages = struct {
     pub const predefined_top_level = struct {
         const msg = "predefined identifier is only valid inside function";
         const opt = "predefined-identifier-outside-function";
+        const kind = .warning;
+    };
+    pub const too_many_scalar_init_braces = struct {
+        const msg = "too many braces around scalar initializer";
+        const opt = "many-braces-around-scalar-init";
         const kind = .warning;
     };
 };
