@@ -8,7 +8,7 @@ void foo(void) {
     const char g[2] = "foo";
     int h[2] = (int []){1,2,3};
     int i[] = "foo";
-    int j = { [0] = 1 }; 
+    int j = { [0] = 1 };
     int k[2] = { [-1] = 1 };
     int l[2] = { [2] = 1 };
     #define N 1000000000
@@ -17,7 +17,7 @@ void foo(void) {
     struct Foo {
         int a, b, c;
     } o = { .b = 1, 2 }, p = { .d = 0 };
-    // struct Foo q = { .c = 1, .b = 2, 3, 4, 5}, r = { .c = 1, 2};
+    // struct Foo q = { .c = 1, .b = 2, 3, 4, 5}, r = { .c = 1, 2}; TODO
     int s[2] = {1, 2, 3}, t[2] = {[1] = 1, 2, 3};
 
     int arr[2][2] = {1, [1] = 3, 4, 5, 6};
@@ -29,18 +29,25 @@ void foo(void) {
         } c;
     } arr2[2] = {1, [0].c.b = 2, 3, 4, 5, 6, 7, 8};
     struct {} empty[2] = {1};
-    int j[] = c; // TODO improve the error message
+    int j[] = c;
 
     struct S s = {};
     enum E e1 = 1, e2 = 2 + e1;
     union U u = {.x = 1};
     void v[1] = {1};
     (void){};
-} 
-
+}
 void bar(void) {
     int x = 1;
     int arr[] = {[x] = 2};
+}
+
+void baz(void) {
+    char arr1[] = "arr";
+    signed char arr2[] = ("arr");
+    unsigned char arr3[] = ((("arr")));
+    char arr4[] = arr1;
+    signed char h[2] = (char []){1,2};
 }
 
 #define TESTS_SKIPPED 2
@@ -69,10 +76,12 @@ void bar(void) {
     "initializers.c:23:37: warning: excess elements in array initializer" \
     "initializers.c:30:43: warning: excess elements in array initializer" \
     "initializers.c:31:27: error: initializer for aggregate with no elements requires explicit braces" \
-    "initializers.c:32:15: error: initializing 'int []' from incompatible type 'int *'" \
+    "initializers.c:32:15: error: array initializer must be an initializer list or wide string literal" \
     "initializers.c:34:14: error: variable has incomplete type 'struct S'" \
     "initializers.c:35:12: error: variable has incomplete type 'enum E'" \
     "initializers.c:36:13: error: variable has incomplete type 'union U'" \
     "initializers.c:37:11: error: array has incomplete element type 'void'" \
     "initializers.c:38:11: error: variable has incomplete type 'void'" \
     "initializers.c:42:19: error: expression is not an integer constant expression" \
+    "initializers.c:49:19: error: array initializer must be an initializer list or wide string literal" \
+    "initializers.c:50:24: error: cannot initialize array of type 'signed char [2]' with array of type 'char [2]'"\
