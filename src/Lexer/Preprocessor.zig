@@ -1386,7 +1386,7 @@ fn expandMacro(pp: *Preprocessor, lexer: *Lexer, raw: RawToken) MacroError!void 
     try pp.expandMacroExhaustive(lexer, &pp.topExpansionBuffer, 0, 1, true);
     try pp.tokens.ensureUnusedCapacity(pp.compilation.gpa, pp.topExpansionBuffer.items.len);
     for (pp.topExpansionBuffer.items) |*tok| {
-        if (tok.id == .WhiteSpace and !pp.compilation.onlyPreprocess) {
+        if ((tok.id == .WhiteSpace or tok.id == .NewLine) and !pp.compilation.onlyPreprocess) {
             Token.free(tok.expansionLocs, pp.compilation.gpa);
             continue;
         }
