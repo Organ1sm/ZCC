@@ -827,13 +827,13 @@ fn parseDeclaration(p: *Parser) Error!bool {
                 try p.errStr(.redefinition, initD.d.name, p.getTokenSlice(initD.d.name));
                 try p.errToken(.previous_definition, sym.definition.nameToken);
             }
-        } else {
-            try p.scopes.append(.{ .definition = .{
-                .name = p.getTokenSlice(initD.d.name),
-                .type = initD.d.type,
-                .nameToken = initD.d.name,
-            } });
         }
+
+        try p.scopes.append(.{ .definition = .{
+            .name = p.getTokenSlice(initD.d.name),
+            .type = initD.d.type,
+            .nameToken = initD.d.name,
+        } });
 
         const func = p.func;
         defer p.func = func;
@@ -3521,9 +3521,11 @@ fn labeledStmt(p: *Parser) Error!?NodeIndex {
             try p.labels.append(.{ .label = nameToken });
 
             var i: usize = 0;
-            while (i < p.labels.items.len) : (i += 1) {
+            while (i < p.labels.items.len) {
                 if (p.labels.items[i] == .unresolvedGoto and std.mem.eql(u8, p.getTokenSlice(p.labels.items[i].unresolvedGoto), str))
-                    _ = p.labels.swapRemove(i);
+                    _ = p.labels.swapRemove(i)
+                else
+                    i += 1;
             }
         }
 
