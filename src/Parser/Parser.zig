@@ -1367,6 +1367,17 @@ fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec) Error!?InitDeclarator {
             declSpec.storageClass = .none;
         }
 
+        const scopesLen = p.scopes.items.len;
+        defer p.scopes.items.len = scopesLen;
+
+        try p.scopes.append(.{
+            .declaration = .{
+                .name = p.getTokenSlice(initD.d.name),
+                .type = initD.d.type,
+                .nameToken = initD.d.name,
+            },
+        });
+
         var initListExpr = try p.initializer(initD.d.type);
         initD.initializer = initListExpr.node;
         // int j [] = c; // c -> *int
