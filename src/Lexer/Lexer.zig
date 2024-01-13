@@ -956,8 +956,16 @@ pub fn next(self: *Lexer) Token {
 }
 
 pub fn nextNoWhiteSpace(self: *Lexer) Token {
+    return self.nextNoSpecificTokens(std.EnumSet(TokenType).initOne(.WhiteSpace));
+}
+
+pub fn nextNoWsAndNewLine(self: *Lexer) Token {
+    return self.nextNoSpecificTokens(std.EnumSet(TokenType).initMany(&[_]TokenType{ .NewLine, .WhiteSpace }));
+}
+
+pub fn nextNoSpecificTokens(self: *Lexer, skipTokens: std.EnumSet(TokenType)) Token {
     var token = self.next();
-    while (token.id == .WhiteSpace)
+    while (skipTokens.contains(token.id))
         token = self.next();
     return token;
 }

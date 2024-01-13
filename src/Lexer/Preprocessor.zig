@@ -268,8 +268,8 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!Token {
                     },
 
                     .KeywordUndef => {
-                        const macro_name = (try pp.expectMacroName(&lexer)) orelse continue;
-                        _ = pp.defines.remove(macro_name);
+                        const macroName = (try pp.expectMacroName(&lexer)) orelse continue;
+                        _ = pp.defines.remove(macroName);
                         try pp.expectNewLine(&lexer);
                     },
 
@@ -400,6 +400,25 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!Token {
                 try pp.expandMacro(&lexer, token);
             },
         }
+    }
+}
+
+/// Tokenize a file without any preprocessing, returns eof token.
+pub fn tokenize(pp: *Preprocessor, source: Source) Error!Token {
+    var tokenizer = Lexer{
+        .buffer = source.buffer,
+        .comp = pp.compilation,
+        .source = source.id,
+    };
+
+    // Estimate how many new tokens this source will contain.
+    const EstimatedTokenCount = source.buffer.len / 8;
+    try pp.tokens.ensureTotalCapacity(pp.compilation.gpa, pp.tokens.len + EstimatedTokenCount);
+
+    while (true) {
+        const tok = tokenizer.next();
+        if (tok.id == .Eof) return tokenFromRaw(tok);
+        try pp.tokens.append(pp.compilation.gpa, tokenFromRaw(tok));
     }
 }
 
