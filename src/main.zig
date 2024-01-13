@@ -4,6 +4,7 @@ const Compilation = @import("Basic/Compilation.zig");
 const Codegen = @import("CodeGen/Codegen.zig");
 const Source = @import("Basic/Source.zig");
 const Preprocessor = @import("Lexer/Preprocessor.zig");
+const Lexer = @import("Lexer/Lexer.zig");
 const Parser = @import("Parser/Parser.zig");
 
 var GeneralPurposeAllocator = std.heap.GeneralPurposeAllocator(.{}){};
@@ -79,8 +80,9 @@ const usage =
     \\  -Wno-<warning>          Disable the specified warning
     \\
     \\Debug options:
-    \\  --dump-ast              Dump produced AST to stdout
-    \\
+    \\  -dump-ast              Dump produced AST to stdout
+    \\  -dump-tokens           Run preprocessor, dump internal rep of tokens to stdout 
+    \\  -dump-raw-tokens        Lex file in raw mode and dump raw tokens to stdout
     \\
 ;
 
@@ -218,8 +220,12 @@ fn handleArgs(comp: *Compilation, args: [][]const u8) !void {
                     return comp.diag.fatalNoSrc("unable to resolve target: {s}", .{@errorName(e)});
                 };
                 comp.target = target;
-            } else if (std.mem.eql(u8, arg, "--dump-ast")) {
+            } else if (std.mem.eql(u8, arg, "-dump-ast")) {
                 comp.dumpAst = true;
+            } else if (std.mem.eql(u8, arg, "-dump-tokens")) {
+                comp.dumpTokens = true;
+            } else if (std.mem.eql(u8, arg, "-dump-raw-tokens")) {
+                comp.dumpRawTokens = true;
             } else {
                 try stdOut.print(usage, .{args[0]});
                 return std.debug.print("unknown command: {s}", .{arg});
@@ -270,8 +276,12 @@ fn processSource(comp: *Compilation, source: Source, builtinMacro: Source, userD
 
     _ = try pp.preprocess(builtinMacro);
     _ = try pp.preprocess(userDefinedMacros);
-    const eof = try pp.preprocess(source);
-    try pp.tokens.append(pp.compilation.gpa, eof);
+    if (comp.dumpRawTokens) {
+        _ = try pp.tokenize(source);
+    } else {
+        const eof = try pp.preprocess(source);
+        try pp.tokens.append(pp.compilation.gpa, eof);
+    }
 
     if (comp.onlyPreprocess) {
         comp.renderErrors();
@@ -285,6 +295,29 @@ fn processSource(comp: *Compilation, source: Source, builtinMacro: Source, userD
 
         return pp.prettyPrintTokens(file.writer()) catch |err|
             comp.diag.fatalNoSrc("{s} when trying to print tokens", .{@errorName(err)});
+    }
+
+    if (comp.dumpTokens or comp.dumpRawTokens) {
+        const locs = pp.tokens.items(.loc);
+        var lexer = Lexer{
+            .buffer = comp.getSource(locs[0].id).buffer,
+            .comp = comp,
+            .index = locs[0].byteOffset,
+            .source = .generated,
+        };
+        for (pp.tokens.items(.id), 0..) |*tok, i| {
+            const loc = locs[i];
+            const res = if (comp.dumpTokens) lexer.nextNoWsAndNewLine() else lexer.next();
+            const s = pp.compilation.getSource(loc.id);
+            std.debug.print("{d:^5} `{s}` {s:^15} [line: {d}, col: {d}]\n", .{
+                i,
+                if (tok.* == .NewLine) "nl" else lexer.buffer[res.start..res.end],
+                @tagName(tok.*),
+                loc.line,
+                s.getLineCol(locs[i].byteOffset).col,
+            });
+        }
+        return;
     }
 
     var tree = try Parser.parse(&pp);

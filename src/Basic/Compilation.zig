@@ -30,6 +30,8 @@ pragmaHandlers: std.StringArrayHashMapUnmanaged(*Pragma) = .{},
 onlyPreprocess: bool = false,
 onlyCompile: bool = false,
 dumpAst: bool = false,
+dumpTokens: bool = false,
+dumpRawTokens: bool = false,
 langOpts: LangOpts = .{},
 generatedBuffer: std.ArrayList(u8),
 
