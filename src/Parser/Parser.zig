@@ -295,7 +295,7 @@ pub fn addNode(p: *Parser, node: AST.Node) Allocator.Error!NodeIndex {
     const res = p.nodes.len;
     try p.nodes.append(p.pp.compilation.gpa, node);
 
-    return @as(NodeIndex, @enumFromInt(res));
+    return @enumFromInt(res);
 }
 
 fn addList(p: *Parser, nodes: []const NodeIndex) Allocator.Error!AST.Range {
@@ -2220,7 +2220,7 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: Declarator
         var maxBits = p.pp.compilation.target.ptrBitWidth();
         if (maxBits > 61) maxBits = 61;
 
-        const maxBytes = (@as(u64, 1) << @as(u6, @truncate(maxBits))) - 1;
+        const maxBytes = (@as(u64, 1) << @truncate(maxBits)) - 1;
         const maxElems = maxBytes / @max(1, outer.sizeof(p.pp.compilation) orelse 1);
 
         switch (size.value) {
@@ -2267,7 +2267,7 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: Declarator
 
                 const arrayType = try p.arena.create(Type.Array);
                 arrayType.elem = .{ .specifier = .Void };
-                arrayType.len = @as(u64, @bitCast(v));
+                arrayType.len = @bitCast(v);
                 if (arrayType.len > maxElems) {
                     try p.errToken(.array_too_large, lb);
                     arrayType.len = maxElems;
@@ -2587,7 +2587,7 @@ pub fn initializerItem(p: *Parser, il: *InitList, initType: Type) Error!bool {
                     return error.ParsingFailed;
                 }
 
-                const checked = @as(usize, @intCast(indexUnchecked));
+                const checked: usize = @intCast(indexUnchecked);
                 curIL = try curIL.find(p.pp.compilation.gpa, checked);
                 curType = curType.getElemType();
                 designation = true;
@@ -3032,7 +3032,7 @@ fn convertInitList(p: *Parser, il: InitList, initType: Type) Error!NodeIndex {
             const init = il.list.items[0];
             const fieldType = unionType.data.record.fields[init.index].ty;
             unionInitNode.data.unionInit = .{
-                .fieldIndex = @as(u32, @truncate(init.index)),
+                .fieldIndex = @truncate(init.index),
                 .node = try p.convertInitList(init.list, fieldType),
             };
         }
@@ -4431,10 +4431,10 @@ fn parseCastExpr(p: *Parser) Error!Result {
                 const isUnsigned = ty.isUnsignedInt(p.pp.compilation);
                 if (isUnsigned and operand.value == .signed) {
                     const copy = operand.value.signed;
-                    operand.value = .{ .unsigned = @as(u64, @bitCast(copy)) };
+                    operand.value = .{ .unsigned = @bitCast(copy) };
                 } else if (!isUnsigned and operand.value == .unsigned) {
                     const copy = operand.value.unsigned;
-                    operand.value = .{ .signed = @as(i64, @bitCast(copy)) };
+                    operand.value = .{ .signed = @bitCast(copy) };
                 }
             } else {
                 try p.errStr(.invalid_cast_type, lp, try p.typeStr(operand.ty));
@@ -5063,8 +5063,8 @@ fn parseCallExpr(p: *Parser, lhs: Result) Error!Result {
 
     const extra = Diagnostics.Message.Extra{
         .arguments = .{
-            .expected = @as(u32, @intCast(params.len)),
-            .actual = @as(u32, @intCast(argCount)),
+            .expected = @intCast(params.len),
+            .actual = @intCast(argCount),
         },
     };
     if (ty.is(.Func) and params.len != argCount)
@@ -5102,7 +5102,7 @@ fn checkArrayBounds(p: *Parser, index: Result, arrayType: Type, token: TokenInde
         .signed => |val| if (val < 0)
             try p.errExtra(.array_before, token, .{ .signed = val })
         else if (std.math.compare(val, .gte, len))
-            try p.errExtra(.array_after, token, .{ .unsigned = @as(u64, @intCast(val)) }),
+            try p.errExtra(.array_after, token, .{ .unsigned = @intCast(val) }),
         .unavailable => return,
     }
 }
@@ -5333,7 +5333,7 @@ fn makePredefinedIdentifier(p: *Parser, start: usize) !Result {
     const strLit = try p.addNode(.{
         .tag = .StringLiteralExpr,
         .type = ty,
-        .data = .{ .string = .{ .index = @as(u32, @intCast(start)), .len = @as(u32, @intCast(len)) } },
+        .data = .{ .string = .{ .index = @intCast(start), .len = @intCast(len) } },
     });
     return Result{
         .ty = ty,
@@ -5377,7 +5377,7 @@ fn castInt(p: *Parser, val: u64, specs: []const Type.Specifier) Error!Result {
                 else => unreachable,
             }
         } else {
-            res.value = .{ .signed = @as(i64, @bitCast(val)) };
+            res.value = .{ .signed = @bitCast(val) };
             switch (tySize) {
                 2 => if (val <= std.math.maxInt(i16)) break,
                 4 => if (val <= std.math.maxInt(i32)) break,
@@ -5790,7 +5790,7 @@ fn parseStringLiteral(p: *Parser) Error!Result {
     res.node = try p.addNode(.{
         .tag = .StringLiteralExpr,
         .type = res.ty,
-        .data = .{ .string = .{ .index = @as(u32, @intCast(index)), .len = @as(u32, @intCast(len)) } },
+        .data = .{ .string = .{ .index = @intCast(index), .len = @intCast(len) } },
     });
 
     return res;

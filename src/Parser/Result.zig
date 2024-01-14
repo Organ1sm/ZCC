@@ -428,7 +428,7 @@ fn usualArithmeticConversion(a: *Result, b: *Result, p: *Parser) Error!void {
     if (aIsUnsigned == bIsUnsigned) {
         // cast to greater signed or unsigned type
         const resSpecifier = @max(@intFromEnum(aPromoted.specifier), @intFromEnum(bPromoted.specifier));
-        const resType = Type{ .specifier = @as(Type.Specifier, @enumFromInt(resSpecifier)) };
+        const resType = Type{ .specifier = @enumFromInt(resSpecifier) };
         try a.intCast(p, resType);
         try b.intCast(p, resType);
         return;

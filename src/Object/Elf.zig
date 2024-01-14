@@ -167,7 +167,7 @@ pub fn addRelocation(elf: *Elf, name: []const u8, sectionKind: Object.Section, a
 
     try section.relocations.append(elf.arena.child_allocator, .{
         .symbol = symbol,
-        .offset = @as(u48, @intCast(address)),
+        .offset = @intCast(address),
         .addend = addend,
         .type = if (symbol.section == null) 4 else 2, // TODO
     });
@@ -252,7 +252,7 @@ pub fn finish(elf: *Elf, file: std.fs.File) !void {
             });
             sym.index = symIdx;
             symIdx += 1;
-            nameOffset += @as(u32, @intCast(entry.key_ptr.len + 1)); // +1 for null byte
+            nameOffset += @intCast(entry.key_ptr.len + 1); // +1 for null byte
         }
         it = elf.globalSymbols.iterator();
         while (it.next()) |entry| {
@@ -267,7 +267,7 @@ pub fn finish(elf: *Elf, file: std.fs.File) !void {
             });
             sym.index = symIdx;
             symIdx += 1;
-            nameOffset += @as(u32, @intCast(entry.key_ptr.len + 1)); // +1 for null byte
+            nameOffset += @intCast(entry.key_ptr.len + 1); // +1 for null byte
         }
     }
 
@@ -352,7 +352,7 @@ pub fn finish(elf: *Elf, file: std.fs.File) !void {
         while (it.next()) |entry| {
             const sect = entry.value_ptr.*;
             const relaCount = sect.relocations.items.len;
-            const relaNameOffset = if (relaCount != 0) @as(u32, @truncate(".rela".len)) else 0;
+            const relaNameOffset: u32 = if (relaCount != 0) @truncate(".rela".len) else 0;
             try w.writeStruct(std.elf.Elf64_Shdr{
                 .sh_name = relaNameOffset + nameOffset,
                 .sh_type = sect.type,

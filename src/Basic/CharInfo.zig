@@ -6,6 +6,7 @@
 const assert = @import("std").debug.assert;
 
 /// C11 Standard Annex D
+/// see: https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1548.pdf Annex D appendix.
 pub fn isC11IdChar(codepoint: u21) bool {
     assert(codepoint > 0x7F);
     return switch (codepoint) {
@@ -75,6 +76,7 @@ pub fn isC11IdChar(codepoint: u21) bool {
 }
 
 /// C99 Standard Annex D
+/// see: https://www.dii.uchile.cl/~daespino/files/Iso_C_1999_definition.pdf Annex D appendix.
 pub fn isC99IdChar(codepoint: u21) bool {
     assert(codepoint > 0x7F);
     return switch (codepoint) {
