@@ -25,7 +25,7 @@ pub const ID = enum(u32) {
 path: []const u8,
 /// source file content buffer
 buffer: []const u8,
-///represent source file state
+///represent source file state or this source file where in position
 id: ID,
 /// invalid UTF-8 location
 invalidUTF8Loc: ?Location = null,

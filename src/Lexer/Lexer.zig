@@ -7,10 +7,15 @@ const Compilation = @import("../Basic/Compilation.zig");
 const CharInfo = @import("../Basic/CharInfo.zig");
 const Lexer = @This();
 
+/// Input buffer containing source code
 buffer: []const u8 = undefined,
+/// Current tokenize position
 index: u32 = 0,
+/// Source file ID
 source: Source.ID,
+/// Compilation context
 comp: *const Compilation,
+/// current line number
 line: u32 = 1,
 
 const State = enum {

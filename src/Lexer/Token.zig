@@ -6,17 +6,33 @@ const Compilation = @import("../Basic/Compilation.zig");
 const CharInfo = @import("../Basic/CharInfo.zig");
 
 pub const Token = struct {
+    /// Token classification type (keyword, identifier etc.)
     id: TokenType,
+
+    /// Source file ID where this token is from
     source: Source.ID,
+
+    /// Starting byte offset of token in source file
     start: u32 = 0,
+
+    /// Ending byte offset of token in source file
     end: u32 = 0,
+
+    /// Line number where this token appears
     line: u32 = 0,
 
-    /// double underscore and underscore + capital letter identifiers
-    /// belong to the implementation namespace, so we always convert them
-    /// to keywords.
+    /// Maps a token string to a TokenType based on keywords
+    /// and current language standard.
+    ///
+    /// Special cases like inline, restrict have different keyword
+    /// status depending on standards. These are checked before
+    /// mapping.
+    ///
+    /// Returns final TokenType for further processing.
     pub fn getTokenId(comp: *const Compilation, str: []const u8) TokenType {
         const kw = AllKeywords.get(str) orelse return .Identifier;
+
+        // Retrieve the language standard from the Compilation context
         const standard = comp.langOpts.standard;
         return switch (kw) {
             .KeywordInline => if (standard.isGNU() or standard.atLeast(.c99)) kw else .Identifier,
@@ -38,6 +54,7 @@ pub const Token = struct {
                 CharInfo.isC11IdChar(codepoint) and !CharInfo.isC11DisallowedInitialIdChar(codepoint)
             else
                 CharInfo.isC99IdChar(codepoint) and !CharInfo.isC99DisallowedInitialIDChar(codepoint),
+
             .inside => if (comp.langOpts.standard.atLeast(.c11))
                 CharInfo.isC11IdChar(codepoint)
             else

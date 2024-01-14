@@ -72,7 +72,7 @@ const Standard = enum {
 standard: Standard = .default,
 /// -fshort-enums option, makes enums only take up as much space as they need to hold all the values.
 shortEnums: bool = false,
-/// -
+/// -fdollars-in-identifiers, allow '$' in identifiers(default).
 dollarsInIdentifiers: bool = true,
 
 pub fn setStandard(self: *LangOpts, name: []const u8) error{InvalidStandard}!void {
