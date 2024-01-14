@@ -163,7 +163,7 @@ pub fn main() !void {
             }
             const tokSlice = pp.getTokenSlice(macro.tokens[0]);
             const testsSkipped = try std.fmt.parseInt(u32, tokSlice, 0);
-            progress.log("{d} test{s} skipped\n", .{ testsSkipped, if (testsSkipped == 1) @as([]const u8, "") else "s" });
+            progress.log("{d} test{s} skipped\n", .{ testsSkipped, if (testsSkipped == 1) "" else "s" });
             skipCount += testsSkipped;
             continue;
         }

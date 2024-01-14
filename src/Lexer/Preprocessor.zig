@@ -816,7 +816,7 @@ fn pragmaOperator(pp: *Preprocessor, argToken: Token, operatorLoc: Source.Locati
     var tempLexer = Lexer{
         .buffer = pp.compilation.generatedBuffer.items,
         .comp = pp.compilation,
-        .index = @as(u32, @intCast(start)),
+        .index = @intCast(start),
         .source = .generated,
         .line = pp.generatedLine,
     };
@@ -1310,7 +1310,7 @@ fn expandMacroExhaustive(
 
                     // Validate argument count.
                     const extra = Diagnostics.Message.Extra{ .arguments = .{
-                        .expected = @as(u32, @intCast(macro.params.len)),
+                        .expected = @intCast(macro.params.len),
                         .actual = argsCount,
                     } };
                     if (macro.varArgs and argsCount < macro.params.len) {
@@ -1469,7 +1469,7 @@ fn pasteTokens(pp: *Preprocessor, lhsTokens: *ExpandBuffer, rhsTokens: []const T
     var lexer = Lexer{
         .buffer = pp.compilation.generatedBuffer.items,
         .comp = pp.compilation,
-        .index = @as(u32, @intCast(start)),
+        .index = @intCast(start),
         .source = .generated,
     };
 
@@ -1492,7 +1492,7 @@ fn makeGeneratedToken(pp: *Preprocessor, start: usize, id: TokenType, source: To
         .id = id,
         .loc = .{
             .id = .generated,
-            .byteOffset = @as(u32, @intCast(start)),
+            .byteOffset = @intCast(start),
             .line = pp.generatedLine,
         },
     };
