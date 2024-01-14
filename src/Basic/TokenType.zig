@@ -224,6 +224,21 @@ pub const TokenType = enum(u8) {
     KeywordLine,
     KeywordVarArgs,
 
+    /// This function checks if the provided `id` matches any of the predefined macro-related token types,
+    /// and returns `true` if it does, indicating that it is a macro identifier.
+    ///
+    /// # Arguments
+    /// - `id`: The `TokenType` to be checked for macro identifier status.
+    ///
+    /// # Returns
+    /// Returns `true` if the `id` corresponds to a macro identifier, otherwise returns `false`.
+    ///
+    /// # Examples
+    /// ```
+    ///     const tokenType = .KeywordDefine;
+    ///     const isMacro = isMacroIdentifier(tokenType);
+    ///     assert(isMacro); // This assertion will pass since .KeywordDefine is a macro identifier.
+    /// ```
     pub fn isMacroIdentifier(id: TokenType) bool {
         return switch (id) {
             .KeywordInclude,
@@ -312,6 +327,14 @@ pub const TokenType = enum(u8) {
         };
     }
 
+    /// Simplifies a macro-related keyword to `.Identifier`.
+    ///
+    /// # Arguments
+    /// - `id`: A pointer to the `TokenType` to be simplified.
+    ///
+    /// # Note
+    /// This function is designed to simplify the processing of macro-related keywords,
+    /// treating them uniformly as identifiers.
     pub fn simplifyMacroKeyword(id: *TokenType) void {
         switch (id.*) {
             .KeywordInclude,
@@ -553,7 +576,7 @@ pub const TokenType = enum(u8) {
             .IntegerLiteral_LLU,
             => "an integer literal",
 
-            else => id.getTokenText().?, // handled in lexeme
+            else => id.getTokenText().?, // handled in getTokenText();
         };
     }
 
