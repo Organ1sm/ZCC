@@ -22,10 +22,10 @@ deinit: *const fn (*Pragma, *Compilation) void,
 
 /// Called whenever the preprocessor encounters this pragma. `start_idx` is the index
 /// within `pp.tokens` of the pragma name token. The pragma end is indicated by a
-/// .nl token (which may be generated if the source ends with a pragma with no newline)
+/// newline token (which may be generated if the source ends with a pragma with no newline)
 /// As an example, given the following line:
 ///     #pragma GCC diagnostic error "-Wnewline-eof" \n
-/// Then pp.tokens.get(start_idx) will return the `GCC` token.
+/// Then pp.tokens.get(startIdx) will return the `GCC` token.
 /// Return error.UnknownPragma to emit an `unsupported_pragma` diagnostic
 /// Return error.StopPreprocessing to stop preprocessing the current file (see once.zig)
 preprocessorHandler: ?*const fn (*Pragma, *Preprocessor, startIdx: TokenIndex) Error!void = null,
@@ -67,8 +67,10 @@ pub fn pasteTokens(pp: *Preprocessor, startIdx: TokenIndex) ![]const u8 {
             else => return error.ExpectedStringLiteral,
         }
     }
+
     if (lparenCount != rparenCount)
         return error.ExpectedStringLiteral;
+
     return pp.charBuffer.items[charBufferTop..];
 }
 

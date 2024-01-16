@@ -1551,6 +1551,8 @@ fn define(pp: *Preprocessor, lexer: *Lexer) Error!void {
     }
     first.id.simplifyMacroKeyword();
 
+    // Clear the token buffer
+    // Safe to use since we can only be in one directive at a time.
     pp.tokenBuffer.items.len = 0;
 
     var endIdx: u32 = undefined;
@@ -1643,6 +1645,8 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: RawToken, lParen: Raw
 
     var endIdx: u32 = undefined;
     // Collect the body tokens and validate # and ##'s found.
+    // Clear the token buffer
+    // Safe to use since we can only be in one directive at a time.
     pp.tokenBuffer.items.len = 0;
     tokenLoop: while (true) {
         var token = lexer.next();
