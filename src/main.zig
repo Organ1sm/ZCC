@@ -309,12 +309,14 @@ fn processSource(comp: *Compilation, source: Source, builtinMacro: Source, userD
             const loc = locs[i];
             const res = if (comp.dumpTokens) lexer.nextNoWsAndNewLine() else lexer.next();
             const s = pp.compilation.getSource(loc.id);
-            std.debug.print("{d:^5} `{s}` {s:^15} [line: {d}, col: {d}]\n", .{
+            std.debug.print("{d:^5} {s:<15} [line: {d}, col: {d}, range:<{d}, {d}>], info=`{s}`\n", .{
                 i,
-                if (tok.* == .NewLine) "nl" else lexer.buffer[res.start..res.end],
                 @tagName(tok.*),
                 loc.line,
                 s.getLineCol(locs[i].byteOffset).col,
+                res.start,
+                res.end,
+                if (tok.* == .NewLine) "nl" else lexer.buffer[res.start..res.end],
             });
         }
         return;

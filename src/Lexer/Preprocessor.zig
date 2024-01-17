@@ -1643,6 +1643,7 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: RawToken, lParen: Raw
         try params.append(pp.getTokenSlice(token));
     }
 
+    // store the macro definition end index.
     var endIdx: u32 = undefined;
     // Collect the body tokens and validate # and ##'s found.
     // Clear the token buffer
