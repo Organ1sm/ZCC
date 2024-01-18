@@ -36,29 +36,76 @@ const LineCol = struct {
     line: []const u8,
     /// indicate the column number within the line
     col: u32,
+    /// visual width
+    width: u32,
 };
 
-/// calculates line number, column, and line string
-/// for a given byte offset into the Source.
+/// Calculates line number, column, and visual width for a given byte offset into the Source.
+/// Returns a LineCol struct containing line information.
 pub fn getLineCol(source: Source, byteOffset: u32) LineCol {
+    // Find the start of the line by moving backward from the given byte offset
     var start = byteOffset;
     while (true) : (start -= 1) {
-        if (start == 0) break;
+        if (start == 0) {
+            if (source.buffer[start] == '\n')
+                start += 1;
+            break;
+        }
+
         if (start < source.buffer.len and source.buffer[start] == '\n') {
             start += 1;
             break;
         }
     }
 
-    const col = col: {
-        var i: usize = start;
-        var col: u32 = 1;
-        while (i < byteOffset) : (col += 1) { // TODO this is still incorrect, but better
-            i += std.unicode.utf8ByteSequenceLength(source.buffer[i]) catch unreachable;
-        }
-        break :col col;
+    var i: usize = start;
+    var col: u32 = 1;
+    var width: u32 = 1;
+
+    // Iterate from the start of the line to the given byte offset to calculate column and visual width
+    while (i < byteOffset) : (col += 1) { // TODO this is still incorrect, but better
+        // Determine the byte sequence length and code point at the current position
+        const len = std.unicode.utf8ByteSequenceLength(source.buffer[i]) catch unreachable;
+        const cp = std.unicode.utf8Decode(source.buffer[i..][0..len]) catch unreachable;
+        width += codepointWidth(cp);
+
+        i += len;
+    }
+    
+    return .{
+        .line = std.mem.sliceTo(source.buffer[start..], '\n'),
+        .col = col,
+        .width = width,
     };
-    return .{ .line = std.mem.sliceTo(source.buffer[start..], '\n'), .col = col };
+}
+
+/// Determines the display width of a given Unicode code point.
+/// Returns 1 for half-width characters and 2 for full-width characters.
+fn codepointWidth(cp: u32) u32 {
+    return switch (cp) {
+        // Half-width characters and special cases
+        0x1100...0x115F,
+        0x2329,
+        0x232A,
+        0x2E80...0x303F,
+        0x3040...0x3247,
+        0x3250...0x4DBF,
+        0x4E00...0xA4C6,
+        0xA960...0xA97C,
+        0xAC00...0xD7A3,
+        0xF900...0xFAFF,
+        0xFE10...0xFE19,
+        0xFE30...0xFE6B,
+        0xFF01...0xFF60,
+        0xFFE0...0xFFE6,
+        0x1B000...0x1B001,
+        0x1F200...0x1F251,
+        0x20000...0x3FFFD,
+        0x1F300...0x1F5FF,
+        0x1F900...0x1F9FF,
+        => 2,
+        else => 1, // Full-width characters
+    };
 }
 
 /// Returns the first offset, if any, in buf where an invalid utf8 sequence
