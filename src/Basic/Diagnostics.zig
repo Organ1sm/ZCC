@@ -1493,11 +1493,13 @@ pub fn renderExtra(comp: *Compilation, m: anytype) void {
             => @as(u32, @truncate(msg.extra.unsigned)),
             else => 0,
         };
+        var width = col;
         if (msg.loc.id != .unused) {
             const source = comp.getSource(msg.loc.id);
             const lineAndCol = source.getLineCol(msg.loc.byteOffset);
             line = lineAndCol.line;
             col += lineAndCol.col;
+            width += lineAndCol.width;
             m.location(source.path, msg.loc.line, col);
         }
 
@@ -1538,7 +1540,7 @@ pub fn renderExtra(comp: *Compilation, m: anytype) void {
             }
         }
 
-        m.end(line, col);
+        m.end(line, width);
     }
 
     const ws: []const u8 = if (warnings == 1) "" else "s";
