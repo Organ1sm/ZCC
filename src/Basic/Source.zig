@@ -9,6 +9,10 @@ pub const Location = struct {
     id: ID = .unused,
     byteOffset: u32 = 0,
     line: u32 = 0,
+
+    pub fn eql(a: Location, b: Location) bool {
+        return (a.id == b.id) and (a.byteOffset == b.byteOffset) and (a.line == b.line);
+    }
 };
 
 /// Enumeration ID represents the state of a source code file.
@@ -71,7 +75,7 @@ pub fn getLineCol(source: Source, byteOffset: u32) LineCol {
 
         i += len;
     }
-    
+
     return .{
         .line = std.mem.sliceTo(source.buffer[start..], '\n'),
         .col = col,

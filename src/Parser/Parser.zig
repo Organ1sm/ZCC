@@ -921,7 +921,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
             }
         }
 
-        const body = (try p.parseCompoundStmt(true)) orelse {
+        const body = (try p.parseCompoundStmt(true, null)) orelse {
             std.debug.assert(initD.d.oldTypeFunc != null);
             try p.err(.expected_fn_body);
             return true;
@@ -3146,7 +3146,7 @@ fn stmt(p: *Parser) Error!NodeIndex {
     if (try p.labeledStmt()) |some|
         return some;
 
-    if (try p.parseCompoundStmt(false)) |some|
+    if (try p.parseCompoundStmt(false, null)) |some|
         return some;
 
     if (p.eat(.KeywordIf)) |_|
@@ -3567,8 +3567,13 @@ fn labeledStmt(p: *Parser) Error!?NodeIndex {
     } else return null;
 }
 
+const StmtExprState = struct {
+    lastExprToken: TokenIndex = 0,
+    lastExprRes: Result = .{ .ty = .{ .specifier = .Void } },
+};
+
 /// compoundStmt : '{' ( decl | KeywordGccExtensionDecl |staticAssert |stmt)* '}'
-fn parseCompoundStmt(p: *Parser, isFnBody: bool) Error!?NodeIndex {
+fn parseCompoundStmt(p: *Parser, isFnBody: bool, stmtExprState: ?*StmtExprState) Error!?NodeIndex {
     const lBrace = p.eat(.LBrace) orelse return null;
 
     const declBufferTop = p.declBuffer.items.len;
@@ -3587,6 +3592,7 @@ fn parseCompoundStmt(p: *Parser, isFnBody: bool) Error!?NodeIndex {
     var noreturnLabelCount: u32 = 0;
 
     while (p.eat(.RBrace) == null) : (_ = try p.pragma()) {
+        if (stmtExprState) |state| state.* = .{};
         if (p.parseStaticAssert() catch |er| switch (er) {
             error.ParsingFailed => {
                 try p.nextStmt(lBrace);
@@ -3618,6 +3624,7 @@ fn parseCompoundStmt(p: *Parser, isFnBody: bool) Error!?NodeIndex {
             p.index = ext;
         }
 
+        const stmtToken = p.index;
         const s = p.stmt() catch |er| switch (er) {
             error.ParsingFailed => {
                 try p.nextStmt(lBrace);
@@ -3627,6 +3634,15 @@ fn parseCompoundStmt(p: *Parser, isFnBody: bool) Error!?NodeIndex {
         };
 
         if (s == .none) continue;
+        if (stmtExprState) |state| {
+            state.* = .{
+                .lastExprToken = stmtToken,
+                .lastExprRes = .{
+                    .node = s,
+                    .ty = p.nodes.items(.type)[@intFromEnum(s)],
+                },
+            };
+        }
         try p.declBuffer.append(s);
 
         if (noreturnIdx == null and p.nodeIsNoreturn(s)) {
@@ -4415,13 +4431,47 @@ fn mulExpr(p: *Parser) Error!Result {
     return lhs;
 }
 
+/// This will always be the last message, if present
+fn removeUnusedWarningForTok(p: *Parser, lastExprToken: TokenIndex) void {
+    if (lastExprToken == 0) return;
+    if (p.pp.compilation.diag.list.items.len == 0) return;
+
+    const lastExprLoc = p.pp.tokens.items(.loc)[lastExprToken];
+    const lastMessage = p.pp.compilation.diag.list.items[p.pp.compilation.diag.list.items.len - 1];
+
+    if (lastMessage.tag == .unused_value and lastMessage.loc.eql(lastExprLoc)) {
+        p.pp.compilation.diag.list.items.len = p.pp.compilation.diag.list.items.len - 1;
+    }
+}
+
 /// castExpr :  ( '(' type_name ')' )
-///  :  '(' typeName ')' castExpr
+///  :  '(' compoundStmt ')'
+///  |  '(' typeName ')' castExpr
 ///  | '(' typeName ')' '{' initializerItems '}'
 ///  | __builtin_choose_expr '(' constExpr ',' assignExpr ',' assignExpr ')'
 ///  | unExpr
 fn parseCastExpr(p: *Parser) Error!Result {
     if (p.eat(.LParen)) |lp| {
+        if (p.getCurrToken() == .LBrace) {
+            try p.err(.gnu_statement_expression);
+            if (p.func.type == null) {
+                try p.err(.stmt_expr_not_allowed_file_scope);
+                return error.ParsingFailed;
+            }
+
+            var stmtExprState: StmtExprState = .{};
+            const body_node = (try p.parseCompoundStmt(false, &stmtExprState)).?; // compoundStmt only returns null if .l_brace isn't the first token
+            p.removeUnusedWarningForTok(stmtExprState.lastExprToken);
+
+            var res = Result{
+                .node = body_node,
+                .ty = stmtExprState.lastExprRes.ty,
+                .value = stmtExprState.lastExprRes.value,
+            };
+            try p.expectClosing(lp, .RParen);
+            try res.un(p, .StmtExpr);
+            return res;
+        }
         if (try p.typeName()) |ty| {
             try p.expectClosing(lp, .RParen);
 

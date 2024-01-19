@@ -67,9 +67,11 @@ pub fn maybeWarnUnused(res: Result, p: *Parser, exprStart: TokenIndex, errStart:
     if (res.ty.is(.Void) or res.node == .none)
         return;
 
-    // don't warn about unused result if the expression contained errors
-    if (p.pp.compilation.diag.list.items.len > errStart)
-        return;
+    // don't warn about unused result if the expression contained errors besides other unused results
+    var i = errStart;
+    while (i < p.pp.compilation.diag.list.items.len) : (i += 1) {
+        if (p.pp.compilation.diag.list.items[i].tag != .unused_value) return;
+    }
 
     var curNode = res.node;
     while (true)
@@ -93,6 +95,21 @@ pub fn maybeWarnUnused(res: Result, p: *Parser, exprStart: TokenIndex, errStart:
             .PostIncExpr,
             .PostDecExpr,
             => return,
+
+            .StmtExpr => {
+                const body = p.nodes.items(.data)[@intFromEnum(curNode)].unExpr;
+                switch (p.nodes.items(.tag)[@intFromEnum(body)]) {
+                    .CompoundStmtTwo => {
+                        const bodyStmt = p.nodes.items(.data)[@intFromEnum(body)].binExpr;
+                        curNode = if (bodyStmt.rhs != .none) bodyStmt.rhs else bodyStmt.lhs;
+                    },
+                    .CompoundStmt => {
+                        const data = p.nodes.items(.data)[@intFromEnum(body)];
+                        curNode = p.data.items[data.range.end - 1];
+                    },
+                    else => unreachable,
+                }
+            },
 
             .CommaExpr => curNode = p.nodes.items(.data)[@intFromEnum(curNode)].binExpr.rhs,
             .ParenExpr => curNode = p.nodes.items(.data)[@intFromEnum(curNode)].unExpr,
