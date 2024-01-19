@@ -69,8 +69,8 @@ pub fn maybeWarnUnused(res: Result, p: *Parser, exprStart: TokenIndex, errStart:
 
     // don't warn about unused result if the expression contained errors besides other unused results
     var i = errStart;
-    while (i < p.pp.compilation.diag.list.items.len) : (i += 1) {
-        if (p.pp.compilation.diag.list.items[i].tag != .unused_value) return;
+    while (i < p.pp.comp.diag.list.items.len) : (i += 1) {
+        if (p.pp.comp.diag.list.items[i].tag != .unused_value) return;
     }
 
     var curNode = res.node;
@@ -223,8 +223,8 @@ pub fn adjustTypes(a: *Result, token: TokenIndex, b: *Result, p: *Parser, kind: 
             if (!aIsScalar or !bIsScalar) return a.invalidBinTy(token, b, p);
 
             // Do integer promotions but nothing else
-            if (aIsInt) try a.intCast(p, a.ty.integerPromotion(p.pp.compilation));
-            if (bIsInt) try b.intCast(p, b.ty.integerPromotion(p.pp.compilation));
+            if (aIsInt) try a.intCast(p, a.ty.integerPromotion(p.pp.comp));
+            if (bIsInt) try b.intCast(p, b.ty.integerPromotion(p.pp.comp));
             return a.shouldEval(b, p);
         },
 
@@ -286,8 +286,8 @@ pub fn adjustTypes(a: *Result, token: TokenIndex, b: *Result, p: *Parser, kind: 
                 return a.invalidBinTy(token, b, p);
 
             // Do integer promotions but nothing else
-            if (aIsInt) try a.intCast(p, a.ty.integerPromotion(p.pp.compilation));
-            if (bIsInt) try b.intCast(p, b.ty.integerPromotion(p.pp.compilation));
+            if (aIsInt) try a.intCast(p, a.ty.integerPromotion(p.pp.comp));
+            if (bIsInt) try b.intCast(p, b.ty.integerPromotion(p.pp.comp));
 
             // The result type is the type of the pointer operand
             if (aIsInt) a.ty = b.ty else b.ty = a.ty;
@@ -301,11 +301,11 @@ pub fn adjustTypes(a: *Result, token: TokenIndex, b: *Result, p: *Parser, kind: 
             if (aIsPtr and bIsPtr) {
                 if (!a.ty.eql(b.ty, false))
                     try p.errStr(.incompatible_pointers, token, try p.typePairStr(a.ty, b.ty));
-                a.ty = Type.ptrDiffT(p.pp.compilation);
+                a.ty = Type.ptrDiffT(p.pp.comp);
             }
 
             // Do integer promotion on b if needed
-            if (bIsInt) try b.intCast(p, b.ty.integerPromotion(p.pp.compilation));
+            if (bIsInt) try b.intCast(p, b.ty.integerPromotion(p.pp.comp));
             return a.shouldEval(b, p);
         },
 
@@ -362,7 +362,7 @@ pub fn intCast(res: *Result, p: *Parser, intType: Type) Error!void {
         try res.un(p, .IntCast);
     }
 
-    const isUnsigned = intType.isUnsignedInt(p.pp.compilation);
+    const isUnsigned = intType.isUnsignedInt(p.pp.comp);
     if (isUnsigned and res.value == .signed) {
         const copy = res.value.signed;
         res.value = .{ .unsigned = @bitCast(copy) };
@@ -431,8 +431,8 @@ fn usualArithmeticConversion(a: *Result, b: *Result, p: *Parser) Error!void {
     }
 
     // Do integer promotion on both operands
-    const aPromoted = a.ty.integerPromotion(p.pp.compilation);
-    const bPromoted = b.ty.integerPromotion(p.pp.compilation);
+    const aPromoted = a.ty.integerPromotion(p.pp.comp);
+    const bPromoted = b.ty.integerPromotion(p.pp.comp);
     if (aPromoted.eql(bPromoted, true)) {
         // cast to promoted type
         try a.intCast(p, aPromoted);
@@ -440,8 +440,8 @@ fn usualArithmeticConversion(a: *Result, b: *Result, p: *Parser) Error!void {
         return;
     }
 
-    const aIsUnsigned = aPromoted.isUnsignedInt(p.pp.compilation);
-    const bIsUnsigned = bPromoted.isUnsignedInt(p.pp.compilation);
+    const aIsUnsigned = aPromoted.isUnsignedInt(p.pp.comp);
+    const bIsUnsigned = bPromoted.isUnsignedInt(p.pp.comp);
     if (aIsUnsigned == bIsUnsigned) {
         // cast to greater signed or unsigned type
         const resSpecifier = @max(@intFromEnum(aPromoted.specifier), @intFromEnum(bPromoted.specifier));
@@ -516,7 +516,7 @@ pub fn compare(a: Result, op: std.math.CompareOperator, b: Result) bool {
 }
 
 pub fn mul(a: *Result, token: TokenIndex, b: Result, p: *Parser) !void {
-    const size = a.ty.sizeof(p.pp.compilation).?;
+    const size = a.ty.sizeof(p.pp.comp).?;
 
     var isOverflow = false;
     switch (a.value) {
@@ -564,7 +564,7 @@ pub fn mul(a: *Result, token: TokenIndex, b: Result, p: *Parser) !void {
 }
 
 pub fn add(a: *Result, tok: TokenIndex, b: Result, p: *Parser) !void {
-    const size = a.ty.sizeof(p.pp.compilation).?;
+    const size = a.ty.sizeof(p.pp.comp).?;
     var isOverflow = false;
     switch (a.value) {
         .unsigned => |*v| {
@@ -612,7 +612,7 @@ pub fn add(a: *Result, tok: TokenIndex, b: Result, p: *Parser) !void {
 }
 
 pub fn sub(a: *Result, tok: TokenIndex, b: Result, p: *Parser) !void {
-    const size = a.ty.sizeof(p.pp.compilation).?;
+    const size = a.ty.sizeof(p.pp.comp).?;
     var isOverflow = false;
     switch (a.value) {
         .unsigned => |*v| {
