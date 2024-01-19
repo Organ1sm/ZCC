@@ -4852,29 +4852,13 @@ fn parseSuffixExpr(p: *Parser, lhs: Result) Error!Result {
         .Period => {
             p.index += 1;
             const name = try p.expectIdentifier();
-            const fieldType = try p.getFieldAccessField(lhs.ty, name, false);
-            return Result{
-                .ty = fieldType,
-                .node = try p.addNode(.{
-                    .tag = .MemberAccessExpr,
-                    .type = fieldType,
-                    .data = .{ .member = .{ .lhs = lhs.node, .name = name } },
-                }),
-            };
+            return p.getFieldAccess(lhs, name, false);
         },
 
         .Arrow => {
             p.index += 1;
             const name = try p.expectIdentifier();
-            const fieldType = try p.getFieldAccessField(lhs.ty, name, true);
-            return Result{
-                .ty = fieldType,
-                .node = try p.addNode(.{
-                    .tag = .MemberAccessPtrExpr,
-                    .type = fieldType,
-                    .data = .{ .member = .{ .lhs = lhs.node, .name = name } },
-                }),
-            };
+            return p.getFieldAccess(lhs, name, true);
         },
 
         .PlusPlus => {
@@ -4919,12 +4903,13 @@ fn parseSuffixExpr(p: *Parser, lhs: Result) Error!Result {
     }
 }
 
-fn getFieldAccessField(
+fn getFieldAccess(
     p: *Parser,
-    exprType: Type,
+    lhs: Result,
     fieldNameToken: TokenIndex,
     isArrow: bool,
-) !Type {
+) !Result {
+    const exprType = lhs.ty;
     const isPtr = exprType.get(.Pointer) != null;
     const exprBaseType = if (isPtr) exprType.getElemType() else exprType;
     const recordType = exprBaseType.canonicalize(.standard);
@@ -4945,9 +4930,8 @@ fn getFieldAccessField(
     if (isArrow and !isPtr) try p.errStr(.member_expr_not_ptr, fieldNameToken, try p.typeStr(exprType));
     if (!isArrow and isPtr) try p.errStr(.member_expr_ptr, fieldNameToken, try p.typeStr(exprType));
 
-    // TODO deal with anonymous structs
     const fieldName = p.getTokenSlice(fieldNameToken);
-    const field = recordType.getField(fieldName) orelse {
+    if (!recordType.hasField(fieldName)) {
         const stringsTop = p.strings.items.len;
         defer p.strings.items.len = stringsTop;
 
@@ -4957,8 +4941,33 @@ fn getFieldAccessField(
 
         try p.errStr(.no_such_member, fieldNameToken, try p.arena.dupe(u8, p.strings.items[stringsTop..]));
         return error.ParsingFailed;
-    };
-    return field.f.ty;
+    }
+
+    return p.fieldAccessExtra(lhs.node, recordType, fieldName, isArrow);
+}
+
+fn fieldAccessExtra(p: *Parser, lhs: NodeIndex, recordType: Type, fieldName: []const u8, isArrow: bool) Error!Result {
+    for (recordType.data.record.fields, 0..) |f, i| {
+        if (f.isAnonymous()) {
+            if (!f.ty.hasField(fieldName)) continue;
+            const inner = try p.addNode(.{
+                .tag = if (isArrow) .MemberAccessPtrExpr else .MemberAccessExpr,
+                .type = f.ty,
+                .data = .{ .member = .{ .lhs = lhs, .index = @intCast(i) } },
+            });
+            return p.fieldAccessExtra(inner, f.ty, fieldName, false);
+        }
+        if (std.mem.eql(u8, fieldName, f.name)) return Result{
+            .ty = f.ty,
+            .node = try p.addNode(.{
+                .tag = if (isArrow) .MemberAccessPtrExpr else .MemberAccessExpr,
+                .type = f.ty,
+                .data = .{ .member = .{ .lhs = lhs, .index = @intCast(i) } },
+            }),
+        };
+    }
+    // We already checked that this container has a field by the name.
+    unreachable;
 }
 
 fn reportParam(p: *Parser, paramToken: TokenIndex, arg: Result, argCount: u32, params: []Type.Function.Param) Error!void {
