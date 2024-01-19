@@ -300,7 +300,7 @@ pub fn finish(b: @This(), p: *Parser) Parser.Error!Type {
     try b.qual.finish(p, &ty);
 
     if (b.alignToken) |alignToken| {
-        const default = ty.alignof(p.pp.compilation);
+        const default = ty.alignof(p.pp.comp);
         if (ty.isFunc()) {
             try p.errToken(.alignas_on_func, alignToken);
         } else if (b.alignment != 0 and b.alignment < default) {

@@ -280,7 +280,7 @@ fn processSource(comp: *Compilation, source: Source, builtinMacro: Source, userD
         _ = try pp.tokenize(source);
     } else {
         const eof = try pp.preprocess(source);
-        try pp.tokens.append(pp.compilation.gpa, eof);
+        try pp.tokens.append(pp.comp.gpa, eof);
     }
 
     if (comp.onlyPreprocess) {
@@ -308,7 +308,7 @@ fn processSource(comp: *Compilation, source: Source, builtinMacro: Source, userD
         for (pp.tokens.items(.id), 0..) |*tok, i| {
             const loc = locs[i];
             const res = if (comp.dumpTokens) lexer.nextNoWsAndNewLine() else lexer.next();
-            const s = pp.compilation.getSource(loc.id);
+            const s = pp.comp.getSource(loc.id);
             std.debug.print("{d:^5} {s:<15} [line: {d}, col: {d}, range:<{d}, {d}>], info=`{s}`\n", .{
                 i,
                 @tagName(tok.*),
