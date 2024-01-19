@@ -247,6 +247,8 @@ pub const Tag = enum(u8) {
     GenericDefaultExpr,
     /// __builtin_choose_expr(lhs, data[0], data[1])
     BuiltinChooseExpr,
+    /// ({ un }) *gnu extension*
+    StmtExpr,
 
     /// ====== Initializer expressions ======
     /// { lhs, rhs }

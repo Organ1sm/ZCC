@@ -834,7 +834,10 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
             }
         },
 
-        .GenericAssociationExpr, .GenericDefaultExpr => {
+        .GenericAssociationExpr,
+        .GenericDefaultExpr,
+        .StmtExpr,
+        => {
             try tree.dumpNode(data.unExpr, level + delta, w);
         },
 
