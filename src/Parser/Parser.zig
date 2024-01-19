@@ -2648,7 +2648,7 @@ pub fn initializerItem(p: *Parser, il: *InitList, initType: Type) Error!bool {
             var tempIL = InitList{};
             defer tempIL.deinit(p.pp.compilation.gpa);
             saw = try p.initializerItem(&tempIL, .{ .specifier = .Void });
-            if (!warnedExcess)
+            if (!warnedExcess and saw)
                 try p.errToken(if (initType.isArray()) .excess_array_init else .excess_struct_init, firstToken);
             warnedExcess = true;
         }
@@ -4928,6 +4928,12 @@ fn parseSuffixExpr(p: *Parser, lhs: Result) Error!Result {
         .Arrow => {
             p.index += 1;
             const name = try p.expectIdentifier();
+            if (lhs.ty.isArray()) {
+                var copy = lhs;
+                copy.ty.decayArray();
+                try copy.un(p, .ArrayToPointer);
+                return p.getFieldAccess(copy, name, true);
+            }
             return p.getFieldAccess(lhs, name, true);
         },
 
@@ -4980,7 +4986,7 @@ fn getFieldAccess(
     isArrow: bool,
 ) !Result {
     const exprType = lhs.ty;
-    const isPtr = exprType.get(.Pointer) != null;
+    const isPtr = exprType.isPointer();
     const exprBaseType = if (isPtr) exprType.getElemType() else exprType;
     const recordType = exprBaseType.canonicalize(.standard);
 

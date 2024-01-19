@@ -48,23 +48,13 @@ const LineCol = struct {
 /// Returns a LineCol struct containing line information.
 pub fn getLineCol(source: Source, byteOffset: u32) LineCol {
     // Find the start of the line by moving backward from the given byte offset
-    var start = byteOffset;
-    while (true) : (start -= 1) {
-        if (start == 0) {
-            if (source.buffer[start] == '\n')
-                start += 1;
-            break;
-        }
-
-        if (start < source.buffer.len and source.buffer[start] == '\n') {
-            start += 1;
-            break;
-        }
-    }
+    var start: usize = 0;
+    if (std.mem.lastIndexOfScalar(u8, source.buffer[0..byteOffset], '\n')) |some|
+        start = some + 1;
 
     var i: usize = start;
     var col: u32 = 1;
-    var width: u32 = 1;
+    var width: u32 = 0;
 
     // Iterate from the start of the line to the given byte offset to calculate column and visual width
     while (i < byteOffset) : (col += 1) { // TODO this is still incorrect, but better
