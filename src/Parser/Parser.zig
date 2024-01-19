@@ -1940,7 +1940,7 @@ fn parseEnumSpec(p: *Parser) Error!*Type.Enum {
     }
 
     enumType.fields = try p.arena.dupe(Type.Enum.Field, p.enumBuffer.items[enumBufferTop..]);
-    enumType.tagType = .{ .specifier = .Int };
+    enumType.tagType = e.res.ty;
 
     if (p.enumBuffer.items.len == enumBufferTop)
         try p.err(.empty_enum);
@@ -2597,12 +2597,13 @@ pub fn initializerItem(p: *Parser, il: *InitList, initType: Type) Error!bool {
                     try p.errStr(.invalid_field_designator, period, try p.typeStr(curType));
                     return error.ParsingFailed;
                 }
-                const field = curType.getField(p.getTokenSlice(identifier)) orelse {
-                    try p.errStr(.no_such_field_designator, period, p.getTokenSlice(identifier));
+
+                // TODO check if union already has field set
+                const fieldName = p.getTokenSlice(identifier);
+                if (!(try p.findFieldDesigntor(&curIL, &curType, fieldName))) {
+                    try p.errStr(.no_such_field_designator, period, fieldName);
                     return error.ParsingFailed;
-                };
-                curIL = try curIL.find(p.pp.compilation.gpa, field.i);
-                curType = field.f.ty;
+                }
                 designation = true;
             } else break;
         }
@@ -2677,6 +2678,25 @@ pub fn initializerItem(p: *Parser, il: *InitList, initType: Type) Error!bool {
     il.node = .none;
     il.tok = lb;
     return true;
+}
+
+fn findFieldDesigntor(p: *Parser, il: **InitList, ty: *Type, fieldName: []const u8) Error!bool {
+    const recordType = ty.canonicalize(.standard);
+    for (recordType.data.record.fields, 0..) |f, i| {
+        if (f.isAnonymous()) {
+            // Recurse into anonymous field if it has a field by the name.
+            if (!f.ty.hasField(fieldName)) continue;
+            il.* = try il.*.find(p.pp.compilation.gpa, i);
+            ty.* = f.ty;
+            return p.findFieldDesigntor(il, ty, fieldName);
+        }
+        if (std.mem.eql(u8, fieldName, f.name)) {
+            il.* = try il.*.find(p.pp.compilation.gpa, i);
+            ty.* = f.ty;
+            return true;
+        }
+    }
+    return false;
 }
 
 /// Returns true if the value is unused.
