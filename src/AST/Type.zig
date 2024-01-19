@@ -724,30 +724,6 @@ pub fn hasUnboundVLA(ty: Type) bool {
     }
 }
 
-const FieldAndIndex = struct { f: Record.Field, i: usize };
-pub fn getField(ty: Type, name: []const u8) ?FieldAndIndex {
-    // TODO deal with anonymous struct
-    switch (ty.specifier) {
-        .Struct => {
-            std.debug.assert(!ty.data.record.isIncomplete());
-            for (ty.data.record.fields, 0..) |f, i| {
-                if (std.mem.eql(u8, name, f.name)) return FieldAndIndex{ .f = f, .i = i };
-            }
-        },
-        .Union => {
-            std.debug.assert(!ty.data.record.isIncomplete());
-            for (ty.data.record.fields, 0..) |f, i| {
-                if (std.mem.eql(u8, name, f.name)) return FieldAndIndex{ .f = f, .i = i };
-            }
-        },
-        .TypeofType => return ty.data.subType.getField(name),
-        .TypeofExpr => return ty.data.expr.ty.getField(name),
-        .Attributed => return ty.data.attributed.base.getField(name),
-        else => unreachable,
-    }
-    return null;
-}
-
 pub fn maxInt(ty: Type, comp: *const Compilation) u64 {
     std.debug.assert(ty.isInt());
     return switch (ty.sizeof(comp).?) {
