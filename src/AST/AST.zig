@@ -116,7 +116,7 @@ pub const Node = struct {
         unExpr: NodeIndex,
         binExpr: struct { lhs: NodeIndex, rhs: NodeIndex },
 
-        member: struct { lhs: NodeIndex, name: TokenIndex },
+        member: struct { lhs: NodeIndex, index: u32 },
         unionInit: struct { fieldIndex: u32, node: NodeIndex },
 
         int: u64,
@@ -284,6 +284,7 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
     const tag = tree.nodes.items(.tag)[@intFromEnum(node)];
     const data = tree.nodes.items(.data)[@intFromEnum(node)];
     const ty = tree.nodes.items(.type)[@intFromEnum(node)];
+    try w.writeByteNTimes(' ', level);
 
     util.setColor(if (tag.isImplicit()) IMPLICIT else TAG, w);
 
@@ -324,7 +325,6 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
 
     switch (tag) {
         .Invalid => unreachable,
-
         .StaticAssert => {
             try w.writeByteNTimes(' ', level + 1);
             try w.writeAll("condition:\n");
@@ -774,15 +774,18 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
         },
 
         .MemberAccessExpr, .MemberAccessPtrExpr => {
-            if (data.member.lhs != .none) {
-                try w.writeByteNTimes(' ', level + 1);
-                try w.writeAll("lhs:\n");
-                try tree.dumpNode(data.member.lhs, level + delta, w);
-            }
+            try w.writeByteNTimes(' ', level + 1);
+            try w.writeAll("lhs:\n");
+            try tree.dumpNode(data.member.lhs, level + delta, w);
+
+            var lhsType = tree.nodes.items(.type)[@intFromEnum(data.member.lhs)];
+            if (lhsType.isPointer()) lhsType = lhsType.getElemType();
+            lhsType = lhsType.canonicalize(.standard);
+
             try w.writeByteNTimes(' ', level + 1);
             try w.writeAll("name: ");
             util.setColor(NAME, w);
-            try w.print("{s}\n", .{tree.getTokenSlice(data.member.name)});
+            try w.print("{s}\n", .{lhsType.data.record.fields[data.member.index].name});
             util.setColor(.reset, w);
         },
 
