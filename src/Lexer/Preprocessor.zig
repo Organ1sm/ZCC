@@ -74,6 +74,7 @@ tokenBuffer: RawTokenList,
 charBuffer: std.ArrayList(u8),
 includeDepth: u8 = 0,
 generatedLine: u32 = 1,
+addExpansionNL: u32 = 0,
 poisonedIdentifiers: std.StringHashMap(void),
 /// used to implement __COUNTER__ Macro
 counter: u32 = 0,
@@ -790,7 +791,7 @@ fn pasteStringsUnsafe(pp: *Preprocessor, toks: []const Token) ![]const u8 {
         return error.ExpectedStringLiteral;
 
     for (unwrapped) |tok| {
-        if (tok.id == .WhiteSpace) continue;
+        if (tok.id == .MacroWS) continue;
         if (tok.id != .StringLiteral) return error.ExpectedStringLiteral;
         const str = pp.expandedSlice(tok);
         try pp.charBuffer.appendSlice(str[1 .. str.len - 1]);
@@ -861,8 +862,7 @@ fn stringify(pp: *Preprocessor, tokens: []const Token) !void {
 
     var wsState: enum { start, need, notNeeded } = .start;
     for (tokens) |tok| {
-        if (tok.id == .NewLine) continue;
-        if (tok.id == .WhiteSpace) {
+        if (tok.id == .MacroWS) {
             if (wsState == .start) continue;
             wsState = .need;
             continue;
@@ -870,10 +870,25 @@ fn stringify(pp: *Preprocessor, tokens: []const Token) !void {
         if (wsState == .need) try pp.charBuffer.append(' ');
         wsState = .notNeeded;
 
+        // backslashes not inside strings are not escaped
+        const isString = switch (tok.id) {
+            .StringLiteral,
+            .StringLiteralUTF_8,
+            .StringLiteralUTF_16,
+            .StringLiteralUTF_32,
+            .StringLiteralWide,
+            .CharLiteral,
+            .CharLiteralUTF_16,
+            .CharLiteralUTF_32,
+            .CharLiteralWide,
+            => true,
+            else => false,
+        };
+
         for (pp.expandedSlice(tok)) |c| {
             if (c == '"')
                 try pp.charBuffer.appendSlice("\\\"")
-            else if (c == '\\')
+            else if (c == '\\' and isString)
                 try pp.charBuffer.appendSlice("\\\\")
             else
                 try pp.charBuffer.append(c);
@@ -899,7 +914,7 @@ fn handleBuiltinMacro(
                 .Identifier, .ExtendedIdentifier => {
                     if (identifier) |_| invalid = tok else identifier = tok;
                 },
-                .WhiteSpace => continue,
+                .MacroWS => continue,
                 else => {
                     invalid = tok;
                     break;
@@ -954,7 +969,7 @@ fn handleBuiltinMacro(
             var invalid: ?Token = null;
             var identifier: ?Token = null;
             for (paramTokens) |tok| switch (tok.id) {
-                .WhiteSpace => continue,
+                .MacroWS => continue,
                 else => {
                     if (identifier) |_| invalid = tok else identifier = tok;
                 },
@@ -1022,7 +1037,7 @@ fn expandFuncMacro(
                     const rawNext = funcMacro.tokens[tokenIdx + 1];
                     tokenIdx += 1;
                     const next = switch (rawNext.id) {
-                        .WhiteSpace => continue,
+                        .MacroWS => continue,
                         .HashHash => continue,
                         .MacroParam, .MacroParamNoExpand => args.items[rawNext.end],
                         .KeywordVarArgs => varArguments.items,
@@ -1095,7 +1110,7 @@ fn expandFuncMacro(
                     .StringLiteral => {
                         if (string) |_| invalid = tok else string = tok;
                     },
-                    .WhiteSpace => continue,
+                    .MacroWS => continue,
                     else => {
                         invalid = tok;
                         break;
@@ -1107,9 +1122,6 @@ fn expandFuncMacro(
                     some.expansionSlice(),
                 ) else try pp.pragmaOperator(string.?, loc);
             },
-
-            .WhiteSpace => if (pp.comp.onlyPreprocess)
-                try buf.append(tokenFromRaw(raw)),
 
             else => try buf.append(tokenFromRaw(raw)),
         }
@@ -1155,6 +1167,10 @@ fn nextBufToken(
             const rawToken = lexer.next();
             if (rawToken.id.isMacroIdentifier() and pp.poisonedIdentifiers.get(pp.getTokenSlice(rawToken)) != null)
                 try pp.addError(rawToken, .poisoned_identifier);
+
+            if (rawToken.id == .NewLine)
+                pp.addExpansionNL += 1;
+
             const newToken = tokenFromRaw(rawToken);
             endIdx.* += 1;
             try buf.append(newToken);
@@ -1184,7 +1200,7 @@ fn collectMacroFuncArguments(
         const token = try nextBufToken(pp, lexer, buf, startIdx, endIdx, extendBuffer);
 
         switch (token.id) {
-            .NewLine, .WhiteSpace => {},
+            .NewLine, .WhiteSpace, .MacroWS => {},
             .LParen => break,
             else => {
                 if (isBuiltin) {
@@ -1245,6 +1261,10 @@ fn collectMacroFuncArguments(
                     nameToken.expansionSlice(),
                 );
                 return null;
+            },
+
+            .NewLine, .WhiteSpace => {
+                try curArgument.append(.{ .id = .MacroWS, .loc = .{ .id = .generated } });
             },
 
             else => {
@@ -1405,11 +1425,18 @@ fn expandMacro(pp: *Preprocessor, lexer: *Lexer, raw: RawToken) MacroError!void 
     try pp.expandMacroExhaustive(lexer, &pp.topExpansionBuffer, 0, 1, true);
     try pp.tokens.ensureUnusedCapacity(pp.comp.gpa, pp.topExpansionBuffer.items.len);
     for (pp.topExpansionBuffer.items) |*tok| {
-        if ((tok.id == .WhiteSpace or tok.id == .NewLine) and !pp.comp.onlyPreprocess) {
+        if (tok.id == .MacroWS and !pp.comp.onlyPreprocess) {
             Token.free(tok.expansionLocs, pp.comp.gpa);
             continue;
         }
         pp.tokens.appendAssumeCapacity(tok.*);
+    }
+
+    if (pp.comp.onlyPreprocess) {
+        try pp.tokens.ensureUnusedCapacity(pp.comp.gpa, pp.addExpansionNL);
+        while (pp.addExpansionNL > 0) : (pp.addExpansionNL -= 1) {
+            pp.tokens.appendAssumeCapacity(.{ .id = .NewLine, .loc = .{ .id = .generated } });
+        }
     }
 }
 
@@ -1439,7 +1466,7 @@ pub fn expandedSlice(pp: *Preprocessor, token: Token) []const u8 {
 /// Concat two tokens and add the result to pp.generated
 fn pasteTokens(pp: *Preprocessor, lhsTokens: *ExpandBuffer, rhsTokens: []const Token) Error!void {
     const lhs = while (lhsTokens.popOrNull()) |lhs| {
-        if (lhs.id == .WhiteSpace)
+        if (lhs.id == .MacroWS)
             Token.free(lhs.expansionLocs, pp.comp.gpa)
         else
             break lhs;
@@ -1449,7 +1476,7 @@ fn pasteTokens(pp: *Preprocessor, lhsTokens: *ExpandBuffer, rhsTokens: []const T
 
     var rhsRest: u32 = 1;
     const rhs = for (rhsTokens) |rhs| {
-        if (rhs.id != .WhiteSpace) break rhs;
+        if (rhs.id != .MacroWS) break rhs;
         rhsRest += 1;
     } else {
         return lhsTokens.appendAssumeCapacity(lhs);
@@ -1555,6 +1582,7 @@ fn define(pp: *Preprocessor, lexer: *Lexer) Error!void {
     // Safe to use since we can only be in one directive at a time.
     pp.tokenBuffer.items.len = 0;
 
+    var needWS = false;
     var endIdx: u32 = undefined;
     // Collect the token body and validate any ## found.
     var token = first;
@@ -1581,7 +1609,14 @@ fn define(pp: *Preprocessor, lexer: *Lexer) Error!void {
                 endIdx = token.start;
                 break;
             },
-            else => try pp.tokenBuffer.append(token),
+            .WhiteSpace => needWS = true,
+            else => {
+                if (token.id != .WhiteSpace and needWS) {
+                    needWS = false;
+                    try pp.tokenBuffer.append(.{ .id = .MacroWS, .source = .generated });
+                }
+                try pp.tokenBuffer.append(token);
+            },
         }
         token = lexer.next();
     }
@@ -1643,6 +1678,7 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: RawToken, lParen: Raw
         try params.append(pp.getTokenSlice(token));
     }
 
+    var needWS = false;
     // store the macro definition end index.
     var endIdx: u32 = undefined;
     // Collect the body tokens and validate # and ##'s found.
@@ -1656,8 +1692,12 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: RawToken, lParen: Raw
                 endIdx = token.start;
                 break;
             },
-            .WhiteSpace => if (pp.tokenBuffer.items.len != 0) try pp.tokenBuffer.append(token),
+            .WhiteSpace => needWS = pp.tokenBuffer.items.len != 0,
             .Hash => {
+                if (token.id != .WhiteSpace and needWS) {
+                    needWS = false;
+                    try pp.tokenBuffer.append(.{ .id = .MacroWS, .source = .generated });
+                }
                 const param = lexer.nextNoWhiteSpace();
                 blk: {
                     if (varArgs and param.id == .KeywordVarArgs) {
@@ -1686,6 +1726,7 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: RawToken, lParen: Raw
             },
 
             .HashHash => {
+                needWS = false;
                 // if "##" appear at the beginning, the token buffer is still empty in this case
                 // emit error
                 if (pp.tokenBuffer.items.len == 0) {
@@ -1709,6 +1750,10 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: RawToken, lParen: Raw
             },
 
             else => {
+                if (token.id != .WhiteSpace and needWS) {
+                    needWS = false;
+                    try pp.tokenBuffer.append(.{ .id = .MacroWS, .source = .generated });
+                }
                 if (varArgs and token.id == .KeywordVarArgs) {
                     // do nothing
                 } else if (token.id.isMacroIdentifier()) {
@@ -1885,7 +1930,11 @@ pub fn prettyPrintTokens(pp: *Preprocessor, w: anytype) !void {
     while (true) : (i += 1) {
         var cur: Token = pp.tokens.get(i);
         switch (cur.id) {
-            .Eof => break,
+            .Eof => {
+                if (pp.tokens.len > 1 and pp.tokens.items(.id)[i - 1] != .NewLine)
+                    try w.writeByte('\n');
+                break;
+            },
             .NewLine => try w.writeAll("\n"),
             .KeywordPragma => {
                 const pragmaName = pp.expandedSlice(pp.tokens.get(i + 1));

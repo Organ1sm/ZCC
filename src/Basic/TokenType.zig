@@ -105,6 +105,8 @@ pub const TokenType = enum(u8) {
     StringifyParam,
     /// Same as stringify_param, but for var args
     StringifyVarArgs,
+    /// Special macro whitespace, always equal to a single space
+    MacroWS,
     /// Special token for implementing __has_attribute
     MacroParamHasAttribute,
     /// Special token for implementing __has_warning
@@ -397,6 +399,8 @@ pub const TokenType = enum(u8) {
             .StringifyParam,
             .StringifyVarArgs,
             => "",
+
+            .MacroWS => " ",
 
             .One => "1",
             .Zero => "0",
