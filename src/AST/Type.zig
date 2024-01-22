@@ -463,11 +463,20 @@ pub fn isAnonymousRecord(ty: Type) bool {
     };
 }
 
-/// Canonicalize a possibly-typeof() type. If the type is not a typeof() type, simply
-/// return it. Otherwise, determine the actual qualified type.
-/// The `qual_handling` parameter can be used to return the full set of qualifiers
-/// added by typeof() operations, which is useful when determining the elemType of
-/// arrays and pointers.
+/// Canonicalizes the input type based on the specified qualifier handling option.
+///
+///* Canonicalize a possibly-typeof() type. If the type is not a typeof() type, simply
+///* return it. Otherwise, determine the actual qualified type.
+///* The `qualHhandling` parameter can be used to return the full set of qualifiers
+///* added by typeof() operations, which is useful when determining the elemType of
+///* arrays and pointers.
+///
+/// # Arguments
+/// * `ty` - The input type to be canonicalized
+/// * `qualHandling` - The qualifier handling option, which can be either `standard` or `preserve_quals`
+///
+/// # Returns
+/// The canonicalized type after processing qualifiers and special cases related to `typeof` and `decay` operations.
 pub fn canonicalize(ty: Type, qualHandling: enum { standard, preserve_quals }) Type {
     var cur = ty;
     if (cur.specifier == .Attributed)
@@ -735,6 +744,7 @@ pub fn maxInt(ty: Type, comp: *const Compilation) u64 {
     };
 }
 
+/// Check if the given type `ty` has a field with the specified `name`
 pub fn hasField(ty: Type, name: []const u8) bool {
     switch (ty.specifier) {
         .Struct => {
