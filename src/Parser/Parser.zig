@@ -5022,7 +5022,24 @@ fn getFieldAccess(
     return p.fieldAccessExtra(lhs.node, recordType, fieldName, isArrow);
 }
 
-fn fieldAccessExtra(p: *Parser, lhs: NodeIndex, recordType: Type, fieldName: []const u8, isArrow: bool) Error!Result {
+/// This function handles extra field access for a given record type.
+///
+/// # Arguments
+/// * `p` - A pointer to the parser
+/// * `lhs` - The node index for the left-hand side expression
+/// * `recordType` - The type of the record
+/// * `fieldName` - The name of the field to access
+/// * `isArrow` - Indicates whether the arrow operator is used
+///
+/// # Returns
+/// An Error or Result
+fn fieldAccessExtra(
+    p: *Parser,
+    lhs: NodeIndex,
+    recordType: Type,
+    fieldName: []const u8,
+    isArrow: bool, // is arrow operator
+) Error!Result {
     for (recordType.data.record.fields, 0..) |f, i| {
         if (f.isAnonymous()) {
             if (!f.ty.hasField(fieldName)) continue;
@@ -5033,14 +5050,15 @@ fn fieldAccessExtra(p: *Parser, lhs: NodeIndex, recordType: Type, fieldName: []c
             });
             return p.fieldAccessExtra(inner, f.ty, fieldName, false);
         }
-        if (std.mem.eql(u8, fieldName, f.name)) return Result{
-            .ty = f.ty,
-            .node = try p.addNode(.{
-                .tag = if (isArrow) .MemberAccessPtrExpr else .MemberAccessExpr,
-                .type = f.ty,
-                .data = .{ .member = .{ .lhs = lhs, .index = @intCast(i) } },
-            }),
-        };
+        if (std.mem.eql(u8, fieldName, f.name))
+            return Result{
+                .ty = f.ty,
+                .node = try p.addNode(.{
+                    .tag = if (isArrow) .MemberAccessPtrExpr else .MemberAccessExpr,
+                    .type = f.ty,
+                    .data = .{ .member = .{ .lhs = lhs, .index = @intCast(i) } },
+                }),
+            };
     }
     // We already checked that this container has a field by the name.
     unreachable;
