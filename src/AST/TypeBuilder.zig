@@ -476,6 +476,7 @@ fn combineExtra(b: *@This(), p: *Parser, new: Specifier, sourceToken: TokenIndex
             Specifier.SInt => Specifier.SLongInt,
             Specifier.ULong => Specifier.ULongLong,
             Specifier.LongLong, Specifier.ULongLong => return b.duplicateSpec(p, "long"),
+            Specifier.Complex => .ComplexLong,
             else => return b.cannotCombine(p, sourceToken),
         },
 
