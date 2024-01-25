@@ -8,6 +8,7 @@ void f[4];
 struct Bar f;
 int x[2305843009213693951u];
 _Complex long cl; /* TODO: complex integers extension */
+_Complex z;
 
 #define TESTS_SKIPPED 6
 #define EXPECTED_ERRORS \
@@ -24,4 +25,5 @@ _Complex long cl; /* TODO: complex integers extension */
     "invalid-types.c:9:6: error: array is too large" \
     "invalid-types.c:10:15: error: '_Complex long' is invalid" \
     "invalid-types.c:10:15: warning: type specifier missing, defaults to 'int'" \
+    "invalid-types.c:11:1: warning: plain '_Complex' requires a type specifier; assuming '_Complex double'" \
 

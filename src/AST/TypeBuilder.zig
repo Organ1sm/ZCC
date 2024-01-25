@@ -181,7 +181,11 @@ pub fn finish(b: @This(), p: *Parser) Parser.Error!Type {
         Specifier.ComplexFloat => ty.specifier = .ComplexFloat,
         Specifier.ComplexDouble => ty.specifier = .ComplexDouble,
         Specifier.ComplexLongDouble => ty.specifier = .ComplexLongDouble,
-        Specifier.Complex, Specifier.ComplexLong => {
+        Specifier.Complex => {
+            try p.errToken(.plain_complex, p.index - 1);
+            ty.specifier = .ComplexDouble;
+        },
+        Specifier.ComplexLong => {
             try p.errExtra(.type_is_invalid, p.index, .{ .str = b.specifier.toString().? });
             return error.ParsingFailed;
         },
