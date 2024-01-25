@@ -599,24 +599,6 @@ pub fn containAnyQual(ty: Type) bool {
     };
 }
 
-pub fn eitherLongDouble(a: Type, b: Type) ?Type {
-    if (a.is(.ComplexLongDouble) or a.is(.LongDouble)) return a;
-    if (b.is(.ComplexLongDouble) or b.is(.LongDouble)) return b;
-    return null;
-}
-
-pub fn eitherDouble(a: Type, b: Type) ?Type {
-    if (a.is(.ComplexDouble) or a.is(.Double)) return a;
-    if (b.is(.ComplexDouble) or b.is(.Double)) return b;
-    return null;
-}
-
-pub fn eitherFloat(a: Type, b: Type) ?Type {
-    if (a.is(.ComplexFloat) or a.is(.Float)) return a;
-    if (b.is(.ComplexFloat) or b.is(.Float)) return b;
-    return null;
-}
-
 pub fn integerPromotion(ty: Type, comp: *Compilation) Type {
     var specifier = ty.specifier;
     if (specifier == .Enum)
