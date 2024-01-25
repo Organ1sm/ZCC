@@ -27,6 +27,11 @@ pub const TokenType = enum(u8) {
     FloatLiteral_F,
     FloatLiteral_L,
 
+    // imaginary literals
+    ImaginaryLiteral,
+    ImaginaryLiteral_F,
+    ImaginaryLiteral_L,
+
     // Integer literals with suffixes
     IntegerLiteral,
     IntegerLiteral_U,
@@ -373,6 +378,9 @@ pub const TokenType = enum(u8) {
             .FloatLiteral,
             .FloatLiteral_F,
             .FloatLiteral_L,
+            .ImaginaryLiteral,
+            .ImaginaryLiteral_F,
+            .ImaginaryLiteral_L,
             .IntegerLiteral,
             .IntegerLiteral_U,
             .IntegerLiteral_L,
@@ -572,6 +580,11 @@ pub const TokenType = enum(u8) {
             .FloatLiteral_L,
             => "a float literal",
 
+            .ImaginaryLiteral,
+            .ImaginaryLiteral_F,
+            .ImaginaryLiteral_L,
+            => "an imaginary literal",
+
             .IntegerLiteral,
             .IntegerLiteral_U,
             .IntegerLiteral_L,
@@ -607,6 +620,9 @@ pub const TokenType = enum(u8) {
             .FloatLiteral,
             .FloatLiteral_F,
             .FloatLiteral_L,
+            .ImaginaryLiteral,
+            .ImaginaryLiteral_F,
+            .ImaginaryLiteral_L,
             .CharLiteral,
             .CharLiteralUTF_16,
             .CharLiteralUTF_32,

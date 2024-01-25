@@ -600,20 +600,20 @@ pub fn containAnyQual(ty: Type) bool {
 }
 
 pub fn eitherLongDouble(a: Type, b: Type) ?Type {
-    if (a.is(.LongDouble) or a.is(.ComplexLongDouble)) return a;
-    if (b.is(.LongDouble) or b.is(.ComplexLongDouble)) return b;
+    if (a.is(.ComplexLongDouble) or a.is(.LongDouble)) return a;
+    if (b.is(.ComplexLongDouble) or b.is(.LongDouble)) return b;
     return null;
 }
 
 pub fn eitherDouble(a: Type, b: Type) ?Type {
-    if (a.is(.Double) or a.is(.ComplexDouble)) return a;
-    if (b.is(.Double) or b.is(.ComplexDouble)) return b;
+    if (a.is(.ComplexDouble) or a.is(.Double)) return a;
+    if (b.is(.ComplexDouble) or b.is(.Double)) return b;
     return null;
 }
 
 pub fn eitherFloat(a: Type, b: Type) ?Type {
-    if (a.is(.Float) or a.is(.ComplexFloat)) return a;
-    if (b.is(.Float) or b.is(.ComplexFloat)) return b;
+    if (a.is(.ComplexFloat) or a.is(.Float)) return a;
+    if (b.is(.ComplexFloat) or b.is(.Float)) return b;
     return null;
 }
 

@@ -93,6 +93,7 @@ pub const Options = packed struct {
     @"many-braces-around-scalar-init": Kind = .default,
     uninitialized: Kind = .default,
     @"gnu-statement-expression": Kind = .default,
+    @"gnu-imaginary-constant": Kind = .default,
 };
 
 const messages = struct {
@@ -1337,6 +1338,12 @@ const messages = struct {
     pub const stmt_expr_not_allowed_file_scope = struct {
         const msg = "statement expression not allowed at file scope";
         const kind = .@"error";
+    };
+    pub const gnu_imaginary_constant = struct {
+        const msg = "imaginary constants are a GNU extension";
+        const opt = "gnu-imaginary-constant";
+        const kind = .off;
+        const suppress_gnu = true;
     };
 };
 

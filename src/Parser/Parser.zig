@@ -4576,7 +4576,9 @@ fn parseCastExpr(p: *Parser) Error!Result {
                     try p.errStr(.invalid_cast_to_pointer, lp, try p.typeStr(operand.ty));
 
                 const isUnsigned = ty.isUnsignedInt(p.pp.comp);
-                if (isUnsigned and operand.value == .signed) {
+                if (!ty.isInt()) {
+                    try operand.saveValue(p);
+                } else if (isUnsigned and operand.value == .signed) {
                     const copy = operand.value.signed;
                     operand.value = .{ .unsigned = @bitCast(copy) };
                 } else if (!isUnsigned and operand.value == .unsigned) {
@@ -4680,6 +4682,7 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
                 .data = .{ .subType = elemType },
             };
 
+            try operand.saveValue(p);
             try operand.un(p, .AddrOfExpr);
             return operand;
         },
@@ -5287,13 +5290,15 @@ fn checkArrayBounds(p: *Parser, index: Result, arrayType: Type, token: TokenInde
     }
 }
 
-//// primaryExpr
+//// primary-expression
 ////  : identifier
 ////  | integer-literal
 ////  | float-literal
+////  | imaginary-literal
 ////  | char-literal
 ////  | string-literal
 ////  | '(' expression ')'
+////  | generic-selection
 fn parsePrimaryExpr(p: *Parser) Error!Result {
     if (p.eat(.LParen)) |lp| {
         var e = try p.parseExpr();
@@ -5442,10 +5447,10 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
         .CharLiteralWide,
         => return p.parseCharLiteral(),
 
-        .FloatLiteral => {
+        .FloatLiteral, .ImaginaryLiteral => |tag| {
             defer p.index += 1;
             const ty = Type{ .specifier = .Double };
-            return Result{
+            var res = Result{
                 .ty = ty,
                 .node = try p.addNode(
                     .{
@@ -5455,12 +5460,20 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
                     },
                 ),
             };
+            if (tag == .ImaginaryLiteral) {
+                try p.err(.gnu_imaginary_constant);
+                res.ty = .{ .specifier = .ComplexDouble };
+                try res.un(p, .ImaginaryLiteral);
+            }
+            return res;
         },
 
-        .FloatLiteral_F => {
+        .FloatLiteral_F,
+        .ImaginaryLiteral_F,
+        => |tag| {
             defer p.index += 1;
             const ty = Type{ .specifier = .Float };
-            return Result{
+            var res = Result{
                 .ty = ty,
                 .node = try p.addNode(
                     .{
@@ -5470,9 +5483,20 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
                     },
                 ),
             };
+            if (tag == .ImaginaryLiteral_F) {
+                try p.err(.gnu_imaginary_constant);
+                res.ty = .{ .specifier = .ComplexFloat };
+                try res.un(p, .ImaginaryLiteral);
+            }
+            return res;
         },
 
         .FloatLiteral_L => return p.todo("long double literals"),
+
+        .ImaginaryLiteral_L => {
+            try p.err(.gnu_imaginary_constant);
+            return p.todo("long double imaginary literals");
+        },
 
         .Zero => {
             p.index += 1;
@@ -5532,8 +5556,12 @@ fn makePredefinedIdentifier(p: *Parser, start: usize) !Result {
 
 fn parseFloat(p: *Parser, tok: TokenIndex, comptime T: type) Error!T {
     var bytes = p.getTokenSlice(tok);
-    if (p.tokenIds[tok] != .FloatLiteral)
-        bytes = bytes[0 .. bytes.len - 1];
+    switch (p.tokenIds[tok]) {
+        .FloatLiteral => {},
+        .ImaginaryLiteral, .FloatLiteral_F, .FloatLiteral_L => bytes = bytes[0 .. bytes.len - 1],
+        .ImaginaryLiteral_F, .ImaginaryLiteral_L => bytes = bytes[0 .. bytes.len - 2],
+        else => unreachable,
+    }
 
     return std.fmt.parseFloat(T, bytes) catch |e| switch (e) {
         error.InvalidCharacter => unreachable, // validated by Tokenizer
@@ -5584,7 +5612,7 @@ fn parseNoEval(p: *Parser, comptime func: fn (*Parser) Error!Result) Error!Resul
     return parsed;
 }
 
-//// genericSelection : 
+//// genericSelection :
 //// `_Generic` '(' assign-expression ',' generic-association (',' generic-association)* ')'
 //// generic-association
 ////  : type-name ':' assign-expression

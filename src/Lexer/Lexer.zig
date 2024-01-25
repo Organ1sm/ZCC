@@ -75,6 +75,9 @@ const State = enum {
     float_exponent,
     float_exponent_digits,
     float_suffix,
+    float_suffix_f,
+    float_suffix_i,
+    float_suffix_l,
 };
 
 pub fn next(self: *Lexer) Token {
@@ -867,19 +870,55 @@ pub fn next(self: *Lexer) Token {
                     state = .float_suffix;
                 },
             },
+
             .float_suffix => switch (c) {
-                'l', 'L' => {
-                    id = .FloatLiteral_L;
-                    self.index += 1;
+                'l', 'L' => state = .float_suffix_l,
+                'f', 'F' => state = .float_suffix_f,
+                'i', 'I' => state = .float_suffix_i,
+
+                else => {
+                    id = .FloatLiteral;
                     break;
                 },
-                'f', 'F' => {
-                    id = .FloatLiteral_F;
+            },
+
+            .float_suffix_f => switch (c) {
+                'i', 'I' => {
+                    id = .ImaginaryLiteral_F;
                     self.index += 1;
                     break;
                 },
                 else => {
-                    id = .FloatLiteral;
+                    id = .FloatLiteral_F;
+                    break;
+                },
+            },
+
+            .float_suffix_i => switch (c) {
+                'f', 'F' => {
+                    id = .ImaginaryLiteral_F;
+                    self.index += 1;
+                    break;
+                },
+                'l', 'L' => {
+                    id = .ImaginaryLiteral_L;
+                    self.index += 1;
+                    break;
+                },
+                else => {
+                    id = .ImaginaryLiteral;
+                    break;
+                },
+            },
+
+            .float_suffix_l => switch (c) {
+                'i', 'I' => {
+                    id = .ImaginaryLiteral_L;
+                    self.index += 1;
+                    break;
+                },
+                else => {
+                    id = .FloatLiteral_L;
                     break;
                 },
             },
@@ -932,6 +971,10 @@ pub fn next(self: *Lexer) Token {
             .integer_suffix_ul => id = TokenType.IntegerLiteral_LU,
 
             .float_suffix => id = TokenType.FloatLiteral,
+            .float_suffix_f => id = TokenType.FloatLiteral_F,
+            .float_suffix_i => id = TokenType.ImaginaryLiteral,
+            .float_suffix_l => id = TokenType.FloatLiteral_L,
+
             .equal => id = TokenType.Equal,
             .bang => id = TokenType.Bang,
             .minus => id = TokenType.Minus,
@@ -1239,6 +1282,9 @@ test "num suffixes" {
         \\ 1.0f 1.0L 1.0 .0 1. 0x1p0f 0X1p0
         \\ 0l 0lu 0ll 0llu 0
         \\ 1u 1ul 1ull 1
+        \\ 1.0i 1.0I
+        \\ 1.0if 1.0If 1.0fi 1.0fI
+        \\ 1.0il 1.0Il 1.0li 1.0lI
         \\
     , &.{
         .FloatLiteral_F,
@@ -1259,6 +1305,19 @@ test "num suffixes" {
         .IntegerLiteral_LU,
         .IntegerLiteral_LLU,
         .IntegerLiteral,
+        .NewLine,
+        .ImaginaryLiteral,
+        .ImaginaryLiteral,
+        .NewLine,
+        .ImaginaryLiteral_F,
+        .ImaginaryLiteral_F,
+        .ImaginaryLiteral_F,
+        .ImaginaryLiteral_F,
+        .NewLine,
+        .ImaginaryLiteral_L,
+        .ImaginaryLiteral_L,
+        .ImaginaryLiteral_L,
+        .ImaginaryLiteral_L,
         .NewLine,
     });
 }
