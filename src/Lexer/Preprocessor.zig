@@ -540,7 +540,7 @@ fn expr(pp: *Preprocessor, lexer: *Lexer) MacroError!bool {
     }
 
     if (!pp.tokens.items(.id)[start].validPreprocessorExprStart()) {
-        const token = pp.tokens.get(0);
+        const token = pp.tokens.get(start);
         try pp.comp.diag.add(.{
             .tag = .invalid_preproc_expr_start,
             .loc = token.loc,
@@ -556,7 +556,7 @@ fn expr(pp: *Preprocessor, lexer: *Lexer) MacroError!bool {
             .StringLiteralUTF_32,
             .StringLiteralWide,
             => {
-                const t = pp.tokens.get(i);
+                const t = pp.tokens.get(start + i);
                 try pp.comp.diag.add(.{
                     .tag = .string_literal_in_pp_expr,
                     .loc = t.loc,
@@ -567,8 +567,11 @@ fn expr(pp: *Preprocessor, lexer: *Lexer) MacroError!bool {
             .FloatLiteral,
             .FloatLiteral_F,
             .FloatLiteral_L,
+            .ImaginaryLiteral,
+            .ImaginaryLiteral_F,
+            .ImaginaryLiteral_L,
             => {
-                const t = pp.tokens.get(i);
+                const t = pp.tokens.get(start + i);
                 try pp.comp.diag.add(.{
                     .tag = .float_literal_in_pp_expr,
                     .loc = t.loc,
@@ -600,7 +603,7 @@ fn expr(pp: *Preprocessor, lexer: *Lexer) MacroError!bool {
             .Arrow,
             .Period,
             => {
-                const t = pp.tokens.get(i);
+                const t = pp.tokens.get(start + i);
                 try pp.comp.diag.add(.{
                     .tag = .invalid_preproc_operator,
                     .loc = t.loc,
@@ -855,7 +858,7 @@ fn destringify(pp: *Preprocessor, str: []const u8) void {
     }
 }
 
-/// Stringify `tokens` into pp.char_buf.
+/// Stringify `tokens` into pp.charBuffer.
 /// See https://gcc.gnu.org/onlinedocs/gcc-11.2.0/cpp/Stringizing.html#Stringizing
 fn stringify(pp: *Preprocessor, tokens: []const Token) !void {
     try pp.charBuffer.append('"');

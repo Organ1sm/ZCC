@@ -231,6 +231,8 @@ pub const Tag = enum(u8) {
     FloatLiteral,
     /// f64 literal
     DoubleLiteral,
+    /// wraps a float or double literal: un
+    ImaginaryLiteral,
     /// tree.string[index][0..len]
     StringLiteralExpr,
     /// sizeof(un?)
