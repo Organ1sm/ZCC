@@ -412,58 +412,62 @@ pub fn nullCast(res: *Result, p: *Parser, ptrType: Type) Error!void {
     try res.un(p, .NullToPointer);
 }
 
-fn usualArithmeticConversion(a: *Result, b: *Result, p: *Parser) Error!void {
+fn usualArithmeticConversion(lhs: *Result, rhs: *Result, p: *Parser) Error!void {
     // if either is a float cast to that type
-    if (Type.eitherLongDouble(a.ty, b.ty)) |ty| {
-        try a.floatCast(p, ty);
-        try b.floatCast(p, ty);
-        return;
-    }
-    if (Type.eitherDouble(a.ty, b.ty)) |ty| {
-        try a.floatCast(p, ty);
-        try b.floatCast(p, ty);
-        return;
-    }
-    if (Type.eitherFloat(a.ty, b.ty)) |ty| {
-        try a.floatCast(p, ty);
-        try b.floatCast(p, ty);
-        return;
+    const floatTypes = [3][2]Type.Specifier{
+        .{ .ComplexLongDouble, .LongDouble },
+        .{ .ComplexDouble, .Double },
+        .{ .ComplexFloat, .Float },
+    };
+    const lhsSpec = lhs.ty.canonicalize(.standard).specifier;
+    const rhsSpec = rhs.ty.canonicalize(.standard).specifier;
+    for (floatTypes) |pair| {
+        if (lhsSpec == pair[0] or lhsSpec == pair[1] or
+            rhsSpec == pair[0] or rhsSpec == pair[1])
+        {
+            const bothReal = lhs.ty.isReal() and rhs.ty.isReal();
+            const resSpec = pair[@intFromBool(bothReal)];
+            const ty = Type{ .specifier = resSpec };
+            try lhs.floatCast(p, ty);
+            try rhs.floatCast(p, ty);
+            return;
+        }
     }
 
     // Do integer promotion on both operands
-    const aPromoted = a.ty.integerPromotion(p.pp.comp);
-    const bPromoted = b.ty.integerPromotion(p.pp.comp);
-    if (aPromoted.eql(bPromoted, true)) {
+    const lhsPromoted = lhs.ty.integerPromotion(p.pp.comp);
+    const rhsPromoted = rhs.ty.integerPromotion(p.pp.comp);
+    if (lhsPromoted.eql(rhsPromoted, true)) {
         // cast to promoted type
-        try a.intCast(p, aPromoted);
-        try b.intCast(p, aPromoted);
+        try lhs.intCast(p, lhsPromoted);
+        try rhs.intCast(p, lhsPromoted);
         return;
     }
 
-    const aIsUnsigned = aPromoted.isUnsignedInt(p.pp.comp);
-    const bIsUnsigned = bPromoted.isUnsignedInt(p.pp.comp);
-    if (aIsUnsigned == bIsUnsigned) {
+    const lhsIsUnsigned = lhsPromoted.isUnsignedInt(p.pp.comp);
+    const rhsIsUnsigned = rhsPromoted.isUnsignedInt(p.pp.comp);
+    if (lhsIsUnsigned == rhsIsUnsigned) {
         // cast to greater signed or unsigned type
-        const resSpecifier = @max(@intFromEnum(aPromoted.specifier), @intFromEnum(bPromoted.specifier));
+        const resSpecifier = @max(@intFromEnum(lhsPromoted.specifier), @intFromEnum(rhsPromoted.specifier));
         const resType = Type{ .specifier = @enumFromInt(resSpecifier) };
-        try a.intCast(p, resType);
-        try b.intCast(p, resType);
+        try lhs.intCast(p, resType);
+        try rhs.intCast(p, resType);
         return;
     }
 
     // cast to the unsigned type with greater rank
-    const aLarger = @intFromEnum(aPromoted.specifier) > @intFromEnum(bPromoted.specifier);
-    const bLarger = @intFromEnum(bPromoted.specifier) > @intFromEnum(bPromoted.specifier);
-    if (aIsUnsigned) {
-        const target = if (aLarger) aPromoted else bPromoted;
-        try a.intCast(p, target);
-        try b.intCast(p, target);
+    const lhsLarger = @intFromEnum(lhsPromoted.specifier) > @intFromEnum(rhsPromoted.specifier);
+    const rhsLarger = @intFromEnum(rhsPromoted.specifier) > @intFromEnum(rhsPromoted.specifier);
+    if (lhsIsUnsigned) {
+        const target = if (lhsLarger) lhsPromoted else rhsPromoted;
+        try lhs.intCast(p, target);
+        try rhs.intCast(p, target);
         return;
     } else {
-        std.debug.assert(bIsUnsigned);
-        const target = if (bLarger) bPromoted else aPromoted;
-        try a.intCast(p, target);
-        try b.intCast(p, target);
+        std.debug.assert(rhsIsUnsigned);
+        const target = if (rhsLarger) rhsPromoted else lhsPromoted;
+        try lhs.intCast(p, target);
+        try rhs.intCast(p, target);
     }
 }
 
