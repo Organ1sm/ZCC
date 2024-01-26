@@ -319,11 +319,11 @@ pub fn finish(b: @This(), p: *Parser) Parser.Error!Type {
 fn cannotCombine(b: @This(), p: *Parser, sourceToken: TokenIndex) !void {
     if (b.errorOnInvalid)
         return error.CannotCombine;
-    const prevType = b.finish(p) catch unreachable;
+    const tyString = b.specifier.toString() orelse try p.typeStr(b.finish(p) catch unreachable);
     try p.errExtra(
         .cannot_combine_spec,
         sourceToken,
-        .{ .str = try p.typeStr(prevType) },
+        .{ .str = tyString },
     );
 
     if (b.typedef) |some|
