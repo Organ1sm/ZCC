@@ -257,7 +257,7 @@ pub fn ignoredAttrString(p: *Parser, attr: Attribute.Tag, context: Attribute.Par
     defer p.strings.items.len = stringTop;
 
     try p.strings.writer().print("Attribute '{s}' ignored in {s} context", .{ @tagName(attr), @tagName(context) });
-    return try p.arena.dupe(u8, p.strings.items[stringTop..]);
+    return try p.pp.comp.diag.arena.allocator().dupe(u8, p.strings.items[stringTop..]);
 }
 
 pub fn typeStr(p: *Parser, ty: Type) ![]const u8 {
@@ -266,7 +266,7 @@ pub fn typeStr(p: *Parser, ty: Type) ![]const u8 {
     defer p.strings.items.len = stringsTop;
 
     try ty.print(p.strings.writer());
-    return try p.arena.dupe(u8, p.strings.items[stringsTop..]);
+    return try p.pp.comp.diag.arena.allocator().dupe(u8, p.strings.items[stringsTop..]);
 }
 
 pub fn typePairStr(p: *Parser, a: Type, b: Type) ![]const u8 {
@@ -284,7 +284,7 @@ pub fn typePairStrExtra(p: *Parser, a: Type, msg: []const u8, b: Type) ![]const 
     try p.strings.append('\'');
     try b.print(p.strings.writer());
     try p.strings.append('\'');
-    return try p.arena.dupe(u8, p.strings.items[stringsTop..]);
+    return try p.pp.comp.diag.arena.allocator().dupe(u8, p.strings.items[stringsTop..]);
 }
 
 pub fn addNode(p: *Parser, node: AST.Node) Allocator.Error!NodeIndex {
@@ -1056,7 +1056,7 @@ fn parseStaticAssert(p: *Parser) Error!bool {
             try p.errStr(
                 .static_assert_failure_message,
                 curToken,
-                try p.arena.dupe(u8, buffer.items),
+                try p.pp.comp.diag.arena.allocator().dupe(u8, buffer.items),
             );
         } else try p.errToken(.static_assert_failure, curToken);
     }
@@ -1594,7 +1594,7 @@ fn parseTypeSpec(p: *Parser, ty: *TypeBuilder) Error!bool {
 
             .Identifier, .ExtendedIdentifier => {
                 const typedef = (try p.findTypedef(p.index, ty.specifier != .None)) orelse break;
-                if (!(try ty.combineTypedef(p, typedef.type, typedef.nameToken)))
+                if (!ty.combineTypedef(p, typedef.type, typedef.nameToken))
                     break;
             },
             else => break,
@@ -5095,7 +5095,8 @@ fn fieldAccess(
         try exprType.print(p.strings.writer());
         try p.strings.append('\'');
 
-        try p.errStr(.no_such_member, fieldNameToken, try p.arena.dupe(u8, p.strings.items[stringsTop..]));
+        const duped = try p.pp.comp.diag.arena.allocator().dupe(u8, p.strings.items[stringsTop..]);
+        try p.errStr(.no_such_member, fieldNameToken, duped);
         return error.ParsingFailed;
     }
 

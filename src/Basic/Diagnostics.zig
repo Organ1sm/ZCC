@@ -1417,7 +1417,10 @@ pub fn add(diag: *Diagnostics, msg: Message, expansionLocs: []const Source.Locat
         var i = expansionLocs.len - 1;
         const half = diag.macroBacktraceLimit / 2;
         const limit = if (i < diag.macroBacktraceLimit) 0 else i - half;
-        try diag.list.ensureUnusedCapacity(diag.arena.allocator(), if (limit == 0) expansionLocs.len else diag.macroBacktraceLimit + 1);
+        try diag.list.ensureUnusedCapacity(
+            diag.arena.allocator(),
+            if (limit == 0) expansionLocs.len else diag.macroBacktraceLimit + 1,
+        );
         while (i > limit) {
             i -= 1;
             diag.list.appendAssumeCapacity(.{
