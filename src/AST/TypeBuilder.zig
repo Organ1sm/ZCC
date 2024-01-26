@@ -319,7 +319,8 @@ pub fn finish(b: @This(), p: *Parser) Parser.Error!Type {
 fn cannotCombine(b: @This(), p: *Parser, sourceToken: TokenIndex) !void {
     if (b.errorOnInvalid)
         return error.CannotCombine;
-    const tyString = b.specifier.toString() orelse try p.typeStr(b.finish(p) catch unreachable);
+
+    const tyString = b.specifier.toString() orelse try p.typeStr(try b.finish(p));
     try p.errExtra(
         .cannot_combine_spec,
         sourceToken,
@@ -353,7 +354,7 @@ pub fn combineFromTypeof(b: *@This(), p: *Parser, new: Type, sourceToken: TokenI
 }
 
 /// Try to combine type from typedef, returns true if successful.
-pub fn combineTypedef(b: *@This(), p: *Parser, typedefType: Type, nameToken: TokenIndex) Compilation.Error!bool {
+pub fn combineTypedef(b: *@This(), p: *Parser, typedefType: Type, nameToken: TokenIndex) bool {
     b.errorOnInvalid = true;
     defer b.errorOnInvalid = false;
 
@@ -361,13 +362,14 @@ pub fn combineTypedef(b: *@This(), p: *Parser, typedefType: Type, nameToken: Tok
     b.combineExtra(p, newSpec, 0) catch |err| switch (err) {
         error.FatalError => unreachable, // we do not add any diagnostics
         error.OutOfMemory => unreachable, // we do not add any diagnostics
+        error.ParsingFailed => unreachable, // we do not add any diagnostics
         error.CannotCombine => return false,
     };
     b.typedef = .{ .token = nameToken, .type = typedefType };
     return true;
 }
 
-pub fn combine(b: *@This(), p: *Parser, new: Specifier, sourceToken: TokenIndex) Compilation.Error!void {
+pub fn combine(b: *@This(), p: *Parser, new: Specifier, sourceToken: TokenIndex) !void {
     b.combineExtra(p, new, sourceToken) catch |er| switch (er) {
         error.CannotCombine => unreachable,
         else => |e| return e,

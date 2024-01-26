@@ -1510,7 +1510,7 @@ fn pasteTokens(pp: *Preprocessor, lhsTokens: *ExpandBuffer, rhsTokens: []const T
         try pp.comp.diag.add(.{
             .tag = .pasting_formed_invalid,
             .loc = lhs.loc,
-            .extra = .{ .str = try pp.arena.allocator().dupe(u8, pp.comp.generatedBuffer.items[start..end]) },
+            .extra = .{ .str = try pp.comp.diag.arena.allocator().dupe(u8, pp.comp.generatedBuffer.items[start..end]) },
         }, lhs.expansionSlice());
     }
     try lhsTokens.append(try pp.makeGeneratedToken(start, pastedToken.id, lhs));
