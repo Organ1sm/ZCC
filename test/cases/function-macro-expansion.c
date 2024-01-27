@@ -1,4 +1,4 @@
-//test preprocess
+//zcc-args -E 
 
 #define HE HI
 #define LLO _THERE

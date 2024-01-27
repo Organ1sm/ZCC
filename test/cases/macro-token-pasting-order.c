@@ -1,4 +1,4 @@
-//test preprocess
+//zcc-args -E
 
 #define CAT(a, ...) a ## __VA_ARGS__
 #define M(val) val

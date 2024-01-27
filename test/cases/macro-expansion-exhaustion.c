@@ -1,4 +1,4 @@
-//test preprocess
+//zcc-args -E
 
 #define CREATE_CALL F
 #define F(x) (x + 2)

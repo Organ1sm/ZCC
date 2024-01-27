@@ -1,4 +1,4 @@
-//test preprocess
+//zcc-args -E
 
 #define X(a) Foo_ ## a = a,
 enum Foo {

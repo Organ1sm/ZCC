@@ -1,4 +1,4 @@
-//test preprocess
+//zcc-args -E
 
 #define f(a) a
 #define z z[0]

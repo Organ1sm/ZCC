@@ -1,4 +1,4 @@
-//test preprocess
+//zcc-args -E
 
 #if defined FOO & !defined(BAZ)
 void
