@@ -225,7 +225,7 @@ pub fn fatal(
     return error.FatalError;
 }
 
-pub fn fatalNoSrc(diag: *Diagnostics, comptime fmt: []const u8, args: anytype) Compilation.Error {
+pub fn fatalNoSrc(diag: *Diagnostics, comptime fmt: []const u8, args: anytype) error{FatalError} {
     if (!diag.color) {
         std.debug.print("fatal error: " ++ fmt ++ "\n", args);
     } else {

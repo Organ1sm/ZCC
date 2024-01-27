@@ -27,14 +27,14 @@ pub fn main() u8 {
     var comp = Compilation.init(gpa);
     defer comp.deinit();
 
-    comp.addDefaultPragmaHandlers() catch |err| switch (err) {
+    comp.addDefaultPragmaHandlers() catch |er| switch (er) {
         error.OutOfMemory => {
             std.debug.print("Out of Memory\n", .{});
             return 1;
         },
     };
 
-    handleArgs(&comp, args) catch |err| switch (err) {
+    mainExtra(&comp, args) catch |er| switch (er) {
         error.OutOfMemory => {
             std.debug.print("Out of Memory\n", .{});
             return 1;
@@ -87,42 +87,35 @@ const usage =
     \\
 ;
 
-fn handleArgs(comp: *Compilation, args: [][]const u8) !void {
-    comp.defineSystemIncludes() catch |err| switch (err) {
-        error.OutOfMemory => return error.OutOfMemory,
-        error.SelfExeNotFound => return comp.diag.fatalNoSrc("could not find ZCC executable path", .{}),
-        error.ZccIncludeNotFound => return comp.diag.fatalNoSrc("could not find ZCC builtin headers", .{}),
-    };
-
-    var sourceFiles = std.ArrayList(Source).init(comp.gpa);
-    var macroBuffer = std.ArrayList(u8).init(comp.gpa);
-
-    defer {
-        sourceFiles.deinit();
-        macroBuffer.deinit();
-    }
-
-    const stdOut = std.io.getStdOut().writer();
+pub fn parseArgs(
+    comp: *Compilation,
+    stdOut: anytype,
+    sources: *std.ArrayList(Source),
+    macroBuffer: anytype,
+    args: [][]const u8,
+) !bool {
     var i: usize = 1;
     while (i < args.len) : (i += 1) {
         const arg = args[i];
         if (std.mem.startsWith(u8, arg, "-")) {
             if (std.mem.eql(u8, arg, "-h") or std.mem.eql(u8, arg, "--help")) {
-                return stdOut.print(usage, .{args[0]}) catch |err| {
-                    return comp.diag.fatalNoSrc("{s} when trying to print usage", .{@errorName(err)});
+                stdOut.print(usage, .{args[0]}) catch |er| {
+                    return fatal(comp, "{s} when trying to print usage", .{@errorName(er)});
                 };
+                return true;
             } else if (std.mem.eql(u8, arg, "-v") or std.mem.eql(u8, arg, "--version")) {
-                return stdOut.writeAll(@import("zcc.zig").VersionStr ++ "\n") catch |err| {
-                    return comp.diag.fatalNoSrc("{s} when trying to print version", .{@errorName(err)});
+                stdOut.writeAll(@import("zcc.zig").VersionStr ++ "\n") catch |er| {
+                    return fatal(comp, "{s} when trying to print version", .{@errorName(er)});
                 };
-            } else if (std.mem.eql(u8, arg, "-c")) {
-                comp.onlyCompile = true;
+                return true;
             } else if (std.mem.startsWith(u8, arg, "-D")) {
                 var macro = arg["-D".len..];
                 if (macro.len == 0) {
                     i += 1;
-                    if (i >= args.len)
-                        return comp.diag.fatalNoSrc("expected argument after -D", .{});
+                    if (i >= args.len) {
+                        try err(comp, "expected argument after -D");
+                        continue;
+                    }
                     macro = args[i];
                 }
 
@@ -131,8 +124,7 @@ fn handleArgs(comp: *Compilation, args: [][]const u8) !void {
                     value = macro[some + 1 ..];
                     macro = macro[0..some];
                 }
-
-                try macroBuffer.writer().print("#define {s} {s}\n", .{ macro, value });
+                try macroBuffer.print("#define {s} {s}\n", .{ macro, value });
             } else if (std.mem.startsWith(u8, arg, "-U")) {
                 var macro = arg["-U".len..];
                 if (macro.len == 0) {
@@ -142,7 +134,9 @@ fn handleArgs(comp: *Compilation, args: [][]const u8) !void {
                     macro = args[i];
                 }
 
-                try macroBuffer.writer().print("#undef {s} \n", .{macro});
+                try macroBuffer.print("#undef {s} \n", .{macro});
+            } else if (std.mem.eql(u8, arg, "-c")) {
+                comp.onlyCompile = true;
             } else if (std.mem.eql(u8, arg, "-E")) {
                 comp.onlyPreprocess = true;
             } else if (std.mem.eql(u8, arg, "-fcolor-diagnostics")) {
@@ -159,18 +153,20 @@ fn handleArgs(comp: *Compilation, args: [][]const u8) !void {
                 comp.langOpts.dollarsInIdentifiers = false;
             } else if (std.mem.startsWith(u8, arg, "-fmacro-backtrace-limit=")) {
                 const limitStr = arg["-fmacro-backtrace-limit=".len..];
-                var limit = std.fmt.parseInt(u32, limitStr, 10) catch
-                    return comp.diag.fatalNoSrc("-fmacro-backtrace-limit takes a number argument", .{});
-
+                var limit = std.fmt.parseInt(u32, limitStr, 10) catch {
+                    try err(comp, "-fmacro-backtrace-limit takes a number argument");
+                    continue;
+                };
                 if (limit == 0) limit = std.math.maxInt(u32);
                 comp.diag.macroBacktraceLimit = limit;
             } else if (std.mem.startsWith(u8, arg, "-I")) {
                 var path = arg["-I".len..];
                 if (path.len == 0) {
                     i += 1;
-                    if (i >= args.len)
-                        return comp.diag.fatalNoSrc("expected argument after -I", .{});
-
+                    if (i >= args.len) {
+                        try err(comp, "expected argument after -I");
+                        continue;
+                    }
                     path = args[i];
                 }
                 try comp.includeDirs.append(path);
@@ -178,8 +174,10 @@ fn handleArgs(comp: *Compilation, args: [][]const u8) !void {
                 var path = arg["-isystem".len..];
                 if (path.len == 0) {
                     i += 1;
-                    if (i >= args.len)
-                        return comp.diag.fatalNoSrc("expected argument after -isystem", .{});
+                    if (i >= args.len) {
+                        try err(comp, "expected argument after -isystem");
+                        continue;
+                    }
                     path = args[i];
                 }
                 try comp.systemIncludeDirs.append(path);
@@ -187,12 +185,13 @@ fn handleArgs(comp: *Compilation, args: [][]const u8) !void {
                 var filename = arg["-o".len..];
                 if (filename.len == 0) {
                     i += 1;
-                    if (i >= args.len)
-                        return comp.diag.fatalNoSrc("expected argument after -o", .{});
+                    if (i >= args.len) {
+                        try err(comp, "expected argument after -o");
+                        continue;
+                    }
                     filename = args[i];
                 }
                 comp.outputName = filename;
-
             } else if (std.mem.eql(u8, arg, "-pedantic")) {
                 comp.diag.options.pedantic = .warning;
             } else if (std.mem.eql(u8, arg, "-Wall")) {
@@ -214,7 +213,8 @@ fn handleArgs(comp: *Compilation, args: [][]const u8) !void {
                 try comp.diag.set(option, .warning);
             } else if (std.mem.startsWith(u8, arg, "-std=")) {
                 const standard = arg["-std=".len..];
-                comp.langOpts.setStandard(standard) catch return comp.diag.fatalNoSrc("Invalid standard '{s}'", .{standard});
+                comp.langOpts.setStandard(standard) catch
+                    try comp.diag.add(.{ .tag = .cli_invalid_standard, .extra = .{ .str = standard } }, &.{});
             } else if (std.mem.startsWith(u8, arg, "--target=")) {
                 const triple = arg["--target=".len..];
                 const query = std.Target.Query.parse(.{ .arch_os_abi = triple }) catch {
@@ -231,19 +231,42 @@ fn handleArgs(comp: *Compilation, args: [][]const u8) !void {
             } else if (std.mem.eql(u8, arg, "-dump-raw-tokens")) {
                 comp.dumpRawTokens = true;
             } else {
-                try stdOut.print(usage, .{args[0]});
-                return std.debug.print("unknown command: {s}", .{arg});
+                try comp.diag.add(.{ .tag = .cli_unknown_arg, .extra = .{ .str = arg } }, &.{});
             }
         } else {
-            const file = comp.addSource(arg) catch |err| return comp.diag.fatalNoSrc("{s}", .{@errorName(err)});
-            try sourceFiles.append(file);
+            const file = comp.addSource(arg) catch |er| {
+                return fatal(comp, "{s}", .{@errorName(er)});
+            };
+            try sources.append(file);
         }
     }
 
+    return false;
+}
+
+fn mainExtra(comp: *Compilation, args: [][]const u8) !void {
+    comp.defineSystemIncludes() catch |er| switch (er) {
+        error.OutOfMemory => return error.OutOfMemory,
+        error.SelfExeNotFound => return comp.diag.fatalNoSrc("could not find ZCC executable path", .{}),
+        error.ZccIncludeNotFound => return comp.diag.fatalNoSrc("could not find ZCC builtin headers", .{}),
+    };
+
+    var sourceFiles = std.ArrayList(Source).init(comp.gpa);
+    var macroBuffer = std.ArrayList(u8).init(comp.gpa);
+
+    defer {
+        sourceFiles.deinit();
+        macroBuffer.deinit();
+    }
+
+    const stdOut = std.io.getStdOut().writer();
+    if (try parseArgs(comp, stdOut, &sourceFiles, macroBuffer.writer(), args))
+        return;
+
     if (sourceFiles.items.len == 0) {
-        return comp.diag.fatalNoSrc("no input files", .{});
+        return fatal(comp, "no input files", .{});
     } else if (sourceFiles.items.len != 1 and comp.outputName != null) {
-        return comp.diag.fatalNoSrc("cannot specify -o when generating multiple output files", .{});
+        return fatal(comp, "cannot specify -o when generating multiple output files", .{});
     }
 
     const builtinMacros = try comp.generateBuiltinMacros();
@@ -271,6 +294,15 @@ fn handleArgs(comp: *Compilation, args: [][]const u8) !void {
     }
 }
 
+fn err(comp: *Compilation, msg: []const u8) !void {
+    try comp.diag.add(.{ .tag = .cli_error, .extra = .{ .str = msg } }, &.{});
+}
+
+fn fatal(comp: *Compilation, comptime fmt: []const u8, args: anytype) error{FatalError} {
+    comp.renderErrors();
+    return comp.diag.fatalNoSrc(fmt, args);
+}
+
 fn processSource(comp: *Compilation, source: Source, builtinMacro: Source, userDefinedMacros: Source) !void {
     comp.generatedBuffer.items.len = 0;
     var pp = Preprocessor.init(comp);
@@ -291,14 +323,14 @@ fn processSource(comp: *Compilation, source: Source, builtinMacro: Source, userD
         comp.renderErrors();
 
         const file = if (comp.outputName) |some|
-            std.fs.cwd().createFile(some, .{}) catch |err|
-                return comp.diag.fatalNoSrc("{s} when trying to create output file", .{@errorName(err)})
+            std.fs.cwd().createFile(some, .{}) catch |er|
+                return fatal(comp, "{s} when trying to create output file", .{@errorName(er)})
         else
             std.io.getStdOut();
         defer if (comp.outputName != null) file.close();
 
-        return pp.prettyPrintTokens(file.writer()) catch |err|
-            comp.diag.fatalNoSrc("{s} when trying to print tokens", .{@errorName(err)});
+        return pp.prettyPrintTokens(file.writer()) catch |er|
+            fatal(comp, "{s} when trying to print tokens", .{@errorName(er)});
     }
 
     if (comp.dumpTokens or comp.dumpRawTokens) {
@@ -343,7 +375,8 @@ fn processSource(comp: *Compilation, source: Source, builtinMacro: Source, userD
         return;
 
     if (comp.target.ofmt != .elf or comp.target.cpu.arch != .x86_64) {
-        return comp.diag.fatalNoSrc(
+        return fatal(
+            comp,
             "unsupported target {s}-{s}-{s}, currently only x86-64 elf is supported",
             .{ @tagName(comp.target.cpu.arch), @tagName(comp.target.os.tag), @tagName(comp.target.abi) },
         );
@@ -359,12 +392,12 @@ fn processSource(comp: *Compilation, source: Source, builtinMacro: Source, userD
     });
     defer if (comp.outputName == null) comp.gpa.free(outFileName);
 
-    const outFile = std.fs.cwd().createFile(outFileName, .{}) catch |err|
-        return comp.diag.fatalNoSrc("could not create output file '{s}': {s}", .{ outFileName, @errorName(err) });
+    const outFile = std.fs.cwd().createFile(outFileName, .{}) catch |er|
+        return fatal(comp, "could not create output file '{s}': {s}", .{ outFileName, @errorName(er) });
     defer outFile.close();
 
-    obj.finish(outFile) catch |err|
-        return comp.diag.fatalNoSrc("could output to object file '{s}': {s}", .{ outFileName, @errorName(err) });
+    obj.finish(outFile) catch |er|
+        return fatal(comp, "could output to object file '{s}': {s}", .{ outFileName, @errorName(er) });
 
     if (comp.onlyCompile) return;
 
