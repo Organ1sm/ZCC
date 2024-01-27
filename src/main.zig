@@ -70,6 +70,7 @@ const usage =
     \\  -I <dir>                Add directory to include search path
     \\  -isystem                Add directory to system include search path
     \\  -o <file>               Write output to <file>
+    \\  -pedantic               Warn on language extensions
     \\  -std=<standard>         Specify language standard
     \\ --target=<value>         Generate code for the given target
     \\  -U <macro>              Undefine <macro>
@@ -122,7 +123,6 @@ fn handleArgs(comp: *Compilation, args: [][]const u8) !void {
                     i += 1;
                     if (i >= args.len)
                         return comp.diag.fatalNoSrc("expected argument after -D", .{});
-
                     macro = args[i];
                 }
 
@@ -139,7 +139,6 @@ fn handleArgs(comp: *Compilation, args: [][]const u8) !void {
                     i += 1;
                     if (i >= args.len)
                         return comp.diag.fatalNoSrc("expected argument after -U", .{});
-
                     macro = args[i];
                 }
 
@@ -181,7 +180,6 @@ fn handleArgs(comp: *Compilation, args: [][]const u8) !void {
                     i += 1;
                     if (i >= args.len)
                         return comp.diag.fatalNoSrc("expected argument after -isystem", .{});
-
                     path = args[i];
                 }
                 try comp.systemIncludeDirs.append(path);
@@ -191,14 +189,20 @@ fn handleArgs(comp: *Compilation, args: [][]const u8) !void {
                     i += 1;
                     if (i >= args.len)
                         return comp.diag.fatalNoSrc("expected argument after -o", .{});
-
                     filename = args[i];
                 }
                 comp.outputName = filename;
+
+            } else if (std.mem.eql(u8, arg, "-pedantic")) {
+                comp.diag.options.pedantic = .warning;
             } else if (std.mem.eql(u8, arg, "-Wall")) {
                 comp.diag.setAll(.warning);
             } else if (std.mem.eql(u8, arg, "-Werror")) {
                 comp.diag.setAll(.@"error");
+            } else if (std.mem.eql(u8, arg, "-Wfatal-errors")) {
+                comp.diag.fatalErrors = true;
+            } else if (std.mem.eql(u8, arg, "-Wno-fatal-errors")) {
+                comp.diag.fatalErrors = false;
             } else if (std.mem.startsWith(u8, arg, "-Werror=")) {
                 const option = arg["-Werror=".len..];
                 try comp.diag.set(option, .@"error");

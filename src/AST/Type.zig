@@ -1013,6 +1013,19 @@ pub fn combine(inner: *Type, outer: Type, p: *Parser, sourceToken: TokenIndex) P
             try inner.data.func.returnType.combine(outer, p, sourceToken);
             if (inner.data.func.returnType.isFunc()) try p.errToken(.func_cannot_return_func, sourceToken);
             if (inner.data.func.returnType.isArray()) try p.errToken(.func_cannot_return_array, sourceToken);
+
+            if (inner.data.func.returnType.qual.@"const") {
+                try p.errStr(.qual_on_ret_type, sourceToken, "const");
+                inner.data.func.returnType.qual.@"const" = false;
+            }
+            if (inner.data.func.returnType.qual.@"volatile") {
+                try p.errStr(.qual_on_ret_type, sourceToken, "volatile");
+                inner.data.func.returnType.qual.@"volatile" = false;
+            }
+            if (inner.data.func.returnType.qual.atomic) {
+                try p.errStr(.qual_on_ret_type, sourceToken, "atomic");
+                inner.data.func.returnType.qual.atomic = false;
+            }
         },
 
         // type should not be able to decay before combine

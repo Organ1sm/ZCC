@@ -26,7 +26,7 @@ deinit: *const fn (*Pragma, *Compilation) void,
 /// As an example, given the following line:
 ///     #pragma GCC diagnostic error "-Wnewline-eof" \n
 /// Then pp.tokens.get(startIdx) will return the `GCC` token.
-/// Return error.UnknownPragma to emit an `unsupported_pragma` diagnostic
+/// Return error.UnknownPragma to emit an `unknown_pragma` diagnostic
 /// Return error.StopPreprocessing to stop preprocessing the current file (see once.zig)
 preprocessorHandler: ?*const fn (*Pragma, *Preprocessor, startIdx: TokenIndex) Error!void = null,
 

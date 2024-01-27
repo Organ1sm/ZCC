@@ -1864,9 +1864,8 @@ fn pragma(
         };
     }
     return pp.comp.diag.add(.{
-        .tag = .unsupported_pragma,
+        .tag = .unknown_pragma,
         .loc = pragmaNameToken.loc,
-        .extra = .{ .str = name },
     }, pragmaNameToken.expansionSlice());
 }
 

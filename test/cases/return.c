@@ -35,7 +35,7 @@ void baz(void) {
     return 1;
 }
 
-#define EXPECTED_ERRORS "return.c:2:5: error: non-void function 'b' should return a value" \
+#define EXPECTED_ERRORS "return.c:2:5: error: non-void function 'b' should return a value [-Wreturn-type]" \
     "return.c:3:5: warning: unreachable code" \
     "return.c:6:12: error: returning 'void' from a function with incompatible result type" \
     "return.c:11:5: warning: unreachable code" \
