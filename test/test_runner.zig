@@ -251,6 +251,7 @@ pub fn main() !void {
 
                 std.debug.assert((try std.zig.string_literal.parseWrite(buffer.writer(), pp.getTokenSlice(str))) == .success);
 
+                try buffer.append('\n');
                 const expectedError = buffer.items;
                 const index = std.mem.indexOf(u8, m.buf.items, expectedError);
                 if (index == null) {
