@@ -1284,3 +1284,24 @@ pub const qual_on_ret_type = struct {
     pub const kind = .off;
     pub const all = true;
 };
+
+pub const cli_invalid_standard = struct {
+    pub const msg = "invalid standard '{s}'";
+    pub const extra = .str;
+    pub const kind = .@"error";
+};
+pub const cli_invalid_target = struct {
+    pub const msg = "invalid target '{s}'";
+    pub const extra = .str;
+    pub const kind = .@"error";
+};
+pub const cli_unknown_arg = struct {
+    pub const msg = "unknown argument '{s}'";
+    pub const extra = .str;
+    pub const kind = .@"error";
+};
+pub const cli_error = struct {
+    pub const msg = "{s}";
+    pub const extra = .str;
+    pub const kind = .@"error";
+};

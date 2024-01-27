@@ -10,5 +10,6 @@ pub const Token = @import("Lexer/Token.zig").Token;
 pub const Lexer = @import("Lexer/Lexer.zig");
 pub const Tree = @import("AST/AST.zig");
 pub const VersionStr = @import("Basic/Info.zig").VersionStr;
+pub const parseArgs = @import("main.zig").parseArgs;
 
 pub const version = std.SemanticVersion.parse(VersionStr) catch unreachable;
