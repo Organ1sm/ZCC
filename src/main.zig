@@ -329,7 +329,11 @@ fn processSource(comp: *Compilation, source: Source, builtinMacro: Source, userD
             std.io.getStdOut();
         defer if (comp.outputName != null) file.close();
 
-        return pp.prettyPrintTokens(file.writer()) catch |er|
+        var bufWriter = std.io.bufferedWriter(file.writer());
+        pp.prettyPrintTokens(file.writer()) catch |er|
+            return fatal(comp, "{s} when trying to print tokens", .{@errorName(er)});
+
+        return bufWriter.flush() catch |er|
             fatal(comp, "{s} when trying to print tokens", .{@errorName(er)});
     }
 
