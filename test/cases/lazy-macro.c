@@ -1,4 +1,4 @@
-//test preprocess
+//zcc-args -E
 
 #define REC_EMPTY
 #define REC_DEFER(op) op REC_EMPTY

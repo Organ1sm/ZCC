@@ -1,4 +1,4 @@
-//test preprocess
+//zcc-args -E
 
 #define F(x) G(x)
 #define G(x) F(x)

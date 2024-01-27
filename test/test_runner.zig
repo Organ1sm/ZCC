@@ -57,11 +57,11 @@ pub fn main() !void {
     const rootNode = progress.start("Test", cases.items.len);
 
     // prepare compiler
-    var comp = zcc.Compilation.init(gpa);
-    defer comp.deinit();
+    var initialComp = zcc.Compilation.init(gpa);
+    defer initialComp.deinit();
 
-    try comp.addDefaultPragmaHandlers();
-    try comp.defineSystemIncludes();
+    try initialComp.addDefaultPragmaHandlers();
+    try initialComp.defineSystemIncludes();
 
     // apparently we can't use setAstCwd without libc on windows yet
     const win = @import("builtin").os.tag == .windows;
@@ -75,31 +75,34 @@ pub fn main() !void {
     var passCount: u32 = 0;
     var failCount: u32 = 0;
     var skipCount: u32 = 0;
-    const initialOptions = comp.diag.options;
     next_test: for (cases.items) |path| {
-        comp.langOpts.standard = .default;
-        comp.diag.options = initialOptions;
-        comp.onlyPreprocess = false;
-        comp.generatedBuffer.items.len = 0;
-        for (comp.sources.values()) |src| {
-            gpa.free(src.path);
-            gpa.free(src.buffer);
+        var comp = initialComp;
+        defer {
+            comp.systemIncludeDirs = @TypeOf(comp.systemIncludeDirs).init(gpa);
+            comp.pragmaHandlers = .{};
+            comp.builtinHeaderPath = null;
+
+            // reset everything else
+            comp.deinit();
         }
-        comp.sources.clearRetainingCapacity();
+
         const file = comp.addSource(path) catch |err| {
             failCount += 1;
             progress.log("could not add source '{s}': {s}\n", .{ path, @errorName(err) });
             continue;
         };
 
-        if (std.mem.startsWith(u8, file.buffer, "//std=")) {
-            const suffix = file.buffer["//std=".len..];
-            var it = std.mem.tokenize(u8, suffix, " \r\n");
-            if (it.next()) |standard| {
-                try comp.langOpts.setStandard(standard);
-            }
-        } else if (std.mem.startsWith(u8, file.buffer, "//test preprocess")) {
-            comp.onlyPreprocess = true;
+        if (std.mem.startsWith(u8, file.buffer, "//zcc-args")) {
+            var testArgs = std.ArrayList([]const u8).init(gpa);
+            defer testArgs.deinit();
+
+            var it = std.mem.tokenize(u8, std.mem.sliceTo(file.buffer, '\n'), " ");
+            while (it.next()) |some|
+                try testArgs.append(some);
+
+            var sourceFiles = std.ArrayList(zcc.Source).init(std.testing.failing_allocator);
+
+            _ = try zcc.parseArgs(&comp, std.io.null_writer, &sourceFiles, std.io.null_writer, testArgs.items);
         }
 
         const builtinMacros = try comp.generateBuiltinMacros();
@@ -132,7 +135,20 @@ pub fn main() !void {
         };
         try pp.tokens.append(gpa, eof);
 
-        if (std.mem.startsWith(u8, file.buffer, "//test preprocess")) {
+        if (pp.defines.get("TESTS_SKIPPED")) |macro| {
+            if (macro.isFunc or macro.tokens.len != 1 or macro.tokens[0].id != .IntegerLiteral) {
+                failCount += 1;
+                progress.log("invalid TESTS_SKIPPED, definition should contain exactly one integer literal {}\n", .{macro});
+                continue;
+            }
+            const tokSlice = pp.getTokenSlice(macro.tokens[0]);
+            const testsSkipped = try std.fmt.parseInt(u32, tokSlice, 0);
+            progress.log("{d} test{s} skipped\n", .{ testsSkipped, if (testsSkipped == 1) "" else "s" });
+            skipCount += testsSkipped;
+            continue;
+        }
+
+        if (comp.onlyPreprocess) {
             comp.renderErrors();
 
             const expectedOutput = blk: {
@@ -152,19 +168,6 @@ pub fn main() !void {
                 passCount += 1
             else |_|
                 failCount += 1;
-            continue;
-        }
-
-        if (pp.defines.get("TESTS_SKIPPED")) |macro| {
-            if (macro.isFunc or macro.tokens.len != 1 or macro.tokens[0].id != .IntegerLiteral) {
-                failCount += 1;
-                progress.log("invalid TESTS_SKIPPED, definition should contain exactly one integer literal {}\n", .{macro});
-                continue;
-            }
-            const tokSlice = pp.getTokenSlice(macro.tokens[0]);
-            const testsSkipped = try std.fmt.parseInt(u32, tokSlice, 0);
-            progress.log("{d} test{s} skipped\n", .{ testsSkipped, if (testsSkipped == 1) "" else "s" });
-            skipCount += testsSkipped;
             continue;
         }
 

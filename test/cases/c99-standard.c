@@ -1,4 +1,4 @@
-//std=c99
+//zcc-args -std=c99
 void foo(void) {
 	int typeof = 5;
 }

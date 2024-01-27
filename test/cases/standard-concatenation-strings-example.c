@@ -1,4 +1,4 @@
-//test preprocess
+//zcc-args -E
 
 #define str(s) # s
 #define xstr(s) str(s)

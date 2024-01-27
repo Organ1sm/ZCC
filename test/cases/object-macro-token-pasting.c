@@ -1,4 +1,4 @@
-//test preprocess
+//zcc-args -E
 
 #define x a##1
 x

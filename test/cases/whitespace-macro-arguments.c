@@ -1,4 +1,4 @@
-//test preprocess
+//zcc-args -E
 
 #define h() 1
 #define g(x) x

@@ -1,4 +1,4 @@
-//test preprocess
+//zcc-args -E
 
 #define FOO
 #ifdef FOO

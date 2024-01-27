@@ -1,4 +1,4 @@
-//test preprocess
+//zcc-args -E
 
 #define CAT(a, b) a##b
 

@@ -1,4 +1,4 @@
-//test preprocess
+//zcc-args -E
 #define FOO 1 /* fjfao */  /* fjfao */ 2
 
 #define BAR + /* fjfao */  /* fjfao */ /

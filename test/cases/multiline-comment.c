@@ -1,4 +1,4 @@
-//test preprocess
+//zcc-args -E
 /* comment **/
 
 int I_exist;

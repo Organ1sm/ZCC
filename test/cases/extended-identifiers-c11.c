@@ -1,4 +1,4 @@
-//std=c11
+//zcc-args -std=c11
 
 #pragma GCC diagnostic warning "-Wc99-compat"
 

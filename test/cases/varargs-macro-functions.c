@@ -1,4 +1,4 @@
-//test preprocess
+//zcc-args -E
 
 #define foo(a,...) #__VA_ARGS__
 foo(1,2,3,4,5,6)
