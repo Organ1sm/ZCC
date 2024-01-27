@@ -26,11 +26,11 @@ void self_referential_initializer(void) {
 
 #define TESTS_SKIPPED 1
 
-#define EXPECTED_ERRORS "statement-expr.c:3:10: warning: use of GNU statement expression extension" \
+#define EXPECTED_ERRORS "statement-expr.c:3:10: warning: use of GNU statement expression extension[-Wgnu-statement-expression] " \
     "statement-expr.c:3:10: error: statement expression not allowed at file scope" \
     "statement-expr.c:10:13: error: initializing 'int' from incompatible type 'void'" \
-    "statement-expr.c:11:5: warning: expression result unused" \
-    "statement-expr.c:12:8: warning: expression result unused" \
-    "statement-expr.c:12:5: warning: expression result unused" \
+    "statement-expr.c:11:5: warning: expression result unused [-Wunused-value]" \
+    "statement-expr.c:12:8: warning: expression result unused [-Wunused-value]" \
+    "statement-expr.c:12:5: warning: expression result unused [-Wunused-value]" \
     "statement-expr.c:18:5: error: use of undeclared identifier 'z'" \
 
