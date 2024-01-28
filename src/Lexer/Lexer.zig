@@ -58,6 +58,7 @@ const State = enum {
     line_comment,
     multi_line_comment,
     multi_line_comment_asterisk,
+    multi_line_comment_done,
     zero,
     integer_literal_oct,
     integer_literal_binary,
@@ -686,13 +687,34 @@ pub fn next(self: *Lexer) Token {
                 else => {},
             },
             .multi_line_comment_asterisk => switch (c) {
-                '/' => state = .start,
+                '/' => state = .multi_line_comment_done,
                 '\n' => {
                     self.line += 1;
                     state = .multi_line_comment;
                 },
                 '*' => {},
                 else => state = .multi_line_comment,
+            },
+            .multi_line_comment_done => switch (c) {
+                '\n' => {
+                    start = self.index + 1;
+                    id = .NewLine;
+                    self.index += 1;
+                    self.line += 1;
+                    break;
+                },
+                '\r' => {
+                    start = self.index;
+                    state = .cr;
+                },
+                '\t', '\x0B', '\x0C', ' ' => {
+                    start = self.index;
+                    state = .whitespace;
+                },
+                else => {
+                    id = .WhiteSpace;
+                    break;
+                },
             },
 
             .zero => switch (c) {
@@ -935,6 +957,7 @@ pub fn next(self: *Lexer) Token {
             => {},
 
             .whitespace => id = .WhiteSpace,
+            .multi_line_comment_done => id = .WhiteSpace,
 
             .period2,
             .string_literal,

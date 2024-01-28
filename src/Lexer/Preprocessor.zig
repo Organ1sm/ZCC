@@ -1964,6 +1964,16 @@ pub fn prettyPrintTokens(pp: *Preprocessor, w: anytype) !void {
                 }
             },
 
+            .WhiteSpace => {
+                var slice = pp.expandedSlice(cur);
+                while (std.mem.indexOfScalar(u8, slice, '\n')) |some| {
+                    try w.writeByte('\n');
+                    slice = slice[some + 1 ..];
+                }
+                for (slice) |_|
+                    try w.writeByte(' ');
+            },
+
             else => {
                 const slice = pp.expandedSlice(cur);
                 try w.writeAll(slice);
