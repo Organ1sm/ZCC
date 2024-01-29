@@ -151,6 +151,11 @@ pub const expected_invalid = struct {
     pub const extra = .tok_id_expected;
     pub const kind = .@"error";
 };
+pub const expected_eof = struct {
+    pub const msg = "expected '{s}' before end of file";
+    pub const extra = .tok_id_expected;
+    pub const kind = .@"error";
+};
 pub const expected_token = struct {
     pub const msg = "expected '{s}', found '{s}'";
     pub const extra = .tok_id;
@@ -1304,4 +1309,10 @@ pub const cli_error = struct {
     pub const msg = "{s}";
     pub const extra = .str;
     pub const kind = .@"error";
+};
+pub const extra_semi = struct {
+    pub const msg = "extra ';' outside of a function";
+    pub const opt = "extra-semi";
+    pub const kind = .off;
+    pub const pedantic = true;
 };

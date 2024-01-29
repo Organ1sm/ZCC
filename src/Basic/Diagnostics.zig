@@ -102,6 +102,7 @@ pub const Options = packed struct {
     @"gnu-imaginary-constant": Kind = .default,
     @"ignored-qualifiers": Kind = .default,
     @"integer-overflow": Kind = .default,
+    @"extra-semi": Kind = .default,
 };
 
 list: std.ArrayListUnmanaged(Message) = .{},
