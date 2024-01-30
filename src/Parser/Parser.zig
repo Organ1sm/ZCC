@@ -139,10 +139,16 @@ fn eatIdentifier(p: *Parser) !?TokenIndex {
 
 fn expectIdentifier(p: *Parser) Error!TokenIndex {
     if (p.getCurrToken() != .Identifier and p.getCurrToken() != .ExtendedIdentifier) {
-        try p.errExtra(.expected_token, p.index, .{ .tokenId = .{
-            .expected = .Identifier,
-            .actual = p.getCurrToken(),
-        } });
+        try p.errExtra(
+            .expected_token,
+            p.index,
+            .{
+                .tokenId = .{
+                    .expected = .Identifier,
+                    .actual = p.getCurrToken(),
+                },
+            },
+        );
         return error.ParsingFailed;
     }
     return (try p.eatIdentifier()) orelse unreachable;
@@ -172,10 +178,16 @@ fn expectToken(p: *Parser, expected: TokenType) Error!TokenIndex {
         switch (actual) {
             .Invalid => try p.errExtra(.expected_invalid, p.index, .{ .expectedTokenId = expected }),
             .Eof => try p.errExtra(.expected_eof, p.index, .{ .expectedTokenId = expected }),
-            else => try p.errExtra(.expected_token, p.index, .{ .tokenId = .{
-                .expected = expected,
-                .actual = actual,
-            } }),
+            else => try p.errExtra(
+                .expected_token,
+                p.index,
+                .{
+                    .tokenId = .{
+                        .expected = expected,
+                        .actual = actual,
+                    },
+                },
+            ),
         }
         return error.ParsingFailed;
     }
@@ -1385,11 +1397,6 @@ fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec) Error!?InitDeclarator {
     try p.parseAttrSpec(if (ID.d.type.isFunc()) .function else .variable);
 
     if (p.eat(.Equal)) |eq| init: {
-        if (ID.d.type.hasIncompleteSize() and !ID.d.type.isArray()) {
-            try p.errStr(.variable_incomplete_ty, ID.d.name, try p.typeStr(ID.d.type));
-            return error.ParsingFailed;
-        }
-
         if (declSpec.storageClass == .typedef or ID.d.funcDeclarator != null)
             try p.errToken(.illegal_initializer, eq)
         else if (ID.d.type.is(.VariableLenArray))
@@ -1397,6 +1404,11 @@ fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec) Error!?InitDeclarator {
         else if (declSpec.storageClass == .@"extern") {
             try p.err(.extern_initializer);
             declSpec.storageClass = .none;
+        }
+
+        if (ID.d.type.hasIncompleteSize() and !ID.d.type.isArray()) {
+            try p.errStr(.variable_incomplete_ty, ID.d.name, try p.typeStr(ID.d.type));
+            return error.ParsingFailed;
         }
 
         const scopesLen = p.scopes.items.len;
@@ -2184,7 +2196,9 @@ fn declarator(p: *Parser, baseType: Type, kind: DeclaratorKind) Error!?Declarato
     const maybeIdent = p.index;
     if (kind != .abstract and (try p.eatIdentifier()) != null) {
         d.name = maybeIdent;
+        const combineToken = p.index;
         d.type = try p.directDeclarator(d.type, &d, kind);
+        try d.type.validateCombinedType(p, combineToken);
         return d;
     } else if (p.eat(.LParen)) |lp| blk: {
         var res = (try p.declarator(.{ .specifier = .Void }, kind)) orelse {
@@ -2197,17 +2211,23 @@ fn declarator(p: *Parser, baseType: Type, kind: DeclaratorKind) Error!?Declarato
         const outer = try p.directDeclarator(d.type, &d, kind);
 
         try res.type.combine(outer, p, res.funcDeclarator orelse suffixStart);
+        try res.type.validateCombinedType(p, suffixStart);
         res.oldTypeFunc = d.oldTypeFunc;
         return res;
     }
 
-    if (kind == .normal and !baseType.isEnumOrRecord()) {
-        try p.err(.expected_ident_or_l_paren);
-    }
+    const expectedIdent = p.index;
 
     d.type = try p.directDeclarator(d.type, &d, kind);
+    if (kind == .normal and !d.type.isEnumOrRecord()) {
+        try p.errToken(.expected_ident_or_l_paren, expectedIdent);
+        return error.ParsingFailed;
+    }
+
     if (start == p.index)
         return null;
+
+    try d.type.validateCombinedType(p, expectedIdent);
 
     return d;
 }
@@ -2277,8 +2297,10 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: Declarator
         var maxBits = p.pp.comp.target.ptrBitWidth();
         if (maxBits > 61) maxBits = 61;
 
+        // `outer` is validated later so it may be invalid here
+        const outerSize = if (outer.hasIncompleteSize()) 1 else outer.sizeof(p.pp.comp);
         const maxBytes = (@as(u64, 1) << @truncate(maxBits)) - 1;
-        const maxElems = maxBytes / @max(1, outer.sizeof(p.pp.comp) orelse 1);
+        const maxElems = maxBytes / @max(1, outerSize orelse 1);
 
         switch (size.value) {
             .unavailable => if (size.node != .none) {
@@ -2991,10 +3013,6 @@ fn convertInitList(p: *Parser, il: InitList, initType: Type) Error!NodeIndex {
     } else if (initType.is(.VariableLenArray)) {
         return error.ParsingFailed; // vla invalid, reported earlier
     } else if (initType.isArray()) {
-        // array element type invalid, reported earlier
-        if (initType.getElemType().hasIncompleteSize())
-            return error.ParsingFailed;
-
         if (il.node != .none)
             return il.node;
 
@@ -3118,9 +3136,6 @@ fn convertInitList(p: *Parser, il: InitList, initType: Type) Error!NodeIndex {
         return try p.addNode(unionInitNode);
     } else if (initType.isFunc()) {
         return error.ParsingFailed; // invalid func initializer, reported earlier
-    } else if (initType.is(.Void)) {
-        try p.errStr(.variable_incomplete_ty, il.tok, try p.typeStr(initType));
-        return error.ParsingFailed;
     } else {
         unreachable;
     }
@@ -3754,12 +3769,12 @@ fn parseCompoundStmt(p: *Parser, isFnBody: bool, stmtExprState: ?*StmtExprState)
     }
 
     if (isFnBody and (p.declBuffer.items.len == declBufferTop or !p.nodeIsNoreturn(p.declBuffer.items[p.declBuffer.items.len - 1]))) {
-        if (!p.func.type.?.returnType().is(.Void))
+        if (!p.func.type.?.getReturnType().is(.Void))
             try p.errStr(.func_does_not_return, p.index - 1, p.getTokenSlice(p.func.name));
 
         try p.declBuffer.append(try p.addNode(.{
             .tag = .ImplicitReturn,
-            .type = p.func.type.?.returnType(),
+            .type = p.func.type.?.getReturnType(),
             .data = undefined,
         }));
     }
@@ -3794,7 +3809,7 @@ fn parseReturnStmt(p: *Parser) Error!?NodeIndex {
 
     var expr = try p.parseExpr();
     _ = try p.expectToken(.Semicolon);
-    const returnType = p.func.type.?.returnType();
+    const returnType = p.func.type.?.getReturnType();
 
     if (expr.node == .none) {
         if (!returnType.is(.Void))
@@ -4573,8 +4588,12 @@ fn parseCastExpr(p: *Parser) Error!Result {
                 // compound literal
                 if (ty.isFunc())
                     try p.err(.func_init)
-                else if (ty.is(.VariableLenArray))
+                else if (ty.is(.VariableLenArray)) {
                     try p.err(.vla_init);
+                } else if (ty.hasIncompleteSize() and !ty.is(.IncompleteArray)) {
+                    try p.errStr(.variable_incomplete_ty, p.index, try p.typeStr(ty));
+                    return error.ParsingFailed;
+                }
 
                 var initListExpr = try p.initializer(ty);
                 try initListExpr.un(p, .CompoundLiteralExpr);
@@ -5279,7 +5298,7 @@ fn parseCallExpr(p: *Parser, lhs: Result) Error!Result {
 
     var callNode: AST.Node = .{
         .tag = .CallExprOne,
-        .type = ty.returnType(),
+        .type = ty.getReturnType(),
         .data = .{ .binExpr = .{ .lhs = lhs.node, .rhs = .none } },
     };
 

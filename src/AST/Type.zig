@@ -557,7 +557,7 @@ pub fn getElemType(ty: Type) Type {
     };
 }
 
-pub fn returnType(ty: Type) Type {
+pub fn getReturnType(ty: Type) Type {
     return switch (ty.specifier) {
         .Func, .VarArgsFunc, .OldStyleFunc => ty.data.func.returnType,
 
@@ -673,6 +673,8 @@ pub fn hasIncompleteSize(ty: Type) bool {
 
         .Enum => ty.data.@"enum".isIncomplete(),
         .Struct, .Union => ty.data.record.isIncomplete(),
+
+        .Array, .StaticArray => ty.data.array.elem.hasIncompleteSize(),
 
         .TypeofType => ty.data.subType.hasIncompleteSize(),
         .TypeofExpr => ty.data.expr.ty.hasIncompleteSize(),
@@ -981,52 +983,19 @@ pub fn combine(inner: *Type, outer: Type, p: *Parser, sourceToken: TokenIndex) P
     switch (inner.specifier) {
         .Pointer => return inner.data.subType.combine(outer, p, sourceToken),
 
-        .UnspecifiedVariableLenArray => {
-            try inner.data.subType.combine(outer, p, sourceToken);
+        .UnspecifiedVariableLenArray => try inner.data.subType.combine(outer, p, sourceToken),
 
-            const elemType = inner.data.subType.*;
-            if (elemType.hasIncompleteSize()) try p.errStr(.array_incomplete_elem, sourceToken, try p.typeStr(elemType));
-            if (elemType.isFunc()) try p.errToken(.array_func_elem, sourceToken);
-            if (elemType.containAnyQual() and elemType.isArray()) try p.errToken(.qualifier_non_outermost_array, sourceToken);
-        },
+        .Array,
+        .StaticArray,
+        .IncompleteArray,
+        => try inner.data.array.elem.combine(outer, p, sourceToken),
 
-        .Array, .StaticArray, .IncompleteArray => {
-            try inner.data.array.elem.combine(outer, p, sourceToken);
+        .VariableLenArray => try inner.data.expr.ty.combine(outer, p, sourceToken),
 
-            const elemType = inner.data.array.elem;
-            if (elemType.hasIncompleteSize()) try p.errStr(.array_incomplete_elem, sourceToken, try p.typeStr(elemType));
-            if (elemType.isFunc()) try p.errToken(.array_func_elem, sourceToken);
-            if (elemType.is(.StaticArray) and elemType.isArray()) try p.errToken(.static_non_outermost_array, sourceToken);
-            if (elemType.containAnyQual() and elemType.isArray()) try p.errToken(.qualifier_non_outermost_array, sourceToken);
-        },
-
-        .VariableLenArray => {
-            try inner.data.expr.ty.combine(outer, p, sourceToken);
-
-            const elemType = inner.data.expr.ty;
-            if (elemType.hasIncompleteSize()) try p.errStr(.array_incomplete_elem, sourceToken, try p.typeStr(elemType));
-            if (elemType.isFunc()) try p.errToken(.array_func_elem, sourceToken);
-            if (elemType.containAnyQual() and elemType.isArray()) try p.errToken(.qualifier_non_outermost_array, sourceToken);
-        },
-
-        .Func, .VarArgsFunc, .OldStyleFunc => {
-            try inner.data.func.returnType.combine(outer, p, sourceToken);
-            if (inner.data.func.returnType.isFunc()) try p.errToken(.func_cannot_return_func, sourceToken);
-            if (inner.data.func.returnType.isArray()) try p.errToken(.func_cannot_return_array, sourceToken);
-
-            if (inner.data.func.returnType.qual.@"const") {
-                try p.errStr(.qual_on_ret_type, sourceToken, "const");
-                inner.data.func.returnType.qual.@"const" = false;
-            }
-            if (inner.data.func.returnType.qual.@"volatile") {
-                try p.errStr(.qual_on_ret_type, sourceToken, "volatile");
-                inner.data.func.returnType.qual.@"volatile" = false;
-            }
-            if (inner.data.func.returnType.qual.atomic) {
-                try p.errStr(.qual_on_ret_type, sourceToken, "atomic");
-                inner.data.func.returnType.qual.atomic = false;
-            }
-        },
+        .Func,
+        .VarArgsFunc,
+        .OldStyleFunc,
+        => try inner.data.func.returnType.combine(outer, p, sourceToken),
 
         // type should not be able to decay before combine
         .DecayedArray,
@@ -1039,6 +1008,65 @@ pub fn combine(inner: *Type, outer: Type, p: *Parser, sourceToken: TokenIndex) P
         => unreachable,
 
         else => inner.* = outer,
+    }
+}
+
+pub fn validateCombinedType(ty: Type, p: *Parser, sourceToken: TokenIndex) Parser.Error!void {
+    switch (ty.specifier) {
+        .Pointer => return ty.data.subType.validateCombinedType(p, sourceToken),
+
+        .UnspecifiedVariableLenArray,
+        .VariableLenArray,
+        .Array,
+        .StaticArray,
+        .IncompleteArray,
+        => {
+            const elemType = ty.getElemType();
+            if (elemType.hasIncompleteSize()) {
+                try p.errStr(.array_incomplete_elem, sourceToken, try p.typeStr(elemType));
+                return error.ParsingFailed;
+            }
+
+            if (elemType.isFunc()) {
+                try p.errToken(.array_func_elem, sourceToken);
+                return error.ParsingFailed;
+            }
+
+            if (elemType.specifier == .StaticArray and elemType.isArray())
+                try p.errToken(.static_non_outermost_array, sourceToken);
+
+            if (elemType.containAnyQual() and elemType.isArray())
+                try p.errToken(.qualifier_non_outermost_array, sourceToken);
+        },
+
+        .Func, .VarArgsFunc, .OldStyleFunc => {
+            const returnType = &ty.data.func.returnType;
+            if (returnType.isArray())
+                try p.errToken(.func_cannot_return_array, sourceToken);
+
+            if (returnType.isFunc())
+                try p.errToken(.func_cannot_return_func, sourceToken);
+
+            if (returnType.qual.@"const") {
+                try p.errStr(.qual_on_ret_type, sourceToken, "const");
+                returnType.qual.@"const" = false;
+            }
+
+            if (returnType.qual.@"volatile") {
+                try p.errStr(.qual_on_ret_type, sourceToken, "volatile");
+                returnType.qual.@"volatile" = false;
+            }
+
+            if (returnType.qual.atomic) {
+                try p.errStr(.qual_on_ret_type, sourceToken, "atomic");
+                returnType.qual.atomic = false;
+            }
+        },
+
+        .TypeofType, .DecayedTypeofType => return ty.data.subType.validateCombinedType(p, sourceToken),
+        .TypeofExpr, .DecayedTypeofExpr => return ty.data.expr.ty.validateCombinedType(p, sourceToken),
+        .Attributed => return ty.data.attributed.base.validateCombinedType(p, sourceToken),
+        else => {},
     }
 }
 
