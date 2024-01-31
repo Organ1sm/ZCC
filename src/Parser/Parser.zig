@@ -138,19 +138,10 @@ fn eatIdentifier(p: *Parser) !?TokenIndex {
 }
 
 fn expectIdentifier(p: *Parser) Error!TokenIndex {
-    if (p.getCurrToken() != .Identifier and p.getCurrToken() != .ExtendedIdentifier) {
-        try p.errExtra(
-            .expected_token,
-            p.index,
-            .{
-                .tokenId = .{
-                    .expected = .Identifier,
-                    .actual = p.getCurrToken(),
-                },
-            },
-        );
-        return error.ParsingFailed;
-    }
+    const actual = p.getCurrToken();
+    if (actual != .Identifier and actual != .ExtendedIdentifier)
+        return p.errExpectedToken(.Identifier, actual);
+
     return (try p.eatIdentifier()) orelse unreachable;
 }
 
@@ -174,23 +165,8 @@ pub fn lookAhead(p: *Parser, n: u32) TokenType {
 fn expectToken(p: *Parser, expected: TokenType) Error!TokenIndex {
     std.debug.assert(expected != .Identifier and expected != .ExtendedIdentifier); // use eatIdentifier
     const actual = p.getCurrToken();
-    if (actual != expected) {
-        switch (actual) {
-            .Invalid => try p.errExtra(.expected_invalid, p.index, .{ .expectedTokenId = expected }),
-            .Eof => try p.errExtra(.expected_eof, p.index, .{ .expectedTokenId = expected }),
-            else => try p.errExtra(
-                .expected_token,
-                p.index,
-                .{
-                    .tokenId = .{
-                        .expected = expected,
-                        .actual = actual,
-                    },
-                },
-            ),
-        }
-        return error.ParsingFailed;
-    }
+    if (actual != expected)
+        return p.errExpectedToken(expected, actual);
 
     defer p.index += 1;
     return p.index;
@@ -224,6 +200,24 @@ fn getTokenSlice(p: *Parser, index: TokenIndex) []const u8 {
 
     const res = lexer.next();
     return lexer.buffer[res.start..res.end];
+}
+
+pub fn errExpectedToken(p: *Parser, expected: TokenType, actual: TokenType) Error {
+    switch (actual) {
+        .Invalid => try p.errExtra(.expected_invalid, p.index, .{ .expectedTokenId = expected }),
+        .Eof => try p.errExtra(.expected_eof, p.index, .{ .expectedTokenId = expected }),
+        else => try p.errExtra(
+            .expected_token,
+            p.index,
+            .{
+                .tokenId = .{
+                    .expected = expected,
+                    .actual = actual,
+                },
+            },
+        ),
+    }
+    return error.ParsingFailed;
 }
 
 pub fn errStr(p: *Parser, tag: Diagnostics.Tag, index: TokenIndex, str: []const u8) Compilation.Error!void {
@@ -823,7 +817,12 @@ fn parseDeclaration(p: *Parser) Error!bool {
 
         switch (p.tokenIds[firstTokenIndex]) {
             .Asterisk, .LParen, .Identifier => {},
-            else => return false,
+            else => if (attrBufferTop == p.attrBuffer.items.len) {
+                return false;
+            } else {
+                try p.err(.expected_ident_or_l_paren);
+                return error.ParsingFailed;
+            },
         }
 
         var spec: TypeBuilder = .{};
@@ -2688,7 +2687,7 @@ pub fn initializerItem(p: *Parser, il: *InitList, initType: Type) Error!bool {
                 // TODO check if union already has field set
                 outer: while (true) {
                     for (curType.data.record.fields, 0..) |f, i| {
-                        if (f.isAnonymous()) {
+                        if (f.isAnonymousRecord()) {
                             // Recurse into anonymous field if it has a field by the name.
                             if (!f.ty.hasField(fieldName)) continue;
                             curType = f.ty.canonicalize(.standard);
@@ -5228,7 +5227,7 @@ fn fieldAccessExtra(
     isArrow: bool, // is arrow operator
 ) Error!Result {
     for (recordType.data.record.fields, 0..) |f, i| {
-        if (f.isAnonymous()) {
+        if (f.isAnonymousRecord()) {
             if (!f.ty.hasField(fieldName)) continue;
             const inner = try p.addNode(.{
                 .tag = if (isArrow) .MemberAccessPtrExpr else .MemberAccessExpr,
