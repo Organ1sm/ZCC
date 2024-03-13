@@ -817,12 +817,10 @@ fn parseDeclaration(p: *Parser) Error!bool {
 
         switch (p.tokenIds[firstTokenIndex]) {
             .Asterisk, .LParen, .Identifier => {},
-            else => if (attrBufferTop == p.attrBuffer.items.len) {
-                return false;
-            } else {
+            else => if (p.index != firstTokenIndex) {
                 try p.err(.expected_ident_or_l_paren);
                 return error.ParsingFailed;
-            },
+            } else return false,
         }
 
         var spec: TypeBuilder = .{};
