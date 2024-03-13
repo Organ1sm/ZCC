@@ -122,10 +122,10 @@ pub fn declareSymbol(
         break :blk elf.sections.get(sectionName);
     };
     const binding: u8 = switch (linkage) {
-        .Internal => std.elf.STB_LOCAL,
-        .Strong => std.elf.STB_GLOBAL,
-        .Weak => std.elf.STB_WEAK,
-        .LinkOnce => unreachable,
+        .internal => std.elf.STB_LOCAL,
+        .strong => std.elf.STB_GLOBAL,
+        .weak => std.elf.STB_WEAK,
+        .link_once => unreachable,
     };
     const symType: u8 = switch (@"type") {
         .func => std.elf.STT_FUNC,
@@ -138,7 +138,7 @@ pub fn declareSymbol(
         break :blk try std.fmt.allocPrint(elf.arena.allocator(), ".L.{d}", .{elf.unnamedSymbolMangle});
     };
 
-    const gop = if (linkage == .Internal)
+    const gop = if (linkage == .internal)
         try elf.localSymbols.getOrPut(elf.arena.child_allocator, name)
     else
         try elf.globalSymbols.getOrPut(elf.arena.child_allocator, name);

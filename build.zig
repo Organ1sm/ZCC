@@ -137,7 +137,7 @@ pub fn build(b: *std.Build) !void {
 
     const integration_test_runner = b.addRunArtifact(integration_tests);
     integration_test_runner.addArg(b.pathFromRoot("test/cases"));
-    integration_test_runner.addArg(b.zig_exe);
+    integration_test_runner.addArg(b.graph.zig_exe);
 
     b.installArtifact(integration_tests);
     test_step.dependOn(&integration_test_runner.step);
