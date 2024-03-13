@@ -183,7 +183,7 @@ fn genNode(func: *Fn, node: Tree.NodeIndex) Codegen.Error!Value {
             const section = try func.c.obj.getSection(.strings);
             const start = section.items.len;
             try section.appendSlice(strBytes);
-            const symbolName = try func.c.obj.declareSymbol(.strings, null, .Internal, .variable, start, strBytes.len);
+            const symbolName = try func.c.obj.declareSymbol(.strings, null, .internal, .variable, start, strBytes.len);
             return Value{ .symbol = symbolName };
         },
 

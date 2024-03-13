@@ -56,7 +56,7 @@ pub fn generateTree(comp: *Compilation, tree: Tree) Compilation.Error!*Object {
             .ThreadlocalExternVar,
             => {
                 const name = c.tree.getTokenSlice(c.nodeData[@intFromEnum(decl)].decl.name);
-                _ = try c.obj.declareSymbol(.undefined, name, .Strong, .external, 0, 0);
+                _ = try c.obj.declareSymbol(.undefined, name, .strong, .external, 0, 0);
             },
 
             // function definition
@@ -100,7 +100,7 @@ fn genFn(c: *Codegen, decl: NodeIndex) Error!void {
         else => unreachable,
     }
     const name = c.tree.getTokenSlice(c.nodeData[@intFromEnum(decl)].decl.name);
-    _ = try c.obj.declareSymbol(section, name, .Strong, .func, startLen, data.items.len - startLen);
+    _ = try c.obj.declareSymbol(section, name, .strong, .func, startLen, data.items.len - startLen);
 }
 
 fn genVar(c: *Codegen, decl: NodeIndex) Error!void {
