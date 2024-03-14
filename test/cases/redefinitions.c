@@ -46,6 +46,19 @@ int f2(int *a) {
     return *a;
 }
 
+struct S {
+    struct {
+        int a;
+    };
+    int a;
+    float a;
+    struct {
+        struct {
+            int a;
+        };
+    };
+};
+
 #define TESTS_SKIPPED 1
 // int f(int (*)(), double (*)[3]);
 // int f(int (*)(char *), double (*)[]);
@@ -72,10 +85,16 @@ int f2(int *a) {
     "redefinitions.c:26:9: error: redefinition of 'a'" \
     "redefinitions.c:25:15: note: previous definition is here" \
     "redefinitions.c:30:5: error: redefinition of 'func5'" \
-    "redefinitions.c:25:5: note: previous definition is here \
+    "redefinitions.c:25:5: note: previous definition is here" \
     "redefinitions.c:38:1: warning: type specifier missing, defaults to 'int' [-Wimplicit-int]" \
     "redefinitions.c:38:4: error: variable length arrays not allowed at file scope" \
     "redefinitions.c:38:1: error: redefinition of 'arr' with a different type" \
     "redefinitions.c:36:5: note: previous definition is here" \
     "redefinitions.c:45:5: error: redefinition of 'f2' with a different type" \
     "redefinitions.c:44:5: note: previous definition is here" \
+    "redefinitions.c:53:9: error: duplicate member 'a'" \
+    "redefinitions.c:51:13: note: previous definition is here" \
+    "redefinitions.c:54:11: error: duplicate member 'a'" \
+    "redefinitions.c:53:9: note: previous definition is here" \
+    "redefinitions.c:57:17: error: duplicate member 'a'" \
+    "redefinitions.c:54:11: note: previous definition is here" \
