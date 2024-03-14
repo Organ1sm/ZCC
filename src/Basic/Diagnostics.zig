@@ -103,6 +103,7 @@ pub const Options = packed struct {
     @"ignored-qualifiers": Kind = .default,
     @"integer-overflow": Kind = .default,
     @"extra-semi": Kind = .default,
+    @"gnu-binary-literal": Kind = .default,
 };
 
 list: std.ArrayListUnmanaged(Message) = .{},

@@ -1346,3 +1346,9 @@ pub const duplicate_member = struct {
     pub const extra = .str;
     pub const kind = .@"error";
 };
+pub const binary_integer_literal = struct {
+    pub const msg = "binary integer literals are a GNU extension";
+    pub const kind = .off;
+    pub const opt = "gnu-binary-literal";
+    pub const pedantic = true;
+};
