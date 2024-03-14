@@ -86,6 +86,12 @@ pub fn main() !void {
             comp.deinit();
         }
 
+        const case = std.mem.sliceTo(std.fs.path.basename(path), '.');
+        var caseNode = rootNode.start(case, 0);
+        caseNode.activate();
+        defer caseNode.end();
+        progress.refresh();
+
         const file = comp.addSource(path) catch |err| {
             failCount += 1;
             progress.log("could not add source '{s}': {s}\n", .{ path, @errorName(err) });
@@ -106,12 +112,6 @@ pub fn main() !void {
         }
 
         const builtinMacros = try comp.generateBuiltinMacros();
-
-        const case = std.mem.sliceTo(std.fs.path.basename(path), '.');
-        var caseNode = rootNode.start(case, 0);
-        caseNode.activate();
-        defer caseNode.end();
-        progress.refresh();
 
         comp.diag.errors = 0;
         var pp = zcc.Preprocessor.init(&comp);

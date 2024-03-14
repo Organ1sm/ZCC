@@ -61,6 +61,7 @@ pub const TokenType = enum(u8) {
     /// "-> : ; , ~ # ##"
     Arrow,
     Colon,
+    ColonColon,
     Semicolon,
     Comma,
     Tilde,
@@ -440,6 +441,7 @@ pub const TokenType = enum(u8) {
             .Ellipsis => "...",
             .Arrow => "->",
             .Colon => ":",
+            .ColonColon => "::",
             .Semicolon => ";",
             .Comma => ",",
             .Tilde => "~",
