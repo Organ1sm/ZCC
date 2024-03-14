@@ -5884,6 +5884,7 @@ fn parseIntegerLiteral(p: *Parser) Error!Result {
         slice = slice[2..];
         base = 16;
     } else if (std.mem.startsWith(u8, slice, "0b") or std.mem.startsWith(u8, slice, "0B")) {
+        try p.err(.binary_integer_literal);
         slice = slice[2..];
         base = 2;
     } else if (slice[0] == '0') {
