@@ -1316,3 +1316,33 @@ pub const extra_semi = struct {
     pub const kind = .off;
     pub const pedantic = true;
 };
+pub const func_field = struct {
+    pub const msg = "field declared as a function";
+    pub const kind = .@"error";
+};
+pub const vla_field = struct {
+    pub const msg = "variable length array fields extension is not supported";
+    pub const kind = .@"error";
+};
+pub const field_incomplete_ty = struct {
+    pub const msg = "field has incomplete type '{s}'";
+    pub const extra = .str;
+    pub const kind = .@"error";
+};
+pub const flexible_in_union = struct {
+    pub const msg = "flexible array member in union is not allowed";
+    pub const kind = .@"error";
+};
+pub const flexible_non_final = struct {
+    pub const msg = "flexible array member is not at the end of struct";
+    pub const kind = .@"error";
+};
+pub const flexible_in_empty = struct {
+    pub const msg = "flexible array member in otherwise empty struct";
+    pub const kind = .@"error";
+};
+pub const duplicate_member = struct {
+    pub const msg = "duplicate member '{s}'";
+    pub const extra = .str;
+    pub const kind = .@"error";
+};
