@@ -41,6 +41,7 @@ const State = enum {
     equal,
     bang,
     pipe,
+    colon,
     percent,
     asterisk,
     plus,
@@ -168,7 +169,9 @@ pub fn next(self: *Lexer) Token {
                     self.index += 1;
                     break;
                 },
-                ':' => {
+                ':' => if (self.comp.langOpts.standard.atLeast(.c2x)) {
+                    state = .colon;
+                } else {
                     id = .Colon;
                     self.index += 1;
                     break;
@@ -481,6 +484,18 @@ pub fn next(self: *Lexer) Token {
                 },
                 else => {
                     id = .Pipe;
+                    break;
+                },
+            },
+
+            .colon => switch (c) {
+                ':' => {
+                    id = .ColonColon;
+                    self.index += 1;
+                    break;
+                },
+                else => {
+                    id = .Colon;
                     break;
                 },
             },
@@ -1011,6 +1026,7 @@ pub fn next(self: *Lexer) Token {
             .angle_bracket_angle_bracket_left => id = TokenType.AngleBracketAngleBracketLeft,
             .angle_bracket_left => id = TokenType.AngleBracketLeft,
             .plus => id = TokenType.Plus,
+            .colon => id = .Colon,
             .percent => id = TokenType.Percent,
             .caret => id = TokenType.Caret,
             .asterisk => id = TokenType.Asterisk,
