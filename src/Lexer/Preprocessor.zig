@@ -1641,21 +1641,14 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: RawToken, lParen: Raw
     defer params.deinit();
 
     // parse the parameter list
+    var gnuVarArgs: []const u8 = ""; // gnu-named varargs
     var varArgs = false;
     var startIdx: u32 = undefined;
     while (true) {
-        var token = lexer.next();
-        if (token.id == .WhiteSpace) continue;
+        var token = lexer.nextNoWhiteSpace();
         if (token.id == .RParen) {
             startIdx = token.end;
             break;
-        }
-
-        if (params.items.len != 0) {
-            if (token.id != .Comma) {
-                try pp.addError(token, .invalid_token_param_list);
-                return skipToNewLine(lexer);
-            } else token = lexer.nextNoWhiteSpace();
         }
 
         if (token.id == .Eof)
@@ -1679,6 +1672,25 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: RawToken, lParen: Raw
         }
 
         try params.append(pp.getTokenSlice(token));
+
+        token = lexer.nextNoWhiteSpace();
+        if (token.id == .Ellipsis) {
+            try pp.addError(token, .gnu_va_macro);
+            gnuVarArgs = params.pop();
+            const rParen = lexer.nextNoWhiteSpace();
+            if (rParen.id != .RParen) {
+                try pp.addError(lParen, .missing_paren_param_list);
+                try pp.addError(lParen, .to_match_paren);
+                return skipToNewLine(lexer);
+            }
+            break;
+        } else if (token.id == .RParen) {
+            startIdx = token.end;
+            break;
+        } else if (token.id != .Comma) {
+            try pp.addError(token, .expected_comma_param_list);
+            return skipToNewLine(lexer);
+        }
     }
 
     var needWS = false;
@@ -1713,6 +1725,11 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: RawToken, lParen: Raw
                         break :blk;
 
                     const s = pp.getTokenSlice(param);
+                    if (std.mem.eql(u8, s, gnuVarArgs)) {
+                        token.id = .StringifyVarArgs;
+                        try pp.tokenBuffer.append(token);
+                        continue :tokenLoop;
+                    }
                     for (params.items, 0..) |p, i| {
                         if (std.mem.eql(u8, p, s)) {
                             token.id = .StringifyParam;
@@ -1762,14 +1779,18 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: RawToken, lParen: Raw
                 } else if (token.id.isMacroIdentifier()) {
                     token.id.simplifyMacroKeyword();
                     const s = pp.getTokenSlice(token);
-                    for (params.items, 0..) |param, i| {
-                        if (std.mem.eql(u8, param, s)) {
-                            // NOTE: it doesn't matter to assign .macro_param_no_expand
-                            // here in case a ## was the previous token, because
-                            // ## processing will eat this token with the same semantics
-                            token.id = .MacroParam;
-                            token.end = @intCast(i);
-                            break;
+                    if (std.mem.eql(u8, gnuVarArgs, s)) {
+                        token.id = .KeywordVarArgs;
+                    } else {
+                        for (params.items, 0..) |param, i| {
+                            if (std.mem.eql(u8, param, s)) {
+                                // NOTE: it doesn't matter to assign .macro_param_no_expand
+                                // here in case a ## was the previous token, because
+                                // ## processing will eat this token with the same semantics
+                                token.id = .MacroParam;
+                                token.end = @intCast(i);
+                                break;
+                            }
                         }
                     }
                 }
@@ -1784,7 +1805,7 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: RawToken, lParen: Raw
     try pp.defineMacro(macroName, .{
         .isFunc = true,
         .params = paramList,
-        .varArgs = varArgs,
+        .varArgs = varArgs or gnuVarArgs.len != 0,
         .tokens = tokenList,
         .loc = .{ .id = macroName.source, .byteOffset = macroName.start, .line = endIdx },
     });
