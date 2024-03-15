@@ -149,7 +149,18 @@ pub fn main() !void {
         }
 
         if (comp.onlyPreprocess) {
-            comp.renderErrors();
+            if (try checkExpectedErrors(&pp, &progress, &buffer)) |some| {
+                if (!some) {
+                    failCount += 1;
+                    continue;
+                }
+            } else {
+                comp.renderErrors();
+                if (comp.diag.errors != 0) {
+                    failCount += 1;
+                    continue;
+                }
+            }
 
             const expectedOutput = blk: {
                 const expandedPath = try std.fs.path.join(gpa, &.{ args[1], "expanded", std.fs.path.basename(path) });
@@ -225,65 +236,8 @@ pub fn main() !void {
             }
         }
 
-        if (pp.defines.get("EXPECTED_ERRORS")) |macro| {
-            const expectedCount = comp.diag.list.items.len;
-            var m = MsgWriter.init(gpa);
-            defer m.deinit();
-
-            zcc.Diagnostics.renderExtra(&comp, &m);
-
-            if (macro.isFunc) {
-                failCount += 1;
-                progress.log("invalid EXPECTED_ERRORS {}\n", .{macro});
-                continue;
-            }
-
-            var count: usize = 0;
-            for (macro.tokens) |str| {
-                if (str.id == .MacroWS) continue;
-                if (str.id != .StringLiteral) {
-                    failCount += 1;
-                    progress.log("EXPECTED_ERRORS tokens must be string literals (found {s})\n", .{@tagName(str.id)});
-                    break;
-                }
-
-                defer count += 1;
-                if (count >= expectedCount) continue;
-
-                defer buffer.items.len = 0;
-
-                std.debug.assert((try std.zig.string_literal.parseWrite(buffer.writer(), pp.getTokenSlice(str))) == .success);
-
-                try buffer.append('\n');
-                const expectedError = buffer.items;
-                const index = std.mem.indexOf(u8, m.buf.items, expectedError);
-                if (index == null) {
-                    failCount += 1;
-                    progress.log(
-                        \\
-                        \\======= expected to find error =======
-                        \\{s}
-                        \\
-                        \\=== but output does not contain it ===
-                        \\{s}
-                        \\
-                        \\
-                    , .{ expectedError, m.buf.items });
-                    continue :next_test;
-                }
-            }
-            if (count != expectedCount) {
-                failCount += 1;
-                progress.log(
-                    \\EXPECTED_ERRORS missing errors, expected {d} found {d},
-                    \\=== actual output ===
-                    \\{s}
-                    \\
-                    \\
-                , .{ count, expectedCount, m.buf.items });
-                continue;
-            }
-            passCount += 1;
+        if (try checkExpectedErrors(&pp, &progress, &buffer)) |some| {
+            if (some) passCount += 1 else failCount += 1;
             progress.log("passed\n", .{});
             continue;
         }
@@ -370,6 +324,65 @@ pub fn main() !void {
         print("{d} passed; {d} failed.\n\n", .{ passCount, failCount });
         std.process.exit(1);
     }
+}
+
+// returns true if passed
+fn checkExpectedErrors(pp: *zcc.Preprocessor, progress: *std.Progress, buf: *std.ArrayList(u8)) !?bool {
+    const macro = pp.defines.get("EXPECTED_ERRORS") orelse return null;
+
+    const expectedCount = pp.comp.diag.list.items.len;
+    var m = MsgWriter.init(pp.comp.gpa);
+    defer m.deinit();
+    zcc.Diagnostics.renderExtra(pp.comp, &m);
+
+    if (macro.isFunc) {
+        progress.log("invalid EXPECTED_ERRORS {}\n", .{macro});
+        return false;
+    }
+
+    var count: usize = 0;
+    for (macro.tokens) |str| {
+        if (str.id == .MacroWS) continue;
+        if (str.id != .StringLiteral) {
+            progress.log("EXPECTED_ERRORS tokens must be string literals (found {s})\n", .{@tagName(str.id)});
+            return false;
+        }
+        defer count += 1;
+        if (count >= expectedCount) continue;
+
+        defer buf.items.len = 0;
+        // realistically the strings will only contain \" if any escapes so we can use Zig's string parsing
+        std.debug.assert((try std.zig.string_literal.parseWrite(buf.writer(), pp.getTokenSlice(str))) == .success);
+        try buf.append('\n');
+        const expectedError = buf.items;
+
+        const index = std.mem.indexOf(u8, m.buf.items, expectedError);
+        if (index == null) {
+            progress.log(
+                \\
+                \\======= expected to find error =======
+                \\{s}
+                \\
+                \\=== but output does not contain it ===
+                \\{s}
+                \\
+                \\
+            , .{ expectedError, m.buf.items });
+            return false;
+        }
+    }
+
+    if (count != expectedCount) {
+        progress.log(
+            \\EXPECTED_ERRORS missing errors, expected {d} found {d},
+            \\=== actual output ===
+            \\{s}
+            \\
+            \\
+        , .{ count, expectedCount, m.buf.items });
+        return false;
+    }
+    return true;
 }
 
 const MsgWriter = struct {

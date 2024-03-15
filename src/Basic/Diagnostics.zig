@@ -104,6 +104,7 @@ pub const Options = packed struct {
     @"integer-overflow": Kind = .default,
     @"extra-semi": Kind = .default,
     @"gnu-binary-literal": Kind = .default,
+    @"variadic-macros": Kind = .default,
 };
 
 list: std.ArrayListUnmanaged(Message) = .{},

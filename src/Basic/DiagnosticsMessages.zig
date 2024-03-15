@@ -134,6 +134,10 @@ pub const invalid_token_param_list = struct {
     pub const msg = "invalid token in macro parameter list";
     pub const kind = .@"error";
 };
+pub const expected_comma_param_list = struct {
+    pub const msg = "expected comma in macro parameter list";
+    pub const kind = .@"error";
+};
 pub const hash_not_followed_param = struct {
     pub const msg = "'#' is not followed by a macro parameter";
     pub const kind = .@"error";
@@ -1350,5 +1354,11 @@ pub const binary_integer_literal = struct {
     pub const msg = "binary integer literals are a GNU extension";
     pub const kind = .off;
     pub const opt = "gnu-binary-literal";
+    pub const pedantic = true;
+};
+pub const gnu_va_macro = struct {
+    pub const msg = "named variadic macros are a GNU extension";
+    pub const opt = "variadic-macros";
+    pub const kind = .off;
     pub const pedantic = true;
 };
