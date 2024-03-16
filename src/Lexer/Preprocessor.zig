@@ -91,6 +91,7 @@ const BuiltinMacros = struct {
     const hasWarning = [1]RawToken{makeFeatCheckMacro(.MacroParamHasWarning)};
     const hasFeature = [1]RawToken{makeFeatCheckMacro(.MacroParamHasFeature)};
     const hasExtension = [1]RawToken{makeFeatCheckMacro(.MacroParamHasExtension)};
+    const hasBuiltin = [1]RawToken{makeFeatCheckMacro(.MacroParamHasBuiltin)};
     const isIdentifier = [1]RawToken{makeFeatCheckMacro(.MacroParamIsIdentifier)};
     const file = [1]RawToken{makeFeatCheckMacro(.MacroFile)};
     const line = [1]RawToken{makeFeatCheckMacro(.MacroLine)};
@@ -121,6 +122,7 @@ pub fn addBuiltinMacros(pp: *Preprocessor) !void {
     try pp.addBuiltinMacro("__has_warning", true, &BuiltinMacros.hasWarning);
     try pp.addBuiltinMacro("__has_feature", true, &BuiltinMacros.hasFeature);
     try pp.addBuiltinMacro("__has_extension", true, &BuiltinMacros.hasExtension);
+    try pp.addBuiltinMacro("__has_builtin", true, &BuiltinMacros.hasBuiltin);
     try pp.addBuiltinMacro("__is_identifier", true, &BuiltinMacros.isIdentifier);
     try pp.addBuiltinMacro("_Pragma", true, &BuiltinMacros.pragmaOperator);
     try pp.addBuiltinMacro("__FILE__", false, &BuiltinMacros.file);
@@ -910,11 +912,16 @@ fn handleBuiltinMacro(
         .MacroParamHasAttribute,
         .MacroParamHasFeature,
         .MacroParamHasExtension,
+        .MacroParamHasBuiltin,
         => {
             var invalid: ?Token = null;
             var identifier: ?Token = null;
             for (paramTokens) |tok| switch (tok.id) {
-                .Identifier, .ExtendedIdentifier => {
+                .Identifier,
+                .ExtendedIdentifier,
+                .BuiltinChooseExpr,
+                .BuiltinVaArg,
+                => {
                     if (identifier) |_| invalid = tok else identifier = tok;
                 },
                 .MacroWS => continue,
@@ -938,6 +945,7 @@ fn handleBuiltinMacro(
                 .MacroParamHasAttribute => AttrTag.fromString(identifierStr) != null,
                 .MacroParamHasFeature => Features.hasFeature(pp.comp, identifierStr),
                 .MacroParamHasExtension => Features.hasExtension(pp.comp, identifierStr),
+                .MacroParamHasBuiltin => pp.comp.builtins.hasBuiltin(identifierStr),
                 else => unreachable,
             };
         },
@@ -1088,6 +1096,7 @@ fn expandFuncMacro(
             .MacroParamHasFeature,
             .MacroParamHasExtension,
             .MacroParamIsIdentifier,
+            .MacroParamHasBuiltin,
             => {
                 const arg = expandedArgs.items[0];
                 const result = if (arg.len == 0) blk: {
