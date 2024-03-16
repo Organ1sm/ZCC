@@ -211,6 +211,9 @@ pub const Tag = enum(u8) {
     CallExprOne,
     /// data[0](data[1..])
     CallExpr,
+    ///decl
+    BuiltinCallExprOne,
+    BuiltinCallExpr,
     /// lhs.member
     MemberAccessExpr,
     /// lhs->member

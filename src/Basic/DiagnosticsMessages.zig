@@ -324,6 +324,14 @@ pub const implicit_func_decl = struct {
     pub const kind = .warning;
     pub const all = true;
 };
+pub const unknown_builtin = struct {
+    pub const msg = "use of unknown builtin '{s}'";
+    pub const extra = .str;
+    pub const opt = "implicit-function-declaration";
+    pub const kind = .@"error";
+    pub const all = true;
+};
+
 pub const expected_param_decl = struct {
     pub const msg = "expected parameter declaration";
     pub const kind = .@"error";
@@ -1252,6 +1260,11 @@ pub const predefined_top_level = struct {
     pub const opt = "predefined-identifier-outside-function";
     pub const kind = .warning;
 };
+pub const incompatible_va_arg = struct {
+    pub const msg = "first argument to va_arg, is of type '{s}' and not 'va_list'";
+    pub const extra = .str;
+    pub const kind = .@"error";
+};
 pub const too_many_scalar_init_braces = struct {
     pub const msg = "too many braces around scalar initializer";
     pub const opt = "many-braces-around-scalar-init";
@@ -1361,4 +1374,21 @@ pub const gnu_va_macro = struct {
     pub const opt = "variadic-macros";
     pub const kind = .off;
     pub const pedantic = true;
+};
+pub const builtin_must_be_called = struct {
+    pub const msg = "builtin function must be directly called";
+    pub const kind = .@"error";
+};
+pub const va_start_not_in_func = struct {
+    pub const msg = "'va_start' cannot be used outside a function";
+    pub const kind = .@"error";
+};
+pub const va_start_fixed_args = struct {
+    pub const msg = "'va_start' used in a function with fixed args";
+    pub const kind = .@"error";
+};
+pub const va_start_not_last_param = struct {
+    pub const msg = "second argument to 'va_start' is not the last named parameter";
+    pub const opt = "varargs";
+    pub const kind = .warning;
 };

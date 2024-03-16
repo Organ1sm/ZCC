@@ -270,6 +270,8 @@ pub const Specifier = enum {
     DecayedTypeofExpr,
     /// data.attributed
     Attributed,
+    /// special type used to implement __builtin_va_start
+    SpecialVaStart,
 };
 
 /// Determine if type matches the given specifier, recursing into typeof
@@ -624,47 +626,6 @@ pub fn integerPromotion(ty: Type, comp: *Compilation) Type {
     };
 }
 
-pub fn wideChar(comp: *Compilation) Type {
-    const os = comp.target.os.tag;
-    return switch (comp.target.cpu.arch) {
-        .xcore => .{ .specifier = .UChar },
-        .ve => .{ .specifier = .UInt },
-
-        .arm, .armeb, .thumb, .thumbeb => .{
-            .specifier = if (os != .windows and os != .netbsd and os != .openbsd) .UInt else .Int,
-        },
-
-        .aarch64, .aarch64_be, .aarch64_32 => .{
-            .specifier = if (!os.isDarwin() and os != .netbsd) .UInt else .Int,
-        },
-
-        .x86_64, .x86 => .{ .specifier = if (os == .windows) .UShort else .Int },
-        else => .{ .specifier = .Int },
-    };
-}
-
-pub fn ptrDiffT(comp: *Compilation) Type {
-    if (comp.target.os.tag == .windows and comp.target.ptrBitWidth() == 64)
-        return .{ .specifier = .LongLong };
-
-    return switch (comp.target.ptrBitWidth()) {
-        32 => .{ .specifier = .Int },
-        64 => .{ .specifier = .Long },
-        else => unreachable,
-    };
-}
-
-pub fn sizeT(comp: *Compilation) Type {
-    if (comp.target.os.tag == .windows and comp.target.ptrBitWidth() == 64)
-        return .{ .specifier = .ULongLong };
-
-    return switch (comp.target.ptrBitWidth()) {
-        32 => .{ .specifier = .UInt },
-        64 => .{ .specifier = .ULong },
-        else => unreachable,
-    };
-}
-
 pub fn hasIncompleteSize(ty: Type) bool {
     return switch (ty.specifier) {
         .Void,
@@ -837,6 +798,7 @@ pub fn sizeof(ty: Type, comp: *const Compilation) ?u64 {
         .TypeofExpr => ty.data.expr.ty.sizeof(comp),
 
         .Attributed => ty.data.attributed.base.sizeof(comp),
+        else => unreachable,
     };
 }
 
@@ -899,6 +861,8 @@ pub fn alignof(ty: Type, comp: *Compilation) u29 {
         .TypeofExpr, .DecayedTypeofExpr => ty.data.expr.ty.alignof(comp),
 
         .Attributed => ty.data.attributed.base.alignof(comp),
+
+        else => unreachable,
     };
 }
 
@@ -1327,6 +1291,7 @@ pub fn dump(ty: Type, w: anytype) @TypeOf(w).Error!void {
             try w.writeAll(")");
         },
 
+        .SpecialVaStart => try w.writeAll("(var start param)"),
         else => try w.writeAll(TypeBuilder.fromType(ty).toString().?),
     }
 }

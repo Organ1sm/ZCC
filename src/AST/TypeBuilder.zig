@@ -576,5 +576,7 @@ pub fn fromType(ty: Type) Specifier {
         .DecayedTypeofExpr => .{ .DecayedTypeofExpr = ty.data.expr },
 
         .Attributed => .{ .Attributed = ty.data.attributed },
+
+        else => unreachable,
     };
 }

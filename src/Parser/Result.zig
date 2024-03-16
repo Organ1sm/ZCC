@@ -301,7 +301,7 @@ pub fn adjustTypes(a: *Result, token: TokenIndex, b: *Result, p: *Parser, kind: 
             if (aIsPtr and bIsPtr) {
                 if (!a.ty.eql(b.ty, false))
                     try p.errStr(.incompatible_pointers, token, try p.typePairStr(a.ty, b.ty));
-                a.ty = Type.ptrDiffT(p.pp.comp);
+                a.ty = p.pp.comp.types.ptrdiff;
             }
 
             // Do integer promotion on b if needed
@@ -315,7 +315,14 @@ pub fn adjustTypes(a: *Result, token: TokenIndex, b: *Result, p: *Parser, kind: 
     return a.shouldEval(b, p);
 }
 
+/// Perform l-value to r-value conversion and decay functions and arrays to pointers.
+/// This function modifies `res` to ensure it's a valid r-value by decaying array types to pointers,
+/// converting functions to pointers, and stripping qualifiers from l-value types to convert them to r-values.
+/// @param res The Result struct representing the expression to convert.
+/// @param p The Parser instance containing the context for the conversion.
+/// @return Error!void The function returns an error if any of the conversion steps fail.
 pub fn lvalConversion(res: *Result, p: *Parser) Error!void {
+    // Convert a function type to a pointer to the function.
     if (res.ty.isFunc()) {
         const elemType = try p.arena.create(Type);
         elemType.* = res.ty;
@@ -323,13 +330,16 @@ pub fn lvalConversion(res: *Result, p: *Parser) Error!void {
         res.ty.data = .{ .subType = elemType };
         res.ty.alignment = 0;
         try res.un(p, .FunctionToPointer);
+    // Decay an array type to a pointer to its first element.
     } else if (res.ty.isArray()) {
         res.ty.decayArray();
         res.ty.alignment = 0;
         try res.un(p, .ArrayToPointer);
+    // Perform l-value to r-value conversion if the type is an l-value and we are not in a macro.
     } else if (!p.inMacro and AST.isLValue(p.nodes.slice(), p.data.items, p.valueMap, res.node)) {
         res.ty.qual = .{};
         res.ty.alignment = 0;
+        // Update the AST to reflect the l-value to r-value conversion.
         try res.un(p, .LValueToRValue);
     }
 }

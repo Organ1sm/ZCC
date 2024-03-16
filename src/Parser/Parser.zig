@@ -59,6 +59,7 @@ computedGotoTok: ?TokenIndex = null,
 
 /// Various variables that are different for each function.
 func: struct {
+    /// null if not in function, will always be plain func, varargs func or OldStyleFunc
     type: ?Type = null,
     name: TokenIndex = 0,
     ident: ?Result = null,
@@ -442,6 +443,10 @@ fn findSwitch(p: *Parser) ?*Scope.Switch {
 }
 
 fn nodeIs(p: *Parser, node: NodeIndex, tag: AstTag) bool {
+    return p.getNode(node, tag) != null;
+}
+
+fn getNode(p: *Parser, node: NodeIndex, tag: AstTag) ?NodeIndex {
     var cur = node;
     const tags = p.nodes.items(.tag);
     const data = p.nodes.items(.data);
@@ -450,9 +455,9 @@ fn nodeIs(p: *Parser, node: NodeIndex, tag: AstTag) bool {
         if (curTag == .ParenExpr) {
             cur = data[@intFromEnum(cur)].unExpr;
         } else if (curTag == tag) {
-            return true;
+            return cur;
         } else {
-            return false;
+            return null;
         }
     }
 }
@@ -536,85 +541,6 @@ fn pragma(p: *Parser) !bool {
     return foundPragma;
 }
 
-/// Define va_list based on the target architecture and operating system
-fn defineVaList(p: *Parser) !void {
-    const Kind = enum { CharPtr, VoidPtr, AArch64VaList, X86_64VaList };
-
-    const kind: Kind = switch (p.pp.comp.target.cpu.arch) {
-        .aarch64 => switch (p.pp.comp.target.os.tag) {
-            .windows => @as(Kind, .CharPtr),
-            .ios, .macos, .tvos, .watchos => .CharPtr,
-            else => .AArch64VaList,
-        },
-        .sparc, .wasm32, .wasm64, .bpfel, .bpfeb, .riscv32, .riscv64, .avr, .spirv32, .spirv64 => .VoidPtr,
-        .powerpc => switch (p.pp.comp.target.os.tag) {
-            .ios, .macos, .tvos, .watchos, .aix => @as(Kind, .CharPtr),
-            else => return, // unknown
-        },
-        .x86 => .CharPtr,
-        .x86_64 => switch (p.pp.comp.target.os.tag) {
-            .windows => @as(Kind, .CharPtr),
-            else => .X86_64VaList,
-        },
-        else => return, // unknown
-    };
-
-    var ty: Type = undefined;
-    switch (kind) {
-        .CharPtr => ty = .{ .specifier = .Char },
-        .VoidPtr => ty = .{ .specifier = .Void },
-        .AArch64VaList => {
-            const recordType = try p.arena.create(Type.Record);
-            recordType.* = .{
-                .name = "__va_list_tag",
-                .fields = try p.arena.alloc(Type.Record.Field, 5),
-                .size = 32,
-                .alignment = 8,
-            };
-            const voidType = try p.arena.create(Type);
-            voidType.* = .{ .specifier = .Void };
-            const voidPtr = Type{ .specifier = .Pointer, .data = .{ .subType = voidType } };
-            recordType.fields[0] = .{ .name = "__stack", .ty = voidPtr };
-            recordType.fields[1] = .{ .name = "__gr_top", .ty = voidPtr };
-            recordType.fields[2] = .{ .name = "__vr_top", .ty = voidPtr };
-            recordType.fields[3] = .{ .name = "__gr_offs", .ty = .{ .specifier = .Int } };
-            recordType.fields[4] = .{ .name = "__vr_offs", .ty = .{ .specifier = .Int } };
-            ty = .{ .specifier = .Struct, .data = .{ .record = recordType } };
-        },
-
-        .X86_64VaList => {
-            const recordType = try p.arena.create(Type.Record);
-            recordType.* = .{
-                .name = "__va_list_tag",
-                .fields = try p.arena.alloc(Type.Record.Field, 4),
-                .size = 24,
-                .alignment = 8,
-            };
-            const voidType = try p.arena.create(Type);
-            voidType.* = .{ .specifier = .Void };
-            const voidPtr = Type{ .specifier = .Pointer, .data = .{ .subType = voidType } };
-            recordType.fields[0] = .{ .name = "gp_offset", .ty = .{ .specifier = .UInt } };
-            recordType.fields[1] = .{ .name = "fp_offset", .ty = .{ .specifier = .UInt } };
-            recordType.fields[2] = .{ .name = "overflow_arg_area", .ty = voidPtr };
-            recordType.fields[3] = .{ .name = "reg_save_area", .ty = voidPtr };
-            ty = .{ .specifier = .Struct, .data = .{ .record = recordType } };
-        },
-    }
-
-    if (kind == .CharPtr or kind == .VoidPtr) {
-        const elemType = try p.arena.create(Type);
-        elemType.* = ty;
-        ty = Type{ .specifier = .Pointer, .data = .{ .subType = elemType } };
-    } else {
-        const arrType = try p.arena.create(Type.Array);
-        arrType.* = .{ .len = 1, .elem = ty };
-        ty = Type{ .specifier = .Array, .data = .{ .array = arrType } };
-    }
-
-    const sym = Scope.Symbol{ .name = "__builtin_va_list", .type = ty, .nameToken = 0 };
-    try p.scopes.append(.{ .typedef = sym });
-}
-
 /// root : (decl | inline assembly ';' | static-assert-declaration)*
 pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
     pp.comp.pragmaEvent(.BeforeParse);
@@ -658,7 +584,13 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
     }
 
     _ = try p.addNode(.{ .tag = .Invalid, .type = undefined, .data = undefined });
-    try p.defineVaList();
+    {
+        const ty = &pp.comp.types.vaList;
+        const sym = Scope.Symbol{ .name = "__builtin_va_list", .type = ty.*, .nameToken = 0 };
+        try p.scopes.append(.{ .typedef = sym });
+
+        if (ty.isArray()) ty.decayArray();
+    }
 
     while (p.eat(.Eof) == null) {
         const foundPragma = p.pragma() catch |er| switch (er) {
@@ -868,7 +800,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
         break :blk DeclSpec{ .type = try spec.finish(p) };
     };
 
-    var initD = (try p.parseInitDeclarator(&declSpec)) orelse {
+    var ID = (try p.parseInitDeclarator(&declSpec)) orelse {
         // eat ';'
         _ = try p.expectToken(.Semicolon);
         if (declSpec.type.is(.Enum) or (declSpec.type.isRecord() and !declSpec.type.isAnonymousRecord() and !declSpec.type.isTypeof()))
@@ -879,15 +811,15 @@ fn parseDeclaration(p: *Parser) Error!bool {
     };
 
     // check for funtion definition
-    if (initD.d.funcDeclarator != null and
-        initD.initializer == .none and
-        initD.d.type.isFunc())
+    if (ID.d.funcDeclarator != null and
+        ID.initializer == .none and
+        ID.d.type.isFunc())
     fndef: {
         switch (p.getCurrToken()) {
             .Comma, .Semicolon => break :fndef,
             .LBrace => {},
             else => {
-                if (initD.d.oldTypeFunc == null) {
+                if (ID.d.oldTypeFunc == null) {
                     try p.err(.expected_fn_body);
                     return true;
                 }
@@ -897,22 +829,23 @@ fn parseDeclaration(p: *Parser) Error!bool {
         if (p.func.type != null)
             try p.err(.func_not_in_root);
 
-        if (p.findSymbol(initD.d.name, .definition)) |sym| {
+        if (p.findSymbol(ID.d.name, .definition)) |sym| {
             if (sym == .definition) {
-                try p.errStr(.redefinition, initD.d.name, p.getTokenSlice(initD.d.name));
+                try p.errStr(.redefinition, ID.d.name, p.getTokenSlice(ID.d.name));
                 try p.errToken(.previous_definition, sym.definition.nameToken);
             }
         }
 
-        try p.scopes.append(.{ .definition = .{
-            .name = p.getTokenSlice(initD.d.name),
-            .type = initD.d.type,
-            .nameToken = initD.d.name,
-        } });
+        const sym = Scope.Symbol{
+            .name = p.getTokenSlice(ID.d.name),
+            .type = ID.d.type,
+            .nameToken = ID.d.name,
+        };
+        try p.scopes.append(.{ .definition = sym });
 
         const func = p.func;
         defer p.func = func;
-        p.func = .{ .type = initD.d.type, .name = initD.d.name };
+        p.func = .{ .type = ID.d.type, .name = ID.d.name };
 
         const scopesTop = p.scopes.items.len;
         defer p.scopes.items.len = scopesTop;
@@ -921,11 +854,11 @@ fn parseDeclaration(p: *Parser) Error!bool {
         try p.scopes.append(.block);
 
         // collect old style parameters
-        if (initD.d.oldTypeFunc != null) {
+        if (ID.d.oldTypeFunc != null) {
             const paramBufferTop = p.paramBuffer.items.len;
             defer p.paramBuffer.items.len = paramBufferTop;
 
-            initD.d.type.specifier = .Func;
+            ID.d.type.specifier = .Func;
             paramLoop: while (true) {
                 const paramDeclSpec = (try p.parseDeclSpec(true)) orelse break;
                 if (p.eat(.Semicolon)) |semi| {
@@ -960,7 +893,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
                     // find and correct parameter types
                     // TODO check for missing declaration and redefinition
                     const name = p.getTokenSlice(d.name);
-                    for (initD.d.type.data.func.params) |*param| {
+                    for (ID.d.type.data.func.params) |*param| {
                         if (std.mem.eql(u8, param.name, name)) {
                             param.ty = d.type;
                             break;
@@ -976,7 +909,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
                 _ = try p.expectToken(.Semicolon);
             }
         } else {
-            for (initD.d.type.data.func.params) |param| {
+            for (ID.d.type.data.func.params) |param| {
                 if (param.ty.hasUnboundVLA())
                     try p.errToken(.unbound_vla, param.nameToken);
                 if (param.ty.hasIncompleteSize() and !param.ty.is(.Void))
@@ -997,14 +930,14 @@ fn parseDeclaration(p: *Parser) Error!bool {
         }
 
         const body = (try p.parseCompoundStmt(true, null)) orelse {
-            std.debug.assert(initD.d.oldTypeFunc != null);
+            std.debug.assert(ID.d.oldTypeFunc != null);
             try p.err(.expected_fn_body);
             return true;
         };
         const node = try p.addNode(.{
-            .type = initD.d.type,
+            .type = ID.d.type,
             .tag = try declSpec.validateFnDef(p),
-            .data = .{ .decl = .{ .name = initD.d.name, .node = body } },
+            .data = .{ .decl = .{ .name = ID.d.name, .node = body } },
         });
         try p.declBuffer.append(node);
 
@@ -1031,28 +964,28 @@ fn parseDeclaration(p: *Parser) Error!bool {
 
     // Declare all variable/typedef declarators.
     while (true) {
-        if (initD.d.oldTypeFunc) |tokenIdx|
+        if (ID.d.oldTypeFunc) |tokenIdx|
             try p.errToken(.invalid_old_style_params, tokenIdx);
 
-        const tag = try declSpec.validate(p, &initD.d.type, initD.initializer != .none);
+        const tag = try declSpec.validate(p, &ID.d.type, ID.initializer != .none);
         const attrs = p.attrBuffer.items[attrBufferTop..];
-        initD.d.type = try initD.d.type.withAttributes(p.arena, attrs);
+        ID.d.type = try ID.d.type.withAttributes(p.arena, attrs);
 
         const node = try p.addNode(.{
-            .type = initD.d.type,
+            .type = ID.d.type,
             .tag = tag,
-            .data = .{ .decl = .{ .name = initD.d.name, .node = initD.initializer } },
+            .data = .{ .decl = .{ .name = ID.d.name, .node = ID.initializer } },
         });
         try p.declBuffer.append(node);
 
         const sym = Scope.Symbol{
-            .name = p.getTokenSlice(initD.d.name),
-            .type = initD.d.type,
-            .nameToken = initD.d.name,
+            .name = p.getTokenSlice(ID.d.name),
+            .type = ID.d.type,
+            .nameToken = ID.d.name,
         };
         if (declSpec.storageClass == .typedef) {
             try p.scopes.append(.{ .typedef = sym });
-        } else if (initD.initializer != .none) {
+        } else if (ID.initializer != .none) {
             try p.scopes.append(.{ .definition = sym });
         } else {
             try p.scopes.append(.{ .declaration = sym });
@@ -1061,7 +994,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
         if (p.eat(.Comma) == null)
             break;
 
-        initD = (try p.parseInitDeclarator(&declSpec)) orelse {
+        ID = (try p.parseInitDeclarator(&declSpec)) orelse {
             try p.err(.expected_ident_or_l_paren);
             continue;
         };
@@ -2435,15 +2368,21 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: Declarator
         return resType;
     } else if (p.eat(.LParen)) |lp| {
         d.funcDeclarator = lp;
-        if (p.getCurrToken() == .Ellipsis) {
-            try p.err(.param_before_var_args);
-            p.index += 1;
-        }
 
         const funcType = try p.arena.create(Type.Function);
         funcType.params = &.{};
         funcType.returnType.specifier = .Void;
         var specifier: Type.Specifier = .Func;
+
+        if (p.eat(.Ellipsis)) |_| {
+            try p.err(.param_before_var_args);
+            try p.expectClosing(lp, .RParen);
+            var resType = Type{ .specifier = .Func, .data = .{ .func = funcType } };
+
+            const outer = try p.directDeclarator(baseType, d, kind);
+            try resType.combine(outer, p, lp);
+            return resType;
+        }
 
         if (try p.parseParamDecls()) |params| {
             funcType.params = params;
@@ -4701,6 +4640,7 @@ fn removeUnusedWarningForTok(p: *Parser, lastExprToken: TokenIndex) void {
 ///  | '(' typeName ')' cast-expression
 ///  | '(' typeName ')' '{' initializerItems '}'
 ///  | __builtin_choose_expr '(' const-expression ',' assign-expression ',' assign-expression ')'
+///  | __builtin_va_arg '('  assign-expression ',' typeName ')'
 ///  | unary-expression
 fn parseCastExpr(p: *Parser) Error!Result {
     if (p.eat(.LParen)) |lp| {
@@ -4782,6 +4722,7 @@ fn parseCastExpr(p: *Parser) Error!Result {
 
     switch (p.getCurrToken()) {
         .BuiltinChooseExpr => return p.parseBuiltinChooseExpr(),
+        .BuiltinVaArg => return p.builtinVaArg(),
         // TODO: other special-cased builtins
         else => {},
     }
@@ -4825,6 +4766,36 @@ fn parseBuiltinChooseExpr(p: *Parser) Error!Result {
     });
 
     return cond;
+}
+
+fn builtinVaArg(p: *Parser) Error!Result {
+    const builtinToken = p.index;
+    p.index += 1;
+
+    const lp = try p.expectToken(.LParen);
+    const vaListToken = p.index;
+    var vaList = try p.parseAssignExpr();
+    try vaList.expect(p);
+    try vaList.lvalConversion(p);
+
+    _ = try p.expectToken(.Comma);
+
+    const ty = (try p.parseTypeName()) orelse {
+        try p.err(.expected_type);
+        return error.ParsingFailed;
+    };
+    try p.expectClosing(lp, .RParen);
+
+    if (!vaList.ty.eql(p.pp.comp.types.vaList, true)) {
+        try p.errStr(.incompatible_va_arg, vaListToken, try p.typeStr(vaList.ty));
+        return error.ParsingFailed;
+    }
+
+    return Result{ .ty = ty, .node = try p.addNode(.{
+        .tag = .BuiltinCallExprOne,
+        .type = ty,
+        .data = .{ .decl = .{ .name = builtinToken, .node = vaList.node } },
+    }) };
 }
 
 /// unaryExpr
@@ -5078,7 +5049,7 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
                 try p.errStr(.invalid_sizeof, expectedParen - 1, try p.typeStr(res.ty));
             }
 
-            res.ty = Type.sizeT(p.pp.comp);
+            res.ty = p.pp.comp.types.size;
             try res.un(p, .SizeOfExpr);
             return res;
         },
@@ -5104,7 +5075,7 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
                 try p.errToken(.alignof_expr, expectedParen);
             }
 
-            res.ty = Type.sizeT(p.pp.comp);
+            res.ty = p.pp.comp.types.size;
             res.value = .{ .unsigned = res.ty.alignof(p.pp.comp) };
             try res.un(p, .AlignOfExpr);
             return res;
@@ -5346,82 +5317,108 @@ fn parseCallExpr(p: *Parser, lhs: Result) Error!Result {
     try p.listBuffer.append(func.node);
     var argCount: u32 = 0;
 
+    const builtinNode = p.getNode(lhs.node, .BuiltinCallExprOne);
+
     var firstAfter = lParen;
-    if (p.eat(.RParen) == null) {
-        while (true) {
-            const paramToken = p.index;
-            if (argCount == params.len)
-                firstAfter = p.index;
+    while (p.eat(.RParen) == null) {
+        const paramToken = p.index;
+        if (argCount == params.len)
+            firstAfter = p.index;
 
-            var arg = try p.parseAssignExpr();
-            try arg.expect(p);
-            try arg.lvalConversion(p);
-            if (arg.ty.hasIncompleteSize() and !arg.ty.is(.Void))
-                return error.ParsingFailed;
+        var arg = try p.parseAssignExpr();
+        try arg.expect(p);
+        const rawArgNode = arg.node;
+        try arg.lvalConversion(p);
+        if (arg.ty.hasIncompleteSize() and !arg.ty.is(.Void))
+            return error.ParsingFailed;
 
-            if (argCount < params.len) {
-                const paramType = params[argCount].ty;
-                if (paramType.is(.Bool)) {
-                    // this is ridiculous but it's what clang does
-                    if (arg.ty.isInt() or arg.ty.isFloat() or arg.ty.isPointer())
-                        try arg.boolCast(p, paramType)
-                    else
-                        try p.reportParam(paramToken, arg, argCount, params);
-                } else if (paramType.isInt()) {
-                    if (arg.ty.isInt() or arg.ty.isFloat()) {
-                        try arg.intCast(p, paramType);
-                    } else if (arg.ty.isPointer()) {
-                        try p.errStr(
-                            .implicit_ptr_to_int,
-                            paramToken,
-                            try p.typePairStrExtra(arg.ty, " to ", paramType),
-                        );
-                        try p.errToken(.parameter_here, params[argCount].nameToken);
-                        try arg.intCast(p, paramType);
-                    } else {
-                        try p.reportParam(paramToken, arg, argCount, params);
-                    }
-                } else if (paramType.isFloat()) {
-                    if (arg.ty.isInt() or arg.ty.isFloat())
-                        try arg.floatCast(p, paramType)
-                    else
-                        try p.reportParam(paramToken, arg, argCount, params);
-                } else if (paramType.isPointer()) {
-                    if (arg.isZero()) {
-                        try arg.nullCast(p, paramType);
-                    } else if (arg.ty.isInt()) {
-                        try p.errStr(
-                            .implicit_int_to_ptr,
-                            paramToken,
-                            try p.typePairStrExtra(arg.ty, " to ", paramType),
-                        );
-                        try p.errToken(.parameter_here, params[argCount].nameToken);
-                        try arg.intCast(p, paramType);
-                    } else if (!arg.ty.isVoidStar() and !paramType.isVoidStar() and !paramType.eql(arg.ty, false)) {
-                        try p.reportParam(paramToken, arg, argCount, params);
-                    }
-                } else if (paramType.isRecord()) {
-                    if (!paramType.eql(arg.ty, false)) {
-                        try p.reportParam(paramToken, arg, argCount, params);
-                    }
-                } else {
-                    // should be unreachable
-                    try p.reportParam(paramToken, arg, argCount, params);
-                }
-            } else {
-                if (arg.ty.isInt())
-                    try arg.intCast(p, arg.ty.integerPromotion(p.pp.comp));
-                if (arg.ty.is(.Float))
-                    try arg.floatCast(p, .{ .specifier = .Double });
-            }
-
+        if (argCount >= params.len) {
+            if (arg.ty.isInt()) try arg.intCast(p, arg.ty.integerPromotion(p.pp.comp));
+            if (arg.ty.is(.Float)) try arg.floatCast(p, .{ .specifier = .Double });
             try arg.saveValue(p);
             try p.listBuffer.append(arg.node);
             argCount += 1;
-            _ = p.eat(.Comma) orelse break;
+
+            _ = p.eat(.Comma) orelse {
+                try p.expectClosing(lParen, .RParen);
+                break;
+            };
+            continue;
         }
 
-        try p.expectClosing(lParen, .RParen);
+        const paramType = params[argCount].ty;
+        if (paramType.is(.SpecialVaStart)) vaStart: {
+            const builtinToken = p.nodes.items(.data)[@intFromEnum(builtinNode.?)].decl.name;
+            const funcType = p.func.type orelse {
+                try p.errToken(.va_start_not_in_func, builtinToken);
+                break :vaStart;
+            };
+            if (funcType.specifier != .VarArgsFunc) {
+                try p.errToken(.va_start_fixed_args, builtinToken);
+                break :vaStart;
+            }
+            const lastParamName = funcType.data.func.params[funcType.data.func.params.len - 1].name;
+            const declRef = p.getNode(rawArgNode, .DeclRefExpr);
+            if (declRef == null or
+                !std.mem.eql(u8, p.getTokenSlice(p.nodes.items(.data)[@intFromEnum(declRef.?)].declRef), lastParamName))
+            {
+                try p.errToken(.va_start_not_last_param, paramToken);
+            }
+        } else if (paramType.is(.Bool)) {
+            // this is ridiculous but it's what clang does
+            if (arg.ty.isInt() or arg.ty.isFloat() or arg.ty.isPointer())
+                try arg.boolCast(p, paramType)
+            else
+                try p.reportParam(paramToken, arg, argCount, params);
+        } else if (paramType.isInt()) {
+            if (arg.ty.isInt() or arg.ty.isFloat()) {
+                try arg.intCast(p, paramType);
+            } else if (arg.ty.isPointer()) {
+                try p.errStr(
+                    .implicit_ptr_to_int,
+                    paramToken,
+                    try p.typePairStrExtra(arg.ty, " to ", paramType),
+                );
+                try p.errToken(.parameter_here, params[argCount].nameToken);
+                try arg.intCast(p, paramType);
+            } else {
+                try p.reportParam(paramToken, arg, argCount, params);
+            }
+        } else if (paramType.isFloat()) {
+            if (arg.ty.isInt() or arg.ty.isFloat())
+                try arg.floatCast(p, paramType)
+            else
+                try p.reportParam(paramToken, arg, argCount, params);
+        } else if (paramType.isPointer()) {
+            if (arg.isZero()) {
+                try arg.nullCast(p, paramType);
+            } else if (arg.ty.isInt()) {
+                try p.errStr(
+                    .implicit_int_to_ptr,
+                    paramToken,
+                    try p.typePairStrExtra(arg.ty, " to ", paramType),
+                );
+                try p.errToken(.parameter_here, params[argCount].nameToken);
+                try arg.intCast(p, paramType);
+            } else if (!arg.ty.isVoidStar() and !paramType.isVoidStar() and !paramType.eql(arg.ty, false)) {
+                try p.reportParam(paramToken, arg, argCount, params);
+            }
+        } else if (paramType.isRecord()) {
+            if (!paramType.eql(arg.ty, false)) {
+                try p.reportParam(paramToken, arg, argCount, params);
+            }
+        } else {
+            // should be unreachable
+            try p.reportParam(paramToken, arg, argCount, params);
+        }
+
+        try arg.saveValue(p);
+        try p.listBuffer.append(arg.node);
+        argCount += 1;
+        _ = p.eat(.Comma) orelse {
+            try p.expectClosing(lParen, .RParen);
+            break;
+        };
     }
 
     const extra = Diagnostics.Message.Extra{
@@ -5438,6 +5435,24 @@ fn parseCallExpr(p: *Parser, lhs: Result) Error!Result {
 
     if (ty.is(.VarArgsFunc) and argCount < params.len)
         try p.errExtra(.expected_at_least_arguments, firstAfter, extra);
+
+    if (builtinNode) |some| {
+        const index = @intFromEnum(some);
+        var callNode = p.nodes.get(index);
+        defer p.nodes.set(index, callNode);
+
+        const args = p.listBuffer.items[listBufferTop..];
+        switch (argCount) {
+            0 => {},
+            1 => callNode.data.decl.node = args[1], // args[0] == func.node
+            else => {
+                callNode.tag = .BuiltinCallExpr;
+                args[0] = @enumFromInt(callNode.data.decl.name);
+                callNode.data = .{ .range = try p.addList(args) };
+            },
+        }
+        return Result{ .node = some, .ty = callNode.type.getReturnType() };
+    }
 
     var callNode: AST.Node = .{
         .tag = .CallExprOne,
@@ -5491,11 +5506,33 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
     switch (p.getCurrToken()) {
         .Identifier, .ExtendedIdentifier => {
             const nameToken = p.expectIdentifier() catch unreachable;
+            const name = p.getTokenSlice(nameToken);
+            if (p.pp.comp.builtins.get(name)) |some| {
+                for (p.tokenIds[p.index..]) |id| switch (id) {
+                    .RParen => {}, // closing grouped expr
+                    .LParen => break, // beginning of a call
+                    else => {
+                        try p.errToken(.builtin_must_be_called, nameToken);
+                        return error.ParsingFailed;
+                    },
+                };
+                return Result{
+                    .ty = some,
+                    .node = try p.addNode(.{
+                        .tag = .BuiltinCallExprOne,
+                        .type = some,
+                        .data = .{ .decl = .{ .name = nameToken, .node = .none } },
+                    }),
+                };
+            }
             const sym = p.findSymbol(nameToken, .reference) orelse {
                 if (p.getCurrToken() == .LParen) {
                     // implicitly declare simple functions as like `puts("foo")`;
-                    const name = p.getTokenSlice(nameToken);
-                    try p.errStr(.implicit_func_decl, nameToken, name);
+                    // allow implicitly declaring functions before C99 like `puts("foo")`
+                    if (std.mem.startsWith(u8, name, "__builtin_"))
+                        try p.errStr(.unknown_builtin, nameToken, name)
+                    else
+                        try p.errStr(.implicit_func_decl, nameToken, name);
 
                     const funcType = try p.arena.create(Type.Function);
                     funcType.* = .{ .returnType = .{ .specifier = .Int }, .params = &.{} };
@@ -5967,7 +6004,7 @@ fn parseCharLiteral(p: *Parser) Error!Result {
     defer p.index += 1;
     const ty: Type = switch (p.getCurrToken()) {
         .CharLiteral => .{ .specifier = .Int },
-        .CharLiteralWide => Type.wideChar(p.pp.comp),
+        .CharLiteralWide => p.pp.comp.types.wchar,
         .CharLiteralUTF_16 => .{ .specifier = .UShort },
         .CharLiteralUTF_32 => .{ .specifier = .ULong },
         else => unreachable,
