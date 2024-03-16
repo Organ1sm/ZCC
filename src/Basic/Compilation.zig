@@ -4,6 +4,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const Source = @import("Source.zig");
 const Diagnostics = @import("../Basic/Diagnostics.zig");
+const Builtins = @import("Builtins.zig");
 const Token = @import("../Lexer/Token.zig").Token;
 const LangOpts = @import("LangOpts.zig");
 const Type = @import("../AST/Type.zig");
@@ -34,6 +35,13 @@ dumpTokens: bool = false,
 dumpRawTokens: bool = false,
 langOpts: LangOpts = .{},
 generatedBuffer: std.ArrayList(u8),
+builtins: Builtins = .{},
+types: struct {
+    wchar: Type,
+    ptrdiff: Type,
+    size: Type,
+    vaList: Type,
+} = undefined,
 
 pub fn init(gpa: Allocator) Compilation {
     return .{
@@ -62,6 +70,7 @@ pub fn deinit(comp: *Compilation) void {
     if (comp.builtinHeaderPath) |some|
         comp.gpa.free(some);
     comp.generatedBuffer.deinit();
+    comp.builtins.deinit(comp.gpa);
 }
 
 /// Dec 31 9999 23:59:59
@@ -106,6 +115,9 @@ fn generateDateAndTime(w: anytype) !void {
 
 /// Generate builtin macros that will be available to each source file.
 pub fn generateBuiltinMacros(comp: *Compilation) !Source {
+    try comp.generateBuiltinTypes();
+    comp.builtins = try Builtins.create(comp);
+
     var buf = std.ArrayList(u8).init(comp.gpa);
     defer buf.deinit();
 
@@ -303,12 +315,12 @@ pub fn generateBuiltinMacros(comp: *Compilation) !Source {
     try comp.generateIntMax(w, "__INT_MAX__", .{ .specifier = .Int });
     try comp.generateIntMax(w, "__LONG_MAX__", .{ .specifier = .Long });
     try comp.generateIntMax(w, "__LONG_LONG_MAX__", .{ .specifier = .LongLong });
-    try comp.generateIntMax(w, "__WCHAR_MAX__", Type.wideChar(comp));
+    try comp.generateIntMax(w, "__WCHAR_MAX__", comp.types.wchar);
     // try comp.generateIntMax(w, "__WINT_MAX__", Type.wideChar(comp));
     // try comp.generateIntMax(w, "__INTMAX_MAX__", Type.wideChar(comp));
-    try comp.generateIntMax(w, "__SIZE_MAX__", Type.sizeT(comp));
+    try comp.generateIntMax(w, "__SIZE_MAX__", comp.types.size);
     // try comp.generateIntMax(w, "__UINTMAX_MAX__", Type.wideChar(comp));
-    try comp.generateIntMax(w, "__PTRDIFF_MAX__", Type.ptrDiffT(comp));
+    try comp.generateIntMax(w, "__PTRDIFF_MAX__", comp.types.ptrdiff);
     // try comp.generateIntMax(w, "__INTPTR_MAX__", Type.wideChar(comp));
     // try comp.generateIntMax(w, "__UINTPTR_MAX__", Type.sizeT(comp));
 
@@ -321,15 +333,15 @@ pub fn generateBuiltinMacros(comp: *Compilation) !Source {
     try comp.generateSizeofType(w, "__SIZEOF_LONG__", .{ .specifier = .Long });
     try comp.generateSizeofType(w, "__SIZEOF_LONG_LONG__", .{ .specifier = .LongLong });
     try comp.generateSizeofType(w, "__SIZEOF_POINTER__", .{ .specifier = .Pointer });
-    try comp.generateSizeofType(w, "__SIZEOF_PTRDIFF_T__", Type.ptrDiffT(comp));
-    try comp.generateSizeofType(w, "__SIZEOF_SIZE_T__", Type.sizeT(comp));
-    try comp.generateSizeofType(w, "__SIZEOF_WCHAR_T__", Type.wideChar(comp));
+    try comp.generateSizeofType(w, "__SIZEOF_PTRDIFF_T__", comp.types.ptrdiff);
+    try comp.generateSizeofType(w, "__SIZEOF_SIZE_T__", comp.types.size);
+    try comp.generateSizeofType(w, "__SIZEOF_WCHAR_T__", comp.types.wchar);
     // try comp.generateSizeofType(w, "__SIZEOF_WINT_T__", .{ .specifier = .Pointer });
 
     // various int types
-    try generateTypeMacro(w, "__PTRDIFF_TYPE__", Type.ptrDiffT(comp));
-    try generateTypeMacro(w, "__SIZE_TYPE__", Type.sizeT(comp));
-    try generateTypeMacro(w, "__WCHAR_TYPE__", Type.wideChar(comp));
+    try generateTypeMacro(w, "__PTRDIFF_TYPE__", comp.types.ptrdiff);
+    try generateTypeMacro(w, "__SIZE_TYPE__", comp.types.size);
+    try generateTypeMacro(w, "__WCHAR_TYPE__", comp.types.wchar);
 
     const dupedPath = try comp.gpa.dupe(u8, "<builtin>");
     errdefer comp.gpa.free(dupedPath);
@@ -350,6 +362,126 @@ fn generateTypeMacro(w: anytype, name: []const u8, ty: Type) !void {
     try w.print("#define {s} ", .{name});
     try ty.print(w);
     try w.writeByte('\n');
+}
+
+fn generateBuiltinTypes(comp: *Compilation) !void {
+    const os = comp.target.os.tag;
+    const wchar: Type = switch (comp.target.cpu.arch) {
+        .xcore => .{ .specifier = .UChar },
+        .ve => .{ .specifier = .UInt },
+        .arm, .armeb, .thumb, .thumbeb => .{
+            .specifier = if (os != .windows and os != .netbsd and os != .openbsd) .UInt else .Int,
+        },
+        .aarch64, .aarch64_be, .aarch64_32 => .{
+            .specifier = if (!os.isDarwin() and os != .netbsd) .UInt else .Int,
+        },
+        .x86_64,
+        .x86,
+        => .{ .specifier = if (os == .windows) .UShort else .Int },
+        else => .{ .specifier = .Int },
+    };
+
+    const ptrdiff = if (os == .windows and comp.target.ptrBitWidth() == 64)
+        Type{ .specifier = .LongLong }
+    else switch (comp.target.ptrBitWidth()) {
+        32 => Type{ .specifier = .Int },
+        64 => Type{ .specifier = .Long },
+        else => unreachable,
+    };
+
+    const size = if (os == .windows and comp.target.ptrBitWidth() == 64)
+        Type{ .specifier = .ULongLong }
+    else switch (comp.target.ptrBitWidth()) {
+        32 => Type{ .specifier = .UInt },
+        64 => Type{ .specifier = .ULong },
+        else => unreachable,
+    };
+
+    const vaList = try comp.generateVaListType();
+    comp.types = .{
+        .wchar = wchar,
+        .ptrdiff = ptrdiff,
+        .size = size,
+        .vaList = vaList,
+    };
+}
+
+fn generateVaListType(comp: *Compilation) !Type {
+    const Kind = enum { char_ptr, void_ptr, aarch64_va_list, x86_64_va_list };
+    const kind: Kind = switch (comp.target.cpu.arch) {
+        .aarch64 => switch (comp.target.os.tag) {
+            .windows => @as(Kind, .char_ptr),
+            .ios, .macos, .tvos, .watchos => .char_ptr,
+            else => .aarch64_va_list,
+        },
+        .sparc, .wasm32, .wasm64, .bpfel, .bpfeb, .riscv32, .riscv64, .avr, .spirv32, .spirv64 => .void_ptr,
+        .powerpc => switch (comp.target.os.tag) {
+            .ios, .macos, .tvos, .watchos, .aix => @as(Kind, .char_ptr),
+            else => return Type{ .specifier = .Void }, // unknown
+        },
+        .x86 => .char_ptr,
+        .x86_64 => switch (comp.target.os.tag) {
+            .windows => @as(Kind, .char_ptr),
+            else => .x86_64_va_list,
+        },
+        else => return Type{ .specifier = .Void }, // unknown
+    };
+
+    // TODO this might be bad?
+    const arena = comp.diag.arena.allocator();
+
+    var ty: Type = undefined;
+    switch (kind) {
+        .char_ptr => ty = .{ .specifier = .Char },
+        .void_ptr => ty = .{ .specifier = .Void },
+        .aarch64_va_list => {
+            const recordType = try arena.create(Type.Record);
+            recordType.* = .{
+                .name = "__va_list_tag",
+                .fields = try arena.alloc(Type.Record.Field, 5),
+                .size = 32,
+                .alignment = 8,
+            };
+            const voidType = try arena.create(Type);
+            voidType.* = .{ .specifier = .Void };
+            const voidPtr = Type{ .specifier = .Pointer, .data = .{ .subType = voidType } };
+            recordType.fields[0] = .{ .name = "__stack", .ty = voidPtr };
+            recordType.fields[1] = .{ .name = "__gr_top", .ty = voidPtr };
+            recordType.fields[2] = .{ .name = "__vr_top", .ty = voidPtr };
+            recordType.fields[3] = .{ .name = "__gr_offs", .ty = .{ .specifier = .Int } };
+            recordType.fields[4] = .{ .name = "__vr_offs", .ty = .{ .specifier = .Int } };
+            ty = .{ .specifier = .Struct, .data = .{ .record = recordType } };
+        },
+        .x86_64_va_list => {
+            const recordType = try arena.create(Type.Record);
+            recordType.* = .{
+                .name = "__va_list_tag",
+                .fields = try arena.alloc(Type.Record.Field, 4),
+                .size = 24,
+                .alignment = 8,
+            };
+            const voidType = try arena.create(Type);
+            voidType.* = .{ .specifier = .Void };
+            const voidPtr = Type{ .specifier = .Pointer, .data = .{ .subType = voidType } };
+            recordType.fields[0] = .{ .name = "gp_offset", .ty = .{ .specifier = .UInt } };
+            recordType.fields[1] = .{ .name = "fp_offset", .ty = .{ .specifier = .UInt } };
+            recordType.fields[2] = .{ .name = "overflow_arg_area", .ty = voidPtr };
+            recordType.fields[3] = .{ .name = "reg_save_area", .ty = voidPtr };
+            ty = .{ .specifier = .Struct, .data = .{ .record = recordType } };
+        },
+    }
+
+    if (kind == .char_ptr or kind == .void_ptr) {
+        const elemType = try arena.create(Type);
+        elemType.* = ty;
+        ty = Type{ .specifier = .Pointer, .data = .{ .subType = elemType } };
+    } else {
+        const arrayType = try arena.create(Type.Array);
+        arrayType.* = .{ .len = 1, .elem = ty };
+        ty = Type{ .specifier = .Array, .data = .{ .array = arrayType } };
+    }
+
+    return ty;
 }
 
 fn generateIntMax(comp: *Compilation, w: anytype, name: []const u8, ty: Type) !void {

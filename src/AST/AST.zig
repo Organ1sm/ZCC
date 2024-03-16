@@ -674,6 +674,32 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
             }
         },
 
+        .BuiltinCallExpr => {
+            try w.writeByteNTimes(' ', level + half);
+            try w.writeAll("name: ");
+            util.setColor(NAME, w);
+            try w.print("{s}\n", .{tree.getTokenSlice(@intFromEnum(tree.data[data.range.start]))});
+            util.setColor(.reset, w);
+
+            try w.writeByteNTimes(' ', level + half);
+            try w.writeAll("args:\n");
+            for (tree.data[data.range.start + 1 .. data.range.end]) |arg|
+                try tree.dumpNode(arg, level + delta, w);
+        },
+
+        .BuiltinCallExprOne => {
+            try w.writeByteNTimes(' ', level + half);
+            try w.writeAll("name: ");
+            util.setColor(NAME, w);
+            try w.print("{s}\n", .{tree.getTokenSlice(data.decl.name)});
+            util.setColor(.reset, w);
+            if (data.decl.node != .none) {
+                try w.writeByteNTimes(' ', level + half);
+                try w.writeAll("arg:\n");
+                try tree.dumpNode(data.decl.node, level + delta, w);
+            }
+        },
+
         .CommaExpr,
         .BinaryCondExpr,
         .AssignExpr,

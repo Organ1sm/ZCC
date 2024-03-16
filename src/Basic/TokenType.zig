@@ -215,6 +215,7 @@ pub const TokenType = enum(u8) {
 
     // gcc builtins
     BuiltinChooseExpr,
+    BuiltinVaArg,
     KeywordAttribute1,
     KeywordAttribute2,
 
@@ -323,6 +324,7 @@ pub const TokenType = enum(u8) {
             .KeywordGccAlignof2,
             .KeywordGccExtension,
             .BuiltinChooseExpr,
+            .BuiltinVaArg,
             .KeywordAttribute1,
             .KeywordAttribute2,
             .Identifier,
@@ -550,6 +552,7 @@ pub const TokenType = enum(u8) {
             .KeywordTypeof1 => "__typeof",
             .KeywordTypeof2 => "__typeof__",
             .BuiltinChooseExpr => "__builtin_choose_expr",
+            .BuiltinVaArg => "__builtin_va_arg",
             .KeywordAttribute1 => "__attribute",
             .KeywordAttribute2 => "__attribute__",
         };
@@ -562,6 +565,8 @@ pub const TokenType = enum(u8) {
             .MacroFunc,
             .MacroFunction,
             .MacroPrettyFunc,
+            .BuiltinChooseExpr,
+            .BuiltinVaArg,
             => "an identifier",
 
             .StringLiteral,
