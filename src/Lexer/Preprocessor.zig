@@ -183,8 +183,6 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!Token {
         .comp = pp.comp,
     };
 
-    const TrailingWhiteSpace = " \r\t\x0B\x0C";
-
     // Estimate how many new tokens this source will contain.
     const estimatedTokenCount = source.buffer.len / 8;
     try pp.tokens.ensureTotalCapacity(pp.comp.gpa, pp.tokens.len + estimatedTokenCount);
@@ -202,19 +200,26 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!Token {
             .Hash => if (startOfLine) {
                 const directive = lexer.nextNoWhiteSpace();
                 switch (directive.id) {
-                    .KeywordError => {
-                        const start = lexer.index;
-                        while (lexer.index < lexer.buffer.len) : (lexer.index += 1) {
-                            if (lexer.buffer[lexer.index] == '\n') break;
+                    .KeywordError, .KeywordWarning => {
+                        pp.topExpansionBuffer.items.len = 0;
+
+                        const charTop = pp.charBuffer.items.len;
+                        defer pp.charBuffer.items.len = charTop;
+
+                        while (true) {
+                            token = lexer.next();
+                            if (token.id == .NewLine or token.id == .Eof) break;
+                            if (token.id == .WhiteSpace) token.id = .MacroWS;
+                            try pp.topExpansionBuffer.append(tokenFromRaw(token));
                         }
 
-                        // #error message
-                        var message = lexer.buffer[start..lexer.index];
-                        message = std.mem.trim(u8, message, TrailingWhiteSpace);
+                        try pp.stringify(pp.topExpansionBuffer.items);
+                        const slice = pp.charBuffer.items[charTop + 1 .. pp.charBuffer.items.len - 2];
+                        const message = try pp.comp.diag.arena.allocator().dupe(u8, slice);
 
                         try pp.comp.diag.add(.{
-                            .tag = .error_directive,
-                            .loc = .{ .id = token.source, .byteOffset = token.start, .line = directive.line },
+                            .tag = if (directive.id == .KeywordError) .error_directive else .warning_directive,
+                            .loc = .{ .id = token.source, .byteOffset = directive.start, .line = directive.line },
                             .extra = .{ .str = message },
                         }, &.{});
                     },
@@ -372,7 +377,7 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!Token {
                     },
                     else => {
                         try pp.addError(token, .invalid_preprocessing_directive);
-                        try pp.expectNewLine(&lexer);
+                        skipToNewLine(&lexer);
                     },
                 }
             },

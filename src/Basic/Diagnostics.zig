@@ -106,6 +106,7 @@ pub const Options = packed struct {
     @"gnu-binary-literal": Kind = .default,
     @"variadic-macros": Kind = .default,
     varargs: Kind = .default,
+    @"#warnings": Kind = .default,
 };
 
 list: std.ArrayListUnmanaged(Message) = .{},

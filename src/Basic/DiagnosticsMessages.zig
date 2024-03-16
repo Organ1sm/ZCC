@@ -10,6 +10,12 @@ pub const error_directive = struct {
     pub const extra = .str;
     pub const kind = .@"error";
 };
+pub const warning_directive = struct {
+    pub const msg = "{s}";
+    pub const opt = "#warnings";
+    pub const extra = .str;
+    pub const kind = .warning;
+};
 pub const elif_without_if = struct {
     pub const msg = "#elif without #if";
     pub const kind = .@"error";

@@ -7,5 +7,5 @@
 #  endif
 #endif
 
-#define EXPECTED_ERRORS "__has_feature.c:3:7: error: feature exists"
+#define EXPECTED_ERRORS "__has_feature.c:3:8: error: feature exists"
 
