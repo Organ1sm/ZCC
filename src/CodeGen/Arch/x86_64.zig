@@ -124,8 +124,10 @@ pub fn spillInst(f: *Fn, reg: Register, inst: u32) !void {
 }
 
 fn genNode(func: *Fn, node: Tree.NodeIndex) Codegen.Error!Value {
-    if (func.c.tree.valueMap.get(node)) |some|
-        return Value{ .immediate = @intCast(some) };
+    if (func.c.tree.valueMap.get(node)) |some| {
+        if (some.tag == .int)
+            return Value{ .immediate = @bitCast(some.data.int) };
+    }
 
     const data = func.c.nodeData[@intFromEnum(node)];
     switch (func.c.nodeTag[@intFromEnum(node)]) {
@@ -179,7 +181,7 @@ fn genNode(func: *Fn, node: Tree.NodeIndex) Codegen.Error!Value {
 
         .IntLiteral => return Value{ .immediate = @intCast(data.int) },
         .StringLiteralExpr => {
-            const strBytes = func.c.tree.strings[data.string.index..][0..data.string.len];
+            const strBytes = func.c.tree.valueMap.get(node).?.data.bytes;
             const section = try func.c.obj.getSection(.strings);
             const start = section.items.len;
             try section.appendSlice(strBytes);

@@ -1,6 +1,7 @@
 const std = @import("std");
 const Type = @import("../AST/Type.zig");
 const AST = @import("../AST/AST.zig");
+const Value = @import("../AST/Value.zig");
 const AstTag = @import("../AST/AstTag.zig").Tag;
 const Parser = @import("Parser.zig");
 
@@ -12,39 +13,11 @@ const Result = @This();
 
 node: NodeIndex = .none,
 ty: Type = .{ .specifier = .Int },
-value: union(enum) {
-    unsigned: u64,
-    signed: i64,
-    unavailable,
-} = .unavailable,
-
-pub fn getBool(res: Result) bool {
-    return switch (res.value) {
-        .signed => |v| v != 0,
-        .unsigned => |v| v != 0,
-        .unavailable => unreachable,
-    };
-}
-
-pub fn asU64(res: Result) u64 {
-    return switch (res.value) {
-        .signed => |v| @as(u64, @bitCast(v)),
-        .unsigned => |v| v,
-        .unavailable => unreachable,
-    };
-}
-
-pub fn isZero(res: Result) bool {
-    return switch (res.value) {
-        .signed => |v| v == 0,
-        .unsigned => |v| v == 0,
-        .unavailable => false,
-    };
-}
+value: Value = .{},
 
 pub fn expect(res: Result, p: *Parser) Error!void {
     if (p.inMacro) {
-        if (res.value == .unavailable) {
+        if (res.value.tag == .unavailable) {
             try p.errToken(.expected_expr, p.index);
             return error.ParsingFailed;
         }
@@ -59,7 +32,7 @@ pub fn expect(res: Result, p: *Parser) Error!void {
 
 pub fn empty(res: Result, p: *Parser) bool {
     if (p.inMacro)
-        return res.value == .unavailable;
+        return res.value.tag == .unavailable;
     return res.node == .none;
 }
 
@@ -233,7 +206,7 @@ pub fn adjustTypes(a: *Result, token: TokenIndex, b: *Result, p: *Parser, kind: 
             if (!aIsScalar or !bIsScalar or (aIsFloat and bIsPtr) or (bIsFloat and aIsPtr))
                 return a.invalidBinTy(token, b, p);
 
-            if ((aIsInt or bIsInt) and !(a.isZero() or b.isZero())) {
+            if ((aIsInt or bIsInt) and !(a.value.isZero() or b.value.isZero())) {
                 try p.errStr(.comparison_ptr_int, token, try p.typePairStr(a.ty, b.ty));
             } else if (aIsPtr and bIsPtr) {
                 if (!a.ty.isVoidStar() and !b.ty.isVoidStar() and !a.ty.eql(b.ty, false))
@@ -257,7 +230,7 @@ pub fn adjustTypes(a: *Result, token: TokenIndex, b: *Result, p: *Parser, kind: 
             }
 
             if ((aIsPtr and bIsInt) or (aIsInt and bIsPtr)) {
-                if (a.isZero() or b.isZero()) {
+                if (a.value.isZero() or b.value.isZero()) {
                     try a.nullCast(p, b.ty);
                     try b.nullCast(p, a.ty);
                     return true;
@@ -330,13 +303,15 @@ pub fn lvalConversion(res: *Result, p: *Parser) Error!void {
         res.ty.data = .{ .subType = elemType };
         res.ty.alignment = 0;
         try res.un(p, .FunctionToPointer);
-    // Decay an array type to a pointer to its first element.
+        // Decay an array type to a pointer to its first element.
     } else if (res.ty.isArray()) {
+        res.value.tag = .unavailable;
         res.ty.decayArray();
         res.ty.alignment = 0;
         try res.un(p, .ArrayToPointer);
-    // Perform l-value to r-value conversion if the type is an l-value and we are not in a macro.
+        // Perform l-value to r-value conversion if the type is an l-value and we are not in a macro.
     } else if (!p.inMacro and AST.isLValue(p.nodes.slice(), p.data.items, p.valueMap, res.node)) {
+        res.value.tag = .unavailable;
         res.ty.qual = .{};
         res.ty.alignment = 0;
         // Update the AST to reflect the l-value to r-value conversion.
@@ -346,12 +321,15 @@ pub fn lvalConversion(res: *Result, p: *Parser) Error!void {
 
 pub fn boolCast(res: *Result, p: *Parser, boolType: Type) Error!void {
     if (res.ty.isPointer()) {
+        res.value.toBool();
         res.ty = boolType;
         try res.un(p, .PointerToBool);
     } else if (res.ty.isInt() and !res.ty.is(.Bool)) {
+        res.value.toBool();
         res.ty = boolType;
         try res.un(p, .IntToBool);
     } else if (res.ty.isFloat()) {
+        res.value.floatToInt(res.ty, boolType, p.pp.comp);
         res.ty = boolType;
         try res.un(p, .FloatToBool);
     }
@@ -365,28 +343,23 @@ pub fn intCast(res: *Result, p: *Parser, intType: Type) Error!void {
         res.ty = intType;
         try res.un(p, .PointerToInt);
     } else if (res.ty.isFloat()) {
+        res.value.floatToInt(res.ty, intType, p.pp.comp);
         res.ty = intType;
         try res.un(p, .FloatToInt);
     } else if (!res.ty.eql(intType, true)) {
+        res.value.intCast(res.ty, intType, p.pp.comp);
         res.ty = intType;
         try res.un(p, .IntCast);
-    }
-
-    const isUnsigned = intType.isUnsignedInt(p.pp.comp);
-    if (isUnsigned and res.value == .signed) {
-        const copy = res.value.signed;
-        res.value = .{ .unsigned = @bitCast(copy) };
-    } else if (!isUnsigned and res.value == .unsigned) {
-        const copy = res.value.unsigned;
-        res.value = .{ .signed = @bitCast(copy) };
     }
 }
 
 pub fn floatCast(res: *Result, p: *Parser, floatType: Type) Error!void {
     if (res.ty.is(.Bool)) {
+        res.value.intToFloat(res.ty, floatType, p.pp.comp);
         res.ty = floatType;
         try res.un(p, .BoolToFloat);
     } else if (res.ty.isInt()) {
+        res.value.intToFloat(res.ty, floatType, p.pp.comp);
         res.ty = floatType;
         try res.un(p, .IntToFloat);
     } else if (!res.ty.eql(floatType, true)) {
@@ -400,6 +373,7 @@ pub fn ptrCast(res: *Result, p: *Parser, ptrType: Type) Error!void {
         res.ty = ptrType;
         try res.un(p, .BoolToPointer);
     } else if (res.ty.isInt()) {
+        res.value.intCast(res.ty, ptrType, p.pp.comp);
         res.ty = ptrType;
         try res.un(p, .IntToPointer);
     }
@@ -417,7 +391,7 @@ pub fn toVoid(res: *Result, p: *Parser) Error!void {
 }
 
 pub fn nullCast(res: *Result, p: *Parser, ptrType: Type) Error!void {
-    if (!res.isZero()) return;
+    if (!res.value.isZero()) return;
     res.ty = ptrType;
     try res.un(p, .NullToPointer);
 }
@@ -488,7 +462,7 @@ fn invalidBinTy(a: *Result, tok: TokenIndex, b: *Result, p: *Parser) Error!bool 
 
 fn shouldEval(a: *Result, b: *Result, p: *Parser) Error!bool {
     if (p.noEval) return false;
-    if (a.value != .unavailable and b.value != .unavailable)
+    if (a.value.tag != .unavailable and b.value.tag != .unavailable)
         return true;
 
     try a.saveValue(p);
@@ -496,178 +470,12 @@ fn shouldEval(a: *Result, b: *Result, p: *Parser) Error!bool {
     return p.noEval;
 }
 
+/// Saves value and replaces it with `.unavailable`.
 pub fn saveValue(res: *Result, p: *Parser) !void {
     std.debug.assert(!p.inMacro);
-    switch (res.value) {
-        .unsigned => |v| try p.valueMap.put(res.node, v),
-        .signed => |v| try p.valueMap.put(res.node, @as(u64, @bitCast(v))),
-        .unavailable => return,
-    }
+    if (res.value.tag == .unavailable) return;
 
-    res.value = .unavailable;
-}
-
-pub fn hash(res: Result) u64 {
-    var val: i64 = undefined;
-    switch (res.value) {
-        .unsigned => |v| return std.hash.Wyhash.hash(0, std.mem.asBytes(&v)), // doesn't matter we only want a hash
-        .signed => |v| return std.hash.Wyhash.hash(0, std.mem.asBytes(&v)),
-        .unavailable => unreachable,
-    }
-    return std.hash.Wyhash.hash(0, std.mem.asBytes(&val));
-}
-
-pub fn eql(a: Result, b: Result) bool {
-    return a.compare(.eq, b);
-}
-
-pub fn compare(a: Result, op: std.math.CompareOperator, b: Result) bool {
-    switch (a.value) {
-        .unsigned => |val| return std.math.compare(val, op, b.value.unsigned),
-        .signed => |val| return std.math.compare(val, op, b.value.signed),
-        .unavailable => unreachable,
-    }
-}
-
-pub fn mul(a: *Result, token: TokenIndex, b: Result, p: *Parser) !void {
-    const size = a.ty.sizeof(p.pp.comp).?;
-
-    var isOverflow = false;
-    switch (a.value) {
-        .unsigned => |*v| {
-            switch (size) {
-                1, 2 => unreachable, // promoted to int,
-                4 => {
-                    const ov = @mulWithOverflow(@as(u32, @truncate(v.*)), @as(u32, @truncate(b.value.unsigned)));
-                    isOverflow = ov[1] == 1;
-                    v.* = ov[0];
-                },
-                8 => {
-                    const ov = @mulWithOverflow(v.*, b.value.unsigned);
-                    isOverflow = ov[1] == 1;
-                    v.* = ov[0];
-                },
-                else => unreachable,
-            }
-
-            if (isOverflow)
-                try p.errExtra(.overflow_signed, token, .{ .unsigned = v.* });
-        },
-
-        .signed => |*v| {
-            switch (size) {
-                1, 2 => unreachable, // promoted to int
-                4 => {
-                    const ov = @mulWithOverflow(@as(i32, @truncate(v.*)), @as(i32, @truncate(b.value.signed)));
-                    isOverflow = ov[1] == 1;
-                    v.* = ov[0];
-                },
-                8 => {
-                    const ov = @mulWithOverflow(v.*, b.value.signed);
-                    isOverflow = ov[1] == 1;
-                    v.* = ov[0];
-                },
-                else => unreachable,
-            }
-            if (isOverflow)
-                try p.errExtra(.overflow_signed, token, .{ .signed = v.* });
-        },
-
-        .unavailable => unreachable,
-    }
-}
-
-pub fn add(a: *Result, tok: TokenIndex, b: Result, p: *Parser) !void {
-    const size = a.ty.sizeof(p.pp.comp).?;
-    var isOverflow = false;
-    switch (a.value) {
-        .unsigned => |*v| {
-            switch (size) {
-                1, 2 => unreachable, // promoted to int
-                4 => {
-                    const sum, const overflowed = @addWithOverflow(@as(u32, @truncate(v.*)), @as(u32, @truncate(b.value.unsigned)));
-                    isOverflow = (overflowed == 1);
-                    v.* = sum;
-                },
-                8 => {
-                    const sum, const overflowed = @addWithOverflow(v.*, b.value.unsigned);
-                    isOverflow = (overflowed == 1);
-                    v.* = sum;
-                },
-                else => unreachable,
-            }
-
-            if (isOverflow)
-                try p.errExtra(.overflow_unsigned, tok, .{ .unsigned = v.* });
-        },
-
-        .signed => |*v| {
-            switch (size) {
-                1, 2 => unreachable, // promoted to int
-                4 => {
-                    const sum, const overflowed = @addWithOverflow(@as(i32, @truncate(v.*)), @as(i32, @truncate(b.value.signed)));
-                    isOverflow = (overflowed == 1);
-                    v.* = sum;
-                },
-                8 => {
-                    const sum, const overflowed = @addWithOverflow(v.*, b.value.signed);
-                    isOverflow = (overflowed == 1);
-                    v.* = sum;
-                },
-                else => unreachable,
-            }
-
-            if (isOverflow)
-                try p.errExtra(.overflow_signed, tok, .{ .signed = v.* });
-        },
-
-        .unavailable => unreachable,
-    }
-}
-
-pub fn sub(a: *Result, tok: TokenIndex, b: Result, p: *Parser) !void {
-    const size = a.ty.sizeof(p.pp.comp).?;
-    var isOverflow = false;
-    switch (a.value) {
-        .unsigned => |*v| {
-            switch (size) {
-                1, 2 => unreachable, // promoted to int
-                4 => {
-                    const ov = @subWithOverflow(@as(u32, @truncate(v.*)), @as(u32, @truncate(b.value.unsigned)));
-                    isOverflow = ov[1] == 1;
-                    v.* = ov[0];
-                },
-                8 => {
-                    const ov = @subWithOverflow(v.*, b.value.unsigned);
-                    isOverflow = ov[1] == 1;
-                    v.* = ov[0];
-                },
-                else => unreachable,
-            }
-            if (isOverflow)
-                try p.errExtra(.overflow_unsigned, tok, .{ .unsigned = v.* });
-        },
-
-        .signed => |*v| {
-            switch (size) {
-                1, 2 => unreachable, // promoted to int
-                4 => {
-                    const ov = @subWithOverflow(@as(i32, @truncate(v.*)), @as(i32, @truncate(b.value.signed)));
-                    isOverflow = ov[1] == 1;
-                    v.* = ov[0];
-                },
-                8 => {
-                    const ov = @subWithOverflow(v.*, b.value.signed);
-                    isOverflow = ov[1] == 1;
-                    v.* = ov[0];
-                },
-                else => unreachable,
-            }
-
-            if (isOverflow)
-                try p.errExtra(.overflow_signed, tok, .{ .signed = v.* });
-        },
-
-        .unavailable => unreachable,
-    }
+    if (!p.inMacro)
+        try p.valueMap.put(res.node, res.value);
+    res.value.tag = .unavailable;
 }
