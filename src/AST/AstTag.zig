@@ -230,6 +230,8 @@ pub const Tag = enum(u8) {
     EnumerationRef,
     /// integer literal, always unsigned
     IntLiteral,
+    /// Same as IntLiteral
+    CharLiteral,
     /// f32 literal
     FloatLiteral,
     /// f64 literal

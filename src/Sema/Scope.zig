@@ -1,6 +1,7 @@
 const std = @import("std");
 const AST = @import("../AST/AST.zig");
 const Type = @import("../AST/Type.zig");
+const Compilation = @import("../Basic/Compilation.zig");
 const Parser = @import("../Parser/Parser.zig");
 const Result = @import("../Parser/Result.zig");
 
@@ -38,11 +39,14 @@ pub const Scope = union(enum) {
         default: ?Case = null,
 
         const ResultContext = struct {
-            pub fn eql(_: ResultContext, a: Result, b: Result) bool {
-                return a.asU64() == b.asU64();
+            ty: Type,
+            comp: *Compilation,
+
+            pub fn eql(self: ResultContext, a: Result, b: Result) bool {
+                return a.value.compare(.eq, b.value, self.ty, self.comp);
             }
             pub fn hash(_: ResultContext, a: Result) u64 {
-                return a.hash();
+                return a.value.hash();
             }
         };
 

@@ -6,12 +6,13 @@ const Lexer = @import("../Lexer/Lexer.zig");
 const TokenType = @import("../Basic/TokenType.zig").TokenType;
 const AstTag = @import("AstTag.zig").Tag;
 const Attribute = @import("../Lexer/Attribute.zig");
+const Value = @import("Value.zig");
 
 const AST = @This();
 
 pub const TokenIndex = u32;
 pub const NodeIndex = enum(u32) { none, _ };
-pub const ValueMap = std.AutoHashMap(NodeIndex, u64);
+pub const ValueMap = std.AutoHashMap(NodeIndex, Value);
 
 comp: *Compilation,
 arena: std.heap.ArenaAllocator,
@@ -111,8 +112,6 @@ pub const Node = struct {
 
         if3: struct { cond: NodeIndex, body: u32 },
 
-        string: struct { index: u32, len: u32 },
-
         unExpr: NodeIndex,
         binExpr: struct { lhs: NodeIndex, rhs: NodeIndex },
 
@@ -120,8 +119,6 @@ pub const Node = struct {
         unionInit: struct { fieldIndex: u32, node: NodeIndex },
 
         int: u64,
-        float: f32,
-        double: f64,
 
         pub fn forDecl(data: Data, tree: AST) struct {
             decls: []const NodeIndex,
@@ -227,7 +224,7 @@ pub fn isLValueExtra(
         .BuiltinChooseExpr => {
             const data = nodes.items(.data)[@intFromEnum(node)];
             if (valueMap.get(data.if3.cond)) |val| {
-                const offset = @intFromBool(val == 0);
+                const offset = @intFromBool(val.isZero());
                 return isLValueExtra(nodes, extra, valueMap, extra[data.if3.body + offset], isConst);
             }
 
@@ -301,10 +298,9 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
 
     if (tree.valueMap.get(node)) |val| {
         util.setColor(LITERAL, w);
-        if (ty.isUnsignedInt(tree.comp))
-            try w.print(" (value: {d})", .{val})
-        else
-            try w.print(" (value: {d})", .{@as(i64, @bitCast(val))});
+        try w.writeAll(" (value: ");
+        try val.dump(ty, tree.comp, w);
+        try w.writeByte(')');
     }
 
     try w.writeAll("\n");
@@ -635,15 +631,6 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
             }
         },
 
-        .StringLiteralExpr => {
-            try w.writeByteNTimes(' ', level + half);
-            try w.writeAll("data: ");
-            util.setColor(LITERAL, w);
-            try dumpString(tree.strings[data.string.index..][0..data.string.len], tag, w);
-            try w.writeByte('\n');
-            util.setColor(.reset, w);
-        },
-
         .AttrArgIdentifier => {
             try w.writeByteNTimes(' ', level + half);
             util.setColor(ATTRIBUTE, w);
@@ -775,29 +762,12 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
             util.setColor(.reset, w);
         },
 
-        .IntLiteral => {
-            try w.writeByteNTimes(' ', level + 1);
-            try w.writeAll("value: ");
-            util.setColor(LITERAL, w);
-            try w.print("{d}\n", .{data.int});
-            util.setColor(.reset, w);
-        },
-
-        .FloatLiteral => {
-            try w.writeByteNTimes(' ', level + 1);
-            try w.writeAll("value: ");
-            util.setColor(LITERAL, w);
-            try w.print("{d}\n", .{data.float});
-            util.setColor(.reset, w);
-        },
-
-        .DoubleLiteral => {
-            try w.writeByteNTimes(' ', level + 1);
-            try w.writeAll("value: ");
-            util.setColor(LITERAL, w);
-            try w.print("{d}\n", .{data.double});
-            util.setColor(.reset, w);
-        },
+        .CharLiteral,
+        .IntLiteral,
+        .FloatLiteral,
+        .DoubleLiteral,
+        .StringLiteralExpr,
+        => {},
 
         .MemberAccessExpr, .MemberAccessPtrExpr => {
             try w.writeByteNTimes(' ', level + 1);

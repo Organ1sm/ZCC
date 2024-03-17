@@ -155,7 +155,8 @@ pub const Enum = struct {
     pub const Field = struct {
         name: []const u8,
         ty: Type,
-        value: u64,
+        nameToken: TokenIndex,
+        node: NodeIndex,
     };
 
     pub fn isIncomplete(e: Enum) bool {
@@ -425,7 +426,7 @@ pub fn isVoidStar(ty: Type) bool {
 pub fn isUnsignedInt(ty: Type, comp: *const Compilation) bool {
     return switch (ty.specifier) {
         .Char => return getCharSignedness(comp) == .unsigned,
-        .UChar, .UShort, .UInt, .ULong, .ULongLong => return true,
+        .UChar, .UShort, .UInt, .ULong, .ULongLong, .Bool => return true,
         .TypeofType => ty.data.subType.isUnsignedInt(comp),
         .TypeofExpr => ty.data.expr.ty.isUnsignedInt(comp),
         .Attributed => ty.data.attributed.base.isUnsignedInt(comp),
