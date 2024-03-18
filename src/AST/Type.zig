@@ -604,8 +604,12 @@ pub fn containAnyQual(ty: Type) bool {
 
 pub fn integerPromotion(ty: Type, comp: *Compilation) Type {
     var specifier = ty.specifier;
-    if (specifier == .Enum)
+    if (specifier == .Enum) {
+        // promote incomplete enums to int type
+        if (ty.hasIncompleteSize())
+            return .{ .specifier = .Int };
         specifier = ty.data.@"enum".tagType.specifier;
+    }
 
     return .{
         .specifier = switch (specifier) {
