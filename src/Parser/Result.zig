@@ -347,6 +347,8 @@ pub fn intCast(res: *Result, p: *Parser, intType: Type) Error!void {
         res.ty = intType;
         try res.un(p, .FloatToInt);
     } else if (!res.ty.eql(intType, true)) {
+        if (intType.hasIncompleteSize())
+            return error.ParsingFailed;
         res.value.intCast(res.ty, intType, p.pp.comp);
         res.ty = intType;
         try res.un(p, .IntCast);
