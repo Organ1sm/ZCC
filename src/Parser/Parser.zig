@@ -26,6 +26,11 @@ const NodeList = std.ArrayList(NodeIndex);
 const Parser = @This();
 pub const Error = Compilation.Error || error{ParsingFailed};
 
+/// An attribute that has been parsed but not yet validated in its context
+const TentativeAttribute = struct {
+    attr: Attribute,
+    tok: TokenIndex,
+};
 // values from pp
 pp: *Preprocessor,
 tokenIds: []const TokenType,
@@ -46,7 +51,7 @@ declBuffer: NodeList,
 paramBuffer: std.ArrayList(Type.Function.Param),
 enumBuffer: std.ArrayList(Type.Enum.Field),
 recordBuffer: std.ArrayList(Type.Record.Field),
-attrBuffer: std.ArrayList(Attribute),
+attrBuffer: std.MultiArrayList(TentativeAttribute) = .{},
 
 // configuration
 noEval: bool = false,
@@ -572,7 +577,6 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
         .paramBuffer = std.ArrayList(Type.Function.Param).init(pp.comp.gpa),
         .enumBuffer = std.ArrayList(Type.Enum.Field).init(pp.comp.gpa),
         .recordBuffer = std.ArrayList(Type.Record.Field).init(pp.comp.gpa),
-        .attrBuffer = std.ArrayList(Attribute).init(pp.comp.gpa),
     };
 
     defer {
@@ -584,7 +588,7 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
         p.paramBuffer.deinit();
         p.enumBuffer.deinit();
         p.recordBuffer.deinit();
-        p.attrBuffer.deinit();
+        p.attrBuffer.deinit(pp.comp.gpa);
     }
 
     errdefer {
@@ -786,11 +790,11 @@ fn skipTo(p: *Parser, id: TokenType) void {
 fn parseDeclaration(p: *Parser) Error!bool {
     _ = try p.pragma();
     const firstTokenIndex = p.index;
-    const attrBufferTop = p.attrBuffer.items.len;
-    defer p.attrBuffer.items.len = attrBufferTop;
+    const attrBufferTop = p.attrBuffer.len;
+    defer p.attrBuffer.len = attrBufferTop;
     // TODO: at this point we don't know what we're trying to parse, so we'll need to check
     // the attributes against what kind of decl was parsed after the fact
-    try p.parseAttrSpec(.any);
+    try p.parseAttrSpec(); // .any
 
     var declSpec = if (try p.parseDeclSpec(false)) |some| some else blk: {
         if (p.func.type != null) {
@@ -978,7 +982,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
             try p.errToken(.invalid_old_style_params, tokenIdx);
 
         const tag = try declSpec.validate(p, &ID.d.type, ID.initializer != .none);
-        const attrs = p.attrBuffer.items[attrBufferTop..];
+        const attrs = p.attrBuffer.items(.attr)[attrBufferTop..];
         ID.d.type = try ID.d.type.withAttributes(p.arena, attrs);
 
         const node = try p.addNode(.{
@@ -1237,87 +1241,82 @@ fn parseDeclSpec(p: *Parser, isParam: bool) Error!?DeclSpec {
 ///  | attrIdentifier '(' identifier ')'
 ///  | attrIdentifier '(' identifier (',' expr)+ ')'
 ///  | attrIdentifier '(' (expr (',' expr)*)? ')'
-fn attribute(p: *Parser) Error!Attribute {
+fn attribute(p: *Parser) Error!?TentativeAttribute {
     const nameToken = p.index;
     switch (p.getCurrToken()) {
         .KeywordConst, .KeywordGccConst1, .KeywordGccConst2 => p.index += 1,
         else => _ = try p.expectIdentifier(),
     }
 
-    switch (p.getCurrToken()) {
-        .Comma, .RParen => { // will be consumed in attributeList
-            return Attribute{ .name = nameToken };
-        },
+    const name = p.getTokenSlice(nameToken);
+    const attr = Attribute.fromString(name) orelse {
+        try p.errStr(.unknown_attribute, nameToken, name);
+        if (p.eat(.LParen)) |_| p.skipTo(.RParen);
+        return null;
+    };
+    const requiredCount = Attribute.requiredArgCount(attr);
+    var arguments = Attribute.initArguments(attr);
+    var argIdx: u32 = 0;
 
-        .LParen => {
+    switch (p.getCurrToken()) {
+        .Comma, .RParen => {}, // will be consumed in attributeList
+
+        .LParen => blk: {
             p.index += 1;
             if (p.eat(.RParen)) |_|
-                return Attribute{ .name = nameToken };
+                break :blk;
 
-            const maybeIdent = try p.eatIdentifier();
-            if (maybeIdent != null and p.eat(.RParen) != null) {
-                const argNode = try p.addNode(.{
-                    .tag = .AttrArgIdentifier,
-                    .type = .{ .specifier = .Void },
-                    .data = .{ .declRef = maybeIdent.? },
-                });
-                return Attribute{
-                    .name = nameToken,
-                    .params = argNode,
-                };
-            }
-            const listBufferTop = p.listBuffer.items.len;
-            defer p.listBuffer.items.len = listBufferTop;
-
-            if (maybeIdent) |ident| {
-                const argNode = try p.addNode(.{
-                    .tag = .AttrArgIdentifier,
-                    .type = .{ .specifier = .Void },
-                    .data = .{ .declRef = ident },
-                });
-                try p.listBuffer.append(argNode);
+            if (Attribute.wantsIdentEnum(attr)) {
+                if (try p.eatIdentifier()) |ident| {
+                    if (Attribute.diagnoseIdent(attr, &arguments, p.getTokenSlice(ident))) |msg| {
+                        try p.errExtra(msg.tag, ident, msg.extra);
+                        p.skipTo(.RParen);
+                        return error.ParsingFailed;
+                    }
+                } else {
+                    try p.errExtra(.attribute_requires_identifier, nameToken, .{ .str = name });
+                    return error.ParsingFailed;
+                }
             } else {
+                const argStart = p.index;
                 var firstExpr = try p.parseAssignExpr();
                 try firstExpr.expect(p);
-                try firstExpr.saveValue(p);
-                try p.listBuffer.append(firstExpr.node);
+                if (p.diagnose(attr, &arguments, argIdx, firstExpr)) |msg| {
+                    try p.errExtra(msg.tag, argStart, msg.extra);
+                    p.skipTo(.RParen);
+                    return error.ParsingFailed;
+                }
             }
-
-            while (p.getCurrToken() != .RParen) {
+            argIdx += 1;
+            while (p.eat(.RParen) == null) : (argIdx += 1) {
                 _ = try p.expectToken(.Comma);
 
-                var attrExpr = try p.parseAssignExpr();
-                try attrExpr.expect(p);
-                try attrExpr.saveValue(p);
-
-                try p.listBuffer.append(attrExpr.node);
+                const argStart = p.index;
+                var argExpr = try p.parseAssignExpr();
+                try argExpr.expect(p);
+                if (p.diagnose(attr, &arguments, argIdx, argExpr)) |msg| {
+                    try p.errExtra(msg.tag, argStart, msg.extra);
+                    p.skipTo(.RParen);
+                    return error.ParsingFailed;
+                }
             }
-            p.index += 1; // eat closing r_paren
-
-            const items = p.listBuffer.items[listBufferTop..];
-            std.debug.assert(items.len > 0);
-
-            var node: AST.Node = .{
-                .tag = .AttrParamsTwo,
-                .type = .{ .specifier = .Void },
-                .data = .{ .binExpr = .{ .lhs = items[0], .rhs = .none } },
-            };
-            switch (items.len) {
-                0 => unreachable,
-                1 => {},
-                2 => node.data.binExpr.rhs = items[1],
-                else => {
-                    node.tag = .AttrParams;
-                    node.data = .{ .range = try p.addList(items) };
-                },
-            }
-            return Attribute{
-                .name = nameToken,
-                .params = try p.addNode(node),
-            };
         },
         else => return error.ParsingFailed,
     }
+    if (argIdx < requiredCount) {
+        try p.errExtra(
+            .attribute_not_enough_args,
+            nameToken,
+            .{ .attrArgCount = .{ .attribute = attr, .expected = requiredCount } },
+        );
+        return error.ParsingFailed;
+    }
+    return TentativeAttribute{ .attr = .{ .tag = attr, .args = arguments }, .tok = nameToken };
+}
+
+fn diagnose(p: *Parser, attr: Attribute.Tag, arguments: *Attribute.Arguments, argIdx: u32, res: Result) ?Diagnostics.Message {
+    const node = p.nodes.get(@intFromEnum(res.node));
+    return Attribute.diagnose(attr, arguments, argIdx, res.value, node);
 }
 
 fn validateAttr(p: *Parser, attr: Attribute, context: Attribute.ParseContext) Error!bool {
@@ -1339,33 +1338,54 @@ fn validateAttr(p: *Parser, attr: Attribute, context: Attribute.ParseContext) Er
 }
 
 /// attribute-list : (attribute (',' attribute)*)?
-fn parseAttributeList(p: *Parser, context: Attribute.ParseContext) Error!void {
+fn parseAttributeList(p: *Parser) Error!void {
     if (p.getCurrToken() != .RParen) {
-        const attr = try p.attribute();
-        if (try p.validateAttr(attr, context)) {
-            try p.attrBuffer.append(attr);
+        if (try p.attribute()) |attr| {
+            try p.attrBuffer.append(p.pp.comp.gpa, attr);
         }
         while (p.getCurrToken() != .RParen) {
             _ = try p.expectToken(.Comma);
-            const nextAttr = try p.attribute();
-            if (try p.validateAttr(nextAttr, context)) {
-                try p.attrBuffer.append(nextAttr);
+            if (try p.attribute()) |attr| {
+                try p.attrBuffer.append(p.pp.comp.gpa, attr);
             }
         }
     }
 }
 
-/// attribute-specifier : (__attribute__ '( '(' attribute-list ')' ')')*
-fn parseAttrSpec(p: *Parser, context: Attribute.ParseContext) Error!void {
-    while (p.getCurrToken() == .KeywordAttribute1 or p.getCurrToken() == .KeywordAttribute2) {
-        p.index += 1;
-        const paren1 = try p.expectToken(.LParen);
-        const paren2 = try p.expectToken(.LParen);
+fn c2xAttribute(p: *Parser) !bool {
+    // todo [[attribute]]
+    _ = p;
+    return false;
+}
 
-        try p.parseAttributeList(context);
+fn msvcAttribute(p: *Parser) !bool {
+    // todo __declspec
+    _ = p;
+    return false;
+}
 
-        _ = try p.expectClosing(paren2, .RParen);
-        _ = try p.expectClosing(paren1, .RParen);
+fn gnuAttribute(p: *Parser) !bool {
+    switch (p.getCurrToken()) {
+        .KeywordAttribute1, .KeywordAttribute2 => p.index += 1,
+        else => return false,
+    }
+    const paren1 = try p.expectToken(.LParen);
+    const paren2 = try p.expectToken(.LParen);
+
+    try p.parseAttributeList();
+
+    _ = try p.expectClosing(paren2, .RParen);
+    _ = try p.expectClosing(paren1, .RParen);
+    return true;
+}
+
+/// attribute-specifier : (keyword_attrbute '( '(' attribute-list ')' ')')*
+fn parseAttrSpec(p: *Parser) Error!void {
+    while (true) {
+        if (try p.gnuAttribute()) continue;
+        if (try p.c2xAttribute()) continue;
+        if (try p.msvcAttribute()) continue;
+        break;
     }
 }
 
@@ -1375,7 +1395,7 @@ const InitDeclarator = struct { d: Declarator, initializer: NodeIndex = .none };
 fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec) Error!?InitDeclarator {
     var ID = InitDeclarator{ .d = (try p.declarator(declSpec.type, .normal)) orelse return null };
     _ = try p.parseAssembly(.decl);
-    try p.parseAttrSpec(if (ID.d.type.isFunc()) .function else .variable);
+    try p.parseAttrSpec(); //if (ID.d.type.isFunc()) .function else .variable
 
     if (p.eat(.Equal)) |eq| init: {
         if (declSpec.storageClass == .typedef or ID.d.funcDeclarator != null)
@@ -1498,7 +1518,7 @@ fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec) Error!?InitDeclarator {
 fn parseTypeSpec(p: *Parser, ty: *TypeBuilder) Error!bool {
     const start = p.index;
     while (true) {
-        try p.parseAttrSpec(.typedef);
+        try p.parseAttrSpec(); // .typedef
         if (try p.typeof()) |innerType| {
             try ty.combineFromTypeof(p, innerType, start);
             continue;
@@ -1653,10 +1673,10 @@ fn parseRecordSpecifier(p: *Parser) Error!*Type.Record {
     const isStruct = p.tokenIds[kindToken] == .KeywordStruct;
     p.index += 1;
 
-    const attrBufferTop = p.attrBuffer.items.len;
-    defer p.attrBuffer.items.len = attrBufferTop;
+    const attrBufferTop = p.attrBuffer.len;
+    defer p.attrBuffer.len = attrBufferTop;
 
-    try p.parseAttrSpec(.record);
+    try p.parseAttrSpec(); // .record
 
     const maybeIdent = try p.eatIdentifier();
     const lb = p.eat(.LBrace) orelse {
@@ -1746,7 +1766,7 @@ fn parseRecordSpecifier(p: *Parser) Error!*Type.Record {
         try p.errStr(.empty_record, kindToken, p.getTokenSlice(kindToken));
 
     try p.expectClosing(lb, .RBrace);
-    try p.parseAttrSpec(.record);
+    try p.parseAttrSpec(); // .record
 
     // finish by creating a node
     var node: AST.Node = .{
@@ -1810,15 +1830,15 @@ fn parseRecordDecls(p: *Parser) Error!void {
 
 /// record-declarator : declarator (':' constant-expression)?
 fn parseRecordDeclarator(p: *Parser) Error!bool {
-    const attrBuffTop = p.attrBuffer.items.len;
-    defer p.attrBuffer.items.len = attrBuffTop;
+    const attrBuffTop = p.attrBuffer.len;
+    defer p.attrBuffer.len = attrBuffTop;
     const baseType = (try p.parseSpecQuals()) orelse return false;
 
     while (true) {
-        const thisDeclTop = p.attrBuffer.items.len;
-        defer p.attrBuffer.items.len = thisDeclTop;
+        const thisDeclTop = p.attrBuffer.len;
+        defer p.attrBuffer.len = thisDeclTop;
 
-        try p.parseAttrSpec(.record);
+        try p.parseAttrSpec(); //.record
         // 0 means unnamed
         var nameToken: TokenIndex = 0;
         var ty = baseType;
@@ -1830,8 +1850,8 @@ fn parseRecordDeclarator(p: *Parser) Error!bool {
             ty = d.type;
         }
 
-        try p.parseAttrSpec(.record);
-        const attrs = p.attrBuffer.items[attrBuffTop..];
+        try p.parseAttrSpec(); // .record
+        const attrs = p.attrBuffer.items(.attr)[attrBuffTop..];
         ty = try ty.withAttributes(p.arena, attrs);
 
         if (p.eat(.Colon)) |_| bits: {
@@ -1943,10 +1963,10 @@ fn parseEnumSpec(p: *Parser) Error!*Type.Enum {
     const enumTK = p.index;
     p.index += 1;
 
-    const attrBufferTop = p.attrBuffer.items.len;
-    defer p.attrBuffer.items.len = attrBufferTop;
+    const attrBufferTop = p.attrBuffer.len;
+    defer p.attrBuffer.len = attrBufferTop;
 
-    try p.parseAttrSpec(.record);
+    try p.parseAttrSpec(); //.record
 
     const maybeID = try p.eatIdentifier();
     const lb = p.eat(.LBrace) orelse {
@@ -2023,7 +2043,7 @@ fn parseEnumSpec(p: *Parser) Error!*Type.Enum {
         try p.err(.empty_enum);
 
     try p.expectClosing(lb, .RBrace);
-    try p.parseAttrSpec(.record);
+    try p.parseAttrSpec(); //.record
 
     // finish by creating a node
     var node: AST.Node = .{
@@ -2083,10 +2103,10 @@ fn enumerator(p: *Parser, e: *Enumerator) Error!?EnumFieldAndNode {
     };
 
     const name = p.getTokenSlice(nameToken);
-    const attrBufferTop = p.attrBuffer.items.len;
-    defer p.attrBuffer.items.len = attrBufferTop;
+    const attrBufferTop = p.attrBuffer.len;
+    defer p.attrBuffer.len = attrBufferTop;
 
-    try p.parseAttrSpec(.@"enum");
+    try p.parseAttrSpec(); // .@"enum"
 
     if (p.eat(.Equal)) |_| {
         const specified = try p.parseConstExpr();
@@ -2361,7 +2381,7 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: Declarator
                 try p.errToken(.negative_array_size, lb);
 
             const arrayType = try p.arena.create(Type.Array);
-            arrayType.elem = .{.specifier = .Void};
+            arrayType.elem = .{ .specifier = .Void };
             if (sizeValue.compare(.gt, Value.int(maxElems), size_t, p.pp.comp)) {
                 try p.errToken(.array_too_large, lb);
                 arrayType.len = maxElems;
@@ -3371,10 +3391,10 @@ fn parseStmt(p: *Parser) Error!NodeIndex {
         return e.node;
     }
 
-    const attrBufferTop = p.attrBuffer.items.len;
-    defer p.attrBuffer.items.len = attrBufferTop;
-    try p.parseAttrSpec(.statement);
-    const attrs = p.attrBuffer.items[attrBufferTop..];
+    const attrBufferTop = p.attrBuffer.len;
+    defer p.attrBuffer.len = attrBufferTop;
+    try p.parseAttrSpec(); // .statement
+    const attrs = p.attrBuffer.items(.attr)[attrBufferTop..];
 
     if (p.eat(.Semicolon)) |_| {
         var nullNode: AST.Node = .{ .tag = .NullStmt, .data = undefined };
@@ -3753,10 +3773,10 @@ fn parseLabeledStmt(p: *Parser) Error!?NodeIndex {
 
         p.index += 1;
 
-        const attrBufferTop = p.attrBuffer.items.len;
-        defer p.attrBuffer.items.len = attrBufferTop;
+        const attrBufferTop = p.attrBuffer.len;
+        defer p.attrBuffer.len = attrBufferTop;
 
-        try p.parseAttrSpec(.label);
+        try p.parseAttrSpec(); // .label
 
         return try p.addNode(.{
             .tag = .LabeledStmt,

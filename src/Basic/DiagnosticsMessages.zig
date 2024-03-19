@@ -1398,3 +1398,28 @@ pub const va_start_not_last_param = struct {
     pub const opt = "varargs";
     pub const kind = .warning;
 };
+pub const attribute_not_enough_args = struct {
+    pub const msg = "'{s}' attribute takes at least {d} argument(s)";
+    pub const kind = .@"error";
+    pub const extra = .attr_arg_count;
+};
+pub const attribute_too_many_args = struct {
+    pub const msg = "'{s}' attribute takes at most {d} argument(s)";
+    pub const kind = .@"error";
+    pub const extra = .attr_arg_count;
+};
+pub const attribute_arg_invalid = struct {
+    pub const msg = "Attribute argument is invalid, expected {s} but got {s}";
+    pub const kind = .@"error";
+    pub const extra = .attr_arg_type;
+};
+pub const unknown_attr_enum = struct {
+    pub const msg = "Unknown `{s}` argument {s}{s}{s}. Possible values are: {s}";
+    pub const kind = .@"error";
+    pub const extra = .attr_enum;
+};
+pub const attribute_requires_identifier = struct {
+    pub const msg = "'{s}' attribute requires an identifier";
+    pub const kind = .@"error";
+    pub const extra = .str;
+};

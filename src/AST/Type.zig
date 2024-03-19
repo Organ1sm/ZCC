@@ -1039,6 +1039,33 @@ pub fn validateCombinedType(ty: Type, p: *Parser, sourceToken: TokenIndex) Parse
     }
 }
 
+/// Return the attribute with the specified tag from the given type.
+/// If the type is a TypeofType or TypeofExpr, the search is performed on
+/// the subtype or the type of the expression, respectively.
+///
+/// If the type is Attributed, it iterates over its attributes to find a match.
+/// Returns null if the attribute is not present or the type does not support attributes.
+///
+/// @param ty The Type from which to retrieve the attribute.
+/// @param tag The attribute tag to search for.
+/// @return The attribute with the given tag if it exists, or null otherwise.
+pub fn getAttribute(ty: Type, comptime tag: Attribute.Tag) ?Attribute {
+    switch (ty.specifier) {
+        .TypeofType => return ty.data.subType.getAttribute(tag),
+        .TypeofExpr => return ty.data.expr.ty.getAttribute(tag),
+
+        .Attributed => {
+            for (ty.data.attributed.attributes) |attr| {
+                if (attr.tag == tag)
+                    return @field(attr.args, @tagName(tag));
+            }
+            return null;
+        },
+
+        else => return null,
+    }
+}
+
 /// Print type in C style
 pub fn print(ty: Type, w: anytype) @TypeOf(w).Error!void {
     _ = try ty.printPrologue(w);

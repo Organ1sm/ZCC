@@ -4,6 +4,7 @@ const Source = @import("Source.zig");
 const TokenType = @import("TokenType.zig").TokenType;
 const Tree = @import("../AST/AST.zig");
 const Compilation = @import("Compilation.zig");
+const Attribute = @import("../Lexer/Attribute.zig");
 const DiagnosticsMessages = @import("../Basic/DiagnosticsMessages.zig");
 const util = @import("../Basic/Util.zig");
 const IsWindows = @import("builtin").os.tag == .windows;
@@ -34,7 +35,18 @@ pub const Message = struct {
             actual: u21,
             resembles: u21,
         },
-
+        attrArgCount: struct {
+            attribute: Attribute.Tag,
+            expected: u32,
+        },
+        attrArgType: struct {
+            expected: Attribute.ArgumentType,
+            actual: Attribute.ArgumentType,
+        },
+        attrEnum: struct {
+            tag: Attribute.Tag,
+            actual: []const u8,
+        },
         actualCodePoint: u21,
         unsigned: u64,
         signed: i64,
@@ -300,9 +312,24 @@ pub fn renderExtra(comp: *Compilation, m: anytype) void {
                             msg.extra.codePoints.actual,
                             msg.extra.codePoints.resembles,
                         }),
+                        .attr_arg_count => m.print(info.msg, .{
+                            @tagName(msg.extra.attrArgCount.attribute),
+                            msg.extra.attrArgCount.expected,
+                        }),
+                        .attr_arg_type => m.print(info.msg, .{
+                            msg.extra.attrArgType.expected.toString(),
+                            msg.extra.attrArgType.actual.toString(),
+                        }),
                         .actual_codepoint => m.print(info.msg, .{msg.extra.actualCodePoint}),
                         .unsigned => m.print(info.msg, .{msg.extra.unsigned}),
                         .signed => m.print(info.msg, .{msg.extra.signed}),
+                        .attr_enum => m.print(info.msg, .{
+                            @tagName(msg.extra.attrEnum.tag),
+                            Attribute.Formatting.quoteChar(msg.extra.attrEnum.tag),
+                            msg.extra.attrEnum.actual,
+                            Attribute.Formatting.quoteChar(msg.extra.attrEnum.tag),
+                            Attribute.Formatting.choices(msg.extra.attrEnum.tag),
+                        }),
                         else => unreachable,
                     }
                 } else {
