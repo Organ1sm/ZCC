@@ -182,11 +182,11 @@ pub fn finish(b: @This(), p: *Parser) Parser.Error!Type {
         Specifier.ComplexDouble => ty.specifier = .ComplexDouble,
         Specifier.ComplexLongDouble => ty.specifier = .ComplexLongDouble,
         Specifier.Complex => {
-            try p.errToken(.plain_complex, p.index - 1);
+            try p.errToken(.plain_complex, p.tokenIdx - 1);
             ty.specifier = .ComplexDouble;
         },
         Specifier.ComplexLong => {
-            try p.errExtra(.type_is_invalid, p.index, .{ .str = b.specifier.toString().? });
+            try p.errExtra(.type_is_invalid, p.tokenIdx, .{ .str = b.specifier.toString().? });
             return error.ParsingFailed;
         },
 
@@ -334,7 +334,7 @@ fn cannotCombine(b: @This(), p: *Parser, sourceToken: TokenIndex) !void {
 fn duplicateSpec(b: *@This(), p: *Parser, spec: []const u8) !void {
     if (b.errorOnInvalid)
         return error.CannotCombine;
-    try p.errStr(.duplicate_declspec, p.index, spec);
+    try p.errStr(.duplicate_declspec, p.tokenIdx, spec);
 }
 
 pub fn combineFromTypeof(b: *@This(), p: *Parser, new: Type, sourceToken: TokenIndex) Compilation.Error!void {

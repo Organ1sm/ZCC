@@ -627,7 +627,7 @@ fn expr(pp: *Preprocessor, lexer: *Lexer) MacroError!bool {
     var parser = Parser{
         .pp = pp,
         .tokenIds = pp.tokens.items(.id),
-        .index = @intCast(start),
+        .tokenIdx = @intCast(start),
         .arena = pp.arena.allocator(),
         .inMacro = true,
         .scopes = undefined,

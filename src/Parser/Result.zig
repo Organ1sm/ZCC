@@ -18,14 +18,14 @@ value: Value = .{},
 pub fn expect(res: Result, p: *Parser) Error!void {
     if (p.inMacro) {
         if (res.value.tag == .unavailable) {
-            try p.errToken(.expected_expr, p.index);
+            try p.errToken(.expected_expr, p.tokenIdx);
             return error.ParsingFailed;
         }
         return;
     }
 
     if (res.node == .none) {
-        try p.errToken(.expected_expr, p.index);
+        try p.errToken(.expected_expr, p.tokenIdx);
         return error.ParsingFailed;
     }
 }
