@@ -1241,7 +1241,7 @@ fn parseDeclSpec(p: *Parser, isParam: bool) Error!?DeclSpec {
 ///  | attrIdentifier '(' identifier ')'
 ///  | attrIdentifier '(' identifier (',' expr)+ ')'
 ///  | attrIdentifier '(' (expr (',' expr)*)? ')'
-fn attribute(p: *Parser) Error!?TentativeAttribute {
+fn attribute(p: *Parser, syntax: Attribute.Syntax, namespace: ?[]const u8) Error!?TentativeAttribute {
     const nameToken = p.tokenIdx;
     switch (p.getCurrToken()) {
         .KeywordConst, .KeywordGccConst1, .KeywordGccConst2 => p.tokenIdx += 1,
@@ -1249,7 +1249,7 @@ fn attribute(p: *Parser) Error!?TentativeAttribute {
     }
 
     const name = p.getTokenSlice(nameToken);
-    const attr = Attribute.fromString(name) orelse {
+    const attr = Attribute.fromString(syntax, namespace, name) orelse {
         try p.errStr(.unknown_attribute, nameToken, name);
         if (p.eat(.LParen)) |_| p.skipTo(.RParen);
         return null;
@@ -1338,24 +1338,51 @@ fn validateAttr(p: *Parser, attr: Attribute, context: Attribute.ParseContext) Er
 }
 
 /// attribute-list : (attribute (',' attribute)*)?
-fn parseAttributeList(p: *Parser) Error!void {
-    if (p.getCurrToken() != .RParen) {
-        if (try p.attribute()) |attr| {
+fn parseGNUAttrList(p: *Parser) Error!void {
+    if (p.getCurrToken() == .RParen)
+        return;
+
+    if (try p.attribute(.gnu, null)) |attr| {
+        try p.attrBuffer.append(p.pp.comp.gpa, attr);
+    }
+
+    while (p.getCurrToken() != .RParen) {
+        _ = try p.expectToken(.Comma);
+        if (try p.attribute(.gnu, null)) |attr| {
             try p.attrBuffer.append(p.pp.comp.gpa, attr);
-        }
-        while (p.getCurrToken() != .RParen) {
-            _ = try p.expectToken(.Comma);
-            if (try p.attribute()) |attr| {
-                try p.attrBuffer.append(p.pp.comp.gpa, attr);
-            }
         }
     }
 }
 
-fn c2xAttribute(p: *Parser) !bool {
-    // todo [[attribute]]
-    _ = p;
-    return false;
+fn c23AttributeList(p: *Parser) Error!void {
+    while (p.getCurrToken() != .RBracket) { //
+        const namespaceTok = try p.expectIdentifier();
+        var namespace: ?[]const u8 = null;
+        if (p.eat(.ColonColon)) |_| {
+            namespace = p.getTokenSlice(namespaceTok);
+        } else {
+            p.tokenIdx -= 1;
+        }
+        if (try p.attribute(.c23, namespace)) |attr|
+            try p.attrBuffer.append(p.pp.comp.gpa, attr);
+        _ = p.eat(.Comma);
+    }
+}
+
+fn c23Attribute(p: *Parser) !bool {
+    if (!p.pp.comp.langOpts.standard.atLeast(.c2x)) return false;
+    const bracket1 = p.eat(.LBracket) orelse return false;
+    const bracket2 = p.eat(.LBracket) orelse {
+        p.tokenIdx -= 1;
+        return false;
+    };
+
+    try p.c23AttributeList();
+
+    _ = try p.expectClosing(bracket2, .RBracket);
+    _ = try p.expectClosing(bracket1, .RBracket);
+
+    return true;
 }
 
 fn msvcAttribute(p: *Parser) !bool {
@@ -1372,7 +1399,7 @@ fn gnuAttribute(p: *Parser) !bool {
     const paren1 = try p.expectToken(.LParen);
     const paren2 = try p.expectToken(.LParen);
 
-    try p.parseAttributeList();
+    try p.parseGNUAttrList();
 
     _ = try p.expectClosing(paren2, .RParen);
     _ = try p.expectClosing(paren1, .RParen);
@@ -1383,7 +1410,7 @@ fn gnuAttribute(p: *Parser) !bool {
 fn parseAttrSpec(p: *Parser) Error!void {
     while (true) {
         if (try p.gnuAttribute()) continue;
-        if (try p.c2xAttribute()) continue;
+        if (try p.c23Attribute()) continue;
         if (try p.msvcAttribute()) continue;
         break;
     }

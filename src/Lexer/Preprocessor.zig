@@ -947,7 +947,7 @@ fn handleBuiltinMacro(
             const identifierStr = pp.expandedSlice(identifier.?);
 
             return switch (builtin) {
-                .MacroParamHasAttribute => Attribute.fromString(identifierStr) != null,
+                .MacroParamHasAttribute => Attribute.fromString(.gnu, null, identifierStr) != null,
                 .MacroParamHasFeature => Features.hasFeature(pp.comp, identifierStr),
                 .MacroParamHasExtension => Features.hasExtension(pp.comp, identifierStr),
                 .MacroParamHasBuiltin => pp.comp.builtins.hasBuiltin(identifierStr),
