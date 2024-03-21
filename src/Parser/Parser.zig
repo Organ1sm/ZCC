@@ -851,9 +851,8 @@ fn parseDeclaration(p: *Parser) Error!bool {
     const firstTokenIndex = p.tokenIdx;
     const attrBufferTop = p.attrBuffer.len;
     defer p.attrBuffer.len = attrBufferTop;
-    // TODO: at this point we don't know what we're trying to parse, so we'll need to check
-    // the attributes against what kind of decl was parsed after the fact
-    try p.parseAttrSpec(); // .any
+
+    try p.parseAttrSpec();
 
     var declSpec = if (try p.parseDeclSpec(false)) |some| some else blk: {
         if (p.func.type != null) {
@@ -873,6 +872,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
         break :blk DeclSpec{ .type = try spec.finish(p) };
     };
 
+    try declSpec.warnIgnoredAttrs(p, attrBufferTop);
     var ID = (try p.parseInitDeclarator(&declSpec)) orelse {
         // eat ';'
         _ = try p.expectToken(.Semicolon);

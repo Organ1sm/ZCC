@@ -47,6 +47,10 @@ pub const Message = struct {
             tag: Attribute.Tag,
             actual: []const u8,
         },
+        ignoredRecordAttr: struct {
+            tag: Attribute.Tag,
+            specifier: enum { @"struct", @"union", @"enum" },
+        },
         actualCodePoint: u21,
         unsigned: u64,
         signed: i64,
@@ -330,6 +334,10 @@ pub fn renderExtra(comp: *Compilation, m: anytype) void {
                             msg.extra.attrEnum.actual,
                             Attribute.Formatting.quoteChar(msg.extra.attrEnum.tag),
                             Attribute.Formatting.choices(msg.extra.attrEnum.tag),
+                        }),
+                        .ignored_record_attr => m.print(info.msg, .{
+                            @tagName(msg.extra.ignoredRecordAttr.tag),
+                            @tagName(msg.extra.ignoredRecordAttr.specifier),
                         }),
                         else => unreachable,
                     }

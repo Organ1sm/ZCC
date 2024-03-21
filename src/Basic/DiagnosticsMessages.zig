@@ -1455,3 +1455,9 @@ pub const unavailable_note = struct {
     pub const extra = .str;
     pub const kind = .note;
 };
+pub const ignored_record_attr = struct {
+    pub const msg = "attribute '{s}' is ignored, place it after \"{s}\" to apply attribute to type declaration";
+    pub const extra = .ignored_record_attr;
+    pub const kind = .warning;
+    pub const opt = "ignored-attributes";
+};
