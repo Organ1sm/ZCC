@@ -1423,3 +1423,7 @@ pub const attribute_requires_identifier = struct {
     pub const kind = .@"error";
     pub const extra = .str;
 };
+pub const declspec_not_enabled = struct {
+    pub const msg = "'__declspec' attributes are not enabled; use '-fdeclspec' or '-fms-extensions' to enable support for __declspec attributes";
+    pub const kind = .@"error";
+};

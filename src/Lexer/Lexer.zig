@@ -1182,7 +1182,7 @@ test "keywords" {
         \\struct switch typedef union unsigned void volatile 
         \\while _Bool _Complex _Imaginary inline restrict _Alignas 
         \\_Alignof _Atomic _Generic _Noreturn _Static_assert _Thread_local 
-        \\__attribute __attribute__
+        \\__attribute __attribute__ __declspec
         \\
     , &.{
         .KeywordAuto,
@@ -1237,6 +1237,7 @@ test "keywords" {
         .NewLine,
         .KeywordAttribute1,
         .KeywordAttribute2,
+        .KeywordDeclSpec,
         .NewLine,
     });
 }

@@ -74,6 +74,8 @@ standard: Standard = .default,
 shortEnums: bool = false,
 /// -fdollars-in-identifiers, allow '$' in identifiers(default).
 dollarsInIdentifiers: bool = true,
+/// This field indicates whether ms extension declaration specifiers and attributes are enabled.
+declSpecAttrs: bool = false,
 
 pub fn setStandard(self: *LangOpts, name: []const u8) error{InvalidStandard}!void {
     self.standard = Standard.NameMap.get(name) orelse return error.InvalidStandard;

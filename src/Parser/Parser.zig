@@ -1386,8 +1386,12 @@ fn c23Attribute(p: *Parser) !bool {
 }
 
 fn msvcAttribute(p: *Parser) !bool {
-    // todo __declspec
-    _ = p;
+    const declspecTok = p.eat(.KeywordDeclSpec) orelse return false;
+    if (!p.pp.comp.langOpts.declSpecAttrs) {
+        try p.errToken(.declspec_not_enabled, declspecTok);
+        return error.ParsingFailed;
+    }
+
     return false;
 }
 

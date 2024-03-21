@@ -156,11 +156,14 @@ pub const Token = struct {
         .{ "asm", .KeywordGccAsm },
         .{ "__asm", .KeywordGccAsm1 },
         .{ "__asm__", .KeywordGccAsm2 },
+        .{ "__attribute", .KeywordAttribute1 },
+        .{ "__attribute__", .KeywordAttribute2 },
+
+        // MS keywords
+        .{ "__declspec", .KeywordDeclSpec },
 
         // gcc builtins
         .{ "__builtin_choose_expr", .BuiltinChooseExpr },
         .{ "__builtin_va_arg", .BuiltinVaArg },
-        .{ "__attribute", .KeywordAttribute1 },
-        .{ "__attribute__", .KeywordAttribute2 },
     });
 };
