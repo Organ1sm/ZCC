@@ -335,8 +335,21 @@ const attributes = struct {
             position_2: ?u32 = null,
         };
     };
+    pub const allocate = struct {
+        const declspec = "allocate";
+
+        const Args = struct {
+            segname: []const u8,
+        };
+    };
+    pub const allocator = struct {
+        const declspec = "allocator";
+    };
     pub const always_inline = struct {
         const gnu = "always_inline";
+    };
+    pub const appdomain = struct {
+        const declspec = "appdomain";
     };
     pub const artificial = struct {
         const gnu = "artificial";
@@ -352,6 +365,12 @@ const attributes = struct {
         const gnu = "cleanup";
         const Args = struct {
             function: Identifier,
+        };
+    };
+    pub const code_seg = struct {
+        const declspec = "code_seg";
+        const Args = struct {
+            segname: []const u8,
         };
     };
     pub const cold = struct {
@@ -377,8 +396,10 @@ const attributes = struct {
     };
     pub const deprecated = struct {
         const gnu = "deprecated";
+        const declspec = "deprecated";
+        const c23 = "deprecated";
         const Args = struct {
-            msg: ?[]const u8,
+            msg: ?[]const u8 = null,
         };
     };
     pub const designated_init = struct {
@@ -389,6 +410,12 @@ const attributes = struct {
         const Args = struct {
             priority: ?u32 = null,
         };
+    };
+    pub const dllexport = struct {
+        const declspec = "dllexport";
+    };
+    pub const dllimport = struct {
+        const declspec = "dllimport";
     };
     pub const @"error" = struct {
         const gnu = "error";
@@ -401,6 +428,7 @@ const attributes = struct {
     };
     const fallthrough = struct {
         const gnu = "fallthrough";
+        const c23 = "fallthrough";
     };
     const flatten = struct {
         const gnu = "flatten";
@@ -446,6 +474,9 @@ const attributes = struct {
     pub const interrupt_handler = struct {
         const gnu = "interrupt_handler";
     };
+    pub const jitintrinsic = struct {
+        const declspec = "jitintrinsic";
+    };
     pub const leaf = struct {
         const gnu = "leaf";
     };
@@ -472,6 +503,9 @@ const attributes = struct {
             },
         };
     };
+    pub const naked = struct {
+        const declspec = "naked";
+    };
     pub const no_address_safety_analysis = struct {
         const gnu = "no_address_safety_analysise";
     };
@@ -497,6 +531,7 @@ const attributes = struct {
     };
     pub const no_sanitize_address = struct {
         const gnu = "no_sanitize_address";
+        const declspec = "no_sanitize_address";
     };
     pub const no_sanitize_coverage = struct {
         const gnu = "no_sanitize_coverage";
@@ -516,17 +551,24 @@ const attributes = struct {
     pub const no_stack_protector = struct {
         const gnu = "no_stack_protector";
     };
+    pub const @"noalias" = struct {
+        const declspec = "noalias";
+    };
     pub const noclone = struct {
         const gnu = "noclone";
     };
     pub const nocommon = struct {
         const gnu = "nocommon";
     };
+    pub const nodiscard = struct {
+        const c23 = "nodiscard";
+    };
     pub const noinit = struct {
         const gnu = "noinit";
     };
     pub const @"noinline" = struct {
         const gnu = "noinline";
+        const declspec = "noinline";
     };
     pub const noipa = struct {
         const gnu = "noipa";
@@ -545,9 +587,15 @@ const attributes = struct {
     };
     pub const @"noreturn" = struct {
         const gnu = "noreturn";
+        const c23 = "noreturn";
+        const declspec = "noreturn";
     };
     pub const nothrow = struct {
         const gnu = "nothrow";
+        const declspec = "nothrow";
+    };
+    pub const novtable = struct {
+        const declspec = "novtable";
     };
     // TODO: union args ?
     //    const optimize = struct {
@@ -564,8 +612,14 @@ const attributes = struct {
     pub const persistent = struct {
         const gnu = "persistent";
     };
+    pub const process = struct {
+        const declspec = "process";
+    };
     pub const pure = struct {
         const gnu = "pure";
+    };
+    pub const restrict = struct {
+        const declspec = "restrict";
     };
     pub const retain = struct {
         const gnu = "retain";
@@ -575,6 +629,9 @@ const attributes = struct {
     };
     pub const returns_twice = struct {
         const gnu = "returns_twice";
+    };
+    pub const safebuffers = struct {
+        const declspec = "safebuffers";
     };
     pub const scalar_storage_order = struct {
         const gnu = "scalar_storage_order";
@@ -614,6 +671,18 @@ const attributes = struct {
             },
         };
     };
+    pub const spectre = struct {
+        const declspec = "spectre";
+        const Args = struct {
+            arg: enum {
+                nomitigation,
+
+                const opts = struct {
+                    const enum_kind = .identifier;
+                };
+            },
+        };
+    };
     pub const stack_protect = struct {
         const gnu = "stack_protect";
     };
@@ -634,6 +703,9 @@ const attributes = struct {
         const Args = struct {
             options: []const u8, // TODO: multiple arguments
         };
+    };
+    pub const thread = struct {
+        const declspec = "thread";
     };
     pub const tls_model = struct {
         const gnu = "tls_model";
@@ -668,6 +740,12 @@ const attributes = struct {
     };
     pub const used = struct {
         const gnu = "used";
+    };
+    pub const uuid = struct {
+        const declspec = "uuid";
+        const Args = struct {
+            uuid: []const u8,
+        };
     };
     pub const vector_size = struct {
         const gnu = "vector_size";

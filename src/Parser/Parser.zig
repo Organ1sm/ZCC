@@ -1355,7 +1355,7 @@ fn parseGNUAttrList(p: *Parser) Error!void {
     }
 }
 
-fn c23AttributeList(p: *Parser) Error!void {
+fn parseC23AttrList(p: *Parser) Error!void {
     while (p.getCurrToken() != .RBracket) { //
         const namespaceTok = try p.expectIdentifier();
         var namespace: ?[]const u8 = null;
@@ -1370,6 +1370,14 @@ fn c23AttributeList(p: *Parser) Error!void {
     }
 }
 
+fn parseMSVCAttrList(p: *Parser) Error!void {
+    while (p.getCurrToken() != .RParen) {
+        if (try p.attribute(.declspec, null)) |attr|
+            try p.attrBuffer.append(p.pp.comp.gpa, attr);
+        _ = p.eat(.Comma);
+    }
+}
+
 fn c23Attribute(p: *Parser) !bool {
     if (!p.pp.comp.langOpts.standard.atLeast(.c2x)) return false;
     const bracket1 = p.eat(.LBracket) orelse return false;
@@ -1378,7 +1386,7 @@ fn c23Attribute(p: *Parser) !bool {
         return false;
     };
 
-    try p.c23AttributeList();
+    try p.parseC23AttrList();
 
     _ = try p.expectClosing(bracket2, .RBracket);
     _ = try p.expectClosing(bracket1, .RBracket);
@@ -1392,6 +1400,10 @@ fn msvcAttribute(p: *Parser) !bool {
         try p.errToken(.declspec_not_enabled, declspecTok);
         return error.ParsingFailed;
     }
+
+    const lparen = try p.expectToken(.LParen);
+    try p.parseMSVCAttrList();
+    _ = try p.expectClosing(lparen, .RParen);
 
     return false;
 }
