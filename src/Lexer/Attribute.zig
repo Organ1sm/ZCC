@@ -75,7 +75,7 @@ pub fn requiredArgCount(attr: Tag) u32 {
             comptime {
                 const fields = getArguments(@field(attributes, @tagName(tag)));
                 for (fields) |arg_field| {
-                    if (!mem.eql(u8, arg_field.name, "__name_tok") and @typeInfo(arg_field.type) != .Optional)
+                    if (!mem.eql(u8, arg_field.name, "__name_token") and @typeInfo(arg_field.type) != .Optional)
                         needed += 1;
                 }
             }
@@ -92,7 +92,7 @@ pub fn maxArgCount(attr: Tag) u32 {
             comptime {
                 const fields = getArguments(@field(attributes, @tagName(tag)));
                 for (fields) |arg_field| {
-                    if (!mem.eql(u8, arg_field.name, "__name_tok"))
+                    if (!mem.eql(u8, arg_field.name, "__name_token"))
                         max += 1;
                 }
             }
@@ -400,6 +400,7 @@ const attributes = struct {
         const c23 = "deprecated";
         const Args = struct {
             msg: ?[]const u8 = null,
+            __name_token: TokenIndex = undefined,
         };
     };
     pub const designated_init = struct {
@@ -728,7 +729,8 @@ const attributes = struct {
     pub const unavailable = struct {
         const gnu = "unavailable";
         const Args = struct {
-            msg: ?[]const u8,
+            msg: ?[]const u8 = null,
+            __name_token: TokenIndex = undefined,
         };
     };
     pub const uninitialized = struct {
@@ -842,10 +844,15 @@ pub fn ArgumentsForTag(comptime tag: Tag) type {
     return if (@hasDecl(@field(attributes, decl.name), "Args")) @field(attributes, decl.name).Args else void;
 }
 
-pub fn initArguments(tag: Tag) Arguments {
+pub fn initArguments(tag: Tag, nameToken: TokenIndex) Arguments {
     inline for (@typeInfo(Tag).Enum.fields) |field| {
         if (@intFromEnum(tag) == field.value) {
-            return @unionInit(Arguments, field.name, undefined);
+            var args = @unionInit(Arguments, field.name, undefined);
+            const decl = @typeInfo(attributes).Struct.decls[field.value];
+            if (@hasDecl(@field(attributes, decl.name), "Args") and @hasField(@field(attributes, decl.name).Args, "__name_token")) {
+                @field(@field(args, field.name), "__name_token") = nameToken;
+            }
+            return args;
         }
     }
     unreachable;

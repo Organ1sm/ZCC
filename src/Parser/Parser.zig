@@ -365,13 +365,13 @@ fn checkDeprecatedUnavailable(p: *Parser, ty: Type, usageToken: TokenIndex, decl
     // Check if the type has an 'unavailable' attribute and report it
     if (ty.getAttribute(.unavailable)) |unavailable| {
         try p.errDeprecated(.unavailable, usageToken, unavailable.msg);
-        try p.errStr(.unavailable_note, declToken, p.getTokenSlice(declToken));
+        try p.errStr(.unavailable_note, unavailable.__name_token, p.getTokenSlice(declToken));
         return error.ParsingFailed; // Abort parsing due to 'unavailable' type
     }
     // Check if the type has a 'deprecated' attribute and report it
     else if (ty.getAttribute(.deprecated)) |deprecated| {
         try p.errDeprecated(.deprecated_declarations, usageToken, deprecated.msg);
-        try p.errStr(.deprecated_note, declToken, p.getTokenSlice(declToken));
+        try p.errStr(.deprecated_note, deprecated.__name_token, p.getTokenSlice(declToken));
     }
 }
 
@@ -1318,7 +1318,7 @@ fn attribute(p: *Parser, syntax: Attribute.Syntax, namespace: ?[]const u8) Error
         return null;
     };
     const requiredCount = Attribute.requiredArgCount(attr);
-    var arguments = Attribute.initArguments(attr);
+    var arguments = Attribute.initArguments(attr, nameToken);
     var argIdx: u32 = 0;
 
     switch (p.getCurrToken()) {
