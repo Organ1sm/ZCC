@@ -5693,13 +5693,16 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
                     return res;
                 },
 
-                .declaration, .definition, .param => |s| return Result{
-                    .ty = s.type,
-                    .node = try p.addNode(.{
-                        .tag = .DeclRefExpr,
-                        .type = s.type,
-                        .data = .{ .declRef = nameToken },
-                    }),
+                .declaration, .definition, .param => |s| {
+                    try p.checkDeprecatedUnavailable(s.type, nameToken, s.nameToken);
+                    return Result{
+                        .ty = s.type,
+                        .node = try p.addNode(.{
+                            .tag = .DeclRefExpr,
+                            .type = s.type,
+                            .data = .{ .declRef = nameToken },
+                        }),
+                    };
                 },
 
                 else => unreachable,
