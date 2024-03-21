@@ -2637,8 +2637,16 @@ fn parseParamDecls(p: *Parser) Error!?[]Type.Function.Param {
             if (some.oldTypeFunc) |tokenIdx|
                 try p.errToken(.invalid_old_style_params, tokenIdx);
 
+            // parse attributes at end of formal parameters 
+            const attrBufferTop = p.attrBuffer.len;
+            defer p.attrBuffer.len = attrBufferTop;
+
+            try p.parseAttrSpec();
+            const attrs = p.attrBuffer.items(.attr)[attrBufferTop..];
+
             nameToken = some.name;
-            paramType = some.type;
+            paramType = try some.type.withAttributes(p.arena, attrs);
+
             if (some.name != 0) {
                 if (p.findSymbol(nameToken, .definition)) |scope| {
                     if (scope == .enumeration) {
