@@ -1382,24 +1382,6 @@ fn diagnose(p: *Parser, attr: Attribute.Tag, arguments: *Attribute.Arguments, ar
     return Attribute.diagnose(attr, arguments, argIdx, res.value, node);
 }
 
-fn validateAttr(p: *Parser, attr: Attribute, context: Attribute.ParseContext) Error!bool {
-    const name = p.getTokenSlice(attr.name);
-    if (Attribute.Tag.fromString(name)) |tag| {
-        if (tag.allowedInContext(context))
-            return true;
-
-        if (context == .statement) {
-            try p.errToken(.cannot_apply_attribute_to_statement, attr.name);
-            return error.ParsingFailed;
-        }
-        try p.errStr(.ignored_attribute, attr.name, try p.ignoredAttrString(tag, context));
-    } else {
-        try p.errStr(.unknown_attribute, attr.name, name);
-    }
-
-    return false;
-}
-
 /// attribute-list : (attribute (',' attribute)*)?
 fn parseGNUAttrList(p: *Parser) Error!void {
     if (p.getCurrToken() == .RParen)
