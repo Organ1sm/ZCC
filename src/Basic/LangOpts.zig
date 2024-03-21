@@ -80,3 +80,11 @@ declSpecAttrs: bool = false,
 pub fn setStandard(self: *LangOpts, name: []const u8) error{InvalidStandard}!void {
     self.standard = Standard.NameMap.get(name) orelse return error.InvalidStandard;
 }
+
+pub fn enableMSExtensions(self: *LangOpts) void {
+    self.declSpecAttrs = true;
+}
+
+pub fn disableMSExtensions(self: *LangOpts) void {
+    self.declSpecAttrs = false;
+}
