@@ -869,7 +869,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
         }
 
         var spec: TypeBuilder = .{};
-        break :blk DeclSpec{ .type = try spec.finish(p) };
+        break :blk DeclSpec{ .type = try spec.finish(p, p.attrBuffer.len) };
     };
 
     try declSpec.warnIgnoredAttrs(p, attrBufferTop);
@@ -1211,6 +1211,9 @@ fn parseDeclSpec(p: *Parser, isParam: bool) Error!?DeclSpec {
     var d: DeclSpec = .{};
     var spec: TypeBuilder = .{};
 
+    const attrBufferTop = p.attrBuffer.len;
+    defer p.attrBuffer.len = attrBufferTop;
+
     const start = p.tokenIdx;
     while (true) {
         if (try p.parseTypeSpec(&spec))
@@ -1291,7 +1294,7 @@ fn parseDeclSpec(p: *Parser, isParam: bool) Error!?DeclSpec {
         spec.alignToken = null;
     }
 
-    d.type = try spec.finish(p);
+    d.type = try spec.finish(p, attrBufferTop);
     return d;
 }
 
@@ -2048,12 +2051,15 @@ fn parseRecordDeclarator(p: *Parser) Error!bool {
 
 // specifier-qualifier-list : (type-specifier | type-qualifier | align-specifier)+
 fn parseSpecQuals(p: *Parser) Error!?Type {
+    const attrBufferTop = p.attrBuffer.len;
+    defer p.attrBuffer.len = attrBufferTop;
+
     var spec: TypeBuilder = .{};
     if (try p.parseTypeSpec(&spec)) {
         if (spec.alignment != 0)
             try p.errToken(.align_ignored, spec.alignToken.?);
         spec.alignToken = null;
-        return try spec.finish(p);
+        return try spec.finish(p, attrBufferTop);
     }
 
     return null;
@@ -2621,7 +2627,7 @@ fn parseParamDecls(p: *Parser) Error!?[]Type.Function.Param {
             return null
         else blk: {
             var spec: TypeBuilder = .{};
-            break :blk DeclSpec{ .type = try spec.finish(p) };
+            break :blk DeclSpec{ .type = try spec.finish(p, p.attrBuffer.len) };
         };
 
         var nameToken: TokenIndex = 0;

@@ -142,7 +142,7 @@ pub const Specifier = union(enum) {
     }
 };
 
-pub fn finish(b: @This(), p: *Parser) Parser.Error!Type {
+pub fn finish(b: @This(), p: *Parser, attrBufferStart: usize) Parser.Error!Type {
     var ty = Type{ .specifier = undefined };
     switch (b.specifier) {
         Specifier.None => {
@@ -313,14 +313,16 @@ pub fn finish(b: @This(), p: *Parser) Parser.Error!Type {
             ty.alignment = b.alignment;
         }
     }
-    return ty;
+
+    const attrs = p.attrBuffer.items(.attr)[attrBufferStart..];
+    return ty.withAttributes(p.arena, attrs);
 }
 
 fn cannotCombine(b: @This(), p: *Parser, sourceToken: TokenIndex) !void {
     if (b.errorOnInvalid)
         return error.CannotCombine;
 
-    const tyString = b.specifier.toString() orelse try p.typeStr(try b.finish(p));
+    const tyString = b.specifier.toString() orelse try p.typeStr(try b.finish(p, p.attrBuffer.len));
     try p.errExtra(
         .cannot_combine_spec,
         sourceToken,
