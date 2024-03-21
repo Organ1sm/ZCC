@@ -283,7 +283,8 @@ pub fn is(ty: Type, specifier: Specifier) bool {
 }
 
 pub fn withAttributes(self: Type, allocator: std.mem.Allocator, attributes: []const Attribute) !Type {
-    if (attributes.len == 0) return self;
+    if (attributes.len == 0)
+        return self;
 
     const attributedType = try Type.Attributed.creat(allocator, self, attributes);
     return Type{ .specifier = .Attributed, .data = .{ .attributed = attributedType } };
@@ -1049,7 +1050,7 @@ pub fn validateCombinedType(ty: Type, p: *Parser, sourceToken: TokenIndex) Parse
 /// @param ty The Type from which to retrieve the attribute.
 /// @param tag The attribute tag to search for.
 /// @return The attribute with the given tag if it exists, or null otherwise.
-pub fn getAttribute(ty: Type, comptime tag: Attribute.Tag) ?Attribute {
+pub fn getAttribute(ty: Type, comptime tag: Attribute.Tag) ?Attribute.ArgumentsForTag(tag) {
     switch (ty.specifier) {
         .TypeofType => return ty.data.subType.getAttribute(tag),
         .TypeofExpr => return ty.data.expr.ty.getAttribute(tag),

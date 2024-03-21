@@ -119,6 +119,7 @@ pub const Options = packed struct {
     @"variadic-macros": Kind = .default,
     varargs: Kind = .default,
     @"#warnings": Kind = .default,
+    @"deprecated-declarations": Kind = .default,
 };
 
 list: std.ArrayListUnmanaged(Message) = .{},

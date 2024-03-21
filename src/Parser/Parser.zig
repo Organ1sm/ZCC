@@ -350,6 +350,65 @@ pub fn typePairStrExtra(p: *Parser, a: Type, msg: []const u8, b: Type) ![]const 
     return try p.pp.comp.diag.arena.allocator().dupe(u8, p.strings.items[stringsTop..]);
 }
 
+/// Check for deprecated or unavailable attributes on a type and report them.
+/// If the type has an 'unavailable' attribute, it reports an error for both
+/// the usage and declaration tokens, then aborts parsing.
+/// If the type has a 'deprecated' attribute, it reports a warning for both
+/// the usage and declaration tokens.
+///
+/// @param p The parser instance.
+/// @param ty The type to check for attributes.
+/// @param usageToken The token index where the type is used.
+/// @param declToken The token index where the type is declared.
+/// @return Returns error.ParsingFailed if the type is unavailable, otherwise void.
+fn checkDeprecatedUnavailable(p: *Parser, ty: Type, usageToken: TokenIndex, declToken: TokenIndex) !void {
+    // Check if the type has an 'unavailable' attribute and report it
+    if (ty.getAttribute(.unavailable)) |unavailable| {
+        try p.errDeprecated(.unavailable, usageToken, unavailable.msg);
+        try p.errStr(.unavailable_note, declToken, p.getTokenSlice(declToken));
+        return error.ParsingFailed; // Abort parsing due to 'unavailable' type
+    }
+    // Check if the type has a 'deprecated' attribute and report it
+    else if (ty.getAttribute(.deprecated)) |deprecated| {
+        try p.errDeprecated(.deprecated_declarations, usageToken, deprecated.msg);
+        try p.errStr(.deprecated_note, declToken, p.getTokenSlice(declToken));
+    }
+}
+
+/// Reports deprecated or unavailable usage of code based on the diagnostic tag.
+/// It constructs an error message and then calls `errStr` to handle the error.
+///
+/// @param p         The parser instance containing state and utilities for parsing.
+/// @param tag       The diagnostic tag indicating the type of deprecation.
+/// @param tokenIdx  The index of the token related to the deprecation.
+/// @param msg       Optional message providing additional information about the deprecation.
+/// @return          An error indicating that the parsing should be aborted on failure.
+fn errDeprecated(p: *Parser, tag: Diagnostics.Tag, tokenIdx: TokenIndex, msg: ?[]const u8) Compilation.Error!void {
+    const stringsTop = p.strings.items.len;
+    defer p.strings.items.len = stringsTop;
+
+    const w = p.strings.writer();
+    try w.print("'{s}' is ", .{p.getTokenSlice(tokenIdx)});
+    // Determine the reason for deprecation based on the provided tag.
+    const reason: []const u8 = switch (tag) {
+        .unavailable => "unavailable", // The feature is not available.
+        .deprecated_declarations => "deprecated", // The feature is deprecated.
+        else => unreachable, // Other cases should be unreachable.
+    };
+
+    // Write the reason to the buffer.
+    try w.writeAll(reason);
+    // If a custom message is provided, append it to the buffer.
+    if (msg) |m| {
+        try w.print(": {s}", .{m}); // Append the custom message.
+    }
+
+    // Duplicate the constructed string from the buffer and prepare the error message.
+    const str = try p.pp.comp.diag.arena.allocator().dupe(u8, p.strings.items[stringsTop..]);
+    // Report the error with the constructed message.
+    return p.errStr(tag, tokenIdx, str);
+}
+
 pub fn addNode(p: *Parser, node: AST.Node) Allocator.Error!NodeIndex {
     if (p.inMacro)
         return .none;
@@ -2150,7 +2209,7 @@ fn enumerator(p: *Parser, e: *Enumerator) Error!?EnumFieldAndNode {
     const attrBufferTop = p.attrBuffer.len;
     defer p.attrBuffer.len = attrBufferTop;
 
-    try p.parseAttrSpec(); // .@"enum"
+    try p.parseAttrSpec();
 
     if (p.eat(.Equal)) |_| {
         const specified = try p.parseConstExpr();
@@ -2178,19 +2237,23 @@ fn enumerator(p: *Parser, e: *Enumerator) Error!?EnumFieldAndNode {
         else => unreachable,
     };
 
+    const attrs = p.attrBuffer.items(.attr)[attrBufferTop..];
+    var res = e.res;
+    res.ty = try res.ty.withAttributes(p.arena, attrs);
+
     try p.scopes.append(.{ .enumeration = .{
         .name = name,
-        .value = e.res,
+        .value = res,
         .nameToken = nameToken,
     } });
 
     const node = try p.addNode(.{
         .tag = .EnumFieldDecl,
-        .type = e.res.ty,
+        .type = res.ty,
         .data = .{
             .decl = .{
                 .name = nameToken,
-                .node = e.res.node,
+                .node = res.node,
             },
         },
     });
@@ -2198,9 +2261,9 @@ fn enumerator(p: *Parser, e: *Enumerator) Error!?EnumFieldAndNode {
     return EnumFieldAndNode{
         .field = .{
             .name = name,
-            .ty = e.res.ty,
+            .ty = res.ty,
             .nameToken = nameToken,
-            .node = e.res.node,
+            .node = res.node,
         },
         .node = node,
     };
@@ -5614,6 +5677,7 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
             switch (sym) {
                 .enumeration => |e| {
                     var res = e.value;
+                    try p.checkDeprecatedUnavailable(res.ty, nameToken, e.nameToken);
                     res.node = try p.addNode(.{
                         .tag = .EnumerationRef,
                         .type = res.ty,

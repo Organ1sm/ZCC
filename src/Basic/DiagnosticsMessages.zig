@@ -1433,3 +1433,25 @@ pub const declspec_attr_not_supported = struct {
     pub const opt = "ignored-attributes";
     pub const kind = .warning;
 };
+pub const deprecated_declarations = struct {
+    pub const msg = "{s}";
+    pub const extra = .str;
+    pub const opt = "deprecated-declarations";
+    pub const kind = .warning;
+};
+pub const deprecated_note = struct {
+    pub const msg = "'{s}' has been explicitly marked deprecated here";
+    pub const extra = .str;
+    pub const opt = "deprecated-declarations";
+    pub const kind = .note;
+};
+pub const unavailable = struct {
+    pub const msg = "{s}";
+    pub const extra = .str;
+    pub const kind = .@"error";
+};
+pub const unavailable_note = struct {
+    pub const msg = "'{s}' has been explicitly marked unavailable here";
+    pub const extra = .str;
+    pub const kind = .note;
+};
