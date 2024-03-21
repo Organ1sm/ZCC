@@ -139,8 +139,13 @@ pub const Attributed = struct {
         const attrType = try allocator.create(Attributed);
         errdefer allocator.destroy(attrType);
 
+        const existingAttrs = base.getAttributes();
+        var allAttrs = try allocator.alloc(Attribute, existingAttrs.len + attributes.len);
+        @memcpy(allAttrs[0..existingAttrs.len], existingAttrs);
+        @memcpy(allAttrs[existingAttrs.len..], attributes);
+
         attrType.* = .{
-            .attributes = try allocator.dupe(Attribute, attributes),
+            .attributes = allAttrs,
             .base = base,
         };
         return attrType;
@@ -1065,6 +1070,15 @@ pub fn getAttribute(ty: Type, comptime tag: Attribute.Tag) ?Attribute.ArgumentsF
 
         else => return null,
     }
+}
+
+pub fn getAttributes(ty: Type) []const Attribute {
+    return switch (ty.specifier) {
+        .Attributed => ty.data.attributed.attributes,
+        .TypeofType, .DecayedTypeofType => ty.data.subType.getAttributes(),
+        .TypeofExpr, .DecayedTypeofExpr => ty.data.expr.ty.getAttributes(),
+        else => &.{},
+    };
 }
 
 /// Print type in C style
