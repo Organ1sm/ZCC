@@ -1250,7 +1250,8 @@ fn attribute(p: *Parser, syntax: Attribute.Syntax, namespace: ?[]const u8) Error
 
     const name = p.getTokenSlice(nameToken);
     const attr = Attribute.fromString(syntax, namespace, name) orelse {
-        try p.errStr(.unknown_attribute, nameToken, name);
+        const tag: Diagnostics.Tag = if (syntax == .declspec) .declspec_attr_not_supported else .unknown_attribute;
+        try p.errStr(tag, nameToken, name);
         if (p.eat(.LParen)) |_| p.skipTo(.RParen);
         return null;
     };
@@ -1301,7 +1302,7 @@ fn attribute(p: *Parser, syntax: Attribute.Syntax, namespace: ?[]const u8) Error
                 }
             }
         },
-        else => return error.ParsingFailed,
+        else => {},
     }
     if (argIdx < requiredCount) {
         try p.errExtra(

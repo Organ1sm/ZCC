@@ -1427,3 +1427,9 @@ pub const declspec_not_enabled = struct {
     pub const msg = "'__declspec' attributes are not enabled; use '-fdeclspec' or '-fms-extensions' to enable support for __declspec attributes";
     pub const kind = .@"error";
 };
+pub const declspec_attr_not_supported = struct {
+    pub const msg = "__declspec attribute '{s}' is not supported";
+    pub const extra = .str;
+    pub const opt = "ignored-attributes";
+    pub const kind = .warning;
+};
