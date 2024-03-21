@@ -135,7 +135,7 @@ pub const Attributed = struct {
     attributes: []Attribute,
     base: Type, // base type
 
-    fn creat(allocator: std.mem.Allocator, base: Type, attributes: []const Attribute) !*Attributed {
+    fn create(allocator: std.mem.Allocator, base: Type, attributes: []const Attribute) !*Attributed {
         const attrType = try allocator.create(Attributed);
         errdefer allocator.destroy(attrType);
 
@@ -286,7 +286,7 @@ pub fn withAttributes(self: Type, allocator: std.mem.Allocator, attributes: []co
     if (attributes.len == 0)
         return self;
 
-    const attributedType = try Type.Attributed.creat(allocator, self, attributes);
+    const attributedType = try Type.Attributed.create(allocator, self, attributes);
     return Type{ .specifier = .Attributed, .data = .{ .attributed = attributedType } };
 }
 
