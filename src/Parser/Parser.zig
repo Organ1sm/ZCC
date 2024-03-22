@@ -2643,7 +2643,7 @@ fn parseParamDecls(p: *Parser) Error!?[]Type.Function.Param {
             if (some.oldTypeFunc) |tokenIdx|
                 try p.errToken(.invalid_old_style_params, tokenIdx);
 
-            // parse attributes at end of formal parameters 
+            // parse attributes at end of formal parameters
             const attrBufferTop = p.attrBuffer.len;
             defer p.attrBuffer.len = attrBufferTop;
 
@@ -3526,14 +3526,14 @@ fn parseStmt(p: *Parser) Error!NodeIndex {
 
     if (p.eat(.Semicolon)) |_| {
         var nullNode: AST.Node = .{ .tag = .NullStmt, .data = undefined };
-        if (attrs.len > 0) {
+        nullNode.type = try nullNode.type.withAttributes(p.arena, attrs);
+
+        if (nullNode.type.getAttribute(.fallthrough) != null) {
             // TODO: this condition is not completely correct; the last statement of a compound
             // statement is also valid if it precedes a switch label (so intervening '}' are ok,
             // but only if they close a compound statement)
             if (p.getCurrToken() != .KeywordCase and p.getCurrToken() != .KeywordDefault)
                 try p.errToken(.invalid_fallthrough, exprStart);
-
-            nullNode.type = try nullNode.type.withAttributes(p.arena, attrs);
         }
 
         return p.addNode(nullNode);
