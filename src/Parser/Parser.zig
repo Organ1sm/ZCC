@@ -1575,15 +1575,17 @@ fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec) Error!?InitDeclarator {
             ID.d.type.data.array.len = initListExpr.ty.data.array.len;
             ID.d.type.specifier = .Array;
         } else if (ID.d.type.is(.IncompleteArray)) {
+            const attrs = ID.d.type.getAttributes();
             const arrayType = try p.arena.create(Type.Array);
             arrayType.* = .{
                 .elem = ID.d.type.getElemType(),
                 .len = initListExpr.ty.arrayLen().?,
             };
-            ID.d.type = .{
+            const ty = Type{
                 .specifier = .Array,
                 .data = .{ .array = arrayType },
             };
+            ID.d.type = try ty.withAttributes(p.arena, attrs);
         }
     }
 
