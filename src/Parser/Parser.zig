@@ -1328,7 +1328,7 @@ fn validateAlignas(p: *Parser, ty: Type, tag: ?Diagnostics.Tag) !void {
 ///  | attrIdentifier '(' identifier ')'
 ///  | attrIdentifier '(' identifier (',' expr)+ ')'
 ///  | attrIdentifier '(' (expr (',' expr)*)? ')'
-fn attribute(p: *Parser, syntax: Attribute.Syntax, namespace: ?[]const u8) Error!?TentativeAttribute {
+fn attribute(p: *Parser, kind: Attribute.Kind, namespace: ?[]const u8) Error!?TentativeAttribute {
     const nameToken = p.tokenIdx;
     switch (p.getCurrToken()) {
         .KeywordConst, .KeywordGccConst1, .KeywordGccConst2 => p.tokenIdx += 1,
@@ -1336,8 +1336,8 @@ fn attribute(p: *Parser, syntax: Attribute.Syntax, namespace: ?[]const u8) Error
     }
 
     const name = p.getTokenSlice(nameToken);
-    const attr = Attribute.fromString(syntax, namespace, name) orelse {
-        const tag: Diagnostics.Tag = if (syntax == .declspec) .declspec_attr_not_supported else .unknown_attribute;
+    const attr = Attribute.fromString(kind, namespace, name) orelse {
+        const tag: Diagnostics.Tag = if (kind == .declspec) .declspec_attr_not_supported else .unknown_attribute;
         try p.errStr(tag, nameToken, name);
         if (p.eat(.LParen)) |_| p.skipTo(.RParen);
         return null;

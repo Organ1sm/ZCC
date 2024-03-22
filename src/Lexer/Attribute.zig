@@ -15,7 +15,7 @@ const Attribute = @This();
 tag: Tag,
 args: Arguments,
 
-pub const Syntax = enum {
+pub const Kind = enum {
     c23,
     declspec,
     gnu,
@@ -912,8 +912,8 @@ pub fn initArguments(tag: Tag, nameToken: TokenIndex) Arguments {
     unreachable;
 }
 
-pub fn fromString(stx: Syntax, namespace: ?[]const u8, name: []const u8) ?Tag {
-    return switch (stx) {
+pub fn fromString(kind: Kind, namespace: ?[]const u8, name: []const u8) ?Tag {
+    return switch (kind) {
         .c23 => fromStringC23(namespace, name),
         .declspec => fromStringDeclspec(name),
         .gnu => fromStringGnu(name),
