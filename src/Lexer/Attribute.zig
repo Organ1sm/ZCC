@@ -529,12 +529,28 @@ const attributes = struct {
         const gnu = "mode";
         const Args = struct {
             mode: enum {
-                byte,
-                __byte__,
-                word,
-                __word__,
-                pointer,
-                __pointer__,
+                // zig fmt: off
+                byte,  word,  pointer,
+                BI,    QI,    HI,
+                PSI,   SI,    PDI,
+                DI,    TI,    OI,
+                XI,    QF,    HF,
+                TQF,   SF,    DF,
+                XF,    SD,    DD,
+                TD,    TF,    QQ,
+                HQ,    SQ,    DQ,
+                TQ,    UQQ,   UHQ,
+                USQ,   UDQ,   UTQ,
+                HA,    SA,    DA,
+                TA,    UHA,   USA,
+                UDA,   UTA,   CC,
+                BLK,   VOID,  QC,
+                HC,    SC,    DC,
+                XC,    TC,    CQI,
+                CHI,   CSI,   CDI,
+                CTI,   COI,   CPSI,
+                BND32, BND64,
+                // zig fmt: on
 
                 const opts = struct {
                     const enum_kind = .identifier;
