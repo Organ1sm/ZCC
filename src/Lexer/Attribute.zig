@@ -347,7 +347,7 @@ const attributes = struct {
                 };
             },
             ref_index: u32,
-            size_index: ?u32,
+            size_index: ?u32 = null,
         };
     };
     pub const alias = struct {
@@ -361,7 +361,7 @@ const attributes = struct {
         const declspec = "align";
 
         const Args = struct {
-            alignment: ?Alignment,
+            alignment: ?Alignment = null,
             __name_token: TokenIndex = undefined,
         };
     };
@@ -712,7 +712,7 @@ const attributes = struct {
                 const opts = struct {
                     const enum_kind = .string;
                 };
-            },
+            } = null,
         };
     };
     pub const spectre = struct {
@@ -834,7 +834,7 @@ const attributes = struct {
     pub const weakref = struct {
         const gnu = "weakref";
         const Args = struct {
-            target: ?[]const u8,
+            target: ?[]const u8 = null,
         };
     };
     pub const zero_call_used_regs = struct {
