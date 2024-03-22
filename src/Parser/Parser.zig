@@ -1428,7 +1428,7 @@ fn parseGNUAttrList(p: *Parser) Error!void {
 }
 
 fn parseC23AttrList(p: *Parser) Error!void {
-    while (p.getCurrToken() != .RBracket) { //
+    while (p.getCurrToken() != .RBracket) { // ']'
         const namespaceTok = try p.expectIdentifier();
         var namespace: ?[]const u8 = null;
         if (p.eat(.ColonColon)) |_| {
@@ -2356,12 +2356,17 @@ fn declarator(p: *Parser, baseType: Type, kind: DeclaratorKind) Error!?Declarato
     const start = p.tokenIdx;
     var d = Declarator{ .name = 0, .type = try p.parsePointer(baseType) };
 
+    const attrBufferTop = p.attrBuffer.len;
+    defer p.attrBuffer.len = attrBufferTop;
+
     const maybeIdent = p.tokenIdx;
     if (kind != .abstract and (try p.eatIdentifier()) != null) {
         d.name = maybeIdent;
         const combineToken = p.tokenIdx;
         d.type = try p.directDeclarator(d.type, &d, kind);
         try d.type.validateCombinedType(p, combineToken);
+        const attrs = p.attrBuffer.items(.attr)[attrBufferTop..];
+        d.type = try d.type.withAttributes(p.arena, attrs);
         return d;
     } else if (p.eat(.LParen)) |lp| blk: {
         var res = (try p.declarator(.{ .specifier = .Void }, kind)) orelse {
@@ -2386,6 +2391,9 @@ fn declarator(p: *Parser, baseType: Type, kind: DeclaratorKind) Error!?Declarato
         try p.errToken(.expected_ident_or_l_paren, expectedIdent);
         return error.ParsingFailed;
     }
+
+    const attrs = p.attrBuffer.items(.attr)[attrBufferTop..];
+    d.type = try d.type.withAttributes(p.arena, attrs);
 
     if (start == p.tokenIdx)
         return null;
@@ -2420,6 +2428,7 @@ fn declarator(p: *Parser, baseType: Type, kind: DeclaratorKind) Error!?Declarato
 ///  | '[' '*' ']'
 ///  | '(' param-decls? ')'
 fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: DeclaratorKind) Error!Type {
+    try p.parseAttrSpec();
     if (p.eat(.LBracket)) |lb| {
         var resType = Type{ .specifier = .Pointer };
         var qualsBuilder = Type.Qualifiers.Builder{};
