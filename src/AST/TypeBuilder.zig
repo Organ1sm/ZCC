@@ -14,8 +14,6 @@ typedef: ?struct {
 
 specifier: @This().Specifier = .None,
 qual: Qualifiers.Builder = .{},
-alignment: u29 = 0,
-alignToken: ?TokenIndex = null,
 typeof: ?Type = null,
 /// When true an error is returned instead of adding a diagnostic message.
 /// Used for trying to combine typedef types.
@@ -302,17 +300,6 @@ pub fn finish(b: @This(), p: *Parser, attrBufferStart: usize) Parser.Error!Type 
     }
 
     try b.qual.finish(p, &ty);
-
-    if (b.alignToken) |alignToken| {
-        const default = ty.alignof(p.pp.comp);
-        if (ty.isFunc()) {
-            try p.errToken(.alignas_on_func, alignToken);
-        } else if (b.alignment != 0 and b.alignment < default) {
-            try p.errExtra(.minimum_alignment, alignToken, .{ .unsigned = default });
-        } else {
-            ty.alignment = b.alignment;
-        }
-    }
 
     const attrs = p.attrBuffer.items(.attr)[attrBufferStart..];
     return ty.withAttributes(p.arena, attrs);

@@ -4,6 +4,8 @@ const Tree = @import("../AST/AST.zig");
 const Value = @import("../AST/Value.zig");
 const Diagnostics = @import("../Basic/Diagnostics.zig");
 const Parser = @import("../Parser/Parser.zig");
+const Compilation = @import("../Basic/Compilation.zig");
+const Type = @import("../AST/Type.zig");
 const NodeIndex = Tree.NodeIndex;
 const TokenIndex = Tree.TokenIndex;
 const ZigType = std.builtin.Type;
@@ -188,6 +190,51 @@ pub fn diagnoseIdent(attr: Tag, arguments: *Arguments, ident: []const u8) ?Diagn
     }
 }
 
+pub fn wantsAlignment(attr: Tag, idx: usize) bool {
+    inline for (@typeInfo(Tag).Enum.fields, 0..) |field, i| {
+        if (field.value == @intFromEnum(attr)) {
+            const decl = @typeInfo(attributes).Struct.decls[i];
+            const fields = getArguments(@field(attributes, decl.name));
+
+            if (idx >= fields.len) return false;
+            inline for (fields, 0..) |arg_field, field_idx| {
+                if (field_idx == idx) {
+                    return UnwrapOptional(arg_field.type) == Alignment;
+                }
+            }
+        }
+    }
+    unreachable;
+}
+
+pub fn diagnoseAlignment(attr: Tag, arguments: *Arguments, arg_idx: u32, val: Value, ty: Type, comp: *Compilation) ?Diagnostics.Message {
+    switch (attr) {
+        inline else => |tag| {
+            const arg_fields = getArguments(@field(attributes, @tagName(tag)));
+            if (arg_fields.len == 0) unreachable;
+
+            switch (arg_idx) {
+                inline 0...arg_fields.len - 1 => |arg_i| {
+                    if (UnwrapOptional(arg_fields[arg_i].type) != Alignment) unreachable;
+
+                    if (val.tag != .int) return Diagnostics.Message{ .tag = .alignas_unavailable };
+                    if (val.compare(.lt, Value.int(0), ty, comp)) {
+                        return Diagnostics.Message{ .tag = .negative_alignment, .extra = .{ .signed = val.signExtend(ty, comp) } };
+                    }
+                    const requested = std.math.cast(u29, val.data.int) orelse {
+                        return Diagnostics.Message{ .tag = .maximum_alignment, .extra = .{ .unsigned = val.data.int } };
+                    };
+                    if (!std.mem.isValidAlign(requested)) return Diagnostics.Message{ .tag = .non_pow2_align };
+
+                    @field(@field(arguments, @tagName(tag)), arg_fields[arg_i].name) = Alignment{ .requested = requested };
+                    return null;
+                },
+                else => unreachable,
+            }
+        },
+    }
+}
+
 fn diagnoseField(
     comptime decl: ZigType.Declaration,
     comptime field: ZigType.StructField,
@@ -200,12 +247,6 @@ fn diagnoseField(
         .int => {
             if (@typeInfo(wanted) == .Int) {
                 @field(@field(arguments, decl.name), field.name) = val.getInt(wanted);
-                return null;
-            } else if (wanted == Alignment) {
-                const requested = val.getInt(u29);
-                if (!std.math.isPowerOfTwo(requested)) return Diagnostics.Message{ .tag = .non_pow2_align };
-
-                @field(@field(arguments, decl.name), field.name) = Alignment{ .requested = requested };
                 return null;
             }
         },
@@ -285,6 +326,7 @@ const EnumTypes = enum {
 pub const Alignment = struct {
     node: NodeIndex = .none,
     requested: u29,
+    alignas: bool = false,
 };
 pub const Identifier = struct {
     tok: TokenIndex = 0,
@@ -320,6 +362,7 @@ const attributes = struct {
 
         const Args = struct {
             alignment: ?Alignment,
+            __name_token: TokenIndex = undefined,
         };
     };
     pub const alloc_align = struct {
@@ -427,14 +470,14 @@ const attributes = struct {
     pub const externally_visible = struct {
         const gnu = "externally_visible";
     };
-    const fallthrough = struct {
+    pub const fallthrough = struct {
         const gnu = "fallthrough";
         const c23 = "fallthrough";
     };
-    const flatten = struct {
+    pub const flatten = struct {
         const gnu = "flatten";
     };
-    const format = struct {
+    pub const format = struct {
         const gnu = "format";
         const Args = struct {
             archetype: enum {

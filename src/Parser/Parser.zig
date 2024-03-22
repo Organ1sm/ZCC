@@ -883,6 +883,10 @@ fn parseDeclaration(p: *Parser) Error!bool {
         return true;
     };
 
+    const attrs = p.attrBuffer.items(.attr)[attrBufferTop..];
+    ID.d.type = try ID.d.type.withAttributes(p.arena, attrs);
+    try p.validateAlignas(ID.d.type, null);
+
     // check for funtion definition
     if (ID.d.funcDeclarator != null and
         ID.initializer == .none and
@@ -966,7 +970,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
                     // find and correct parameter types
                     // TODO check for missing declaration and redefinition
                     const name = p.getTokenSlice(d.name);
-                    for (ID.d.type.data.func.params) |*param| {
+                    for (ID.d.type.getParams()) |*param| {
                         if (std.mem.eql(u8, param.name, name)) {
                             param.ty = d.type;
                             break;
@@ -982,7 +986,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
                 _ = try p.expectToken(.Semicolon);
             }
         } else {
-            for (ID.d.type.data.func.params) |param| {
+            for (ID.d.type.getParams()) |param| {
                 if (param.ty.hasUnboundVLA())
                     try p.errToken(.unbound_vla, param.nameToken);
                 if (param.ty.hasIncompleteSize() and !param.ty.is(.Void))
@@ -1041,8 +1045,8 @@ fn parseDeclaration(p: *Parser) Error!bool {
             try p.errToken(.invalid_old_style_params, tokenIdx);
 
         const tag = try declSpec.validate(p, &ID.d.type, ID.initializer != .none);
-        const attrs = p.attrBuffer.items(.attr)[attrBufferTop..];
-        ID.d.type = try ID.d.type.withAttributes(p.arena, attrs);
+        // const attrs = p.attrBuffer.items(.attr)[attrBufferTop..];
+        // ID.d.type = try ID.d.type.withAttributes(p.arena, attrs);
 
         const node = try p.addNode(.{
             .type = ID.d.type,
@@ -1288,14 +1292,35 @@ fn parseDeclSpec(p: *Parser, isParam: bool) Error!?DeclSpec {
         p.tokenIdx += 1;
     }
 
-    if (p.tokenIdx == start) return null;
-    if (isParam and spec.alignToken != null) {
-        try p.errToken(.alignas_on_param, spec.alignToken.?);
-        spec.alignToken = null;
-    }
+    if (p.tokenIdx == start)
+        return null;
 
     d.type = try spec.finish(p, attrBufferTop);
+    if (isParam)
+        try p.validateAlignas(d.type, .alignas_on_param);
+
     return d;
+}
+
+fn validateAlignas(p: *Parser, ty: Type, tag: ?Diagnostics.Tag) !void {
+    const base = ty.canonicalize(.standard);
+    const defaultAlign = base.alignof(p.pp.comp);
+    for (ty.getAttributes()) |attr| {
+        if (attr.tag != .aligned) continue;
+        if (attr.args.aligned.alignment) |alignment| {
+            if (!alignment.alignas) continue;
+
+            const alignToken = attr.args.aligned.__name_token;
+            if (tag) |t|
+                try p.errToken(t, alignToken);
+
+            if (ty.isFunc()) {
+                try p.errToken(.alignas_on_func, alignToken);
+            } else if (alignment.requested < defaultAlign) {
+                try p.errExtra(.minimum_alignment, alignToken, .{ .unsigned = defaultAlign });
+            }
+        }
+    }
 }
 
 /// attribute
@@ -1378,6 +1403,9 @@ fn attribute(p: *Parser, syntax: Attribute.Syntax, namespace: ?[]const u8) Error
 }
 
 fn diagnose(p: *Parser, attr: Attribute.Tag, arguments: *Attribute.Arguments, argIdx: u32, res: Result) ?Diagnostics.Message {
+    if (Attribute.wantsAlignment(attr, argIdx))
+        return Attribute.diagnoseAlignment(attr, arguments, argIdx, res.value, res.ty, p.pp.comp);
+
     const node = p.nodes.get(@intFromEnum(res.node));
     return Attribute.diagnose(attr, arguments, argIdx, res.value, node);
 }
@@ -1467,9 +1495,37 @@ fn gnuAttribute(p: *Parser) !bool {
     return true;
 }
 
+/// alignAs : keyword_alignas '(' (typeName | constExpr ) ')'
+fn alignAs(p: *Parser) !bool {
+    const alignToken = p.eat(.KeywordAlignas) orelse return false;
+    const lparen = try p.expectToken(.LParen);
+    if (try p.parseTypeName()) |innerTy| {
+        const alignment = Attribute.Alignment{ .requested = innerTy.alignof(p.pp.comp), .alignas = true };
+        const attr = Attribute{ .tag = .aligned, .args = .{ .aligned = .{ .alignment = alignment, .__name_token = alignToken } } };
+        try p.attrBuffer.append(p.pp.comp.gpa, .{ .attr = attr, .tok = alignToken });
+    } else {
+        const arg_start = p.tokenIdx;
+        const res = try p.parseConstExpr();
+        if (!res.value.isZero()) {
+            var args = Attribute.initArguments(.aligned, alignToken);
+            if (p.diagnose(.aligned, &args, 0, res)) |msg| {
+                try p.errExtra(msg.tag, arg_start, msg.extra);
+                p.skipTo(.RParen);
+                return error.ParsingFailed;
+            }
+            args.aligned.alignment.?.node = res.node;
+            args.aligned.alignment.?.alignas = true;
+            try p.attrBuffer.append(p.pp.comp.gpa, .{ .attr = .{ .tag = .aligned, .args = args }, .tok = alignToken });
+        }
+    }
+    try p.expectClosing(lparen, .RParen);
+    return true;
+}
+
 /// attribute-specifier : (keyword_attrbute '( '(' attribute-list ')' ')')*
 fn parseAttrSpec(p: *Parser) Error!void {
     while (true) {
+        if (try p.alignAs()) continue;
         if (try p.gnuAttribute()) continue;
         if (try p.c23Attribute()) continue;
         if (try p.msvcAttribute()) continue;
@@ -1527,7 +1583,6 @@ fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec) Error!?InitDeclarator {
             ID.d.type = .{
                 .specifier = .Array,
                 .data = .{ .array = arrayType },
-                .alignment = ID.d.type.alignment,
             };
         }
     }
@@ -1557,12 +1612,12 @@ fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec) Error!?InitDeclarator {
             try p.errToken(.previous_definition, scope.enumeration.nameToken);
         },
 
-        .declaration => |s| if (!s.type.eql(ID.d.type, true)) {
+        .declaration => |s| if (!s.type.eql(ID.d.type, p.pp.comp, true)) {
             try p.errStr(.redefinition, name, p.getTokenSlice(name));
             try p.errToken(.previous_definition, s.nameToken);
         },
 
-        .definition => |s| if (!s.type.eql(ID.d.type, true)) {
+        .definition => |s| if (!s.type.eql(ID.d.type, p.pp.comp, true)) {
             try p.errStr(.redefinition_incompatible, name, p.getTokenSlice(name));
             try p.errToken(.previous_definition, s.nameToken);
         } else if (ID.initializer != .none) {
@@ -1669,48 +1724,6 @@ fn parseTypeSpec(p: *Parser, ty: *TypeBuilder) Error!bool {
             .KeywordUnion => {
                 const tagToken = p.tokenIdx;
                 try ty.combine(p, .{ .Union = try p.parseRecordSpecifier() }, tagToken);
-                continue;
-            },
-
-            .KeywordAlignas => {
-                if (ty.alignToken != null)
-                    try p.errStr(.duplicate_declspec, p.tokenIdx, "alignment");
-
-                ty.alignToken = p.tokenIdx;
-                p.tokenIdx += 1;
-
-                const lp = try p.expectToken(.LParen);
-                if (try p.parseTypeName()) |innerType| {
-                    ty.alignment = innerType.alignment;
-                } else blk: {
-                    const res = try p.parseConstExpr();
-                    if (res.value.tag == .unavailable) {
-                        try p.errToken(.alignas_unavailable, ty.alignToken.?);
-                        break :blk;
-                    } else if (res.value.compare(.lt, Value.int(0), res.ty, p.pp.comp)) {
-                        try p.errExtra(.negative_alignment, ty.alignToken.?, .{
-                            .signed = res.value.signExtend(res.ty, p.pp.comp),
-                        });
-                        break :blk;
-                    }
-                    var requested = std.math.cast(u29, res.value.data.int);
-                    if (requested == null) {
-                        try p.errExtra(.maximum_alignment, ty.alignToken.?, .{
-                            .unsigned = res.value.getInt(u64),
-                        });
-                        break :blk;
-                    }
-
-                    if (requested == 0) {
-                        try p.errToken(.zero_align_ignored, ty.alignToken.?);
-                    } else if (!std.mem.isValidAlign(requested.?)) {
-                        requested = 0;
-                        try p.errToken(.non_pow2_align, ty.alignToken.?);
-                    }
-                    ty.alignment = requested.?;
-                }
-
-                try p.expectClosing(lp, .RParen);
                 continue;
             },
 
@@ -2031,6 +2044,18 @@ fn parseRecordDeclarator(p: *Parser) Error!bool {
     return true;
 }
 
+fn checkAlignasUsage(p: *Parser, tag: Diagnostics.Tag, attrBufferStart: usize) !void {
+    var i = attrBufferStart;
+    while (i < p.attrBuffer.len) : (i += 1) {
+        const tentativeAttr = p.attrBuffer.get(i);
+        if (tentativeAttr.attr.tag != .aligned) continue;
+        if (tentativeAttr.attr.args.aligned.alignment) |alignment| {
+            if (alignment.alignas)
+                try p.errToken(tag, tentativeAttr.tok);
+        }
+    }
+}
+
 // specifier-qualifier-list : (type-specifier | type-qualifier | align-specifier)+
 fn parseSpecQuals(p: *Parser) Error!?Type {
     const attrBufferTop = p.attrBuffer.len;
@@ -2038,10 +2063,9 @@ fn parseSpecQuals(p: *Parser) Error!?Type {
 
     var spec: TypeBuilder = .{};
     if (try p.parseTypeSpec(&spec)) {
-        if (spec.alignment != 0)
-            try p.errToken(.align_ignored, spec.alignToken.?);
-        spec.alignToken = null;
-        return try spec.finish(p, attrBufferTop);
+        const ty = try spec.finish(p, attrBufferTop);
+        try p.validateAlignas(ty, .align_ignored);
+        return ty;
     }
 
     return null;
@@ -3102,7 +3126,7 @@ fn coerceArrayInit(p: *Parser, item: *Result, token: TokenIndex, target: Type) !
 
     const targetSpec = target.getElemType().canonicalize(.standard).specifier;
     const itemSpec = item.ty.getElemType().canonicalize(.standard).specifier;
-    const compatible = target.getElemType().eql(item.ty.getElemType(), false) or
+    const compatible = target.getElemType().eql(item.ty.getElemType(), p.pp.comp, false) or
         (isStrLiteral and itemSpec == .Char and (targetSpec == .UChar or targetSpec == .SChar));
 
     if (!compatible) {
@@ -3169,10 +3193,10 @@ fn coerceInit(p: *Parser, item: *Result, token: TokenIndex, target: Type) !void 
             try p.errStr(.implicit_int_to_ptr, token, try p.typePairStrExtra(item.ty, " to ", target));
             try item.ptrCast(p, unqualType);
         } else if (item.ty.isPointer()) {
-            if (!item.ty.isVoidStar() and !unqualType.isVoidStar() and !unqualType.eql(item.ty, false)) {
+            if (!item.ty.isVoidStar() and !unqualType.isVoidStar() and !unqualType.eql(item.ty, p.pp.comp, false)) {
                 try p.errStr(.incompatible_ptr_init, token, try p.typePairStrExtra(target, eMsg, item.ty));
                 try item.ptrCast(p, unqualType);
-            } else if (!unqualType.eql(item.ty, true)) {
+            } else if (!unqualType.eql(item.ty, p.pp.comp, true)) {
                 if (!unqualType.getElemType().qual.hasQuals(item.ty.getElemType().qual))
                     try p.errStr(.ptr_init_discards_quals, token, try p.typePairStrExtra(target, eMsg, item.ty));
 
@@ -3182,7 +3206,7 @@ fn coerceInit(p: *Parser, item: *Result, token: TokenIndex, target: Type) !void 
             try p.errStr(.incompatible_init, token, try p.typePairStrExtra(target, eMsg, item.ty));
         }
     } else if (unqualType.isRecord()) {
-        if (!unqualType.eql(item.ty, false))
+        if (!unqualType.eql(item.ty, p.pp.comp, false))
             try p.errStr(.incompatible_init, token, try p.typePairStrExtra(target, eMsg, item.ty));
     } else if (unqualType.isArray() or unqualType.isFunc()) {
         // we have already issued an error for this
@@ -3268,8 +3292,9 @@ fn convertInitList(p: *Parser, il: InitList, initType: Type) Error!NodeIndex {
             arrInitNode.type = .{
                 .specifier = .Array,
                 .data = .{ .array = arrayType },
-                .alignment = initType.alignment,
             };
+            const attrs = initType.getAttributes();
+            arrInitNode.type = try arrInitNode.type.withAttributes(p.arena, attrs);
         } else if (start < maxItems) {
             const elem = try p.addNode(.{
                 .tag = .ArrayFillerExpr,
@@ -4069,11 +4094,11 @@ fn parseReturnStmt(p: *Parser) Error!?NodeIndex {
         } else if (expr.ty.isInt()) {
             try p.errStr(.implicit_int_to_ptr, eToken, try p.typePairStrExtra(expr.ty, " to ", returnType));
             try expr.intCast(p, returnType);
-        } else if (!expr.ty.isVoidStar() and !returnType.isVoidStar() and !returnType.eql(expr.ty, false)) {
+        } else if (!expr.ty.isVoidStar() and !returnType.isVoidStar() and !returnType.eql(expr.ty, p.pp.comp, false)) {
             try p.errStr(.incompatible_return, eToken, try p.typeStr(expr.ty));
         }
     } else if (returnType.isRecord()) { // enum.isInt() == true
-        if (!returnType.eql(expr.ty, false)) {
+        if (!returnType.eql(expr.ty, p.pp.comp, false)) {
             try p.errStr(.incompatible_return, eToken, try p.typeStr(expr.ty));
         }
     } else {
@@ -4366,9 +4391,9 @@ fn parseAssignExpr(p: *Parser) Error!Result {
             try p.errStr(.implicit_int_to_ptr, token, try p.typePairStrExtra(rhs.ty, " to ", lhs.ty));
             try rhs.ptrCast(p, unqualType);
         } else if (rhs.ty.isPointer()) {
-            if (!unqualType.isVoidStar() and !rhs.ty.isVoidStar() and !unqualType.eql(rhs.ty, false)) {
+            if (!unqualType.isVoidStar() and !rhs.ty.isVoidStar() and !unqualType.eql(rhs.ty, p.pp.comp, false)) {
                 try p.errStr(.incompatible_ptr_assign, token, try p.typePairStrExtra(lhs.ty, eMsg, rhs.ty));
-            } else if (!unqualType.eql(rhs.ty, true)) {
+            } else if (!unqualType.eql(rhs.ty, p.pp.comp, true)) {
                 if (!unqualType.getElemType().qual.hasQuals(rhs.ty.getElemType().qual))
                     try p.errStr(.ptr_assign_discards_quals, token, try p.typePairStrExtra(lhs.ty, eMsg, rhs.ty));
                 try rhs.ptrCast(p, unqualType);
@@ -4377,7 +4402,7 @@ fn parseAssignExpr(p: *Parser) Error!Result {
             try p.errStr(.incompatible_assign, token, try p.typePairStrExtra(lhs.ty, eMsg, rhs.ty));
         }
     } else if (lhs.ty.isRecord()) {
-        if (!unqualType.eql(rhs.ty, false))
+        if (!unqualType.eql(rhs.ty, p.pp.comp, false))
             try p.errStr(.incompatible_assign, token, try p.typePairStrExtra(lhs.ty, eMsg, rhs.ty));
     } else if (lhs.ty.isArray() or lhs.ty.isFunc()) {
         try p.errToken(.not_assignable, token);
@@ -4903,7 +4928,7 @@ fn builtinVaArg(p: *Parser) Error!Result {
     };
     try p.expectClosing(lp, .RParen);
 
-    if (!vaList.ty.eql(p.pp.comp.types.vaList, true)) {
+    if (!vaList.ty.eql(p.pp.comp.types.vaList, p.pp.comp, true)) {
         try p.errStr(.incompatible_va_arg, vaListToken, try p.typeStr(vaList.ty));
         return error.ParsingFailed;
     }
@@ -5182,8 +5207,8 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
                 try p.errToken(.alignof_expr, expectedParen);
             }
 
-            res.ty = p.pp.comp.types.size;
             res.value = Value.int(res.ty.alignof(p.pp.comp));
+            res.ty = p.pp.comp.types.size;
             try res.un(p, .AlignOfExpr);
             return res;
         },
@@ -5414,7 +5439,7 @@ fn parseCallExpr(p: *Parser, lhs: Result) Error!Result {
         return error.ParsingFailed;
     };
 
-    const params = ty.data.func.params;
+    const params = ty.getParams();
     var func = lhs;
     try func.lvalConversion(p);
 
@@ -5463,7 +5488,10 @@ fn parseCallExpr(p: *Parser, lhs: Result) Error!Result {
                 try p.errToken(.va_start_fixed_args, builtinToken);
                 break :vaStart;
             }
-            const lastParamName = funcType.data.func.params[funcType.data.func.params.len - 1].name;
+
+            const funcParams = funcType.getParams();
+
+            const lastParamName = funcParams[funcType.data.func.params.len - 1].name;
             const declRef = p.getNode(rawArgNode, .DeclRefExpr);
             if (declRef == null or
                 !std.mem.eql(u8, p.getTokenSlice(p.nodes.items(.data)[@intFromEnum(declRef.?)].declRef), lastParamName))
@@ -5506,11 +5534,11 @@ fn parseCallExpr(p: *Parser, lhs: Result) Error!Result {
                 );
                 try p.errToken(.parameter_here, params[argCount].nameToken);
                 try arg.intCast(p, paramType);
-            } else if (!arg.ty.isVoidStar() and !paramType.isVoidStar() and !paramType.eql(arg.ty, false)) {
+            } else if (!arg.ty.isVoidStar() and !paramType.isVoidStar() and !paramType.eql(arg.ty, p.pp.comp, false)) {
                 try p.reportParam(paramToken, arg, argCount, params);
             }
         } else if (paramType.isRecord()) {
-            if (!paramType.eql(arg.ty, false)) {
+            if (!paramType.eql(arg.ty, p.pp.comp, false)) {
                 try p.reportParam(paramToken, arg, argCount, params);
             }
         } else {

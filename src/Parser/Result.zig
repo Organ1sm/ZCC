@@ -122,13 +122,14 @@ pub fn adjustCondExprPtrs(a: *Result, tok: TokenIndex, b: *Result, p: *Parser) !
 
     const aElem = a.ty.getElemType();
     const bElem = b.ty.getElemType();
-    if (aElem.eql(bElem, true)) return true;
+    if (aElem.eql(bElem, p.pp.comp, true))
+        return true;
 
     var adjustedElemType = try p.arena.create(Type);
     adjustedElemType.* = aElem;
 
     const hasVoidStarBranch = a.ty.isVoidStar() or b.ty.isVoidStar();
-    const onlyQualsDiffer = aElem.eql(bElem, false);
+    const onlyQualsDiffer = aElem.eql(bElem, p.pp.comp, false);
     const pointersCompatible = onlyQualsDiffer or hasVoidStarBranch;
 
     if (!pointersCompatible or hasVoidStarBranch) {
@@ -140,8 +141,8 @@ pub fn adjustCondExprPtrs(a: *Result, tok: TokenIndex, b: *Result, p: *Parser) !
     if (pointersCompatible) {
         adjustedElemType.qual = aElem.qual.mergeCVQualifiers(bElem.qual);
     }
-    if (!adjustedElemType.eql(aElem, true)) try a.qualCast(p, adjustedElemType);
-    if (!adjustedElemType.eql(bElem, true)) try b.qualCast(p, adjustedElemType);
+    if (!adjustedElemType.eql(aElem, p.pp.comp, true)) try a.qualCast(p, adjustedElemType);
+    if (!adjustedElemType.eql(bElem, p.pp.comp, true)) try b.qualCast(p, adjustedElemType);
     return true;
 }
 
@@ -209,7 +210,7 @@ pub fn adjustTypes(a: *Result, token: TokenIndex, b: *Result, p: *Parser, kind: 
             if ((aIsInt or bIsInt) and !(a.value.isZero() or b.value.isZero())) {
                 try p.errStr(.comparison_ptr_int, token, try p.typePairStr(a.ty, b.ty));
             } else if (aIsPtr and bIsPtr) {
-                if (!a.ty.isVoidStar() and !b.ty.isVoidStar() and !a.ty.eql(b.ty, false))
+                if (!a.ty.isVoidStar() and !b.ty.isVoidStar() and !a.ty.eql(b.ty, p.pp.comp, false))
                     try p.errStr(.comparison_distinct_ptr, token, try p.typePairStr(a.ty, b.ty));
             } else if (aIsPtr) {
                 try b.ptrCast(p, a.ty);
@@ -247,7 +248,7 @@ pub fn adjustTypes(a: *Result, token: TokenIndex, b: *Result, p: *Parser, kind: 
             if (aIsPtr and bIsPtr)
                 return a.adjustCondExprPtrs(token, b, p);
 
-            if (a.ty.isRecord() and b.ty.isRecord() and a.ty.eql(b.ty, false))
+            if (a.ty.isRecord() and b.ty.isRecord() and a.ty.eql(b.ty, p.pp.comp, false))
                 return true;
 
             return a.invalidBinTy(token, b, p);
@@ -272,7 +273,7 @@ pub fn adjustTypes(a: *Result, token: TokenIndex, b: *Result, p: *Parser, kind: 
             if (!aIsPtr or !(bIsPtr or bIsInt)) return a.invalidBinTy(token, b, p);
 
             if (aIsPtr and bIsPtr) {
-                if (!a.ty.eql(b.ty, false))
+                if (!a.ty.eql(b.ty, p.pp.comp, false))
                     try p.errStr(.incompatible_pointers, token, try p.typePairStr(a.ty, b.ty));
                 a.ty = p.pp.comp.types.ptrdiff;
             }
@@ -301,19 +302,16 @@ pub fn lvalConversion(res: *Result, p: *Parser) Error!void {
         elemType.* = res.ty;
         res.ty.specifier = .Pointer;
         res.ty.data = .{ .subType = elemType };
-        res.ty.alignment = 0;
         try res.un(p, .FunctionToPointer);
         // Decay an array type to a pointer to its first element.
     } else if (res.ty.isArray()) {
         res.value.tag = .unavailable;
         res.ty.decayArray();
-        res.ty.alignment = 0;
         try res.un(p, .ArrayToPointer);
         // Perform l-value to r-value conversion if the type is an l-value and we are not in a macro.
     } else if (!p.inMacro and AST.isLValue(p.nodes.slice(), p.data.items, p.valueMap, res.node)) {
         res.value.tag = .unavailable;
         res.ty.qual = .{};
-        res.ty.alignment = 0;
         // Update the AST to reflect the l-value to r-value conversion.
         try res.un(p, .LValueToRValue);
     }
@@ -346,7 +344,7 @@ pub fn intCast(res: *Result, p: *Parser, intType: Type) Error!void {
         res.value.floatToInt(res.ty, intType, p.pp.comp);
         res.ty = intType;
         try res.un(p, .FloatToInt);
-    } else if (!res.ty.eql(intType, true)) {
+    } else if (!res.ty.eql(intType, p.pp.comp, true)) {
         if (intType.hasIncompleteSize())
             return error.ParsingFailed;
         res.value.intCast(res.ty, intType, p.pp.comp);
@@ -364,7 +362,7 @@ pub fn floatCast(res: *Result, p: *Parser, floatType: Type) Error!void {
         res.value.intToFloat(res.ty, floatType, p.pp.comp);
         res.ty = floatType;
         try res.un(p, .IntToFloat);
-    } else if (!res.ty.eql(floatType, true)) {
+    } else if (!res.ty.eql(floatType, p.pp.comp, true)) {
         res.ty = floatType;
         try res.un(p, .FloatCast);
     }
@@ -423,7 +421,7 @@ fn usualArithmeticConversion(lhs: *Result, rhs: *Result, p: *Parser) Error!void 
     // Do integer promotion on both operands
     const lhsPromoted = lhs.ty.integerPromotion(p.pp.comp);
     const rhsPromoted = rhs.ty.integerPromotion(p.pp.comp);
-    if (lhsPromoted.eql(rhsPromoted, true)) {
+    if (lhsPromoted.eql(rhsPromoted,p.pp.comp,  true)) {
         // cast to promoted type
         try lhs.intCast(p, lhsPromoted);
         try rhs.intCast(p, lhsPromoted);

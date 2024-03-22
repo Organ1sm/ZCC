@@ -24,9 +24,6 @@ data: union {
 qual: Qualifiers = .{},
 specifier: Specifier,
 
-/// user requested alignment, to get type alignment use `alignof`
-alignment: u29 = 0,
-
 pub const Qualifiers = packed struct {
     @"const": bool = false,
     atomic: bool = false,
@@ -569,18 +566,25 @@ pub fn getElemType(ty: Type) Type {
 pub fn getReturnType(ty: Type) Type {
     return switch (ty.specifier) {
         .Func, .VarArgsFunc, .OldStyleFunc => ty.data.func.returnType,
+        .TypeofType, .DecayedTypeofType => ty.data.subType.getReturnType(),
+        .TypeofExpr, .DecayedTypeofExpr => ty.data.expr.ty.getReturnType(),
+        .Attributed => ty.data.attributed.base.getReturnType(),
+        else => unreachable,
+    };
+}
 
-        .TypeofType,
-        .DecayedTypeofType,
-        .TypeofExpr,
-        .DecayedTypeofExpr,
-        .Attributed,
-        => {
-            const unwrapped = ty.canonicalize(.preserve_quals);
-            var elem = unwrapped.getElemType();
-            elem.qual = elem.qual.mergeAllQualifiers(unwrapped.qual);
-            return elem;
-        },
+/// This function looks into the specified type and retrieves the parameters
+/// based on the type's specifier.
+/// @param ty The Type containing the specifier and relevant data.
+/// @return A slice of Function.Param representing the function parameters.
+///         If the type is not a function or typeof expression/typeof type,
+///         the function is unreachable.
+pub fn getParams(ty: Type) []Function.Param {
+    return switch (ty.specifier) {
+        .Func, .VarArgsFunc, .OldStyleFunc => ty.data.func.params,
+        .TypeofType, .DecayedTypeofType => ty.data.subType.getParams(),
+        .TypeofExpr, .DecayedTypeofExpr => ty.data.expr.ty.getParams(),
+        .Attributed => ty.data.attributed.base.getParams(),
         else => unreachable,
     };
 }
@@ -824,9 +828,9 @@ pub fn bitSizeof(ty: Type, comp: *Compilation) ?u64 {
 }
 
 /// Get the alignment of a type
-pub fn alignof(ty: Type, comp: *Compilation) u29 {
-    if (ty.alignment != 0)
-        return ty.alignment;
+pub fn alignof(ty: Type, comp: *const Compilation) u29 {
+    if (ty.requestedAlignment(comp)) |requested|
+        return requested;
 
     // TODO get target from compilation
     return switch (ty.specifier) {
@@ -877,11 +881,37 @@ pub fn alignof(ty: Type, comp: *Compilation) u29 {
     };
 }
 
-pub fn eql(aParam: Type, bParam: Type, checkQualifiers: bool) bool {
+fn requestedAlignment(ty: Type, comp: *const Compilation) ?u29 {
+    return switch (ty.specifier) {
+        .TypeofType, .DecayedTypeofType => ty.data.subType.requestedAlignment(comp),
+        .TypeofExpr, .DecayedTypeofExpr => ty.data.expr.ty.requestedAlignment(comp),
+        .Attributed => {
+            var maxRequested: ?u29 = null;
+            for (ty.data.attributed.attributes) |attribute| {
+                if (attribute.tag != .aligned) continue;
+                var requested: u29 = undefined;
+                if (attribute.args.aligned.alignment) |alignment| {
+                    requested = alignment.requested;
+                } else {
+                    requested = comp.defaultAlignment();
+                }
+                if (maxRequested == null or maxRequested.? < requested) {
+                    maxRequested = requested;
+                }
+            }
+            return maxRequested;
+        },
+        else => null,
+    };
+}
+
+pub fn eql(aParam: Type, bParam: Type, comp: *const Compilation, checkQualifiers: bool) bool {
     const a = aParam.canonicalize(.standard);
     const b = bParam.canonicalize(.standard);
 
-    if (a.alignment != b.alignment) return false;
+    if (a.alignof(comp) != b.alignof(comp))
+        return false;
+
     if (a.isPointer()) {
         if (!b.isPointer()) return false;
     } else if (a.isFunc()) {
@@ -890,7 +920,8 @@ pub fn eql(aParam: Type, bParam: Type, checkQualifiers: bool) bool {
         if (!b.isArray()) return false;
     } else if (a.specifier != b.specifier) return false;
 
-    if (a.qual.atomic != b.qual.atomic) return false;
+    if (a.qual.atomic != b.qual.atomic)
+        return false;
 
     if (checkQualifiers) {
         if (a.qual.@"const" != b.qual.@"const") return false;
@@ -904,7 +935,8 @@ pub fn eql(aParam: Type, bParam: Type, checkQualifiers: bool) bool {
         .DecayedVariableLenArray,
         .DecayedStaticArray,
         .DecayedUnspecifiedVariableLenArray,
-        => if (!aParam.getElemType().eql(bParam.getElemType(), checkQualifiers)) return false,
+        => if (!aParam.getElemType().eql(bParam.getElemType(), comp, checkQualifiers))
+            return false,
 
         .Func,
         .VarArgsFunc,
@@ -914,7 +946,7 @@ pub fn eql(aParam: Type, bParam: Type, checkQualifiers: bool) bool {
             if (a.data.func.params.len != b.data.func.params.len) return false;
 
             // return type cannot have qualifiers
-            if (!a.data.func.returnType.eql(b.data.func.returnType, false))
+            if (!a.data.func.returnType.eql(b.data.func.returnType, comp, false))
                 return false;
 
             for (a.data.func.params, 0..) |param, i| {
@@ -926,7 +958,7 @@ pub fn eql(aParam: Type, bParam: Type, checkQualifiers: bool) bool {
                 bUnqual.qual.@"const" = false;
                 bUnqual.qual.@"volatile" = false;
 
-                if (!aUnqual.eql(bUnqual, checkQualifiers))
+                if (!aUnqual.eql(bUnqual, comp, checkQualifiers))
                     return false;
             }
         },
@@ -935,11 +967,13 @@ pub fn eql(aParam: Type, bParam: Type, checkQualifiers: bool) bool {
         .StaticArray,
         .IncompleteArray,
         => {
-            if (!std.meta.eql(a.arrayLen(), b.arrayLen())) return false;
-            if (!a.getElemType().eql(b.getElemType(), checkQualifiers)) return false;
+            if (!std.meta.eql(a.arrayLen(), b.arrayLen()))
+                return false;
+            if (!a.getElemType().eql(b.getElemType(), comp, checkQualifiers))
+                return false;
         },
 
-        .VariableLenArray => if (!a.getElemType().eql(b.getElemType(), checkQualifiers)) return false,
+        .VariableLenArray => if (!a.getElemType().eql(b.getElemType(), comp, checkQualifiers)) return false,
 
         .Union, .Struct => if (a.data.record != b.data.record) return false,
         .Enum => if (a.data.@"enum" != b.data.@"enum") return false,
@@ -1121,7 +1155,6 @@ fn printPrologue(ty: Type, w: anytype) @TypeOf(w).Error!bool {
             if (elemType.isFunc() or elemType.isArray()) try w.writeByte('(');
             try w.writeByte('*');
             try ty.qual.dump(w);
-            if (ty.alignment != 0) try w.print(" _Alignas({d})", .{ty.alignment});
             return false;
         },
 
@@ -1159,8 +1192,6 @@ fn printPrologue(ty: Type, w: anytype) @TypeOf(w).Error!bool {
         else => {},
     }
     try ty.qual.dump(w);
-    if (ty.alignment != 0)
-        try w.print(" _Alignas({d})", .{ty.alignment});
 
     switch (ty.specifier) {
         .Enum => try w.print("enum {s}", .{ty.data.@"enum".name}),
@@ -1210,7 +1241,6 @@ fn printEpilogue(ty: Type, w: anytype) @TypeOf(w).Error!void {
             try w.writeByte('[');
             if (ty.is(.StaticArray)) try w.writeAll("static ");
             try ty.qual.dump(w);
-            if (ty.alignment != 0) try w.print(" _Alignas({d})", .{ty.alignment});
             try w.print("{d}]", .{ty.data.array.len});
             try ty.data.array.elem.printEpilogue(w);
         },
@@ -1218,7 +1248,6 @@ fn printEpilogue(ty: Type, w: anytype) @TypeOf(w).Error!void {
         .IncompleteArray => {
             try w.writeByte('[');
             try ty.qual.dump(w);
-            if (ty.alignment != 0) try w.print(" _Alignas({d})", .{ty.alignment});
             try w.writeByte(']');
             try ty.data.array.elem.printEpilogue(w);
         },
@@ -1226,7 +1255,6 @@ fn printEpilogue(ty: Type, w: anytype) @TypeOf(w).Error!void {
         .UnspecifiedVariableLenArray => {
             try w.writeByte('[');
             try ty.qual.dump(w);
-            if (ty.alignment != 0) try w.print(" _Alignas({d})", .{ty.alignment});
             try w.writeAll("*]");
             try ty.data.subType.printEpilogue(w);
         },
@@ -1234,7 +1262,6 @@ fn printEpilogue(ty: Type, w: anytype) @TypeOf(w).Error!void {
         .VariableLenArray => {
             try w.writeByte('[');
             try ty.qual.dump(w);
-            if (ty.alignment != 0) try w.print(" _Alignas({d})", .{ty.alignment});
             try w.writeAll("<expr>]");
             try ty.data.expr.ty.printEpilogue(w);
         },
@@ -1248,8 +1275,6 @@ const DumpDetailedContainers = false;
 
 pub fn dump(ty: Type, w: anytype) @TypeOf(w).Error!void {
     try ty.qual.dump(w);
-    if (ty.alignment != 0)
-        try w.print("_Alignas({d})", .{ty.alignment});
 
     switch (ty.specifier) {
         .Pointer => {
