@@ -45,7 +45,6 @@ pub const Message = struct {
         },
         attrEnum: struct {
             tag: Attribute.Tag,
-            actual: []const u8,
         },
         ignoredRecordAttr: struct {
             tag: Attribute.Tag,
@@ -330,9 +329,6 @@ pub fn renderExtra(comp: *Compilation, m: anytype) void {
                         .signed => m.print(info.msg, .{msg.extra.signed}),
                         .attr_enum => m.print(info.msg, .{
                             @tagName(msg.extra.attrEnum.tag),
-                            Attribute.Formatting.quoteChar(msg.extra.attrEnum.tag),
-                            msg.extra.attrEnum.actual,
-                            Attribute.Formatting.quoteChar(msg.extra.attrEnum.tag),
                             Attribute.Formatting.choices(msg.extra.attrEnum.tag),
                         }),
                         .ignored_record_attr => m.print(info.msg, .{

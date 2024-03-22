@@ -184,7 +184,7 @@ pub fn diagnoseIdent(attr: Tag, arguments: *Arguments, ident: []const u8) ?Diagn
 
             return Diagnostics.Message{
                 .tag = .unknown_attr_enum,
-                .extra = .{ .attrEnum = .{ .tag = attr, .actual = ident } },
+                .extra = .{ .attrEnum = .{ .tag = attr } },
             };
         },
     }
@@ -263,12 +263,7 @@ fn diagnoseField(
                     @setEvalBranchQuota(3000);
                     return Diagnostics.Message{
                         .tag = .unknown_attr_enum,
-                        .extra = .{
-                            .attrEnum = .{
-                                .tag = std.meta.stringToEnum(Tag, decl.name).?,
-                                .actual = bytes,
-                            },
-                        },
+                        .extra = .{ .attrEnum = .{ .tag = std.meta.stringToEnum(Tag, decl.name).? } },
                     };
                 }
             }

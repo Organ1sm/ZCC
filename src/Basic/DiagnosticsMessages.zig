@@ -1414,7 +1414,7 @@ pub const attribute_arg_invalid = struct {
     pub const extra = .attr_arg_type;
 };
 pub const unknown_attr_enum = struct {
-    pub const msg = "Unknown `{s}` argument {s}{s}{s}. Possible values are: {s}";
+    pub const msg = "Unknown `{s}` argument. Possible values are: {s}";
     pub const kind = .@"error";
     pub const extra = .attr_enum;
 };
