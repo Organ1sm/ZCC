@@ -86,11 +86,9 @@ pub fn next(self: *Lexer) Token {
     var start = self.index;
     var id: TokenType = .Eof;
     var counter: u32 = 0;
-    var codepointLen: u32 = undefined;
 
     var returnState = state;
-    while (self.index < self.buffer.len) : (self.index += codepointLen) {
-        codepointLen = 1;
+    while (self.index < self.buffer.len) : (self.index += 1) {
         const c = self.buffer[self.index];
         switch (state) {
             .start => switch (c) {
@@ -200,13 +198,13 @@ pub fn next(self: *Lexer) Token {
                     state = .extended_identifier;
                 } else {
                     id = .Invalid;
-                    self.index += codepointLen;
+                    self.index += 1;
                     break;
                 },
                 0x80...0xFF => state = .extended_identifier,
                 else => {
                     id = .Invalid;
-                    self.index += codepointLen;
+                    self.index += 1;
                     break;
                 },
             },
@@ -276,7 +274,7 @@ pub fn next(self: *Lexer) Token {
                     state = .string_literal;
                 },
                 else => {
-                    codepointLen = 0;
+                    self.index -= 1;
                     state = .identifier;
                 },
             },
@@ -287,7 +285,7 @@ pub fn next(self: *Lexer) Token {
                     state = .string_literal;
                 },
                 else => {
-                    codepointLen = 0;
+                    self.index -= 1;
                     state = .identifier;
                 },
             },
@@ -302,7 +300,7 @@ pub fn next(self: *Lexer) Token {
                     state = .string_literal;
                 },
                 else => {
-                    codepointLen = 0;
+                    self.index -= 1;
                     state = .identifier;
                 },
             },
@@ -317,7 +315,7 @@ pub fn next(self: *Lexer) Token {
                     state = .string_literal;
                 },
                 else => {
-                    codepointLen = 0;
+                    self.index -= 1;
                     state = .identifier;
                 },
             },
@@ -414,7 +412,7 @@ pub fn next(self: *Lexer) Token {
                         state = returnState;
                 },
                 else => {
-                    codepointLen = 0;
+                    self.index -= 1;
                     state = returnState;
                 },
             },
@@ -422,7 +420,7 @@ pub fn next(self: *Lexer) Token {
             .hex_escape => switch (c) {
                 '0'...'9', 'a'...'f', 'A'...'F' => {},
                 else => {
-                    codepointLen = 0;
+                    self.index -= 1;
                     state = returnState;
                 },
             },
@@ -899,7 +897,7 @@ pub fn next(self: *Lexer) Token {
             .float_exponent => switch (c) {
                 '+', '-' => state = .float_exponent_digits,
                 else => {
-                    codepointLen = 0;
+                    self.index -= 1;
                     state = .float_exponent_digits;
                 },
             },
@@ -910,7 +908,7 @@ pub fn next(self: *Lexer) Token {
                         id = .Invalid;
                         break;
                     }
-                    codepointLen = 0;
+                    self.index -= 1;
                     state = .float_suffix;
                 },
             },
