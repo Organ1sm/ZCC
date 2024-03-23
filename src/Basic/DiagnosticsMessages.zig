@@ -1194,6 +1194,16 @@ pub const c99_compat = struct {
     pub const opt = "c99-compat";
     pub const kind = .off;
 };
+pub const unexpected_character = struct {
+    pub const msg = "unexpected character <U+{X:0>4}>";
+    pub const extra = .actual_codepoint;
+    pub const kind = .@"error";
+};
+pub const invalid_identifier_start_char = struct {
+    pub const msg = "character <U+{X:0>4}> not allowed at the start of an identifier";
+    pub const extra = .actual_codepoint;
+    pub const kind = .@"error";
+};
 pub const unicode_zero_width = struct {
     pub const msg = "identifier contains Unicode character <U+{X:0>4}> that is invisible in some environments";
     pub const opt = "unicode-homoglyph";

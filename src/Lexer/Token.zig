@@ -43,25 +43,6 @@ pub const Token = struct {
         };
     }
 
-    /// Check if codepoint may appear in specified context
-    /// does not check basic character set chars because the tokenizer handles them separately to keep the common
-    /// case on the fast path
-    pub fn mayAppearInIdent(comp: *const Compilation, codepoint: u21, where: enum { start, inside }) bool {
-        if (codepoint == '$') return comp.langOpts.dollarsInIdentifiers;
-        if (codepoint <= 0x7F) return false;
-        return switch (where) {
-            .start => if (comp.langOpts.standard.atLeast(.c11))
-                CharInfo.isC11IdChar(codepoint) and !CharInfo.isC11DisallowedInitialIdChar(codepoint)
-            else
-                CharInfo.isC99IdChar(codepoint) and !CharInfo.isC99DisallowedInitialIDChar(codepoint),
-
-            .inside => if (comp.langOpts.standard.atLeast(.c11))
-                CharInfo.isC11IdChar(codepoint)
-            else
-                CharInfo.isC99IdChar(codepoint),
-        };
-    }
-
     pub const AllKeywords = std.ComptimeStringMap(TokenType, .{
         .{ "auto", auto: {
             @setEvalBranchQuota(3000);

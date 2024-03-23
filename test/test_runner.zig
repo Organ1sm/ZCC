@@ -121,14 +121,6 @@ pub fn main() !void {
 
         _ = try pp.preprocess(builtinMacros);
         const eof = pp.preprocess(file) catch |err| {
-            if (!std.unicode.utf8ValidateSlice(file.buffer)) {
-                // non-utf8 files are not preprocessed, so we can't use EXPECTED_ERRORS; instead we
-                // check that the most recent error is .invalid_utf8
-                if (comp.diag.list.items.len > 0 and comp.diag.list.items[comp.diag.list.items.len - 1].tag == .invalid_utf8) {
-                    _ = comp.diag.list.pop();
-                    continue;
-                }
-            }
             failCount += 1;
             progress.log("could not preprocess file '{s}': {s}\n", .{ path, @errorName(err) });
             continue;
@@ -184,7 +176,15 @@ pub fn main() !void {
 
         const expectedTypes = pp.defines.get("EXPECTED_TYPES");
 
-        var tree = try zcc.Parser.parse(&pp);
+        var tree = zcc.Parser.parse(&pp) catch |err| switch (err) {
+            error.FatalError => {
+                if (try checkExpectedErrors(&pp, &progress, &buffer)) |some| {
+                    if (some) passCount += 1 else failCount += 1;
+                }
+                continue;
+            },
+            else => |e| return e,
+        };
         defer tree.deinit();
 
         tree.dump(std.io.null_writer) catch {};
