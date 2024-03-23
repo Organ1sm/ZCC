@@ -84,7 +84,7 @@ pub fn preprocessorCB(self: *Pragma, pp: *Preprocessor, startIdx: TokenIndex) Er
 }
 
 pub fn parserCB(self: *Pragma, p: *Parser, startIdx: TokenIndex) Compilation.Error!void {
-    const tokenIdx = p.index;
-    defer std.debug.assert(tokenIdx == p.index);
+    const tokenIdx = p.tokenIdx;
+    defer std.debug.assert(tokenIdx == p.tokenIdx);
     if (self.parserHandler) |func| return func(self, p, startIdx);
 }

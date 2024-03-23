@@ -210,6 +210,8 @@ pub const TokenType = enum(u8) {
     KeywordGccAlignof1,
     KeywordGccAlignof2,
     KeywordGccTypeof,
+    KeywordAttribute1,
+    KeywordAttribute2,
     KeywordGccExtension,
     KeywordGccAsm,
     KeywordGccAsm1,
@@ -218,8 +220,9 @@ pub const TokenType = enum(u8) {
     // gcc builtins
     BuiltinChooseExpr,
     BuiltinVaArg,
-    KeywordAttribute1,
-    KeywordAttribute2,
+
+    // MS extension
+    KeywordDeclSpec,
 
     // Preprocessor directives
     KeywordInclude,
@@ -336,6 +339,7 @@ pub const TokenType = enum(u8) {
             .KeywordGccAsm,
             .KeywordGccAsm1,
             .KeywordGccAsm2,
+            .KeywordDeclSpec,
             => return true,
             else => false,
         };
@@ -542,6 +546,7 @@ pub const TokenType = enum(u8) {
             .KeywordGccAsm => "asm",
             .KeywordGccAsm1 => "__asm",
             .KeywordGccAsm2 => "__asm__",
+            .KeywordDeclSpec => "__declspec",
 
             .KeywordInclude => "include",
             .KeywordDefine => "define",

@@ -59,6 +59,10 @@ const usage =
     \\  -E                      Only run the preprocessor
     \\  -fcolor-diagnostics     Enable colors in diagnostics
     \\  -fno-color-diagnostics  Disable colors in diagnostics
+    \\  -fdeclspec              Enable support for __declspec attributes
+    \\  -fno-declspec           Disable support for __declspec attributes
+    \\  -fms-extensions         Enable support for Microsoft extensions
+    \\  -fno-ms-extensions      Disable support for Microsoft extensions
     \\  -fdollars-in-identifiers        
     \\                          Allow '$' in identifiers(default)
     \\  -fno-dollars-in-identifiers     
@@ -147,6 +151,14 @@ pub fn parseArgs(
                 comp.langOpts.shortEnums = true;
             } else if (std.mem.eql(u8, arg, "-fno-short-enums")) {
                 comp.langOpts.shortEnums = false;
+            } else if (std.mem.eql(u8, arg, "-fdeclspec")) {
+                comp.langOpts.declSpecAttrs = true;
+            } else if (std.mem.eql(u8, arg, "-fno-declspec")) {
+                comp.langOpts.declSpecAttrs = false;
+            } else if (std.mem.eql(u8, arg, "-fms-extensions")) {
+                comp.langOpts.enableMSExtensions();
+            } else if (std.mem.eql(u8, arg, "-fno-ms-extensions")) {
+                comp.langOpts.disableMSExtensions();
             } else if (std.mem.eql(u8, arg, "-fdollars-in-identifiers")) {
                 comp.langOpts.dollarsInIdentifiers = true;
             } else if (std.mem.eql(u8, arg, "-fno-dollars-in-identifiers")) {

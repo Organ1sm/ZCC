@@ -52,25 +52,14 @@ pub fn validateFnDef(d: DeclSpec, p: *Parser) Error!AstTag {
 
     const isStatic = d.storageClass == .static;
     const isInline = d.@"inline" != null;
-    const isNoreturn = d.noreturn != null;
 
     if (isStatic) {
-        if (isInline and isNoreturn)
-            return AstTag.NoreturnInlineStaticFnDef;
         if (isInline)
             return AstTag.InlineStaticFnDef;
-        if (isNoreturn)
-            return AstTag.NoreturnStaticFnDef;
-
         return AstTag.StaticFnDef;
     } else {
-        if (isInline and isNoreturn)
-            return AstTag.NoreturnInlineFnDef;
         if (isInline)
             return AstTag.InlineFnDef;
-        if (isNoreturn)
-            return AstTag.NoreturnFnDef;
-
         return AstTag.FnDef;
     }
 }
@@ -93,24 +82,14 @@ pub fn validate(d: DeclSpec, p: *Parser, ty: *Type, hasInit: bool) Error!AstTag 
             try p.errToken(.threadlocal_non_var, tokenIndex);
 
         const isInline = d.@"inline" != null;
-        const isNoreturn = d.noreturn != null;
 
         if (isStatic) {
-            if (isInline and isNoreturn)
-                return AstTag.NoreturnInlineStaticFnProto;
             if (isInline)
                 return AstTag.InlineStaticFnProto;
-            if (isNoreturn)
-                return AstTag.NoreturnStaticFnProto;
-
             return AstTag.StaticFnProto;
         } else {
-            if (isInline and isNoreturn)
-                return AstTag.NoreturnInlineFnProto;
             if (isInline)
                 return AstTag.InlineFnProto;
-            if (isNoreturn) return AstTag.NoreturnFnProto;
-
             return AstTag.FnProto;
         }
     } else {
@@ -139,5 +118,41 @@ pub fn validate(d: DeclSpec, p: *Parser, ty: *Type, hasInit: bool) Error!AstTag 
             if (isExtern) return AstTag.ExternVar;
             return AstTag.Var;
         }
+    }
+}
+
+/// Warns about ignored attributes for declarations that are enum or record types.
+/// This function iterates through the attributes from a starting index and uses
+/// the parser to report errors for ignored attributes.
+///
+/// @param d  The DeclSpec object which contains declaration specifications.
+/// @param p  The Parser object which is used for error reporting.
+/// @param attrBufferStart  The index to start checking for ignored attributes.
+pub fn warnIgnoredAttrs(d: DeclSpec, p: *Parser, attrBufferStart: usize) !void {
+    // If the type of the declaration is not an enum or record, there is nothing to do.
+    if (!d.type.isEnumOrRecord())
+        return;
+
+    // Start from the given index and iterate over the attribute buffer
+    var i = attrBufferStart;
+    while (i < p.attrBuffer.len) : (i += 1) {
+        // Get the attribute at the current index
+        const ignoredAttr = p.attrBuffer.get(i);
+
+        // Report an error for the ignored attribute with details about the tag and specifier
+        try p.errExtra(.ignored_record_attr, ignoredAttr.tok, .{
+            .ignoredRecordAttr = .{
+                // The tag of the ignored attribute
+                .tag = ignoredAttr.attr.tag,
+                // Determine the specifier string based on the declaration type
+                .specifier = switch (d.type.specifier) {
+                    .Enum => .@"enum",
+                    .Struct => .@"struct",
+                    .Union => .@"union",
+                    // Continue the loop if the type specifier is not one of the above
+                    else => continue,
+                },
+            },
+        });
     }
 }

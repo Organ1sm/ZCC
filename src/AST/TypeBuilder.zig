@@ -14,8 +14,6 @@ typedef: ?struct {
 
 specifier: @This().Specifier = .None,
 qual: Qualifiers.Builder = .{},
-alignment: u29 = 0,
-alignToken: ?TokenIndex = null,
 typeof: ?Type = null,
 /// When true an error is returned instead of adding a diagnostic message.
 /// Used for trying to combine typedef types.
@@ -142,7 +140,7 @@ pub const Specifier = union(enum) {
     }
 };
 
-pub fn finish(b: @This(), p: *Parser) Parser.Error!Type {
+pub fn finish(b: @This(), p: *Parser, attrBufferStart: usize) Parser.Error!Type {
     var ty = Type{ .specifier = undefined };
     switch (b.specifier) {
         Specifier.None => {
@@ -182,11 +180,11 @@ pub fn finish(b: @This(), p: *Parser) Parser.Error!Type {
         Specifier.ComplexDouble => ty.specifier = .ComplexDouble,
         Specifier.ComplexLongDouble => ty.specifier = .ComplexLongDouble,
         Specifier.Complex => {
-            try p.errToken(.plain_complex, p.index - 1);
+            try p.errToken(.plain_complex, p.tokenIdx - 1);
             ty.specifier = .ComplexDouble;
         },
         Specifier.ComplexLong => {
-            try p.errExtra(.type_is_invalid, p.index, .{ .str = b.specifier.toString().? });
+            try p.errExtra(.type_is_invalid, p.tokenIdx, .{ .str = b.specifier.toString().? });
             return error.ParsingFailed;
         },
 
@@ -303,24 +301,14 @@ pub fn finish(b: @This(), p: *Parser) Parser.Error!Type {
 
     try b.qual.finish(p, &ty);
 
-    if (b.alignToken) |alignToken| {
-        const default = ty.alignof(p.pp.comp);
-        if (ty.isFunc()) {
-            try p.errToken(.alignas_on_func, alignToken);
-        } else if (b.alignment != 0 and b.alignment < default) {
-            try p.errExtra(.minimum_alignment, alignToken, .{ .unsigned = default });
-        } else {
-            ty.alignment = b.alignment;
-        }
-    }
-    return ty;
+    return p.withAttributes(ty, attrBufferStart);
 }
 
 fn cannotCombine(b: @This(), p: *Parser, sourceToken: TokenIndex) !void {
     if (b.errorOnInvalid)
         return error.CannotCombine;
 
-    const tyString = b.specifier.toString() orelse try p.typeStr(try b.finish(p));
+    const tyString = b.specifier.toString() orelse try p.typeStr(try b.finish(p, p.attrBuffer.len));
     try p.errExtra(
         .cannot_combine_spec,
         sourceToken,
@@ -334,7 +322,7 @@ fn cannotCombine(b: @This(), p: *Parser, sourceToken: TokenIndex) !void {
 fn duplicateSpec(b: *@This(), p: *Parser, spec: []const u8) !void {
     if (b.errorOnInvalid)
         return error.CannotCombine;
-    try p.errStr(.duplicate_declspec, p.index, spec);
+    try p.errStr(.duplicate_declspec, p.tokenIdx, spec);
 }
 
 pub fn combineFromTypeof(b: *@This(), p: *Parser, new: Type, sourceToken: TokenIndex) Compilation.Error!void {

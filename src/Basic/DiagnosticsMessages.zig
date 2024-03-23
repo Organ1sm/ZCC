@@ -1398,3 +1398,66 @@ pub const va_start_not_last_param = struct {
     pub const opt = "varargs";
     pub const kind = .warning;
 };
+pub const attribute_not_enough_args = struct {
+    pub const msg = "'{s}' attribute takes at least {d} argument(s)";
+    pub const kind = .@"error";
+    pub const extra = .attr_arg_count;
+};
+pub const attribute_too_many_args = struct {
+    pub const msg = "'{s}' attribute takes at most {d} argument(s)";
+    pub const kind = .@"error";
+    pub const extra = .attr_arg_count;
+};
+pub const attribute_arg_invalid = struct {
+    pub const msg = "Attribute argument is invalid, expected {s} but got {s}";
+    pub const kind = .@"error";
+    pub const extra = .attr_arg_type;
+};
+pub const unknown_attr_enum = struct {
+    pub const msg = "Unknown `{s}` argument. Possible values are: {s}";
+    pub const kind = .@"error";
+    pub const extra = .attr_enum;
+};
+pub const attribute_requires_identifier = struct {
+    pub const msg = "'{s}' attribute requires an identifier";
+    pub const kind = .@"error";
+    pub const extra = .str;
+};
+pub const declspec_not_enabled = struct {
+    pub const msg = "'__declspec' attributes are not enabled; use '-fdeclspec' or '-fms-extensions' to enable support for __declspec attributes";
+    pub const kind = .@"error";
+};
+pub const declspec_attr_not_supported = struct {
+    pub const msg = "__declspec attribute '{s}' is not supported";
+    pub const extra = .str;
+    pub const opt = "ignored-attributes";
+    pub const kind = .warning;
+};
+pub const deprecated_declarations = struct {
+    pub const msg = "{s}";
+    pub const extra = .str;
+    pub const opt = "deprecated-declarations";
+    pub const kind = .warning;
+};
+pub const deprecated_note = struct {
+    pub const msg = "'{s}' has been explicitly marked deprecated here";
+    pub const extra = .str;
+    pub const opt = "deprecated-declarations";
+    pub const kind = .note;
+};
+pub const unavailable = struct {
+    pub const msg = "{s}";
+    pub const extra = .str;
+    pub const kind = .@"error";
+};
+pub const unavailable_note = struct {
+    pub const msg = "'{s}' has been explicitly marked unavailable here";
+    pub const extra = .str;
+    pub const kind = .note;
+};
+pub const ignored_record_attr = struct {
+    pub const msg = "attribute '{s}' is ignored, place it after \"{s}\" to apply attribute to type declaration";
+    pub const extra = .ignored_record_attr;
+    pub const kind = .warning;
+    pub const opt = "ignored-attributes";
+};

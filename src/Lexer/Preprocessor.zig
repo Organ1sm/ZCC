@@ -7,7 +7,7 @@ const Lexer = @import("Lexer.zig");
 const Parser = @import("../Parser/Parser.zig");
 const Diagnostics = @import("../Basic/Diagnostics.zig");
 const Token = @import("../AST/AST.zig").Token;
-const AttrTag = @import("Attribute.zig").Tag;
+const Attribute = @import("Attribute.zig");
 const Features = @import("Features.zig");
 
 const Allocator = std.mem.Allocator;
@@ -627,7 +627,7 @@ fn expr(pp: *Preprocessor, lexer: *Lexer) MacroError!bool {
     var parser = Parser{
         .pp = pp,
         .tokenIds = pp.tokens.items(.id),
-        .index = @intCast(start),
+        .tokenIdx = @intCast(start),
         .arena = pp.arena.allocator(),
         .inMacro = true,
         .scopes = undefined,
@@ -947,7 +947,7 @@ fn handleBuiltinMacro(
             const identifierStr = pp.expandedSlice(identifier.?);
 
             return switch (builtin) {
-                .MacroParamHasAttribute => AttrTag.fromString(identifierStr) != null,
+                .MacroParamHasAttribute => Attribute.fromString(.gnu, null, identifierStr) != null,
                 .MacroParamHasFeature => Features.hasFeature(pp.comp, identifierStr),
                 .MacroParamHasExtension => Features.hasExtension(pp.comp, identifierStr),
                 .MacroParamHasBuiltin => pp.comp.builtins.hasBuiltin(identifierStr),

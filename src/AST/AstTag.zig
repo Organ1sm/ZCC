@@ -16,20 +16,12 @@ pub const Tag = enum(u8) {
     StaticFnProto,
     InlineFnProto,
     InlineStaticFnProto,
-    NoreturnFnProto,
-    NoreturnStaticFnProto,
-    NoreturnInlineFnProto,
-    NoreturnInlineStaticFnProto,
 
     // function definition
     FnDef,
     StaticFnDef,
     InlineFnDef,
     InlineStaticFnDef,
-    NoreturnFnDef,
-    NoreturnStaticFnDef,
-    NoreturnInlineFnDef,
-    NoreturnInlineStaticFnDef,
 
     // variable declaration
     Var,
