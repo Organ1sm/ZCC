@@ -877,6 +877,11 @@ fn parseDeclaration(p: *Parser) Error!bool {
         break :blk DeclSpec{ .type = try spec.finish(p, p.attrBuffer.len) };
     };
 
+    if (declSpec.noreturn) |token| {
+        const attr = Attribute{ .tag = .noreturn, .args = .{ .noreturn = {} } };
+        try p.attrBuffer.append(p.pp.comp.gpa, .{ .attr = attr, .tok = token });
+    }
+
     try declSpec.warnIgnoredAttrs(p, attrBufferTop);
     var ID = (try p.parseInitDeclarator(&declSpec)) orelse {
         // eat ';'
@@ -1288,7 +1293,7 @@ fn parseDeclSpec(p: *Parser, isParam: bool) Error!?DeclSpec {
                     try p.errStr(.duplicate_declspec, p.tokenIdx, "_Noreturn");
                 }
 
-                d.noreturn = null;
+                d.noreturn = p.tokenIdx;
             },
             else => break,
         }
@@ -1542,7 +1547,7 @@ const InitDeclarator = struct { d: Declarator, initializer: NodeIndex = .none };
 /// init-declarator : declarator assembly? attribute-specifier? ('=' initializer)?
 fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec) Error!?InitDeclarator {
     var ID = InitDeclarator{ .d = (try p.declarator(declSpec.type, .normal)) orelse return null };
-    _ = try p.parseAssembly(.decl);
+    _ = try p.parseAssembly(.declLable);
     try p.parseAttrSpec(); //if (ID.d.type.isFunc()) .function else .variable
 
     if (p.eat(.Equal)) |eq| init: {
@@ -3388,7 +3393,8 @@ fn convertInitList(p: *Parser, il: InitList, initType: Type) Error!NodeIndex {
 }
 
 /// assembly : keyword_asm asm-qualifier* '(' asm-string ')'
-fn parseAssembly(p: *Parser, kind: enum { global, decl, stmt }) Error!?NodeIndex {
+fn parseAssembly(p: *Parser, kind: enum { global, declLable, stmt }) Error!?NodeIndex {
+    const asmToken = p.tokenIdx;
     switch (p.getCurrToken()) {
         .KeywordGccAsm, .KeywordGccAsm1, .KeywordGccAsm2 => p.tokenIdx += 1,
         else => return null,
@@ -3417,20 +3423,24 @@ fn parseAssembly(p: *Parser, kind: enum { global, decl, stmt }) Error!?NodeIndex
     };
 
     const lparen = try p.expectToken(.LParen);
-    if (kind != .stmt) {
-        _ = try p.parseAsmString();
-    } else {
-        return p.todo("assembly statements");
+    switch (kind) {
+        .declLable => {
+            const str = (try p.parseAsmString()).value.data.bytes;
+            const attr = Attribute{ .tag = .asm_label, .args = .{ .asm_label = .{ .name = str[0 .. str.len - 1] } } };
+            try p.attrBuffer.append(p.pp.comp.gpa, .{ .attr = attr, .tok = asmToken });
+        },
+        .global => _ = try p.parseAsmString(),
+        .stmt => return p.todo("assembly statements"),
     }
     try p.expectClosing(lparen, .RParen);
 
-    if (kind != .decl)
+    if (kind != .declLable)
         _ = try p.expectToken(.Semicolon);
     return .none;
 }
 
 /// Same as stringLiteral but errors on unicode and wide string literals
-fn parseAsmString(p: *Parser) Error!NodeIndex {
+fn parseAsmString(p: *Parser) Error!Result {
     var i = p.tokenIdx;
     while (true) : (i += 1) switch (p.tokenIds[i]) {
         .StringLiteral => {},
@@ -3444,7 +3454,7 @@ fn parseAsmString(p: *Parser) Error!NodeIndex {
         },
         else => break,
     };
-    return (try p.parseStringLiteral()).node;
+    return try p.parseStringLiteral();
 }
 
 // ====== statements ======

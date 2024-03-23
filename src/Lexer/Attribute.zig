@@ -868,6 +868,11 @@ const attributes = struct {
             },
         };
     };
+    pub const asm_label = struct {
+        const Args = struct {
+            name: []const u8,
+        };
+    };
 };
 
 pub const Tag = std.meta.DeclEnum(attributes);

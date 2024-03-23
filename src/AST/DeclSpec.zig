@@ -52,25 +52,14 @@ pub fn validateFnDef(d: DeclSpec, p: *Parser) Error!AstTag {
 
     const isStatic = d.storageClass == .static;
     const isInline = d.@"inline" != null;
-    const isNoreturn = d.noreturn != null;
 
     if (isStatic) {
-        if (isInline and isNoreturn)
-            return AstTag.NoreturnInlineStaticFnDef;
         if (isInline)
             return AstTag.InlineStaticFnDef;
-        if (isNoreturn)
-            return AstTag.NoreturnStaticFnDef;
-
         return AstTag.StaticFnDef;
     } else {
-        if (isInline and isNoreturn)
-            return AstTag.NoreturnInlineFnDef;
         if (isInline)
             return AstTag.InlineFnDef;
-        if (isNoreturn)
-            return AstTag.NoreturnFnDef;
-
         return AstTag.FnDef;
     }
 }
@@ -93,24 +82,14 @@ pub fn validate(d: DeclSpec, p: *Parser, ty: *Type, hasInit: bool) Error!AstTag 
             try p.errToken(.threadlocal_non_var, tokenIndex);
 
         const isInline = d.@"inline" != null;
-        const isNoreturn = d.noreturn != null;
 
         if (isStatic) {
-            if (isInline and isNoreturn)
-                return AstTag.NoreturnInlineStaticFnProto;
             if (isInline)
                 return AstTag.InlineStaticFnProto;
-            if (isNoreturn)
-                return AstTag.NoreturnStaticFnProto;
-
             return AstTag.StaticFnProto;
         } else {
-            if (isInline and isNoreturn)
-                return AstTag.NoreturnInlineFnProto;
             if (isInline)
                 return AstTag.InlineFnProto;
-            if (isNoreturn) return AstTag.NoreturnFnProto;
-
             return AstTag.FnProto;
         }
     } else {

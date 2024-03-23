@@ -343,10 +343,6 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
         .StaticFnProto,
         .InlineFnProto,
         .InlineStaticFnProto,
-        .NoreturnFnProto,
-        .NoreturnStaticFnProto,
-        .NoreturnInlineFnProto,
-        .NoreturnInlineStaticFnProto,
         => {
             try w.writeByteNTimes(' ', level + half);
             try w.writeAll("name: ");
@@ -359,10 +355,6 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
         .StaticFnDef,
         .InlineFnDef,
         .InlineStaticFnDef,
-        .NoreturnFnDef,
-        .NoreturnStaticFnDef,
-        .NoreturnInlineFnDef,
-        .NoreturnInlineStaticFnDef,
         => {
             try w.writeByteNTimes(' ', level + half);
             try w.writeAll("name: ");

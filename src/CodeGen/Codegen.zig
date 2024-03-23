@@ -48,10 +48,6 @@ pub fn generateTree(comp: *Compilation, tree: Tree) Compilation.Error!*Object {
             .StaticFnProto,
             .InlineFnProto,
             .InlineStaticFnProto,
-            .NoreturnFnProto,
-            .NoreturnStaticFnProto,
-            .NoreturnInlineFnProto,
-            .NoreturnInlineStaticFnProto,
             .ExternVar,
             .ThreadlocalExternVar,
             => {
@@ -64,10 +60,6 @@ pub fn generateTree(comp: *Compilation, tree: Tree) Compilation.Error!*Object {
             .StaticFnDef,
             .InlineFnDef,
             .InlineStaticFnDef,
-            .NoreturnFnDef,
-            .NoreturnStaticFnDef,
-            .NoreturnInlineFnDef,
-            .NoreturnInlineStaticFnDef,
             => c.genFn(decl) catch |err| switch (err) {
                 error.FatalError => return error.FatalError,
                 error.OutOfMemory => return error.OutOfMemory,
