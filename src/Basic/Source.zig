@@ -59,7 +59,10 @@ pub fn getLineCol(source: Source, byteOffset: u32) LineCol {
     // Iterate from the start of the line to the given byte offset to calculate column and visual width
     while (i < byteOffset) : (col += 1) { // TODO this is still incorrect, but better
         // Determine the byte sequence length and code point at the current position
-        const len = std.unicode.utf8ByteSequenceLength(source.buffer[i]) catch unreachable;
+        const len = std.unicode.utf8ByteSequenceLength(source.buffer[i]) catch {
+            i += 1;
+            continue;
+        };
         const cp = std.unicode.utf8Decode(source.buffer[i..][0..len]) catch unreachable;
         width += codepointWidth(cp);
 
