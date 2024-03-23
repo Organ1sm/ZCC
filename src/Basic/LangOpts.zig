@@ -1,5 +1,6 @@
 const std = @import("std");
 const DiagnosticTag = @import("Diagnostics.zig").Tag;
+const CharInfo = @import("CharInfo.zig");
 
 const LangOpts = @This();
 
@@ -66,6 +67,20 @@ const Standard = enum {
             // todo: update once finalized; this currently matches clang
             .c2x, .gnu2x => "201710L",
         };
+    }
+
+    pub fn codepointAllowedInIdentifier(standard: Standard, codepoint: u21, isStart: bool) bool {
+        if (isStart) {
+            return if (standard.atLeast(.c11))
+                CharInfo.isC11IdChar(codepoint) and !CharInfo.isC11DisallowedInitialIdChar(codepoint)
+            else
+                CharInfo.isC99IdChar(codepoint) and !CharInfo.isC99DisallowedInitialIDChar(codepoint);
+        } else {
+            return if (standard.atLeast(.c11))
+                CharInfo.isC11IdChar(codepoint)
+            else
+                CharInfo.isC99IdChar(codepoint);
+        }
     }
 };
 

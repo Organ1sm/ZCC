@@ -168,14 +168,6 @@ pub fn preprocess(pp: *Preprocessor, source: Source) Error!Token {
 }
 
 fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!Token {
-    if (source.invalidUTF8Loc) |loc| {
-        try pp.comp.diag.add(.{
-            .tag = .invalid_utf8,
-            .loc = loc,
-        }, &.{});
-        return error.FatalError;
-    }
-
     pp.preprocessCount += 1;
     var lexer = Lexer{
         .buffer = source.buffer,

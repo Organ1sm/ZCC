@@ -4,7 +4,6 @@ const Token = @import("Token.zig").Token;
 const Source = @import("../Basic/Source.zig");
 const LangOpts = @import("../Basic/LangOpts.zig");
 const Compilation = @import("../Basic/Compilation.zig");
-const CharInfo = @import("../Basic/CharInfo.zig");
 const Lexer = @This();
 
 /// Input buffer containing source code
@@ -87,12 +86,12 @@ pub fn next(self: *Lexer) Token {
     var start = self.index;
     var id: TokenType = .Eof;
     var counter: u32 = 0;
-    var codepointLen: u3 = undefined;
+    var codepointLen: u32 = undefined;
 
     var returnState = state;
     while (self.index < self.buffer.len) : (self.index += codepointLen) {
-        codepointLen = std.unicode.utf8ByteSequenceLength(self.buffer[self.index]) catch unreachable;
-        const c = std.unicode.utf8Decode(self.buffer[self.index .. self.index + codepointLen]) catch unreachable;
+        codepointLen = 1;
+        const c = self.buffer[self.index];
         switch (state) {
             .start => switch (c) {
                 '\n' => {
@@ -197,14 +196,18 @@ pub fn next(self: *Lexer) Token {
                 '1'...'9' => state = .integer_literal,
                 '\\' => state = .back_slash,
                 '\t', '\x0B', '\x0C', ' ' => state = .whitespace,
+                '$' => if (self.comp.langOpts.dollarsInIdentifiers) {
+                    state = .extended_identifier;
+                } else {
+                    id = .Invalid;
+                    self.index += codepointLen;
+                    break;
+                },
+                0x80...0xFF => state = .extended_identifier,
                 else => {
-                    if (Token.mayAppearInIdent(self.comp, c, .start)) {
-                        state = .extended_identifier;
-                    } else {
-                        id = .Invalid;
-                        self.index += codepointLen;
-                        break;
-                    }
+                    id = .Invalid;
+                    self.index += codepointLen;
+                    break;
                 },
             },
 
@@ -438,12 +441,16 @@ pub fn next(self: *Lexer) Token {
 
             .identifier, .extended_identifier => switch (c) {
                 'a'...'z', 'A'...'Z', '_', '0'...'9' => {},
-                else => {
-                    if (!Token.mayAppearInIdent(self.comp, c, .inside)) {
-                        id = if (state == .identifier) Token.getTokenId(self.comp, self.buffer[start..self.index]) else .ExtendedIdentifier;
-                        break;
-                    }
+                '$' => if (self.comp.langOpts.dollarsInIdentifiers) {
                     state = .extended_identifier;
+                } else {
+                    id = if (state == .identifier) Token.getTokenId(self.comp, self.buffer[start..self.index]) else .ExtendedIdentifier;
+                    break;
+                },
+                0x80...0xFF => state = .extended_identifier,
+                else => {
+                    id = if (state == .identifier) Token.getTokenId(self.comp, self.buffer[start..self.index]) else .ExtendedIdentifier;
+                    break;
                 },
             },
 
