@@ -301,8 +301,7 @@ pub fn finish(b: @This(), p: *Parser, attrBufferStart: usize) Parser.Error!Type 
 
     try b.qual.finish(p, &ty);
 
-    const attrs = p.attrBuffer.items(.attr)[attrBufferStart..];
-    return ty.withAttributes(p.arena, attrs);
+    return p.withAttributes(ty, attrBufferStart);
 }
 
 fn cannotCombine(b: @This(), p: *Parser, sourceToken: TokenIndex) !void {

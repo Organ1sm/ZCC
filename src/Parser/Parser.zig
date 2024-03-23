@@ -838,6 +838,11 @@ fn skipTo(p: *Parser, id: TokenType) void {
     }
 }
 
+pub fn withAttributes(p: *Parser, ty: Type, start: usize) !Type {
+    const attrs = p.attrBuffer.items(.attr)[start..];
+    return ty.withAttributes(p.arena, attrs);
+}
+
 /// declaration
 ///  : declaration-specifiers init-declarator-list? ';'
 ///  | attribute-specifier declaration-specifiers init-declarator-list? ';'
@@ -883,8 +888,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
         return true;
     };
 
-    const attrs = p.attrBuffer.items(.attr)[attrBufferTop..];
-    ID.d.type = try ID.d.type.withAttributes(p.arena, attrs);
+    ID.d.type = try p.withAttributes(ID.d.type, attrBufferTop);
     try p.validateAlignas(ID.d.type, null);
 
     // check for funtion definition
@@ -1954,8 +1958,7 @@ fn parseRecordDeclarator(p: *Parser) Error!bool {
         }
 
         try p.parseAttrSpec(); // .record
-        const attrs = p.attrBuffer.items(.attr)[attrBuffTop..];
-        ty = try ty.withAttributes(p.arena, attrs);
+        ty = try p.withAttributes(ty, attrBuffTop);
 
         if (p.eat(.Colon)) |_| bits: {
             const res = try p.parseConstExpr();
@@ -2251,9 +2254,8 @@ fn enumerator(p: *Parser, e: *Enumerator) Error!?EnumFieldAndNode {
         else => unreachable,
     };
 
-    const attrs = p.attrBuffer.items(.attr)[attrBufferTop..];
     var res = e.res;
-    res.ty = try res.ty.withAttributes(p.arena, attrs);
+    res.ty = try p.withAttributes(res.ty, attrBufferTop);
 
     try p.scopes.append(.{ .enumeration = .{
         .name = name,
@@ -2365,8 +2367,7 @@ fn declarator(p: *Parser, baseType: Type, kind: DeclaratorKind) Error!?Declarato
         const combineToken = p.tokenIdx;
         d.type = try p.directDeclarator(d.type, &d, kind);
         try d.type.validateCombinedType(p, combineToken);
-        const attrs = p.attrBuffer.items(.attr)[attrBufferTop..];
-        d.type = try d.type.withAttributes(p.arena, attrs);
+        d.type = try p.withAttributes(d.type, attrBufferTop);
         return d;
     } else if (p.eat(.LParen)) |lp| blk: {
         var res = (try p.declarator(.{ .specifier = .Void }, kind)) orelse {
@@ -2392,8 +2393,7 @@ fn declarator(p: *Parser, baseType: Type, kind: DeclaratorKind) Error!?Declarato
         return error.ParsingFailed;
     }
 
-    const attrs = p.attrBuffer.items(.attr)[attrBufferTop..];
-    d.type = try d.type.withAttributes(p.arena, attrs);
+    d.type = try p.withAttributes(d.type, attrBufferTop);
 
     if (start == p.tokenIdx)
         return null;
@@ -2659,10 +2659,9 @@ fn parseParamDecls(p: *Parser) Error!?[]Type.Function.Param {
             defer p.attrBuffer.len = attrBufferTop;
 
             try p.parseAttrSpec();
-            const attrs = p.attrBuffer.items(.attr)[attrBufferTop..];
 
             nameToken = some.name;
-            paramType = try some.type.withAttributes(p.arena, attrs);
+            paramType = try p.withAttributes(some.type, attrBufferTop);
 
             if (some.name != 0) {
                 if (p.findSymbol(nameToken, .definition)) |scope| {
@@ -3533,11 +3532,10 @@ fn parseStmt(p: *Parser) Error!NodeIndex {
     const attrBufferTop = p.attrBuffer.len;
     defer p.attrBuffer.len = attrBufferTop;
     try p.parseAttrSpec(); // .statement
-    const attrs = p.attrBuffer.items(.attr)[attrBufferTop..];
 
     if (p.eat(.Semicolon)) |_| {
         var nullNode: AST.Node = .{ .tag = .NullStmt, .data = undefined };
-        nullNode.type = try nullNode.type.withAttributes(p.arena, attrs);
+        nullNode.type = try p.withAttributes(nullNode.type, attrBufferTop);
 
         if (nullNode.type.getAttribute(.fallthrough) != null) {
             // TODO: this condition is not completely correct; the last statement of a compound
