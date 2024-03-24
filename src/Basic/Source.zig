@@ -82,11 +82,9 @@ pub fn getLineCol(source: Source, byteOffset: u32) LineCol {
         i += len;
     }
 
-    return .{
-        .line = std.mem.sliceTo(source.buffer[start..], '\n'),
-        .col = col,
-        .width = width,
-    };
+    const slice = source.buffer[start..];
+    const nl = std.mem.indexOfAny(u8, slice, "\n\r") orelse slice.len;
+    return .{ .line = slice[0..nl], .col = col, .width = width };
 }
 
 /// Determines the display width of a given Unicode code point.
