@@ -34,6 +34,11 @@ id: ID,
 /// invalid UTF-8 location
 invalidUTF8Loc: ?Location = null,
 
+/// each entry represents a byte position within `buf` where a backslash+newline was deleted
+/// from the original raw buffer. The same position can appear multiple times if multiple
+/// consecutive splices happened. Guaranteed to be non-decreasing
+spliceLocs: []const u32,
+
 /// Definition of the LineCol structure(corresponding to the byte offset).
 const LineCol = struct {
     /// indicate the string content of the source code line
@@ -43,6 +48,14 @@ const LineCol = struct {
     /// visual width
     width: u32,
 };
+
+/// Todo: binary search instead of scanning entire `spliceLocs`.
+pub fn numSplicesBefore(source: Source, byteOffset: u32) u32 {
+    for (source.spliceLocs, 0..) |spliceOffset, i| {
+        if (spliceOffset > byteOffset) return @intCast(i);
+    }
+    return @intCast(source.spliceLocs.len);
+}
 
 /// Calculates line number, column, and visual width for a given byte offset into the Source.
 /// Returns a LineCol struct containing line information.

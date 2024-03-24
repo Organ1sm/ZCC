@@ -295,7 +295,8 @@ pub fn renderExtra(comp: *Compilation, m: anytype) void {
             line = lineAndCol.line;
             col += lineAndCol.col;
             width += lineAndCol.width;
-            m.location(source.path, msg.loc.line, col);
+            const lineNo = msg.loc.line + source.numSplicesBefore(msg.loc.byteOffset);
+            m.location(source.path, lineNo, col);
         }
 
         m.start(msg.kind);

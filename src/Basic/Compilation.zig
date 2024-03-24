@@ -60,6 +60,7 @@ pub fn deinit(comp: *Compilation) void {
     for (comp.sources.values()) |source| {
         comp.gpa.free(source.path);
         comp.gpa.free(source.buffer);
+        comp.gpa.free(source.spliceLocs);
     }
 
     comp.sources.deinit();
@@ -353,6 +354,7 @@ pub fn generateBuiltinMacros(comp: *Compilation) !Source {
         .id = @as(Source.ID, @enumFromInt(comp.sources.count() + 2)),
         .path = dupedPath,
         .buffer = contents,
+        .spliceLocs = &.{},
     };
     try comp.sources.put(dupedPath, source);
     return source;
@@ -539,6 +541,7 @@ pub fn getSource(comp: *Compilation, id: Source.ID) Source {
         .path = "<scratch space>",
         .buffer = comp.generatedBuffer.items,
         .id = .generated,
+        .spliceLocs = &.{},
     };
     return comp.sources.values()[@intFromEnum(id) - 2];
 }
@@ -583,11 +586,14 @@ pub fn addSource(comp: *Compilation, path: []const u8) !Source {
     const contents = try comp.gpa.alloc(u8, size);
     errdefer comp.gpa.free(contents);
 
+    var spliceLocs = std.ArrayList(u32).init(comp.gpa);
+    defer spliceLocs.deinit();
+
     var bufferReader = std.io.bufferedReader(file.reader());
     const reader = bufferReader.reader();
-    var i: usize = 0;
 
-    // replace newline
+    // replace backslash + newline
+    var i: u32 = 0;
     while (true) {
         const byte = reader.readByte() catch break;
         if (byte == '\\') {
@@ -596,7 +602,10 @@ pub fn addSource(comp: *Compilation, path: []const u8) !Source {
                 i += 1;
                 break;
             };
-            if (next == '\n') continue;
+            if (next == '\n') {
+                try spliceLocs.append(i);
+                continue;
+            }
             contents[i] = '\\';
             contents[i + 1] = next;
             i += 2;
@@ -610,6 +619,7 @@ pub fn addSource(comp: *Compilation, path: []const u8) !Source {
         .id = @as(Source.ID, @enumFromInt(comp.sources.count() + 2)),
         .path = dupedPath,
         .buffer = if (contents.len == i) contents else try comp.gpa.realloc(contents, i),
+        .spliceLocs = try comp.gpa.dupe(u32, spliceLocs.items),
     };
     source.checkUtf8();
 

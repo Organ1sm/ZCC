@@ -2035,24 +2035,6 @@ fn debugTokenBuf(pp: *Preprocessor, buf: []const Token) !void {
     std.debug.print("[{} tokens]\n", .{buf.len});
 }
 
-fn addTestSource(pp: *Preprocessor, path: []const u8, content: []const u8) !Source {
-    const dupedPath = try pp.comp.gpa.dupe(u8, path);
-    const dupedContent = try pp.comp.gpa.dupe(u8, content);
-
-    errdefer {
-        pp.comp.gpa.free(dupedPath);
-        pp.comp.gpa.free(dupedContent);
-    }
-
-    const source = Source{
-        .id = @as(Source.Id, @enumFromInt(pp.comp.sources.count() + 2)),
-        .path = dupedPath,
-        .buf = dupedContent,
-    };
-
-    try pp.comp.sources.put(dupedPath, source);
-    return source;
-}
 
 test "Preserve pragma tokens sometimes" {
     const allocator = std.testing.allocator;
@@ -2081,6 +2063,7 @@ test "Preserve pragma tokens sometimes" {
                     .id = @as(Source.ID, @enumFromInt(comp.sources.count() + 2)),
                     .path = duped_path,
                     .buffer = contents,
+                    .spliceLocs =  &.{},
                 };
                 try comp.sources.put(duped_path, source);
                 break :blk source;

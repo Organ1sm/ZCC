@@ -293,6 +293,7 @@ fn mainExtra(comp: *Compilation, args: [][]const u8) !void {
             .id = @as(Source.ID, @enumFromInt(comp.sources.count() + 2)),
             .path = dupedPath,
             .buffer = contents,
+            .spliceLocs = &.{},
         };
         try comp.sources.put(dupedPath, source);
         break :blk source;
