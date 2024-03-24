@@ -564,8 +564,8 @@ pub fn getSource(comp: *Compilation, id: Source.ID) Source {
 ///     FileReadError: If reading the file contents failed
 ///     OutOfMemory: If allocation failed
 ///     FileNotFound: If not found the file
-pub fn addSource(compilation: *Compilation, path: []const u8) !Source {
-    if (compilation.sources.get(path)) |some| return some;
+pub fn addSource(comp: *Compilation, path: []const u8) !Source {
+    if (comp.sources.get(path)) |some| return some;
 
     if (std.mem.indexOfScalar(u8, path, 0) != null)
         return error.FileNotFound;
@@ -573,20 +573,47 @@ pub fn addSource(compilation: *Compilation, path: []const u8) !Source {
     const file = try std.fs.cwd().openFile(path, .{});
     defer file.close();
 
-    const dupedPath = try compilation.gpa.dupe(u8, path);
-    errdefer compilation.gpa.free(dupedPath);
+    const dupedPath = try comp.gpa.dupe(u8, path);
+    errdefer comp.gpa.free(dupedPath);
 
-    const contents = try file.reader().readAllAlloc(compilation.gpa, std.math.maxInt(u32));
-    errdefer compilation.gpa.free(contents);
+    const size = try file.getEndPos();
+    if (size > std.math.maxInt(u32))
+        return error.StreamTooLong;
+
+    const contents = try comp.gpa.alloc(u8, size);
+    errdefer comp.gpa.free(contents);
+
+    var bufferReader = std.io.bufferedReader(file.reader());
+    const reader = bufferReader.reader();
+    var i: usize = 0;
+
+    // replace newline
+    while (true) {
+        const byte = reader.readByte() catch break;
+        if (byte == '\\') {
+            const next = reader.readByte() catch {
+                contents[i] = '\\';
+                i += 1;
+                break;
+            };
+            if (next == '\n') continue;
+            contents[i] = '\\';
+            contents[i + 1] = next;
+            i += 2;
+        } else {
+            contents[i] = byte;
+            i += 1;
+        }
+    }
 
     var source = Source{
-        .id = @as(Source.ID, @enumFromInt(compilation.sources.count() + 2)),
+        .id = @as(Source.ID, @enumFromInt(comp.sources.count() + 2)),
         .path = dupedPath,
-        .buffer = contents,
+        .buffer = if (contents.len == i) contents else try comp.gpa.realloc(contents, i),
     };
     source.checkUtf8();
 
-    try compilation.sources.put(dupedPath, source);
+    try comp.sources.put(dupedPath, source);
 
     return source;
 }
