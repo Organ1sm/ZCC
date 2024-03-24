@@ -759,7 +759,8 @@ fn expandObjMacro(pp: *Preprocessor, simpleMacro: *const Macro) Error!ExpandBuff
             },
             .MacroLine => {
                 const start = pp.comp.generatedBuffer.items.len;
-                try pp.comp.generatedBuffer.writer().print("{d}\n", .{pp.expansionSourceLoc.line});
+                const source = pp.comp.getSource(pp.expansionSourceLoc.id);
+                try pp.comp.generatedBuffer.writer().print("{d}\n", .{source.physicalLine(pp.expansionSourceLoc)});
 
                 buff.appendAssumeCapacity(try pp.makeGeneratedToken(start, .IntegerLiteral, token));
             },
@@ -2035,7 +2036,6 @@ fn debugTokenBuf(pp: *Preprocessor, buf: []const Token) !void {
     std.debug.print("[{} tokens]\n", .{buf.len});
 }
 
-
 test "Preserve pragma tokens sometimes" {
     const allocator = std.testing.allocator;
     const Test = struct {
@@ -2063,7 +2063,7 @@ test "Preserve pragma tokens sometimes" {
                     .id = @as(Source.ID, @enumFromInt(comp.sources.count() + 2)),
                     .path = duped_path,
                     .buffer = contents,
-                    .spliceLocs =  &.{},
+                    .spliceLocs = &.{},
                 };
                 try comp.sources.put(duped_path, source);
                 break :blk source;

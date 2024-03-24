@@ -57,6 +57,12 @@ pub fn numSplicesBefore(source: Source, byteOffset: u32) u32 {
     return @intCast(source.spliceLocs.len);
 }
 
+/// Returns the actual line number (before newline splicing) of a Location
+/// This corresponds to what the user would actually see in their text editor
+pub fn physicalLine(source: Source, loc: Location) u32 {
+    return loc.line + source.numSplicesBefore(loc.byteOffset);
+}
+
 /// Calculates line number, column, and visual width for a given byte offset into the Source.
 /// Returns a LineCol struct containing line information.
 pub fn getLineCol(source: Source, byteOffset: u32) LineCol {
