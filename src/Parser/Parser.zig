@@ -2027,8 +2027,10 @@ fn parseRecordDeclarator(p: *Parser) Error!bool {
                 });
                 break :bits;
             }
-
-            if (res.value.compare(.gt, Value.int(ty.bitSizeof(p.pp.comp).?), res.ty, p.pp.comp)) {
+            
+            // incomplete size error is reported later
+            const bitSize = ty.bitSizeof(p.pp.comp) orelse break :bits;
+            if (res.value.compare(.gt, Value.int(bitSize), res.ty, p.pp.comp)) {
                 try p.errToken(.bitfield_too_big, nameToken);
                 break :bits;
             } else if (res.value.isZero() and nameToken != 0) {
