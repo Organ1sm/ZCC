@@ -97,6 +97,9 @@ pub fn floatToInt(v: *Value, oldTy: Type, newTy: Type, comp: *Compilation) void 
     if (newTy.isUnsignedInt(comp) and v.data.float < 0) {
         v.* = int(0);
         return;
+    } else if (!std.math.isFinite(v.data.float)) {
+        v.tag = .unavailable;
+        return;
     }
 
     const size = oldTy.sizeof(comp).?;
@@ -144,6 +147,19 @@ pub fn intCast(v: *Value, oldTy: Type, newTy: Type, comp: *Compilation) void {
     }
 }
 
+/// Converts the stored value from an integer to a float.
+/// `.unavailable` value remains unchanged.
+pub fn floatCast(v: *Value, oldTy: Type, newTy: Type, comp: *Compilation) void {
+    assert(oldTy.isFloat() and newTy.isFloat());
+    if (v.tag == .unavailable) return;
+    const size = newTy.sizeof(comp).?;
+    if (!newTy.isReal() or size > 8) {
+        v.tag = .unavailable;
+    } else if (size == 32) {
+        v.* = float(@as(f32, @floatCast(v.data.float)));
+    }
+}
+
 /// Truncates data.int to one bit
 pub fn toBool(v: *Value) void {
     if (v.tag == .unavailable) return;
@@ -156,8 +172,8 @@ pub fn isZero(v: Value) bool {
         .unavailable => false,
         .int => v.data.int == 0,
         .float => v.data.float == 0,
-        .array => unreachable,
-        .bytes => unreachable,
+        .array => false,
+        .bytes => false,
     };
 }
 
@@ -166,8 +182,8 @@ pub fn getBool(v: Value) bool {
         .unavailable => unreachable,
         .int => v.data.int != 0,
         .float => v.data.float != 0,
-        .array => unreachable,
-        .bytes => unreachable,
+        .array => false,
+        .bytes => false,
     };
 }
 
@@ -331,7 +347,7 @@ const bin_ops = struct {
         const a_val = a.getInt(T);
         return int(a_val << amt);
     }
-    
+
     inline fn shr(comptime T: type, a: Value, b: Value) Value {
         const ShiftT = std.math.Log2Int(T);
         const UT = std.meta.Int(.unsigned, @typeInfo(T).Int.bits);

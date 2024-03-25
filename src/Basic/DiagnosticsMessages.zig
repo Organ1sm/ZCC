@@ -1476,3 +1476,8 @@ pub const backslash_newline_escape = struct {
     pub const kind = .warning;
     pub const opt = "backslash-newline-escape";
 };
+pub const array_size_non_int = struct {
+    pub const msg = "size of array has non-integer type '{s}'";
+    pub const extra = .str;
+    pub const kind = .@"error";
+};

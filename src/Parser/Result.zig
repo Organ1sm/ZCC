@@ -363,6 +363,7 @@ pub fn floatCast(res: *Result, p: *Parser, floatType: Type) Error!void {
         res.ty = floatType;
         try res.un(p, .IntToFloat);
     } else if (!res.ty.eql(floatType, p.pp.comp, true)) {
+        res.value.floatCast(res.ty, floatType, p.pp.comp);
         res.ty = floatType;
         try res.un(p, .FloatCast);
     }
