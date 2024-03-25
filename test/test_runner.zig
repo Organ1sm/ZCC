@@ -414,16 +414,14 @@ const MsgWriter = struct {
         m.print("{s}: ", .{@tagName(kind)});
     }
 
-    pub fn end(m: *MsgWriter, maybeLine: ?[]const u8, col: u32, backslashNL: bool) void {
+    pub fn end(m: *MsgWriter, maybeLine: ?[]const u8, col: u32, endWithSplice: bool) void {
         const line = maybeLine orelse {
             m.write("\n");
             return;
         };
-        const line_end = if (backslashNL) col else line.len;
-        const trailer = if (backslashNL) "\\ " else "";
-        const offset: u32 = if (backslashNL) 1 else 0;
-        m.print("\n{s}{s}\n", .{ line[0..line_end], trailer });
-        m.print("{s: >[1]}^\n", .{ "", col + offset });
+        const trailer = if (endWithSplice) "\\ " else "";
+        m.print("\n{s}{s}\n", .{ line, trailer });
+        m.print("{s: >[1]}^\n", .{ "", col });
     }
 };
 

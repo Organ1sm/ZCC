@@ -39,16 +39,6 @@ invalidUTF8Loc: ?Location = null,
 /// consecutive splices happened. Guaranteed to be non-decreasing
 spliceLocs: []const u32,
 
-/// Definition of the LineCol structure(corresponding to the byte offset).
-const LineCol = struct {
-    /// indicate the string content of the source code line
-    line: []const u8,
-    /// indicate the column number within the line
-    col: u32,
-    /// visual width
-    width: u32,
-};
-
 /// Todo: binary search instead of scanning entire `spliceLocs`.
 pub fn numSplicesBefore(source: Source, byteOffset: u32) u32 {
     for (source.spliceLocs, 0..) |spliceOffset, i| {
@@ -63,34 +53,77 @@ pub fn physicalLine(source: Source, loc: Location) u32 {
     return loc.line + source.numSplicesBefore(loc.byteOffset);
 }
 
-/// Calculates line number, column, and visual width for a given byte offset into the Source.
-/// Returns a LineCol struct containing line information.
-pub fn getLineCol(source: Source, byteOffset: u32) LineCol {
-    // Find the start of the line by moving backward from the given byte offset
+/// Definition of the LineCol structure(corresponding to the byte offset).
+const LineCol = struct {
+    /// The content of the source code line as a byte slice.
+    line: []const u8,
+    /// The number of the line within the source code, starting from 1.
+    lineNO: u32,
+    /// The column number within the line, starting from 1.
+    col: u32,
+    /// The visual width of the line, taking into account Unicode full-width and half-width characters.
+    width: u32,
+    /// True if the line ends with a line splice (backslash followed by newline), false otherwise.
+    endWithSplic: bool,
+};
+
+/// Calculates line and column information for a given location within a Source.
+/// This includes finding the start and end of the line, and computing visual width and column number.
+/// Handles newline splices within the source buffer.
+///
+/// @param source: The Source containing the text buffer and splice locations.
+/// @param loc: The Location indicating the byte offset within the source buffer.
+/// @return A LineCol struct containing the extracted line information.
+pub fn getLineCol(source: Source, loc: Location) LineCol {
     var start: usize = 0;
-    if (std.mem.lastIndexOfScalar(u8, source.buffer[0..byteOffset], '\n')) |some|
+    // The start of the line is after the last newline before the byte offset, or at the beginning of the buffer.
+    if (std.mem.lastIndexOfScalar(u8, source.buffer[0..loc.byteOffset], '\n')) |some|
         start = some + 1;
 
-    var i: usize = start;
-    var col: u32 = 1;
-    var width: u32 = 0;
+    // Find the closest splice location before the current line start.
+    const spliceIndex: u32 = for (source.spliceLocs, 0..) |spliceOffset, i| {
+        if (spliceOffset > start) {
+            if (spliceOffset < loc.byteOffset) {
+                start = spliceOffset; // Use the splice as the new line start if it's before the location.
+                break @as(u32, @intCast(i)) + 1;
+            }
+            break @intCast(i); // No splice before location, return current index.
+        }
+    } else @intCast(source.spliceLocs.len); // No splices found, return length of splices array.
 
-    // Iterate from the start of the line to the given byte offset to calculate column and visual width
-    while (i < byteOffset) : (col += 1) { // TODO this is still incorrect, but better
-        // Determine the byte sequence length and code point at the current position
+    var i: usize = start;
+    var col: u32 = 1; // Column numbers start at 1.
+    var width: u32 = 0; // Width is the calculated visual width of the characters.
+
+    // Iterate from the start of the line to the given byte offset to calculate column and visual width.
+    while (i < loc.byteOffset) : (col += 1) {
         const len = std.unicode.utf8ByteSequenceLength(source.buffer[i]) catch {
-            i += 1;
+            i += 1; // Skip invalid UTF-8 sequence and continue.
             continue;
         };
         const cp = std.unicode.utf8Decode(source.buffer[i..][0..len]) catch unreachable;
-        width += codepointWidth(cp);
+        width += codepointWidth(cp); // Add the visual width of the code point.
 
-        i += len;
+        i += len; // Advance by the length of the UTF-8 sequence.
     }
 
-    const slice = source.buffer[start..];
-    const nl = std.mem.indexOfAny(u8, slice, "\n\r") orelse slice.len;
-    return .{ .line = slice[0..nl], .col = col, .width = width };
+    // Find the end of the line by looking for the next newline or EOF.
+    var nl = source.buffer.len;
+    var endWithSplice = false;
+    if (std.mem.indexOfScalar(u8, source.buffer[start..], '\n')) |some|
+        nl = some + start;
+    if (source.spliceLocs.len > spliceIndex and nl > source.spliceLocs[spliceIndex] and source.spliceLocs[spliceIndex] > start) {
+        endWithSplice = true;
+        nl = source.spliceLocs[spliceIndex];
+    }
+
+    return .{
+        .line = source.buffer[start..nl],
+        .lineNO = loc.line + spliceIndex,
+        .col = col,
+        .width = width,
+        .endWithSplic = endWithSplice,
+    };
 }
 
 /// Determines the display width of a given Unicode code point.

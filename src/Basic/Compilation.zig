@@ -556,7 +556,10 @@ pub fn addSourceFromReader(comp: *Compilation, reader: anytype, path: []const u8
     var line: u32 = 1;
 
     while (true) {
-        const byte = reader.readByte() catch break;
+        const byte = reader.readByte() catch |err| switch (err) {
+            error.EndOfStream => break,
+            else => |e| return e,
+        };
         contents[i] = byte;
 
         switch (byte) {
@@ -684,10 +687,8 @@ pub fn addSourceFromPath(comp: *Compilation, path: []const u8) !Source {
     const file = try std.fs.cwd().openFile(path, .{});
     defer file.close();
 
-    const contents = file.readToEndAlloc(comp.gpa, std.math.maxInt(u32)) catch |err| switch (err) {
-        error.FileTooBig => return error.StreamTooLong,
-        else => |e| return e,
-    };
+    const size = std.math.cast(u32, try file.getEndPos());
+    const contents = try comp.gpa.alloc(u8, size.?);
     errdefer comp.gpa.free(contents);
 
     var bufferReader = std.io.bufferedReader(file.reader());

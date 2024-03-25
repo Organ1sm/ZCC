@@ -1801,7 +1801,7 @@ fn parseTypeSpec(p: *Parser, ty: *TypeBuilder) Error!bool {
 fn getAnonymousName(p: *Parser, kindToken: TokenIndex) ![]const u8 {
     const loc = p.pp.tokens.items(.loc)[kindToken];
     const source = p.pp.comp.getSource(loc.id);
-    const col = source.getLineCol(loc.byteOffset).col;
+    const lineAndCol = source.getLineCol(loc);
 
     const kindStr = switch (p.tokenIds[kindToken]) {
         .KeywordStruct,
@@ -1814,7 +1814,7 @@ fn getAnonymousName(p: *Parser, kindToken: TokenIndex) ![]const u8 {
     return std.fmt.allocPrint(
         p.arena,
         "(anonymous {s} at {s}:{d}:{d})",
-        .{ kindStr, source.path, loc.line, col },
+        .{ kindStr, source.path, lineAndCol.lineNO, lineAndCol.col },
     );
 }
 
@@ -2027,7 +2027,7 @@ fn parseRecordDeclarator(p: *Parser) Error!bool {
                 });
                 break :bits;
             }
-            
+
             // incomplete size error is reported later
             const bitSize = ty.bitSizeof(p.pp.comp) orelse break :bits;
             if (res.value.compare(.gt, Value.int(bitSize), res.ty, p.pp.comp)) {

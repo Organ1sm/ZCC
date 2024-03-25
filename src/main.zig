@@ -355,7 +355,7 @@ fn processSource(comp: *Compilation, source: Source, builtinMacro: Source, userD
                 i,
                 @tagName(tok.*),
                 loc.line,
-                s.getLineCol(locs[i].byteOffset).col,
+                s.getLineCol(locs[i]).col,
                 res.start,
                 res.end,
                 if (tok.* == .NewLine) "nl" else lexer.buffer[res.start..res.end],
