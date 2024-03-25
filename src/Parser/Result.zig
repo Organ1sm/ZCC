@@ -422,7 +422,7 @@ fn usualArithmeticConversion(lhs: *Result, rhs: *Result, p: *Parser) Error!void 
     // Do integer promotion on both operands
     const lhsPromoted = lhs.ty.integerPromotion(p.pp.comp);
     const rhsPromoted = rhs.ty.integerPromotion(p.pp.comp);
-    if (lhsPromoted.eql(rhsPromoted,p.pp.comp,  true)) {
+    if (lhsPromoted.eql(rhsPromoted, p.pp.comp, true)) {
         // cast to promoted type
         try lhs.intCast(p, lhsPromoted);
         try rhs.intCast(p, lhsPromoted);
@@ -458,6 +458,8 @@ fn usualArithmeticConversion(lhs: *Result, rhs: *Result, p: *Parser) Error!void 
 
 fn invalidBinTy(a: *Result, tok: TokenIndex, b: *Result, p: *Parser) Error!bool {
     try p.errStr(.invalid_bin_types, tok, try p.typePairStr(a.ty, b.ty));
+    a.value.tag = .unavailable;
+    a.value.tag = .unavailable;
     return false;
 }
 
