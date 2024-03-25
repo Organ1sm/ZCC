@@ -19,10 +19,7 @@ line: u32 = 1,
 
 const State = enum {
     start,
-    cr,
     whitespace,
-    back_slash,
-    back_slash_cr,
     u,
     u8,
     U,
@@ -31,7 +28,6 @@ const State = enum {
     char_literal_start,
     char_literal,
     escape_sequence,
-    cr_escape,
     octal_escape,
     hex_escape,
     unicode_escape,
@@ -98,8 +94,6 @@ pub fn next(self: *Lexer) Token {
                     self.line += 1;
                     break;
                 },
-
-                '\r' => state = .cr,
 
                 '"' => {
                     id = .StringLiteral;
@@ -192,7 +186,6 @@ pub fn next(self: *Lexer) Token {
                 '#' => state = .hash,
                 '0' => state = .zero,
                 '1'...'9' => state = .integer_literal,
-                '\\' => state = .back_slash,
                 '\t', '\x0B', '\x0C', ' ' => state = .whitespace,
                 '$' => if (self.comp.langOpts.dollarsInIdentifiers) {
                     state = .extended_identifier;
@@ -209,55 +202,11 @@ pub fn next(self: *Lexer) Token {
                 },
             },
 
-            .cr => switch (c) {
-                '\n' => {
-                    id = .NewLine;
-                    self.index += 1;
-                    self.line += 1;
-                    break;
-                },
-                else => {
-                    id = .NewLine;
-                    self.line += 1;
-                    break;
-                },
-            },
-
             .whitespace => switch (c) {
                 '\t', '\x0B', '\x0C', ' ' => {},
-                '\\' => state = .back_slash,
                 else => {
                     id = .WhiteSpace;
                     break;
-                },
-            },
-
-            .back_slash => switch (c) {
-                '\n' => {
-                    start = self.index + 1;
-                    state = .whitespace;
-                    self.line += 1;
-                },
-                '\r' => state = .back_slash_cr,
-                '\t', '\x0B', '\x0C', ' ' => {
-                    // TODO warn
-                },
-                else => {
-                    id = .Invalid;
-                    break;
-                },
-            },
-
-            .back_slash_cr => switch (c) {
-                '\n' => {
-                    start = self.index + 1;
-                    state = .whitespace;
-                    self.line += 1;
-                },
-                else => {
-                    start = self.index;
-                    state = .start;
-                    self.line += 1;
                 },
             },
 
@@ -329,10 +278,11 @@ pub fn next(self: *Lexer) Token {
                     self.index += 1;
                     break;
                 },
-                '\n', '\r' => {
+                '\n' => {
                     id = .Invalid;
                     break;
                 },
+                '\r' => unreachable,
                 else => {},
             },
 
@@ -375,7 +325,6 @@ pub fn next(self: *Lexer) Token {
                     state = returnState;
                     self.line += 1;
                 },
-                '\r' => state = .cr_escape,
                 '0'...'7' => {
                     counter = 1;
                     state = .octal_escape;
@@ -391,16 +340,6 @@ pub fn next(self: *Lexer) Token {
                 },
                 else => {
                     id = .Invalid;
-                    break;
-                },
-            },
-
-            .cr_escape => switch (c) {
-                '\n' => {
-                    state = returnState;
-                    self.line += 1;
-                },
-                else => {
                     break;
                 },
             },
@@ -723,10 +662,7 @@ pub fn next(self: *Lexer) Token {
                     self.line += 1;
                     break;
                 },
-                '\r' => {
-                    start = self.index;
-                    state = .cr;
-                },
+                '\r' => unreachable,
                 '\t', '\x0B', '\x0C', ' ' => {
                     start = self.index;
                     state = .whitespace;
@@ -971,11 +907,6 @@ pub fn next(self: *Lexer) Token {
             .u, .u8, .U, .L, .identifier => id = Token.getTokenId(self.comp, self.buffer[start..self.index]),
             .extended_identifier => id = .ExtendedIdentifier,
 
-            .cr => id = .NewLine,
-            .back_slash,
-            .back_slash_cr,
-            => {},
-
             .whitespace => id = .WhiteSpace,
             .multi_line_comment_done => id = .WhiteSpace,
 
@@ -984,7 +915,6 @@ pub fn next(self: *Lexer) Token {
             .char_literal_start,
             .char_literal,
             .escape_sequence,
-            .cr_escape,
             .octal_escape,
             .hex_escape,
             .unicode_escape,
@@ -1062,13 +992,14 @@ pub fn nextNoSpecificTokens(self: *Lexer, skipTokens: std.EnumSet(TokenType)) To
     return token;
 }
 
-fn expectTokens(source: []const u8, expected: []const TokenType) !void {
+fn expectTokens(contents: []const u8, expected: []const TokenType) !void {
     var comp = Compilation.init(std.testing.allocator);
     defer comp.deinit();
 
+    const source = try comp.addSourceFromBuffer("path", contents);
     var lexer = Lexer{
-        .buffer = source,
-        .source = .unused,
+        .buffer = source.buffer,
+        .source = source.id,
         .comp = &comp,
     };
 

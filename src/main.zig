@@ -39,6 +39,10 @@ pub fn main() u8 {
             std.debug.print("Out of Memory\n", .{});
             return 1;
         },
+        error.StreamTooLong => {
+            std.debug.print("Stream too long\n", .{});
+            return 1;
+        },
         error.FatalError => comp.renderErrors(),
         else => return 1,
     };
@@ -246,7 +250,7 @@ pub fn parseArgs(
                 try comp.diag.add(.{ .tag = .cli_unknown_arg, .extra = .{ .str = arg } }, &.{});
             }
         } else {
-            const file = comp.addSource(arg) catch |er| {
+            const file = comp.addSourceFromPath(arg) catch |er| {
                 return fatal(comp, "{s}", .{@errorName(er)});
             };
             try sources.append(file);
@@ -282,22 +286,7 @@ fn mainExtra(comp: *Compilation, args: [][]const u8) !void {
     }
 
     const builtinMacros = try comp.generateBuiltinMacros();
-    const userDefinedMacros = blk: {
-        const dupedPath = try comp.gpa.dupe(u8, "<command line>");
-        errdefer comp.gpa.free(dupedPath);
-
-        const contents = try macroBuffer.toOwnedSlice();
-        errdefer comp.gpa.free(contents);
-
-        const source = Source{
-            .id = @as(Source.ID, @enumFromInt(comp.sources.count() + 2)),
-            .path = dupedPath,
-            .buffer = contents,
-            .spliceLocs = &.{},
-        };
-        try comp.sources.put(dupedPath, source);
-        break :blk source;
-    };
+    const userDefinedMacros = try comp.addSourceFromBuffer("<command line>", macroBuffer.items);
 
     for (sourceFiles.items) |source| {
         processSource(comp, source, builtinMacros, userDefinedMacros) catch |e| switch (e) {
