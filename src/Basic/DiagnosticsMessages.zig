@@ -1216,10 +1216,6 @@ pub const unicode_homoglyph = struct {
     pub const opt = "unicode-homoglyph";
     pub const kind = .warning;
 };
-pub const pragma_inside_macro = struct {
-    pub const msg = "#pragma directive in macro expansion";
-    pub const kind = .@"error";
-};
 pub const meaningless_asm_qual = struct {
     pub const msg = "meaningless '{s}' on assembly outside function";
     pub const extra = .str;
