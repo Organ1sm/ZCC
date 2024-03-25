@@ -4881,6 +4881,8 @@ fn parseCastExpr(p: *Parser) Error!Result {
             // everything can cast to void
             operand.value.tag = .unavailable;
         } else if (ty.isInt() or ty.isFloat() or ty.isPointer()) cast: {
+            try operand.lvalConversion(p);
+
             const oldFloat = operand.ty.isFloat();
             const newFloat = ty.isFloat();
 
@@ -4913,6 +4915,9 @@ fn parseCastExpr(p: *Parser) Error!Result {
 
         if (ty.containAnyQual())
             try p.errStr(.qual_cast, lp, try p.typeStr(ty));
+
+        if (ty.isInt() and operand.ty.isPointer() and ty.sizeCompare(operand.ty, p.pp.comp) == .lt)
+            try p.errStr(.cast_to_smaller_int, lp, try p.typePairStrExtra(ty, " from ", operand.ty));
 
         operand.ty = ty;
         operand.ty.qual = .{};
