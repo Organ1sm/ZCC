@@ -1627,7 +1627,7 @@ fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec) Error!?InitDeclarator {
         // int j [] = c; // c -> *int
         if (!initListExpr.ty.isArray()) break :init;
         if (ID.d.type.specifier == .IncompleteArray) {
-            ID.d.type.data.array.len = initListExpr.ty.data.array.len;
+            ID.d.type.data.array.len = initListExpr.ty.arrayLen().?;
             ID.d.type.specifier = .Array;
         } else if (ID.d.type.is(.IncompleteArray)) {
             const attrs = ID.d.type.getAttributes();
