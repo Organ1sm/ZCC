@@ -642,18 +642,16 @@ fn findTag(p: *Parser, kind: TokenType, nameToken: TokenIndex, refKind: enum { r
     return null;
 }
 
-fn pragma(p: *Parser) !bool {
+fn pragma(p: *Parser) Compilation.Error!bool {
     var foundPragma = false;
-    while (p.eat(.KeywordPragma)) |pragmaToken| {
+    while (p.eat(.KeywordPragma)) |_| {
         foundPragma = true;
         const nameToken = p.tokenIdx;
         const name = p.getTokenSlice(nameToken);
-        const endIdx = std.mem.indexOfScalarPos(TokenType, p.tokenIds, p.tokenIdx, .NewLine) orelse {
-            try p.errToken(.pragma_inside_macro, pragmaToken);
-            return error.ParsingFailed;
-        };
+        const endIdx = std.mem.indexOfScalarPos(TokenType, p.tokenIds, p.tokenIdx, .NewLine).?;
         const pragmaLen = @as(TokenIndex, @intCast(endIdx)) - p.tokenIdx;
         defer p.tokenIdx += pragmaLen + 1; // skip past .nl as well
+
         if (p.pp.comp.getPragma(name)) |prag| {
             try prag.parserCB(p, p.tokenIdx);
         }
@@ -712,28 +710,14 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
     }
 
     while (p.eat(.Eof) == null) {
-        const foundPragma = p.pragma() catch |er| switch (er) {
-            error.ParsingFailed => break,
-            else => |e| return e,
-        };
-        if (foundPragma)
+        if (try p.pragma())
             continue;
 
-        if (p.parseStaticAssert() catch |er| switch (er) {
-            error.ParsingFailed => {
-                p.nextExternDecl();
-                continue;
-            },
-            else => |e| return e,
-        }) continue;
+        if (try p.parseOrNextDecl(parseStaticAssert))
+            continue;
 
-        if (p.parseDeclaration() catch |er| switch (er) {
-            error.ParsingFailed => {
-                p.nextExternDecl();
-                continue;
-            },
-            else => |e| return e,
-        }) continue;
+        if (try p.parseOrNextDecl(parseDeclaration))
+            continue;
 
         if (p.eat(.KeywordGccExtension)) |_| {
             const saveExtension = p.extensionSuppressd;
@@ -741,13 +725,8 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
 
             p.extensionSuppressd = true;
 
-            if (p.parseDeclaration() catch |er| switch (er) {
-                error.ParsingFailed => {
-                    p.nextExternDecl();
-                    continue;
-                },
-                else => |e| return e,
-            }) continue;
+            if (try p.parseOrNextDecl(parseDeclaration))
+                continue;
             switch (p.getCurrToken()) {
                 .Semicolon => p.tokenIdx += 1,
                 .KeywordStaticAssert,
@@ -798,6 +777,16 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
         .rootDecls = rootDecls,
         .strings = try p.strings.toOwnedSlice(),
         .valueMap = p.valueMap,
+    };
+}
+
+fn parseOrNextDecl(p: *Parser, comptime func: fn (*Parser) Error!bool) Compilation.Error!bool {
+    return func(p) catch |er| switch (er) {
+        error.ParsingFailed => {
+            p.nextExternDecl();
+            return true;
+        },
+        else => |e| return e,
     };
 }
 
@@ -1956,32 +1945,22 @@ fn parseRecordSpecifier(p: *Parser) Error!*Type.Record {
 fn parseRecordDecls(p: *Parser) Error!void {
     while (true) {
         if (try p.pragma()) continue;
-        if (try p.parseStaticAssert()) continue;
+        if (try p.parseOrNextDecl(parseStaticAssert)) continue;
         if (p.eat(.KeywordGccExtension)) |_| {
             const saveExtension = p.extensionSuppressd;
             defer p.extensionSuppressd = saveExtension;
             p.extensionSuppressd = true;
 
-            if (p.parseRecordDeclarator() catch |e| switch (e) {
-                error.ParsingFailed => {
-                    p.nextExternDecl();
-                    continue;
-                },
-                else => |er| return er,
-            }) continue;
+            if (try p.parseOrNextDecl(parseRecordDeclarator))
+                continue;
 
             try p.err(.expected_type);
             p.nextExternDecl();
             continue;
         }
 
-        if (p.parseRecordDeclarator() catch |e| switch (e) {
-            error.ParsingFailed => {
-                p.nextExternDecl();
-                continue;
-            },
-            else => |er| return er,
-        }) continue;
+        if (try p.parseOrNextDecl(parseRecordDeclarator))
+            continue;
         break;
     }
 }
@@ -4015,21 +3994,11 @@ fn parseCompoundStmt(p: *Parser, isFnBody: bool, stmtExprState: ?*StmtExprState)
 
     while (p.eat(.RBrace) == null) : (_ = try p.pragma()) {
         if (stmtExprState) |state| state.* = .{};
-        if (p.parseStaticAssert() catch |er| switch (er) {
-            error.ParsingFailed => {
-                try p.nextStmt(lBrace);
-                continue;
-            },
-            else => |e| return e,
-        }) continue;
+        if (try p.parseOrNextStmt(parseStaticAssert, lBrace))
+            continue;
 
-        if (p.parseDeclaration() catch |er| switch (er) {
-            error.ParsingFailed => {
-                try p.nextStmt(lBrace);
-                continue;
-            },
-            else => |e| return e,
-        }) continue;
+        if (try p.parseOrNextStmt(parseDeclaration, lBrace))
+            continue;
 
         if (p.eat(.KeywordGccExtension)) |ext| {
             const saveExtension = p.extensionSuppressd;
@@ -4207,6 +4176,16 @@ fn nodeIsNoreturn(p: *Parser, node: NodeIndex) bool {
 
         else => return false,
     }
+}
+
+fn parseOrNextStmt(p: *Parser, comptime func: fn (*Parser) Error!bool, lbrace: TokenIndex) !bool {
+    return func(p) catch |er| switch (er) {
+        error.ParsingFailed => {
+            try p.nextStmt(lbrace);
+            return true;
+        },
+        else => |e| return e,
+    };
 }
 
 fn nextStmt(p: *Parser, lBrace: TokenIndex) !void {
