@@ -92,7 +92,7 @@ pub fn main() !void {
         defer caseNode.end();
         progress.refresh();
 
-        const file = comp.addSource(path) catch |err| {
+        const file = comp.addSourceFromPath(path) catch |err| {
             failCount += 1;
             progress.log("could not add source '{s}': {s}\n", .{ path, @errorName(err) });
             continue;
@@ -414,13 +414,16 @@ const MsgWriter = struct {
         m.print("{s}: ", .{@tagName(kind)});
     }
 
-    pub fn end(m: *MsgWriter, maybeLine: ?[]const u8, col: u32) void {
+    pub fn end(m: *MsgWriter, maybeLine: ?[]const u8, col: u32, backslashNL: bool) void {
         const line = maybeLine orelse {
             m.write("\n");
             return;
         };
-        m.print("\n{s}\n", .{line});
-        m.print("{s: >[1]}^\n", .{ "", col });
+        const line_end = if (backslashNL) col else line.len;
+        const trailer = if (backslashNL) "\\ " else "";
+        const offset: u32 = if (backslashNL) 1 else 0;
+        m.print("\n{s}{s}\n", .{ line[0..line_end], trailer });
+        m.print("{s: >[1]}^\n", .{ "", col + offset });
     }
 };
 

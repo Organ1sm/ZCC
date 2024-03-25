@@ -123,6 +123,7 @@ pub const Options = packed struct {
     varargs: Kind = .default,
     @"#warnings": Kind = .default,
     @"deprecated-declarations": Kind = .default,
+    @"backslash-newline-escape": Kind = .default,
 };
 
 list: std.ArrayListUnmanaged(Message) = .{},
@@ -242,7 +243,7 @@ pub fn fatal(
     m.location(path, lineNo, col);
     m.start(.@"fatal error");
     m.print(fmt, args);
-    m.end(line, col);
+    m.end(line, col, false);
     return error.FatalError;
 }
 
@@ -295,6 +296,8 @@ pub fn renderExtra(comp: *Compilation, m: anytype) void {
             line = lineAndCol.line;
             col += lineAndCol.col;
             width += lineAndCol.width;
+            if (msg.tag == .backslash_newline_escape)
+                col += 1;
             m.location(source.path, source.physicalLine(msg.loc), col);
         }
 
@@ -351,7 +354,7 @@ pub fn renderExtra(comp: *Compilation, m: anytype) void {
             }
         }
 
-        m.end(line, width);
+        m.end(line, width, msg.tag == .backslash_newline_escape);
     }
 
     const ws: []const u8 = if (warnings == 1) "" else "s";
@@ -480,17 +483,20 @@ const MsgWriter = struct {
         }
     }
 
-    fn end(m: *MsgWriter, maybeLine: ?[]const u8, col: u32) void {
-        const line = maybeLine orelse {
+    fn end(m: *MsgWriter, maybe_line: ?[]const u8, col: u32, backslashNL: bool) void {
+        const line = maybe_line orelse {
             m.write("\n");
             return;
         };
+        const lineEnd = if (backslashNL) col else line.len;
+        const trailer = if (backslashNL) "\\ " else "";
+        const offset: u32 = if (backslashNL) 1 else 0;
         if (!m.color) {
-            m.print("\n{s}\n", .{line});
-            m.print("{s: >[1]}^\n", .{ "", col });
+            m.print("\n{s}{s}\n", .{ line[0..lineEnd], trailer });
+            m.print("{s: >[1]}^\n", .{ "", col + offset });
         } else {
             m.setColor(.reset);
-            m.print("\n{s}\n{s: >[2]}", .{ line, "", col });
+            m.print("\n{s}{s}\n{s: >[3]}", .{ line[0..lineEnd], trailer, "", col + offset });
             m.setColor(.green);
             m.write("^\n");
             m.setColor(.reset);

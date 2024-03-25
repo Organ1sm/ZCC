@@ -1471,3 +1471,8 @@ pub const ignored_record_attr = struct {
     pub const kind = .warning;
     pub const opt = "ignored-attributes";
 };
+pub const backslash_newline_escape = struct {
+    pub const msg = "backslash and newline separated by space";
+    pub const kind = .warning;
+    pub const opt = "backslash-newline-escape";
+};
