@@ -979,7 +979,12 @@ fn parseDeclaration(p: *Parser) Error!bool {
             const paramBufferTop = p.paramBuffer.items.len;
             defer p.paramBuffer.items.len = paramBufferTop;
 
-            ID.d.type.specifier = .Func;
+            // ensure attributed specifier is not lost for old-style functions
+            const attrs = ID.d.type.getAttributes();
+            var baseTy = if (ID.d.type.specifier == .Attributed) ID.d.type.getElemType() else ID.d.type;
+            baseTy.specifier = .Func;
+            ID.d.type = try baseTy.withAttributes(p.arena, attrs);
+
             paramLoop: while (true) {
                 const paramDeclSpec = (try p.parseDeclSpec(true)) orelse break;
                 if (p.eat(.Semicolon)) |semi| {

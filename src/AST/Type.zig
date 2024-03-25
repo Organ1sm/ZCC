@@ -551,13 +551,15 @@ pub fn getElemType(ty: Type) Type {
         .DecayedTypeofType,
         .TypeofExpr,
         .DecayedTypeofExpr,
-        .Attributed,
         => {
             const unwrapped = ty.canonicalize(.preserve_quals);
             var elem = unwrapped.getElemType();
             elem.qual = elem.qual.mergeAllQualifiers(unwrapped.qual);
             return elem;
         },
+
+
+        .Attributed => ty.data.attributed.base,
 
         else => unreachable,
     };
