@@ -1595,10 +1595,9 @@ fn define(pp: *Preprocessor, lexer: *Lexer) Error!void {
     pp.tokenBuffer.items.len = 0;
 
     var needWS = false;
-    var endIdx: u32 = undefined;
     // Collect the token body and validate any ## found.
     var token = first;
-    while (true) {
+    const endIdx = while (true) {
         token.id.simplifyMacroKeyword();
         switch (token.id) {
             .HashHash => {
@@ -1617,10 +1616,7 @@ fn define(pp: *Preprocessor, lexer: *Lexer) Error!void {
                 try pp.tokenBuffer.append(token);
                 try pp.tokenBuffer.append(next);
             },
-            .NewLine, .Eof => {
-                endIdx = token.start;
-                break;
-            },
+            .NewLine, .Eof => break token.start,
             .WhiteSpace => needWS = true,
             else => {
                 if (token.id != .WhiteSpace and needWS) {
@@ -1631,7 +1627,7 @@ fn define(pp: *Preprocessor, lexer: *Lexer) Error!void {
             },
         }
         token = lexer.next();
-    }
+    } else unreachable;
 
     const list = try pp.arena.allocator().dupe(RawToken, pp.tokenBuffer.items);
     try pp.defineMacro(macroName, .{
@@ -1652,13 +1648,9 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: RawToken, lParen: Raw
     // parse the parameter list
     var gnuVarArgs: []const u8 = ""; // gnu-named varargs
     var varArgs = false;
-    var startIdx: u32 = undefined;
-    while (true) {
+    const startIdx = while (true) {
         var token = lexer.nextNoWhiteSpace();
-        if (token.id == .RParen) {
-            startIdx = token.end;
-            break;
-        }
+        if (token.id == .RParen) break token.end;
 
         if (token.id == .Eof)
             return pp.addError(token, .unterminated_macro_param_list);
@@ -1672,9 +1664,7 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: RawToken, lParen: Raw
                 return skipToNewLine(lexer);
             }
 
-            startIdx = rParen.end;
-
-            break;
+            break rParen.end;
         }
 
         if (!token.id.isMacroIdentifier()) {
@@ -1694,30 +1684,24 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: RawToken, lParen: Raw
                 try pp.addError(lParen, .to_match_paren);
                 return skipToNewLine(lexer);
             }
-            break;
+            break rParen.end;
         } else if (token.id == .RParen) {
-            startIdx = token.end;
-            break;
+            break token.end;
         } else if (token.id != .Comma) {
             try pp.addError(token, .expected_comma_param_list);
             return skipToNewLine(lexer);
         }
-    }
+    } else unreachable;
 
     var needWS = false;
-    // store the macro definition end index.
-    var endIdx: u32 = undefined;
     // Collect the body tokens and validate # and ##'s found.
     // Clear the token buffer
     // Safe to use since we can only be in one directive at a time.
     pp.tokenBuffer.items.len = 0;
-    tokenLoop: while (true) {
+    const endIdx = tokenLoop: while (true) {
         var token = lexer.next();
         switch (token.id) {
-            .NewLine, .Eof => {
-                endIdx = token.start;
-                break;
-            },
+            .NewLine, .Eof => break token.start,
             .WhiteSpace => needWS = pp.tokenBuffer.items.len != 0,
             .Hash => {
                 if (token.id != .WhiteSpace and needWS) {
@@ -1809,7 +1793,7 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: RawToken, lParen: Raw
                 try pp.tokenBuffer.append(token);
             },
         }
-    }
+    } else unreachable;
 
     const paramList = try pp.arena.allocator().dupe([]const u8, params.items);
     const tokenList = try pp.arena.allocator().dupe(RawToken, pp.tokenBuffer.items);
@@ -1818,7 +1802,7 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: RawToken, lParen: Raw
         .params = paramList,
         .varArgs = varArgs or gnuVarArgs.len != 0,
         .tokens = tokenList,
-        .loc = .{ .id = macroName.source, .byteOffset = macroName.start, .line = endIdx },
+        .loc = .{ .id = macroName.source, .byteOffset = startIdx, .line = endIdx },
     });
 }
 
