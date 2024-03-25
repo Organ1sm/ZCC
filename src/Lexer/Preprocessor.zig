@@ -1411,13 +1411,15 @@ fn expandMacroExhaustive(
             }
             if (idx - startIdx == advanceIdx + 1 and !doRescan) {
                 advanceIdx += 1;
-                //std.debug.print("Advancing start index by {}\n", .{advanceIdx});
             }
         } // end of replacement phase
     }
     // end of scanning phase
 
     // trim excess buffer
+    for (buf.items[movingEndIdx..]) |item| {
+        Token.free(item.expansionLocs, pp.comp.gpa);
+    }
     buf.items.len = movingEndIdx;
 }
 
