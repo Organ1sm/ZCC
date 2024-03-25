@@ -20,7 +20,7 @@ storageClass: union(enum) {
 threadLocal: ?TokenIndex = null,
 @"inline": ?TokenIndex = null,
 noreturn: ?TokenIndex = null,
-type: Type = .{ .specifier = undefined },
+type: Type,
 
 pub fn validateParam(d: DeclSpec, p: *Parser, ty: *Type) Error!void {
     switch (d.storageClass) {

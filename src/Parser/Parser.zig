@@ -1267,7 +1267,7 @@ fn typeof(p: *Parser) Error!?Type {
 ///  | `auto`
 ///  | `register`
 fn parseDeclSpec(p: *Parser, isParam: bool) Error!?DeclSpec {
-    var d: DeclSpec = .{};
+    var d: DeclSpec = .{ .type = .{ .specifier = undefined } };
     var spec: TypeBuilder = .{};
 
     const attrBufferTop = p.attrBuffer.len;
