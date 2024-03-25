@@ -1141,6 +1141,7 @@ fn expandFuncMacro(
 }
 
 fn shouldExpand(tok: Token, macro: *Macro) bool {
+    // macro.loc.line contains the macros end index
     if (tok.loc.id == macro.loc.id and
         tok.loc.byteOffset >= macro.loc.byteOffset and
         tok.loc.byteOffset <= macro.loc.line)
@@ -1236,8 +1237,7 @@ fn collectMacroFuncArguments(
     var curArgument = std.ArrayList(Token).init(pp.comp.gpa);
     defer curArgument.deinit();
 
-    const done = false;
-    while (!done) {
+    while (true) {
         const tok = try nextBufToken(pp, lexer, buf, startIdx, endIdx, extendBuffer);
         switch (tok.id) {
             .Comma => {
@@ -1671,6 +1671,8 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: RawToken, lParen: Raw
                 try pp.addError(lParen, .to_match_paren);
                 return skipToNewLine(lexer);
             }
+
+            startIdx = rParen.end;
 
             break;
         }
