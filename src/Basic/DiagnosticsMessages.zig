@@ -1477,3 +1477,9 @@ pub const array_size_non_int = struct {
     pub const extra = .str;
     pub const kind = .@"error";
 };
+pub const cast_to_smaller_int = struct {
+    pub const msg = "cast to smaller integer type {s}";
+    pub const extra = .str;
+    pub const kind = .warning;
+    pub const opt = "pointer-to-int-cast";
+};

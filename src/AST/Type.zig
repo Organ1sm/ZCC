@@ -558,7 +558,6 @@ pub fn getElemType(ty: Type) Type {
             return elem;
         },
 
-
         .Attributed => ty.data.attributed.base,
 
         else => unreachable,
@@ -751,6 +750,23 @@ pub fn getCharSignedness(comp: *const Compilation) std.builtin.Signedness {
 
         else => return .signed,
     }
+}
+
+const TypeSizeOrder = enum {
+    lt,
+    gt,
+    eq,
+    indeterminate,
+};
+
+pub fn sizeCompare(lhs: Type, rhs: Type, comp: *Compilation) TypeSizeOrder {
+    const lhsSize = lhs.sizeof(comp) orelse return .indeterminate;
+    const rhsSize = rhs.sizeof(comp) orelse return .indeterminate;
+    return switch (std.math.order(lhsSize, rhsSize)) {
+        .lt => .lt,
+        .gt => .gt,
+        .eq => .eq,
+    };
 }
 
 /// Size of type as reported by sizeof
