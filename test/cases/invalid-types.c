@@ -11,6 +11,18 @@ _Complex long cl; /* TODO: complex integers extension */
 _Complex z;
 _Complex long int zi; /* TODO: complex integers extension */
 
+void foo(int arr[]) {
+    typeof(arr) a[2];
+    struct bar[1] = {1};
+    struct bar a[] = {1};
+    struct bar[1][1] = {{1}};
+    struct bar b[1][] = {{1}};
+}
+
+int bar["foo"];
+int baz[] = 111111E1111111111111;
+int qux[] = baz;
+
 #define TESTS_SKIPPED 6
 #define EXPECTED_ERRORS \
     "invalid-types.c:1:6: error: cannot combine with previous 'long' specifier" \
@@ -30,3 +42,10 @@ _Complex long int zi; /* TODO: complex integers extension */
     "invalid-types.c:12:15: error: cannot combine with previous '_Complex long' specifier" \
     "invalid-types.c:12:19: error: '_Complex long' is invalid" \
     "invalid-types.c:12:19: warning: type specifier missing, defaults to 'int' [-Wimplicit-int]" \
+    "invalid-types.c:16:15: error: expected identifier or '('" \
+    "invalid-types.c:17:17: error: array has incomplete element type 'struct bar'" \
+    "invalid-types.c:18:15: error: expected identifier or '('" \
+    "invalid-types.c:19:17: error: array has incomplete element type 'struct bar []'" \
+    "invalid-types.c:22:9: error: size of array has non-integer type 'char [4]'" \
+    "invalid-types.c:23:13: error: array initializer must be an initializer list or wide string literal" \
+    "invalid-types.c:24:13: error: array initializer must be an initializer list or wide string literal" \
