@@ -128,6 +128,9 @@ pub const Options = packed struct {
     @"gnu-case-range": Kind = .default,
     @"c++-compat": Kind = .default,
     vla: Kind = .default,
+    @"float-overflow-conversion": Kind = .default,
+    @"float-zero-conversion": Kind = .default,
+    @"float-conversion": Kind = .default,
 };
 
 list: std.ArrayListUnmanaged(Message) = .{},

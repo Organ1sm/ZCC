@@ -1513,3 +1513,33 @@ pub const vla = struct {
     pub const kind = .off;
     pub const opt = "vla";
 };
+pub const float_overflow_conversion = struct {
+    pub const msg = "implicit conversion of non-finite value from {s} is undefined";
+    pub const extra = .str;
+    pub const kind = .off;
+    pub const opt = "float-overflow-conversion";
+};
+pub const float_out_of_range = struct {
+    pub const msg = "implicit conversion of out of range value from {s} is undefined";
+    pub const extra = .str;
+    pub const kind = .warning;
+    pub const opt = "literal-conversion";
+};
+pub const float_zero_conversion = struct {
+    pub const msg = "implicit conversion from {s}";
+    pub const extra = .str;
+    pub const kind = .off;
+    pub const opt = "float-zero-conversion";
+};
+pub const float_value_changed = struct {
+    pub const msg = "implicit conversion from {s}";
+    pub const extra = .str;
+    pub const kind = .warning;
+    pub const opt = "float-conversion";
+};
+pub const float_to_int = struct {
+    pub const msg = "implicit conversion turns floating-point number into integer: {s}";
+    pub const extra = .str;
+    pub const kind = .off;
+    pub const opt = "literal-conversion";
+};

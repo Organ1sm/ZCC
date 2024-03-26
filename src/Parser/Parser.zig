@@ -396,6 +396,20 @@ pub fn typePairStrExtra(p: *Parser, a: Type, msg: []const u8, b: Type) ![]const 
     return try p.pp.comp.diag.arena.allocator().dupe(u8, p.strings.items[stringsTop..]);
 }
 
+pub fn floatValueChangedStr(p: *Parser, res: *Result, oldValue: f64, intTy: Type) ![]const u8 {
+    const stringsTop = p.strings.items.len;
+    defer p.strings.items.len = stringsTop;
+
+    var w = p.strings.writer();
+    const str = try p.typePairStrExtra(res.ty, " to ", intTy);
+    try w.writeAll(str);
+    const isZero = res.value.isZero();
+    const nonZeroStr: []const u8 = if (isZero) "non-zero " else "";
+    try w.print(" changes {s}value from {d} to {d}", .{ nonZeroStr, oldValue, res.value.data.int });
+
+    return try p.pp.comp.diag.arena.allocator().dupe(u8, p.strings.items[stringsTop..]);
+}
+
 /// Check for deprecated or unavailable attributes on a type and report them.
 /// If the type has an 'unavailable' attribute, it reports an error for both
 /// the usage and declaration tokens, then aborts parsing.
@@ -3226,16 +3240,16 @@ fn coerceInit(p: *Parser, item: *Result, token: TokenIndex, target: Type) !void 
     if (unqualType.is(.Bool)) {
         // this is ridiculous but it's what clang does
         if (item.ty.isInt() or item.ty.isFloat() or item.ty.isPointer()) {
-            try item.boolCast(p, unqualType);
+            try item.boolCast(p, unqualType, token);
         } else {
             try p.errStr(.incompatible_init, token, try p.typePairStrExtra(target, eMsg, item.ty));
         }
     } else if (unqualType.isInt()) {
         if (item.ty.isInt() or item.ty.isFloat()) {
-            try item.intCast(p, unqualType);
+            try item.intCast(p, unqualType, token);
         } else if (item.ty.isPointer()) {
             try p.errStr(.implicit_ptr_to_int, token, try p.typePairStrExtra(item.ty, " to ", target));
-            try item.intCast(p, unqualType);
+            try item.intCast(p, unqualType, token);
         } else {
             try p.errStr(.incompatible_init, token, try p.typePairStrExtra(target, eMsg, item.ty));
         }
@@ -3614,12 +3628,13 @@ fn parseIfStmt(p: *Parser) Error!NodeIndex {
     defer p.scopes.items.len = startScopeLen;
 
     const lp = try p.expectToken(.LParen);
+    const condToken = p.tokenIdx;
     var cond = try p.parseExpr();
 
     try cond.expect(p);
     try cond.lvalConversion(p);
     if (cond.ty.isInt())
-        try cond.intCast(p, cond.ty.integerPromotion(p.pp.comp))
+        try cond.intCast(p, cond.ty.integerPromotion(p.pp.comp), condToken)
     else if (!cond.ty.isFloat() and !cond.ty.isPointer())
         try p.errStr(.statement_scalar, lp + 1, try p.typeStr(cond.ty));
 
@@ -3674,11 +3689,12 @@ fn parseForStmt(p: *Parser) Error!NodeIndex {
         _ = try p.expectToken(.Semicolon);
 
     // cond
+    const condToken = p.tokenIdx;
     var cond = try p.parseExpr();
     if (cond.node != .none) {
         try cond.lvalConversion(p);
         if (cond.ty.isInt())
-            try cond.intCast(p, cond.ty.integerPromotion(p.pp.comp))
+            try cond.intCast(p, cond.ty.integerPromotion(p.pp.comp), condToken)
         else if (!cond.ty.isFloat() and !cond.ty.isPointer())
             try p.errStr(.statement_scalar, lp + 1, try p.typeStr(cond.ty));
     }
@@ -3728,12 +3744,13 @@ fn parseWhileStmt(p: *Parser) Error!NodeIndex {
     defer p.scopes.items.len = startScopeLen;
 
     const lp = try p.expectToken(.LParen);
+    const condToken = p.tokenIdx;
     var cond = try p.parseExpr();
 
     try cond.expect(p);
     try cond.lvalConversion(p);
     if (cond.ty.isInt())
-        try cond.intCast(p, cond.ty.integerPromotion(p.pp.comp))
+        try cond.intCast(p, cond.ty.integerPromotion(p.pp.comp), condToken)
     else if (!cond.ty.isFloat() and !cond.ty.isPointer())
         try p.errStr(.statement_scalar, lp + 1, try p.typeStr(cond.ty));
 
@@ -3760,12 +3777,13 @@ fn parseDoWhileStmt(p: *Parser) Error!NodeIndex {
 
     _ = try p.expectToken(.KeywordWhile);
     const lp = try p.expectToken(.LParen);
+    const condToken = p.tokenIdx;
     var cond = try p.parseExpr();
 
     try cond.expect(p);
     try cond.lvalConversion(p);
     if (cond.ty.isInt())
-        try cond.intCast(p, cond.ty.integerPromotion(p.pp.comp))
+        try cond.intCast(p, cond.ty.integerPromotion(p.pp.comp), condToken)
     else if (!cond.ty.isFloat() and !cond.ty.isPointer())
         try p.errStr(.statement_scalar, lp + 1, try p.typeStr(cond.ty));
 
@@ -3831,12 +3849,13 @@ fn parseSwitchStmt(p: *Parser) Error!NodeIndex {
     defer p.scopes.items.len = startScopeLen;
 
     const lp = try p.expectToken(.LParen);
+    const condToken = p.tokenIdx;
     var cond = try p.parseExpr();
 
     try cond.expect(p);
     try cond.lvalConversion(p);
     if (cond.ty.isInt())
-        try cond.intCast(p, cond.ty.integerPromotion(p.pp.comp))
+        try cond.intCast(p, cond.ty.integerPromotion(p.pp.comp), condToken)
     else
         try p.errStr(.statement_int, lp + 1, try p.typeStr(cond.ty));
 
@@ -4135,16 +4154,16 @@ fn parseReturnStmt(p: *Parser) Error!?NodeIndex {
     if (returnType.is(.Bool)) {
         // this is ridiculous but it's what clang does
         if (expr.ty.isInt() or expr.ty.isFloat() or expr.ty.isPointer()) {
-            try expr.boolCast(p, returnType);
+            try expr.boolCast(p, returnType, eToken);
         } else {
             try p.errStr(.incompatible_return, eToken, try p.typeStr(expr.ty));
         }
     } else if (returnType.isInt()) {
         if (expr.ty.isInt() or expr.ty.isFloat()) {
-            try expr.intCast(p, returnType);
+            try expr.intCast(p, returnType, eToken);
         } else if (expr.ty.isPointer()) {
             try p.errStr(.implicit_ptr_to_int, eToken, try p.typePairStrExtra(expr.ty, " to ", returnType));
-            try expr.intCast(p, returnType);
+            try expr.intCast(p, returnType, eToken);
         } else {
             try p.errStr(.incompatible_return, eToken, try p.typeStr(expr.ty));
         }
@@ -4159,7 +4178,7 @@ fn parseReturnStmt(p: *Parser) Error!?NodeIndex {
             try expr.nullCast(p, returnType);
         } else if (expr.ty.isInt()) {
             try p.errStr(.implicit_int_to_ptr, eToken, try p.typePairStrExtra(expr.ty, " to ", returnType));
-            try expr.intCast(p, returnType);
+            try expr.intCast(p, returnType, eToken);
         } else if (!expr.ty.isVoidStar() and !returnType.isVoidStar() and !returnType.eql(expr.ty, p.pp.comp, false)) {
             try p.errStr(.incompatible_return, eToken, try p.typeStr(expr.ty));
         }
@@ -4442,16 +4461,16 @@ fn parseAssignExpr(p: *Parser) Error!Result {
     if (lhs.ty.is(.Bool)) {
         // this is ridiculous but it's what clang does
         if (rhs.ty.isInt() or rhs.ty.isFloat() or rhs.ty.isPointer()) {
-            try rhs.boolCast(p, lhs.ty);
+            try rhs.boolCast(p, lhs.ty, token);
         } else {
             try p.errStr(.incompatible_assign, token, try p.typePairStrExtra(lhs.ty, eMsg, rhs.ty));
         }
     } else if (unqualType.isInt()) {
         if (rhs.ty.isInt() or rhs.ty.isFloat()) {
-            try rhs.intCast(p, unqualType);
+            try rhs.intCast(p, unqualType, token);
         } else if (rhs.ty.isPointer()) {
             try p.errStr(.implicit_ptr_to_int, token, try p.typePairStrExtra(rhs.ty, " to ", lhs.ty));
-            try rhs.intCast(p, unqualType);
+            try rhs.intCast(p, unqualType, token);
         } else {
             try p.errStr(.incompatible_assign, token, try p.typePairStrExtra(lhs.ty, eMsg, rhs.ty));
         }
@@ -4923,7 +4942,7 @@ fn parseCastExpr(p: *Parser) Error!Result {
             if (ty.is(.Bool)) {
                 operand.value.toBool();
             } else if (oldFloat and newInt) {
-                operand.value.floatToInt(operand.ty, ty, p.pp.comp);
+                _ = operand.value.floatToInt(operand.ty, ty, p.pp.comp); // no warnings for explicit cast
             } else if (newFloat and oldInt) {
                 operand.value.intToFloat(operand.ty, ty, p.pp.comp);
             } else if (newFloat and oldFloat) {
@@ -5033,8 +5052,8 @@ fn builtinVaArg(p: *Parser) Error!Result {
 ///  | `sizeof` '(' type-name ')'
 ///  | alignof '(' type-name ')'
 fn parseUnaryExpr(p: *Parser) Error!Result {
-    const index = p.tokenIdx;
-    switch (p.tokenIds[index]) {
+    const token = p.tokenIdx;
+    switch (p.tokenIds[token]) {
         .Ampersand => {
             if (p.inMacro) {
                 try p.err(.invalid_preproc_operator);
@@ -5046,11 +5065,11 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
 
             const slice = p.nodes.slice();
             if (!AST.isLValue(slice, p.data.items, p.valueMap, operand.node)) {
-                try p.errToken(.addr_of_rvalue, index);
+                try p.errToken(.addr_of_rvalue, token);
             }
 
             if (operand.ty.qual.register)
-                try p.errToken(.addr_of_register, index);
+                try p.errToken(.addr_of_register, token);
 
             const elemType = try p.arena.create(Type);
             elemType.* = operand.ty;
@@ -5098,7 +5117,7 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
             if (operand.ty.isArray() or operand.ty.isPointer()) {
                 operand.ty = operand.ty.getElemType();
             } else if (!operand.ty.isFunc()) {
-                try p.errToken(.indirection_ptr, index);
+                try p.errToken(.indirection_ptr, token);
             }
 
             if (operand.ty.hasIncompleteSize() and !operand.ty.is(.Void))
@@ -5116,10 +5135,10 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
             try operand.lvalConversion(p);
 
             if (!operand.ty.isInt() and !operand.ty.isFloat())
-                try p.errStr(.invalid_argument_un, index, try p.typeStr(operand.ty));
+                try p.errStr(.invalid_argument_un, token, try p.typeStr(operand.ty));
 
             if (operand.ty.isInt())
-                try operand.intCast(p, operand.ty.integerPromotion(p.pp.comp));
+                try operand.intCast(p, operand.ty.integerPromotion(p.pp.comp), token);
 
             return operand;
         },
@@ -5131,10 +5150,10 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
             try operand.lvalConversion(p);
 
             if (!operand.ty.isInt() and !operand.ty.isFloat())
-                try p.errStr(.invalid_argument_un, index, try p.typeStr(operand.ty));
+                try p.errStr(.invalid_argument_un, token, try p.typeStr(operand.ty));
 
             if (operand.ty.isInt())
-                try operand.intCast(p, operand.ty.integerPromotion(p.pp.comp));
+                try operand.intCast(p, operand.ty.integerPromotion(p.pp.comp), token);
 
             if (operand.value.tag != .unavailable)
                 _ = operand.value.sub(operand.value.zero(), operand.value, operand.ty, p.pp.comp);
@@ -5149,19 +5168,19 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
             try operand.expect(p);
 
             if (!operand.ty.isInt() and !operand.ty.isFloat() and !operand.ty.isReal() and !operand.ty.isPointer())
-                try p.errStr(.invalid_argument_un, index, try p.typeStr(operand.ty));
+                try p.errStr(.invalid_argument_un, token, try p.typeStr(operand.ty));
 
             if (!AST.isLValue(p.nodes.slice(), p.data.items, p.valueMap, operand.node) or operand.ty.isConst()) {
-                try p.errToken(.not_assignable, index);
+                try p.errToken(.not_assignable, token);
                 return error.ParsingFailed;
             }
 
             if (operand.ty.isInt())
-                try operand.intCast(p, operand.ty.integerPromotion(p.pp.comp));
+                try operand.intCast(p, operand.ty.integerPromotion(p.pp.comp), token);
 
             if (operand.value.tag != .unavailable) {
                 if (operand.value.add(operand.value, operand.value.one(), operand.ty, p.pp.comp))
-                    try p.errOverflow(index, operand);
+                    try p.errOverflow(token, operand);
             }
 
             try operand.un(p, .PreIncExpr);
@@ -5174,19 +5193,19 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
             try operand.expect(p);
 
             if (!operand.ty.isInt() and !operand.ty.isFloat() and !operand.ty.isReal() and !operand.ty.isPointer())
-                try p.errStr(.invalid_argument_un, index, try p.typeStr(operand.ty));
+                try p.errStr(.invalid_argument_un, token, try p.typeStr(operand.ty));
 
             if (!AST.isLValue(p.nodes.slice(), p.data.items, p.valueMap, operand.node) or operand.ty.isConst()) {
-                try p.errToken(.not_assignable, index);
+                try p.errToken(.not_assignable, token);
                 return error.ParsingFailed;
             }
 
             if (operand.ty.isInt())
-                try operand.intCast(p, operand.ty.integerPromotion(p.pp.comp));
+                try operand.intCast(p, operand.ty.integerPromotion(p.pp.comp), token);
 
             if (operand.value.tag != .unavailable) {
                 if (operand.value.sub(operand.value, operand.value.one(), operand.ty, p.pp.comp))
-                    try p.errOverflow(index, operand);
+                    try p.errOverflow(token, operand);
             }
 
             try operand.un(p, .PreDecExpr);
@@ -5200,13 +5219,10 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
             try operand.lvalConversion(p);
 
             if (!operand.ty.isInt())
-                try p.errStr(.invalid_argument_un, index, try p.typeStr(operand.ty));
-
-            if (operand.ty.isInt())
-                try operand.intCast(p, operand.ty.integerPromotion(p.pp.comp));
+                try p.errStr(.invalid_argument_un, token, try p.typeStr(operand.ty));
 
             if (operand.ty.isInt()) {
-                try operand.intCast(p, operand.ty.integerPromotion(p.pp.comp));
+                try operand.intCast(p, operand.ty.integerPromotion(p.pp.comp), token);
                 if (operand.value.tag != .unavailable) {
                     operand.value = operand.value.bitNot(operand.ty, p.pp.comp);
                 }
@@ -5225,10 +5241,10 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
             try operand.lvalConversion(p);
 
             if (!operand.ty.isInt() and !operand.ty.isFloat() and !operand.ty.isPointer())
-                try p.errStr(.invalid_argument_un, index, try p.typeStr(operand.ty));
+                try p.errStr(.invalid_argument_un, token, try p.typeStr(operand.ty));
 
             if (operand.ty.isInt())
-                try operand.intCast(p, operand.ty.integerPromotion(p.pp.comp));
+                try operand.intCast(p, operand.ty.integerPromotion(p.pp.comp), token);
 
             if (operand.value.tag != .unavailable) {
                 const res = Value.int(@intFromBool(!operand.value.getBool()));
@@ -5397,7 +5413,7 @@ fn parseSuffixExpr(p: *Parser, lhs: Result) Error!Result {
             }
 
             if (operand.ty.isInt())
-                try operand.intCast(p, operand.ty.integerPromotion(p.pp.comp));
+                try operand.intCast(p, operand.ty.integerPromotion(p.pp.comp), p.tokenIdx);
 
             try operand.un(p, .PostIncExpr);
             return operand;
@@ -5416,7 +5432,7 @@ fn parseSuffixExpr(p: *Parser, lhs: Result) Error!Result {
             }
 
             if (operand.ty.isInt())
-                try operand.intCast(p, operand.ty.integerPromotion(p.pp.comp));
+                try operand.intCast(p, operand.ty.integerPromotion(p.pp.comp), p.tokenIdx);
 
             try operand.un(p, .PostDecExpr);
             return operand;
@@ -5549,7 +5565,7 @@ fn parseCallExpr(p: *Parser, lhs: Result) Error!Result {
             return error.ParsingFailed;
 
         if (argCount >= params.len) {
-            if (arg.ty.isInt()) try arg.intCast(p, arg.ty.integerPromotion(p.pp.comp));
+            if (arg.ty.isInt()) try arg.intCast(p, arg.ty.integerPromotion(p.pp.comp), paramToken);
             if (arg.ty.is(.Float)) try arg.floatCast(p, .{ .specifier = .Double });
             try arg.saveValue(p);
             try p.listBuffer.append(arg.node);
@@ -5586,12 +5602,12 @@ fn parseCallExpr(p: *Parser, lhs: Result) Error!Result {
         } else if (paramType.is(.Bool)) {
             // this is ridiculous but it's what clang does
             if (arg.ty.isInt() or arg.ty.isFloat() or arg.ty.isPointer())
-                try arg.boolCast(p, paramType)
+                try arg.boolCast(p, paramType, params[argCount].nameToken)
             else
                 try p.reportParam(paramToken, arg, argCount, params);
         } else if (paramType.isInt()) {
             if (arg.ty.isInt() or arg.ty.isFloat()) {
-                try arg.intCast(p, paramType);
+                try arg.intCast(p, paramType, paramToken);
             } else if (arg.ty.isPointer()) {
                 try p.errStr(
                     .implicit_ptr_to_int,
@@ -5599,7 +5615,7 @@ fn parseCallExpr(p: *Parser, lhs: Result) Error!Result {
                     try p.typePairStrExtra(arg.ty, " to ", paramType),
                 );
                 try p.errToken(.parameter_here, params[argCount].nameToken);
-                try arg.intCast(p, paramType);
+                try arg.intCast(p, paramType, paramToken);
             } else {
                 try p.reportParam(paramToken, arg, argCount, params);
             }
@@ -5618,7 +5634,7 @@ fn parseCallExpr(p: *Parser, lhs: Result) Error!Result {
                     try p.typePairStrExtra(arg.ty, " to ", paramType),
                 );
                 try p.errToken(.parameter_here, params[argCount].nameToken);
-                try arg.intCast(p, paramType);
+                try arg.intCast(p, paramType, paramToken);
             } else if (!arg.ty.isVoidStar() and !paramType.isVoidStar() and !paramType.eql(arg.ty, p.pp.comp, false)) {
                 try p.reportParam(paramToken, arg, argCount, params);
             }

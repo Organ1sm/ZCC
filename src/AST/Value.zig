@@ -89,25 +89,91 @@ pub fn signExtend(v: Value, oldTy: Type, comp: *Compilation) i64 {
     };
 }
 
+pub const FloatToIntChangeKind = enum {
+    ///value did not change,
+    none,
+    /// floating point number too small or large for destination integer type
+    outOfRange,
+    /// tried to convert a NaN or Infinity
+    overflow,
+    /// fractional value was converted to zero
+    nonZeroToZero,
+    /// fractional part truncated
+    valueChanged,
+};
+
+/// Converts a floating-point value to an integer value, handling edge cases and indicating the kind of change that occurred.
+/// @param FloatTy            The type of floating-point number (e.g., f32 or f64).
+/// @param intTySignedness    The signedness (std.builtin.Signedness) of the target integer type.
+/// @param intTySize          The size (in bytes) of the target integer type.
+/// @param v                  A pointer to the Value struct holding the floating-point number to be converted.
+/// @return                   A FloatToIntChangeKind indicating the result of the conversion (e.g., none, outOfRange, nonZeroToZero, valueChanged).
+fn floatToIntExtra(comptime FloatTy: type, intTySignedness: std.builtin.Signedness, intTySize: u16, v: *Value) FloatToIntChangeKind {
+    const floatVal = v.getFloat(FloatTy);
+    const wasZero = floatVal == 0;
+    const hadFraction = std.math.modf(floatVal).fpart != 0;
+
+    // Iterate through all combinations of signedness and byte count.
+    inline for ([_]std.builtin.Signedness{ .signed, .unsigned }) |signedness| {
+        inline for ([_]u16{ 1, 2, 4, 8 }) |bytecount| {
+            // When the current signedness and byte count match the target, perform the conversion.
+            if (signedness == intTySignedness and bytecount == intTySize) {
+                // Define the type of integer to cast to based on the signedness and size.
+                const IntTy = std.meta.Int(signedness, bytecount * 8);
+
+                // Perform a lossy cast of the floating-point value to the target integer type.
+                const intVal = std.math.lossyCast(IntTy, floatVal);
+                // Store the resulting integer value in the Value struct.
+                v.* = int(intVal);
+
+                // Check for special cases and return the appropriate FloatToIntChangeKind.
+                // Case when the float was not zero but the result is zero.
+                if (!wasZero and v.isZero()) return FloatToIntChangeKind.nonZeroToZero;
+                // Case when the value is out of the range representable by IntTy.
+                if (floatVal <= std.math.minInt(IntTy) or floatVal >= std.math.maxInt(IntTy)) return FloatToIntChangeKind.outOfRange;
+                // Case when the float had a fractional part, meaning the value has changed.
+                if (hadFraction) return FloatToIntChangeKind.valueChanged;
+                // If none of the special cases apply, no significant change occurred.
+                return FloatToIntChangeKind.none;
+            }
+        }
+    }
+    // This point should be unreachable because all valid paths return from within the loop.
+    unreachable;
+}
+
 /// Converts the stored value from a float to an integer.
 /// `.unavailable` value remains unchanged.
-pub fn floatToInt(v: *Value, oldTy: Type, newTy: Type, comp: *Compilation) void {
+pub fn floatToInt(v: *Value, oldTy: Type, newTy: Type, comp: *Compilation) FloatToIntChangeKind {
     assert(oldTy.isFloat());
-    if (v.tag == .unavailable) return;
+    if (v.tag == .unavailable)
+        return FloatToIntChangeKind.none;
+
     if (newTy.isUnsignedInt(comp) and v.data.float < 0) {
         v.* = int(0);
-        return;
+        return FloatToIntChangeKind.outOfRange;
     } else if (!std.math.isFinite(v.data.float)) {
         v.tag = .unavailable;
-        return;
+        return FloatToIntChangeKind.overflow;
     }
 
-    const size = oldTy.sizeof(comp).?;
-    v.* = int(switch (size) {
-        4 => std.math.lossyCast(i32, v.getFloat(f32)),
-        8 => std.math.lossyCast(i64, v.getFloat(f64)),
+    const oldSize = oldTy.sizeof(comp).?;
+    const newSize: u16 = @intCast(newTy.sizeof(comp).?);
+    if (newTy.isUnsignedInt(comp))
+        switch (oldSize) {
+            1 => unreachable, // promoted to int
+            2 => unreachable, // promoted to int
+            4 => return floatToIntExtra(f32, .unsigned, newSize, v),
+            8 => return floatToIntExtra(f64, .unsigned, newSize, v),
+            else => unreachable,
+        }
+    else switch (oldSize) {
+        1 => unreachable, // promoted to int
+        2 => unreachable, // promoted to int
+        4 => return floatToIntExtra(f32, .signed, newSize, v),
+        8 => return floatToIntExtra(f64, .signed, newSize, v),
         else => unreachable,
-    });
+    }
 }
 
 /// Converts the stored value from an integer to a float.

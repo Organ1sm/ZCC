@@ -165,7 +165,7 @@ pub fn adjustTypes(a: *Result, token: TokenIndex, b: *Result, p: *Parser, kind: 
     const bIsInt = b.ty.isInt();
 
     if (aIsInt and bIsInt) {
-        try a.usualArithmeticConversion(b, p);
+        try a.usualArithmeticConversion(b, p, token);
         return a.shouldEval(b, p);
     }
 
@@ -181,7 +181,7 @@ pub fn adjustTypes(a: *Result, token: TokenIndex, b: *Result, p: *Parser, kind: 
         if (kind == .relational and (!a.ty.isReal() or !b.ty.isReal()))
             return a.invalidBinTy(token, b, p);
 
-        try a.usualArithmeticConversion(b, p);
+        try a.usualArithmeticConversion(b, p, token);
         return a.shouldEval(b, p);
     }
 
@@ -197,8 +197,8 @@ pub fn adjustTypes(a: *Result, token: TokenIndex, b: *Result, p: *Parser, kind: 
             if (!aIsScalar or !bIsScalar) return a.invalidBinTy(token, b, p);
 
             // Do integer promotions but nothing else
-            if (aIsInt) try a.intCast(p, a.ty.integerPromotion(p.pp.comp));
-            if (bIsInt) try b.intCast(p, b.ty.integerPromotion(p.pp.comp));
+            if (aIsInt) try a.intCast(p, a.ty.integerPromotion(p.pp.comp), token);
+            if (bIsInt) try b.intCast(p, b.ty.integerPromotion(p.pp.comp), token);
             return a.shouldEval(b, p);
         },
 
@@ -260,8 +260,8 @@ pub fn adjustTypes(a: *Result, token: TokenIndex, b: *Result, p: *Parser, kind: 
                 return a.invalidBinTy(token, b, p);
 
             // Do integer promotions but nothing else
-            if (aIsInt) try a.intCast(p, a.ty.integerPromotion(p.pp.comp));
-            if (bIsInt) try b.intCast(p, b.ty.integerPromotion(p.pp.comp));
+            if (aIsInt) try a.intCast(p, a.ty.integerPromotion(p.pp.comp), token);
+            if (bIsInt) try b.intCast(p, b.ty.integerPromotion(p.pp.comp), token);
 
             // The result type is the type of the pointer operand
             if (aIsInt) a.ty = b.ty else b.ty = a.ty;
@@ -279,7 +279,7 @@ pub fn adjustTypes(a: *Result, token: TokenIndex, b: *Result, p: *Parser, kind: 
             }
 
             // Do integer promotion on b if needed
-            if (bIsInt) try b.intCast(p, b.ty.integerPromotion(p.pp.comp));
+            if (bIsInt) try b.intCast(p, b.ty.integerPromotion(p.pp.comp), token);
             return a.shouldEval(b, p);
         },
 
@@ -317,7 +317,8 @@ pub fn lvalConversion(res: *Result, p: *Parser) Error!void {
     }
 }
 
-pub fn boolCast(res: *Result, p: *Parser, boolType: Type) Error!void {
+pub fn boolCast(res: *Result, p: *Parser, boolType: Type, tok: TokenIndex) Error!void {
+    _ = tok;
     if (res.ty.isPointer()) {
         res.value.toBool();
         res.ty = boolType;
@@ -327,29 +328,64 @@ pub fn boolCast(res: *Result, p: *Parser, boolType: Type) Error!void {
         res.ty = boolType;
         try res.un(p, .IntToBool);
     } else if (res.ty.isFloat()) {
-        res.value.floatToInt(res.ty, boolType, p.pp.comp);
+        _ = res.value.floatToInt(res.ty, boolType, p.pp.comp);
         res.ty = boolType;
         try res.un(p, .FloatToBool);
     }
 }
 
-pub fn intCast(res: *Result, p: *Parser, intType: Type) Error!void {
+/// Perform an integer cast on the result's value.
+/// This function handles casting from boolean, pointer, float, and integer types to an integer type.
+/// If the original type is a float, it will also check for potential issues with the conversion.
+/// If the integer type has an incomplete size, the parsing will fail.
+/// @param res      The result object to cast.
+/// @param p        The parser object.
+/// @param intType  The integer type to cast to.
+/// @param tok      The token index at which the cast occurs.
+/// @return Error   Returns an error if casting fails or the result type has an incomplete size.
+pub fn intCast(res: *Result, p: *Parser, intType: Type, tok: TokenIndex) Error!void {
+    // Cast from boolean to integer.
     if (res.ty.is(.Bool)) {
         res.ty = intType;
         try res.un(p, .BoolToInt);
-    } else if (res.ty.isPointer()) {
+    }
+
+    // Cast from pointer to integer.
+    else if (res.ty.isPointer()) {
         res.ty = intType;
         try res.un(p, .PointerToInt);
-    } else if (res.ty.isFloat()) {
-        res.value.floatToInt(res.ty, intType, p.pp.comp);
+    }
+
+    // Cast from floating point to integer.
+    else if (res.ty.isFloat()) {
+        const oldValue = res.value;
+        // Check for the kind of value change that will occur during the cast.
+        const valueChangeKind = res.value.floatToInt(res.ty, intType, p.pp.comp);
+        // Warn if there are issues with the float to int conversion.
+        try res.floatToIntWarning(p, intType, oldValue, valueChangeKind, tok);
         res.ty = intType;
         try res.un(p, .FloatToInt);
-    } else if (!res.ty.eql(intType, p.pp.comp, true)) {
+    }
+
+    // Cast between integer types.
+    else if (!res.ty.eql(intType, p.pp.comp, true)) {
+        // Fail if the integer type size is incomplete.
         if (intType.hasIncompleteSize())
             return error.ParsingFailed;
+        // Perform the integer cast.
         res.value.intCast(res.ty, intType, p.pp.comp);
         res.ty = intType;
         try res.un(p, .IntCast);
+    }
+}
+
+fn floatToIntWarning(res: *Result, p: *Parser, intTy: Type, oldValue: Value, changeKind: Value.FloatToIntChangeKind, tok: TokenIndex) !void {
+    switch (changeKind) {
+        .none => return p.errStr(.float_to_int, tok, try p.typePairStrExtra(res.ty, " to ", intTy)),
+        .outOfRange => return p.errStr(.float_out_of_range, tok, try p.typePairStrExtra(res.ty, " to ", intTy)),
+        .overflow => return p.errStr(.float_overflow_conversion, tok, try p.typePairStrExtra(res.ty, " to ", intTy)),
+        .nonZeroToZero => return p.errStr(.float_zero_conversion, tok, try p.floatValueChangedStr(res, oldValue.getFloat(f64), intTy)),
+        .valueChanged => return p.errStr(.float_value_changed, tok, try p.floatValueChangedStr(res, oldValue.getFloat(f64), intTy)),
     }
 }
 
@@ -398,7 +434,7 @@ pub fn nullCast(res: *Result, p: *Parser, ptrType: Type) Error!void {
     try res.un(p, .NullToPointer);
 }
 
-fn usualArithmeticConversion(lhs: *Result, rhs: *Result, p: *Parser) Error!void {
+fn usualArithmeticConversion(lhs: *Result, rhs: *Result, p: *Parser, tok: TokenIndex) Error!void {
     // if either is a float cast to that type
     const floatTypes = [3][2]Type.Specifier{
         .{ .ComplexLongDouble, .LongDouble },
@@ -425,8 +461,8 @@ fn usualArithmeticConversion(lhs: *Result, rhs: *Result, p: *Parser) Error!void 
     const rhsPromoted = rhs.ty.integerPromotion(p.pp.comp);
     if (lhsPromoted.eql(rhsPromoted, p.pp.comp, true)) {
         // cast to promoted type
-        try lhs.intCast(p, lhsPromoted);
-        try rhs.intCast(p, lhsPromoted);
+        try lhs.intCast(p, lhsPromoted, tok);
+        try rhs.intCast(p, lhsPromoted, tok);
         return;
     }
 
@@ -436,8 +472,8 @@ fn usualArithmeticConversion(lhs: *Result, rhs: *Result, p: *Parser) Error!void 
         // cast to greater signed or unsigned type
         const resSpecifier = @max(@intFromEnum(lhsPromoted.specifier), @intFromEnum(rhsPromoted.specifier));
         const resType = Type{ .specifier = @enumFromInt(resSpecifier) };
-        try lhs.intCast(p, resType);
-        try rhs.intCast(p, resType);
+        try lhs.intCast(p, resType, tok);
+        try rhs.intCast(p, resType, tok);
         return;
     }
 
@@ -446,14 +482,14 @@ fn usualArithmeticConversion(lhs: *Result, rhs: *Result, p: *Parser) Error!void 
     const rhsLarger = @intFromEnum(rhsPromoted.specifier) > @intFromEnum(rhsPromoted.specifier);
     if (lhsIsUnsigned) {
         const target = if (lhsLarger) lhsPromoted else rhsPromoted;
-        try lhs.intCast(p, target);
-        try rhs.intCast(p, target);
+        try lhs.intCast(p, target, tok);
+        try rhs.intCast(p, target, tok);
         return;
     } else {
         std.debug.assert(rhsIsUnsigned);
         const target = if (rhsLarger) rhsPromoted else lhsPromoted;
-        try lhs.intCast(p, target);
-        try rhs.intCast(p, target);
+        try lhs.intCast(p, target, tok);
+        try rhs.intCast(p, target, tok);
     }
 }
 
