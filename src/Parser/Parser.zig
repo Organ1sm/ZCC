@@ -2519,6 +2519,11 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: Declarator
         const maxBytes = (@as(u64, 1) << @as(u6, @truncate(maxBits))) - 1;
         const maxElems = maxBytes / @max(1, outerSize orelse 1);
 
+        if (!size.ty.isInt()) {
+            try p.errStr(.array_size_non_int, sizeToken, try p.typeStr(size.ty));
+            return error.ParsingFailed;
+        }
+
         if (size.value.tag == .unavailable) {
             if (size.node != .none) {
                 try p.errToken(.vla, sizeToken);
@@ -2545,15 +2550,9 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: Declarator
                 resType.data = .{ .array = arrayType };
                 resType.specifier = .IncompleteArray;
             }
-        } else if (!size.ty.isInt() and !size.ty.isFloat()) {
-            try p.errStr(.array_size_non_int, sizeToken, try p.typeStr(size.ty));
-            return error.ParsingFailed;
         } else {
             var sizeValue = size.value;
             const size_t = p.pp.comp.types.size;
-
-            if (sizeValue.tag == .float)
-                sizeValue.floatToInt(size.ty, size_t, p.pp.comp);
 
             if (sizeValue.compare(.lt, Value.int(0), size_t, p.pp.comp))
                 try p.errToken(.negative_array_size, lb);
