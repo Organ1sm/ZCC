@@ -4405,7 +4405,7 @@ fn parseAssignExpr(p: *Parser) Error!Result {
                     else => {},
                 }
             }
-            _ = try lhsCopy.adjustTypes(token, &rhs, p, .arithmetic);
+            _ = try lhsCopy.adjustTypes(token, &rhs, p, if (tag == .ModAssignExpr) .integer else .arithmetic);
             try lhs.bin(p, tag, rhs);
             return lhs;
         },
