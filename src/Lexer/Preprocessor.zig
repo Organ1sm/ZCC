@@ -1262,6 +1262,7 @@ fn collectMacroFuncArguments(
             },
 
             .Eof => {
+                try args.append(try curArgument.toOwnedSlice());
                 deinitMacroArguments(pp.comp.gpa, &args);
                 lexer.* = savedLexer;
                 endIdx.* = oldEnd;
@@ -1374,6 +1375,7 @@ fn expandMacroExhaustive(
 
                     var res = try pp.expandFuncMacro(macroToken.loc, macro, &args, &expandedArgs);
                     defer res.deinit();
+                    const tokensAdded = res.items.len;
 
                     const macroExpansionLocs = macroToken.expansionSlice();
                     for (res.items) |*tok| {
@@ -1381,14 +1383,15 @@ fn expandMacroExhaustive(
                         try tok.addExpansionLocation(pp.comp.gpa, macroExpansionLocs);
                     }
 
-                    const count = macroScanIdx - idx + 1;
-                    for (buf.items[idx .. idx + count]) |tok|
-                        Token.free(tok.expansionLocs, pp.comp.gpa);
-                    try buf.replaceRange(idx, count, res.items);
-                    // TODO: moving_end_idx += res.items.len - (macro_scan_idx-idx+1)
-                    // doesn't work when the RHS is negative (unsigned!)
-                    movingEndIdx = movingEndIdx + res.items.len - count;
-                    idx += res.items.len;
+                    const tokensRemoved = macroScanIdx - idx + 1;
+                    for (buf.items[idx .. idx + tokensRemoved]) |tok| Token.free(tok.expansionLocs, pp.comp.gpa);
+                    try buf.replaceRange(idx, tokensRemoved, res.items);
+
+                    movingEndIdx += tokensAdded;
+                    // Overflow here means that we encountered an unterminated argument list
+                    // while expanding the body of this macro.
+                    movingEndIdx -|= tokensRemoved;
+                    idx += tokensAdded;
                     doRescan = true;
                 } else {
                     const res = try pp.expandObjMacro(macro);
