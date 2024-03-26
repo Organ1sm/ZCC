@@ -1910,9 +1910,13 @@ fn parseRecordSpecifier(p: *Parser) Error!*Type.Record {
             try p.errToken(.flexible_in_empty, some);
     }
 
-    recordType.fields = try p.arena.dupe(Type.Record.Field, p.recordBuffer.items[recordBufferTop..]);
-    recordType.size = 1;
-    recordType.alignment = 1;
+    for (p.recordBuffer.items[recordBufferTop..]) |field| {
+        if (field.ty.hasIncompleteSize()) break;
+    } else {
+        recordType.fields = try p.arena.dupe(Type.Record.Field, p.recordBuffer.items[recordBufferTop..]);
+        recordType.size = 1;
+        recordType.alignment = 1;
+    }
 
     if (p.recordBuffer.items.len == recordBufferTop) {
         try p.errStr(.empty_record, kindToken, p.getTokenSlice(kindToken));
