@@ -104,8 +104,8 @@ pub fn floatToInt(v: *Value, oldTy: Type, newTy: Type, comp: *Compilation) void 
 
     const size = oldTy.sizeof(comp).?;
     v.* = int(switch (size) {
-        4 => @as(i32, @intFromFloat(v.getFloat(f32))),
-        8 => @as(i64, @intFromFloat(v.getFloat(f64))),
+        4 => std.math.lossyCast(i32, v.getFloat(f32)),
+        8 => std.math.lossyCast(i64, v.getFloat(f64)),
         else => unreachable,
     });
 }
