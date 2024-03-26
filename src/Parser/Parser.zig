@@ -6267,7 +6267,10 @@ fn parseCharLiteral(p: *Parser) Error!Result {
                     't' => c = '\t',
                     'a' => c = 0x07,
                     'b' => c = 0x08,
-                    'e' => c = 0x1B,
+                    'e' => {
+                        try p.errExtra(.non_standard_escape_char, p.tokenIdx, .{ .unsigned = i - 1 });
+                        c = 0x1B;
+                    },
                     'f' => c = 0x0C,
                     'v' => c = 0x0B,
                     'x' => c = try p.parseNumberEscape(p.tokenIdx, 16, slice, &i),
@@ -6407,7 +6410,10 @@ fn parseStringLiteral(p: *Parser) Error!Result {
                         't' => p.strings.appendAssumeCapacity('\t'),
                         'a' => p.strings.appendAssumeCapacity(0x07),
                         'b' => p.strings.appendAssumeCapacity(0x08),
-                        'e' => p.strings.appendAssumeCapacity(0x1B),
+                        'e' => {
+                            try p.errExtra(.non_standard_escape_char, start, .{ .unsigned = i - 1 });
+                            p.strings.appendAssumeCapacity(0x1B);
+                        },
                         'f' => p.strings.appendAssumeCapacity(0x0C),
                         'v' => p.strings.appendAssumeCapacity(0x0B),
                         'x' => p.strings.appendAssumeCapacity(try p.parseNumberEscape(start, 16, slice, &i)),

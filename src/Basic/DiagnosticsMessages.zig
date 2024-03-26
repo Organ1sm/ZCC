@@ -1493,3 +1493,8 @@ pub const empty_case_range = struct {
     pub const msg = "empty case range specified";
     pub const kind = .warning;
 };
+pub const non_standard_escape_char = struct {
+    pub const msg = "use of non-standard escape character '\\e'";
+    pub const kind = .off;
+    pub const opt = "pedantic";
+};

@@ -284,29 +284,30 @@ pub fn renderExtra(comp: *Compilation, m: anytype) void {
         }
 
         var line: ?[]const u8 = null;
-        var col = switch (msg.tag) {
-            .escape_sequence_overflow,
-            .invalid_universal_character,
-            // use msg.extra.unsigned for index into string literal
-            => @as(u32, @truncate(msg.extra.unsigned)),
-            else => 0,
-        };
-        var width = col;
         var endWithSplice = false;
-        if (msg.loc.id != .unused) {
-            const source = comp.getSource(msg.loc.id);
-            var lineAndCol = source.getLineCol(msg.loc);
+        const width = if (msg.loc.id != .unused) blk: {
+            var loc = msg.loc;
+            switch (msg.tag) {
+                .escape_sequence_overflow,
+                .invalid_universal_character,
+                .non_standard_escape_char,
+                // use msg.extra.unsigned for index into string literal
+                => loc.byteOffset += @as(u32, @truncate(msg.extra.unsigned)),
+                else => {},
+            }
+
+            const source = comp.getSource(loc.id);
+            var lineAndCol = source.getLineCol(loc);
             line = lineAndCol.line;
-            col += lineAndCol.col;
-            width += lineAndCol.width;
             endWithSplice = lineAndCol.endWithSplic;
             if (msg.tag == .backslash_newline_escape) {
-                line = lineAndCol.line[0 .. col - 1];
-                width += 1;
-                col += 1;
+                line = lineAndCol.line[0 .. lineAndCol.col - 1];
+                lineAndCol.col += 1;
+                lineAndCol.width += 1;
             }
-            m.location(source.path, lineAndCol.lineNO, col);
-        }
+            m.location(source.path, lineAndCol.lineNO, lineAndCol.col);
+            break :blk lineAndCol.width;
+        } else 0;
 
         m.start(msg.kind);
         @setEvalBranchQuota(1500);
