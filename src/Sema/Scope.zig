@@ -27,6 +27,7 @@ pub const Scope = union(enum) {
         name: []const u8,
         type: Type,
         nameToken: TokenIndex,
+        value : Value,
     };
 
     pub const Enumeration = struct {

@@ -1543,3 +1543,15 @@ pub const float_to_int = struct {
     pub const kind = .off;
     pub const opt = "literal-conversion";
 };
+pub const const_decl_folded = struct {
+    pub const msg = "expression is not an integer constant expression; folding it to a constant is a GNU extension";
+    pub const kind = .off;
+    pub const opt = "gnu-folding-constant";
+    pub const pedantic = true;
+};
+pub const const_decl_folded_vla = struct {
+    pub const msg = "variable length array folded to constant array as an extension";
+    pub const kind = .off;
+    pub const opt = "gnu-folding-constant";
+    pub const pedantic = true;
+};
