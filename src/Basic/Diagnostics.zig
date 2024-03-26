@@ -126,6 +126,7 @@ pub const Options = packed struct {
     @"backslash-newline-escape": Kind = .default,
     @"pointer-to-int-cast": Kind = .default,
     @"gnu-case-range": Kind = .default,
+    @"c++-compat": Kind = .default,
 };
 
 list: std.ArrayListUnmanaged(Message) = .{},

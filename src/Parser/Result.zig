@@ -389,6 +389,7 @@ pub fn toVoid(res: *Result, p: *Parser) Error!void {
             .data = .{ .unExpr = res.node },
         });
     }
+    res.value.tag = .unavailable;
 }
 
 pub fn nullCast(res: *Result, p: *Parser, ptrType: Type) Error!void {

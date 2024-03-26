@@ -1914,8 +1914,10 @@ fn parseRecordSpecifier(p: *Parser) Error!*Type.Record {
     recordType.size = 1;
     recordType.alignment = 1;
 
-    if (p.recordBuffer.items.len == recordBufferTop)
+    if (p.recordBuffer.items.len == recordBufferTop) {
         try p.errStr(.empty_record, kindToken, p.getTokenSlice(kindToken));
+        try p.errStr(.empty_record_size, kindToken, p.getTokenSlice(kindToken));
+    }
 
     try p.expectClosing(lb, .RBrace);
     try p.parseAttrSpec(); // .record

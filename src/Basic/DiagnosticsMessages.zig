@@ -553,6 +553,12 @@ pub const empty_record = struct {
     pub const kind = .off;
     pub const pedantic = true;
 };
+pub const empty_record_size = struct {
+    pub const msg = "empty {s} has size 0 in C, size 1 in C++";
+    pub const extra = .str;
+    pub const opt = "c++-compat";
+    pub const kind = .off;
+};
 pub const wrong_tag = struct {
     pub const msg = "use of '{s}' with tag type that does not match previous definition";
     pub const extra = .str;
