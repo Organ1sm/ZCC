@@ -125,6 +125,7 @@ pub const Options = packed struct {
     @"deprecated-declarations": Kind = .default,
     @"backslash-newline-escape": Kind = .default,
     @"pointer-to-int-cast": Kind = .default,
+    @"gnu-case-range": Kind = .default,
 };
 
 list: std.ArrayListUnmanaged(Message) = .{},

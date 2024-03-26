@@ -570,6 +570,22 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
             }
         },
 
+        .CaseRangeStmt => {
+            try w.writeByteNTimes(' ', level + half);
+            try w.writeAll("range start:\n");
+            try tree.dumpNode(tree.data[data.if3.body], level + delta, w);
+
+            try w.writeByteNTimes(' ', level + half);
+            try w.writeAll("range end:\n");
+            try tree.dumpNode(tree.data[data.if3.body + 1], level + delta, w);
+
+            if (data.if3.cond != .none) {
+                try w.writeByteNTimes(' ', level + half);
+                try w.writeAll("stmt:\n");
+                try tree.dumpNode(data.if3.cond, level + delta, w);
+            }
+        },
+
         .DefaultStmt => {
             if (data.unExpr != .none) {
                 try w.writeByteNTimes(' ', level + half);
