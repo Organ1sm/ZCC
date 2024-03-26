@@ -31,6 +31,20 @@ const TentativeAttribute = struct {
     attr: Attribute,
     tok: TokenIndex,
 };
+
+/// How the parser handles const int decl references when it is expecting an integer
+/// constant expression.
+const ConstDeclFoldingMode = enum {
+    /// fold const decls as if they were literals
+    FoldConstDecls,
+    /// fold const decls as if they were literals and issue GNU extension diagnostic
+    GNUFoldingExtension,
+    /// fold const decls as if they were literals and issue VLA diagnostic
+    GNUVLAFoldingExtension,
+    /// folding const decls is prohibited; return an unavailable value
+    NoConstDeclFolding,
+};
+
 // values from pp
 pp: *Preprocessor,
 tokenIds: []const TokenType,
@@ -59,6 +73,7 @@ inMacro: bool = false,
 extensionSuppressd: bool = false,
 containsAddresssOfLabel: bool = false,
 labelCount: u32 = 0,
+constDeclFolding: ConstDeclFoldingMode = .FoldConstDecls,
 /// location of first computed goto in function currently being parsed
 /// if a computed goto is used, the function must contain an
 /// address-of-label expression (tracked with ContainsAddressOfLabel)
@@ -99,6 +114,7 @@ record: struct {
                 .name = name,
                 .nameToken = nameToken,
                 .type = undefined, // unused
+                .value = .{},
             },
         });
     }
@@ -723,7 +739,7 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
     _ = try p.addNode(.{ .tag = .Invalid, .type = undefined, .data = undefined });
     {
         const ty = &pp.comp.types.vaList;
-        const sym = Scope.Symbol{ .name = "__builtin_va_list", .type = ty.*, .nameToken = 0 };
+        const sym = Scope.Symbol{ .name = "__builtin_va_list", .type = ty.*, .nameToken = 0, .value = .{} };
         try p.scopes.append(.{ .typedef = sym });
 
         if (ty.isArray()) ty.decayArray();
@@ -953,7 +969,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
 
     // check for funtion definition
     if (ID.d.funcDeclarator != null and
-        ID.initializer == .none and
+        ID.initializer.node == .none and
         ID.d.type.isFunc())
     fndef: {
         switch (p.getCurrToken()) {
@@ -981,6 +997,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
             .name = p.getTokenSlice(ID.d.name),
             .type = ID.d.type,
             .nameToken = ID.d.name,
+            .value = .{},
         };
         try p.scopes.append(.{ .definition = sym });
 
@@ -1048,7 +1065,14 @@ fn parseDeclaration(p: *Parser) Error!bool {
                         try p.errStr(.parameter_missing, d.name, name);
                     }
 
-                    try p.scopes.append(.{ .param = .{ .name = name, .nameToken = d.name, .type = d.type } });
+                    try p.scopes.append(.{
+                        .param = .{
+                            .name = name,
+                            .nameToken = d.name,
+                            .type = d.type,
+                            .value = .{},
+                        },
+                    });
                     if (p.eat(.Comma) == null) break;
                 }
 
@@ -1070,6 +1094,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
                         .name = param.name,
                         .type = param.ty,
                         .nameToken = param.nameToken,
+                        .value = .{},
                     },
                 });
             }
@@ -1113,14 +1138,14 @@ fn parseDeclaration(p: *Parser) Error!bool {
         if (ID.d.oldTypeFunc) |tokenIdx|
             try p.errToken(.invalid_old_style_params, tokenIdx);
 
-        const tag = try declSpec.validate(p, &ID.d.type, ID.initializer != .none);
+        const tag = try declSpec.validate(p, &ID.d.type, ID.initializer.node != .none);
         // const attrs = p.attrBuffer.items(.attr)[attrBufferTop..];
         // ID.d.type = try ID.d.type.withAttributes(p.arena, attrs);
 
         const node = try p.addNode(.{
             .type = ID.d.type,
             .tag = tag,
-            .data = .{ .decl = .{ .name = ID.d.name, .node = ID.initializer } },
+            .data = .{ .decl = .{ .name = ID.d.name, .node = ID.initializer.node } },
         });
         try p.declBuffer.append(node);
 
@@ -1128,10 +1153,11 @@ fn parseDeclaration(p: *Parser) Error!bool {
             .name = p.getTokenSlice(ID.d.name),
             .type = ID.d.type,
             .nameToken = ID.d.name,
+            .value = if (ID.d.type.isConst()) ID.initializer.value else .{},
         };
         if (declSpec.storageClass == .typedef) {
             try p.scopes.append(.{ .typedef = sym });
-        } else if (ID.initializer != .none) {
+        } else if (ID.initializer.node != .none) {
             try p.scopes.append(.{ .definition = sym });
         } else {
             try p.scopes.append(.{ .declaration = sym });
@@ -1156,7 +1182,7 @@ fn parseStaticAssert(p: *Parser) Error!bool {
     const curToken = p.eat(.KeywordStaticAssert) orelse return false;
     const lp = try p.expectToken(.LParen);
     const resToken = p.tokenIdx;
-    const res = try p.parseConstExpr();
+    const res = try p.parseConstExpr(.NoConstDeclFolding);
 
     const str = if (p.eat(.Comma) != null)
         switch (p.getCurrToken()) {
@@ -1574,7 +1600,7 @@ fn alignAs(p: *Parser) !bool {
         try p.attrBuffer.append(p.pp.comp.gpa, .{ .attr = attr, .tok = alignToken });
     } else {
         const arg_start = p.tokenIdx;
-        const res = try p.parseConstExpr();
+        const res = try p.parseConstExpr(.NoConstDeclFolding);
         if (!res.value.isZero()) {
             var args = Attribute.initArguments(.aligned, alignToken);
             if (p.diagnose(.aligned, &args, 0, res)) |msg| {
@@ -1602,7 +1628,7 @@ fn parseAttrSpec(p: *Parser) Error!void {
     }
 }
 
-const InitDeclarator = struct { d: Declarator, initializer: NodeIndex = .none };
+const InitDeclarator = struct { d: Declarator, initializer: Result = .{} };
 
 /// init-declarator : declarator assembly? attribute-specifier? ('=' initializer)?
 fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec) Error!?InitDeclarator {
@@ -1633,11 +1659,12 @@ fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec) Error!?InitDeclarator {
                 .name = p.getTokenSlice(ID.d.name),
                 .type = ID.d.type,
                 .nameToken = ID.d.name,
+                .value = .{},
             },
         });
 
         var initListExpr = try p.initializer(ID.d.type);
-        ID.initializer = initListExpr.node;
+        ID.initializer = initListExpr;
         // int j [] = c; // c -> *int
         if (!initListExpr.ty.isArray()) break :init;
         if (ID.d.type.specifier == .IncompleteArray) {
@@ -1671,7 +1698,7 @@ fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec) Error!?InitDeclarator {
         };
 
         // if there was an initializer expression it must have contained an error
-        if (ID.initializer != .none)
+        if (ID.initializer.node != .none)
             break :incomplete;
         try p.errStr(.variable_incomplete_ty, name, try p.typeStr(ID.d.type));
         return ID;
@@ -1691,7 +1718,7 @@ fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec) Error!?InitDeclarator {
         .definition => |s| if (!s.type.eql(ID.d.type, p.pp.comp, true)) {
             try p.errStr(.redefinition_incompatible, name, p.getTokenSlice(name));
             try p.errToken(.previous_definition, s.nameToken);
-        } else if (ID.initializer != .none) {
+        } else if (ID.initializer.node != .none) {
             try p.errStr(.redefinition, name, p.getTokenSlice(name));
             try p.errToken(.previous_definition, s.nameToken);
         },
@@ -1867,7 +1894,7 @@ fn parseRecordSpecifier(p: *Parser) Error!*Type.Record {
                 .specifier = if (isStruct) .Struct else .Union,
                 .data = .{ .record = recordType },
             };
-            const sym = Scope.Symbol{ .name = recordType.name, .type = ty, .nameToken = ident };
+            const sym = Scope.Symbol{ .name = recordType.name, .type = ty, .nameToken = ident, .value = .{} };
             try p.scopes.append(if (isStruct) .{ .@"struct" = sym } else .{ .@"union" = sym });
             return recordType;
         }
@@ -1900,6 +1927,7 @@ fn parseRecordSpecifier(p: *Parser) Error!*Type.Record {
             .name = recordType.name,
             .type = ty,
             .nameToken = maybeIdent.?,
+            .value = .{},
         };
         try p.scopes.append(if (isStruct) .{ .@"struct" = sym } else .{ .@"union" = sym });
     }
@@ -2023,7 +2051,7 @@ fn parseRecordDeclarator(p: *Parser) Error!bool {
 
         if (p.eat(.Colon)) |_| bits: {
             const bitsToken = p.tokenIdx;
-            const res = try p.parseConstExpr();
+            const res = try p.parseConstExpr(.GNUFoldingExtension);
             if (!ty.isInt()) {
                 try p.errStr(.non_int_bitfield, firstToken, try p.typeStr(ty));
                 break :bits;
@@ -2165,7 +2193,7 @@ fn parseEnumSpec(p: *Parser) Error!*Type.Enum {
         } else {
             const enumType = try Type.Enum.create(p.arena, p.getTokenSlice(ident));
             const ty = Type{ .specifier = .Enum, .data = .{ .@"enum" = enumType } };
-            const sym = Scope.Symbol{ .name = enumType.name, .type = ty, .nameToken = ident };
+            const sym = Scope.Symbol{ .name = enumType.name, .type = ty, .nameToken = ident, .value = .{} };
             try p.scopes.append(.{ .@"enum" = sym });
             return enumType;
         }
@@ -2197,6 +2225,7 @@ fn parseEnumSpec(p: *Parser) Error!*Type.Enum {
             .name = enumType.name,
             .type = ty,
             .nameToken = maybeID.?,
+            .value = .{},
         } });
     }
 
@@ -2276,6 +2305,7 @@ const Enumerator = struct {
 };
 
 const EnumFieldAndNode = struct { field: Type.Enum.Field, node: NodeIndex };
+
 /// enumerator : identifier ('=' constant-expression)
 fn enumerator(p: *Parser, e: *Enumerator) Error!?EnumFieldAndNode {
     _ = try p.pragma();
@@ -2293,7 +2323,7 @@ fn enumerator(p: *Parser, e: *Enumerator) Error!?EnumFieldAndNode {
     try p.parseAttrSpec();
 
     if (p.eat(.Equal)) |_| {
-        const specified = try p.parseConstExpr();
+        const specified = try p.parseConstExpr(.GNUFoldingExtension);
         if (specified.value.tag == .unavailable) {
             try p.errToken(.enum_val_unavailable, nameToken + 2);
             try e.incr(p);
@@ -2504,7 +2534,11 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: Declarator
 
         var star = p.eat(.Asterisk);
         const sizeToken = p.tokenIdx;
+
+        const constDeclFolding = p.constDeclFolding;
+        p.constDeclFolding = .GNUVLAFoldingExtension;
         const size = if (star) |_| Result{} else try p.parseAssignExpr();
+        p.constDeclFolding = constDeclFolding;
 
         try p.expectClosing(lb, .RBracket);
 
@@ -2642,6 +2676,7 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: Declarator
                     .name = p.getTokenSlice(nameToken),
                     .type = undefined,
                     .nameToken = nameToken,
+                    .value = .{},
                 } });
 
                 try p.paramBuffer.append(.{
@@ -2746,6 +2781,7 @@ fn parseParamDecls(p: *Parser) Error!?[]Type.Function.Param {
                     .name = p.getTokenSlice(nameToken),
                     .type = some.type,
                     .nameToken = nameToken,
+                    .value = .{},
                 } });
             }
         }
@@ -2897,7 +2933,7 @@ pub fn initializerItem(p: *Parser, il: *InitList, initType: Type) Error!bool {
                 }
 
                 const exprToken = p.tokenIdx;
-                const indexRes = try p.parseConstExpr();
+                const indexRes = try p.parseConstExpr(.GNUFoldingExtension);
                 try p.expectClosing(lbr, .RBracket);
 
                 if (indexRes.value.tag == .unavailable) {
@@ -3886,11 +3922,11 @@ fn parseSwitchStmt(p: *Parser) Error!NodeIndex {
 
 /// case-statement : case constant-expression ':'
 fn parseCaseStmt(p: *Parser, caseToken: u32) Error!?NodeIndex {
-    const firstItem = try p.parseConstExpr();
+    const firstItem = try p.parseConstExpr(.GNUFoldingExtension);
     const ellipsis = p.tokenIdx; // `...`
     const secondItem = if (p.eat(.Ellipsis) != null) blk: {
         try p.errToken(.gnu_switch_range, ellipsis);
-        break :blk try p.parseCondExpr();
+        break :blk try p.parseConstExpr(.GNUFoldingExtension);
     } else null;
 
     _ = try p.expectToken(.Colon);
@@ -4517,8 +4553,14 @@ fn parseAssignExpr(p: *Parser) Error!Result {
 }
 
 /// const-expression : conditional-expression
-fn parseConstExpr(p: *Parser) Error!Result {
+fn parseConstExpr(p: *Parser, declFolding: ConstDeclFoldingMode) Error!Result {
     const start = p.tokenIdx;
+
+    const constDeclFolding = p.constDeclFolding;
+    defer p.constDeclFolding = constDeclFolding;
+
+    p.constDeclFolding = declFolding;
+
     const res = try p.parseCondExpr();
     try res.expect(p);
 
@@ -4987,7 +5029,7 @@ fn parseBuiltinChooseExpr(p: *Parser) Error!Result {
     p.tokenIdx += 1;
     const lp = try p.expectToken(.LParen);
     const condToken = p.tokenIdx;
-    var cond = try p.parseConstExpr();
+    var cond = try p.parseConstExpr(.NoConstDeclFolding);
     if (cond.value.tag == .unavailable) {
         try p.errToken(.builtin_choose_cond, condToken);
         return error.ParsingFailed;
@@ -5795,6 +5837,7 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
                         .name = name,
                         .type = ty,
                         .nameToken = nameToken,
+                        .value = .{},
                     } });
 
                     return Result{
@@ -5821,7 +5864,15 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
 
                 .declaration, .definition, .param => |s| {
                     try p.checkDeprecatedUnavailable(s.type, nameToken, s.nameToken);
+                    if (s.value.tag == .int) {
+                        switch (p.constDeclFolding) {
+                            .GNUFoldingExtension => try p.errToken(.const_decl_folded, nameToken),
+                            .GNUVLAFoldingExtension => try p.errToken(.const_decl_folded_vla, nameToken),
+                            else => {},
+                        }
+                    }
                     return Result{
+                        .value = if (p.constDeclFolding == .NoConstDeclFolding) Value{} else s.value,
                         .ty = s.type,
                         .node = try p.addNode(.{
                             .tag = .DeclRefExpr,

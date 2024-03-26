@@ -131,6 +131,7 @@ pub const Options = packed struct {
     @"float-overflow-conversion": Kind = .default,
     @"float-zero-conversion": Kind = .default,
     @"float-conversion": Kind = .default,
+    @"gnu-folding-constant": Kind = .default,
 };
 
 list: std.ArrayListUnmanaged(Message) = .{},
