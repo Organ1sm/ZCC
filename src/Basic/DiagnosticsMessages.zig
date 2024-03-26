@@ -1508,3 +1508,8 @@ pub const invalid_pp_stringify_escape = struct {
     pub const msg = "invalid string literal, ignoring final '\\'";
     pub const kind = .warning;
 };
+pub const vla = struct {
+    pub const msg = "variable length array used";
+    pub const kind = .off;
+    pub const opt = "vla";
+};

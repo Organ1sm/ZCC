@@ -127,6 +127,7 @@ pub const Options = packed struct {
     @"pointer-to-int-cast": Kind = .default,
     @"gnu-case-range": Kind = .default,
     @"c++-compat": Kind = .default,
+    vla: Kind = .default,
 };
 
 list: std.ArrayListUnmanaged(Message) = .{},

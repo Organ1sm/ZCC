@@ -2521,8 +2521,9 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: Declarator
 
         if (size.value.tag == .unavailable) {
             if (size.node != .none) {
+                try p.errToken(.vla, sizeToken);
                 if (p.func.type == null and kind != .param and p.record.kind == .Invalid)
-                    try p.errToken(.variable_len_array_file_scope, lb);
+                    try p.errToken(.variable_len_array_file_scope, d.name);
 
                 const exprType = try p.arena.create(Type.Expr);
                 exprType.ty = .{ .specifier = .Void };
