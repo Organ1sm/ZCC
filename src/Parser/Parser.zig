@@ -3870,6 +3870,9 @@ fn parseCaseStmt(p: *Parser, caseToken: u32) Error!?NodeIndex {
     _ = try p.expectToken(.Colon);
 
     if (p.findSwitch()) |some| check: {
+        if (some.type.hasIncompleteSize()) // error already reported for incomplete size
+            break :check;
+
         const first = firstItem.value;
         const last = if (secondItem) |second| second.value else first;
         if (first.tag == .unavailable) {
