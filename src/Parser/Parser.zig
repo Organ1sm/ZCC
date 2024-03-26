@@ -2022,6 +2022,7 @@ fn parseRecordDeclarator(p: *Parser) Error!bool {
         ty = try p.withAttributes(ty, attrBuffTop);
 
         if (p.eat(.Colon)) |_| bits: {
+            const bitsToken = p.tokenIdx;
             const res = try p.parseConstExpr();
             if (!ty.isInt()) {
                 try p.errStr(.non_int_bitfield, firstToken, try p.typeStr(ty));
@@ -2029,7 +2030,7 @@ fn parseRecordDeclarator(p: *Parser) Error!bool {
             }
 
             if (res.value.tag == .unavailable) {
-                try p.errToken(.expected_integer_constant_expr, firstToken);
+                try p.errToken(.expected_integer_constant_expr, bitsToken);
                 break :bits;
             } else if (res.value.compare(.lt, Value.int(0), res.ty, p.pp.comp)) {
                 try p.errExtra(.negative_bitwidth, firstToken, .{
