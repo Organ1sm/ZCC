@@ -1504,3 +1504,7 @@ pub const non_standard_escape_char = struct {
     pub const kind = .off;
     pub const opt = "pedantic";
 };
+pub const invalid_pp_stringify_escape = struct {
+    pub const msg = "invalid string literal, ignoring final '\\'";
+    pub const kind = .warning;
+};

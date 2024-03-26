@@ -896,6 +896,15 @@ fn stringify(pp: *Preprocessor, tokens: []const Token) !void {
                 try pp.charBuffer.append(c);
         }
     }
+    if (pp.charBuffer.items[pp.charBuffer.items.len - 1] == '\\') {
+        const tok = tokens[tokens.len - 1];
+        try pp.comp.diag.add(.{
+            .tag = .invalid_pp_stringify_escape,
+            .loc = tok.loc,
+        }, tok.expansionSlice());
+        pp.charBuffer.items.len -= 1; // remove `\`
+    }
+
     try pp.charBuffer.appendSlice("\"\n");
 }
 
