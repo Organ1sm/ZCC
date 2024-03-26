@@ -318,7 +318,6 @@ pub fn lvalConversion(res: *Result, p: *Parser) Error!void {
 }
 
 pub fn boolCast(res: *Result, p: *Parser, boolType: Type, tok: TokenIndex) Error!void {
-    _ = tok;
     if (res.ty.isPointer()) {
         res.value.toBool();
         res.ty = boolType;
@@ -328,7 +327,9 @@ pub fn boolCast(res: *Result, p: *Parser, boolType: Type, tok: TokenIndex) Error
         res.ty = boolType;
         try res.un(p, .IntToBool);
     } else if (res.ty.isFloat()) {
-        _ = res.value.floatToInt(res.ty, boolType, p.pp.comp);
+        const oldValue = res.value;
+        const valueChangeKind = res.value.floatToInt(res.ty, boolType, p.pp.comp);
+        try res.floatToIntWarning(p, boolType, oldValue, valueChangeKind, tok);
         res.ty = boolType;
         try res.un(p, .FloatToBool);
     }

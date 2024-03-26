@@ -149,7 +149,16 @@ pub fn floatToInt(v: *Value, oldTy: Type, newTy: Type, comp: *Compilation) Float
     if (v.tag == .unavailable)
         return FloatToIntChangeKind.none;
 
-    if (newTy.isUnsignedInt(comp) and v.data.float < 0) {
+    if (newTy.is(.Bool)) {
+        const wasZero = v.isZero();
+        const wasOne = v.getFloat(f64) == 1.0;
+        v.toBool();
+
+        if (wasZero or wasOne)
+            return FloatToIntChangeKind.none;
+
+        return FloatToIntChangeKind.valueChanged;
+    } else if (newTy.isUnsignedInt(comp) and v.data.float < 0) {
         v.* = int(0);
         return FloatToIntChangeKind.outOfRange;
     } else if (!std.math.isFinite(v.data.float)) {

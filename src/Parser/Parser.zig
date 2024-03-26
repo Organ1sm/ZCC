@@ -405,7 +405,13 @@ pub fn floatValueChangedStr(p: *Parser, res: *Result, oldValue: f64, intTy: Type
     try w.writeAll(str);
     const isZero = res.value.isZero();
     const nonZeroStr: []const u8 = if (isZero) "non-zero " else "";
-    try w.print(" changes {s}value from {d} to {d}", .{ nonZeroStr, oldValue, res.value.data.int });
+    if (intTy.is(.Bool)) {
+        try w.print(" changes {s}value from {d} to {}", .{ nonZeroStr, oldValue, res.value.getBool() });
+    } else if (intTy.isUnsignedInt(p.pp.comp)) {
+        try w.print(" changes {s}value from {d} to {d}", .{ nonZeroStr, oldValue, res.value.getInt(u64) });
+    } else {
+        try w.print(" changes {s}value from {d} to {d}", .{ nonZeroStr, oldValue, res.value.getInt(i64) });
+    }
 
     return try p.pp.comp.diag.arena.allocator().dupe(u8, p.strings.items[stringsTop..]);
 }
