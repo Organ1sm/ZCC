@@ -3836,12 +3836,10 @@ fn parseSwitchStmt(p: *Parser) Error!NodeIndex {
     try p.expectClosing(lp, .RParen);
 
     var switchScope = Scope.Switch{
-        .cases = Scope.Switch.CaseMap.initContext(
-            p.pp.comp.gpa,
-            .{ .ty = cond.ty, .comp = p.pp.comp },
-        ),
+        .ranges = std.ArrayList(Scope.Switch.Range).init(p.pp.comp.gpa),
+        .type = cond.ty,
     };
-    defer switchScope.cases.deinit();
+    defer switchScope.ranges.deinit();
 
     try p.scopes.append(.{ .@"switch" = &switchScope });
     const body = try p.parseStmt();
@@ -3854,49 +3852,64 @@ fn parseSwitchStmt(p: *Parser) Error!NodeIndex {
 
 /// case-statement : case constant-expression ':'
 fn parseCaseStmt(p: *Parser, caseToken: u32) Error!?NodeIndex {
-    const val = try p.parseConstExpr();
+    const firstItem = try p.parseConstExpr();
+    const ellipsis = p.tokenIdx; // `...`
+    const secondItem = if (p.eat(.Ellipsis) != null) blk: {
+        try p.errToken(.gnu_switch_range, ellipsis);
+        break :blk try p.parseCondExpr();
+    } else null;
+
     _ = try p.expectToken(.Colon);
 
+    if (p.findSwitch()) |some| check: {
+        const first = firstItem.value;
+        const last = if (secondItem) |second| second.value else first;
+        if (first.tag == .unavailable) {
+            try p.errToken(.case_val_unavailable, caseToken + 1);
+            break :check;
+        } else if (last.tag == .unavailable) {
+            try p.errToken(.case_val_unavailable, ellipsis + 1);
+            break :check;
+        } else if (last.compare(.lt, first, some.type, p.pp.comp)) {
+            try p.errToken(.empty_case_range, caseToken + 1);
+            break :check;
+        }
+
+        // TODO cast to target type
+        const prev = (try some.add(p.pp.comp, first, last, caseToken + 1)) orelse break :check;
+        // TODO: check which value was already handled
+        if (some.type.isUnsignedInt(p.pp.comp)) {
+            try p.errExtra(.duplicate_switch_case_unsigned, caseToken + 1, .{
+                .unsigned = first.data.int,
+            });
+        } else {
+            try p.errExtra(.duplicate_switch_case_signed, caseToken + 1, .{
+                .signed = first.signExtend(some.type, p.pp.comp),
+            });
+        }
+        try p.errToken(.previous_case, prev.token);
+    } else {
+        try p.errStr(.case_not_in_switch, caseToken, "case");
+    }
+
     const s = try p.parseStmt();
-    const node = try p.addNode(.{
+    if (secondItem) |some| return try p.addNode(.{
+        .tag = .CaseRangeStmt,
+        .data = .{
+            .if3 = .{
+                .cond = s,
+                .body = (try p.addList(&.{ firstItem.node, some.node })).start,
+            },
+        },
+    }) else return try p.addNode(.{
         .tag = .CaseStmt,
         .data = .{
             .binExpr = .{
-                .lhs = val.node,
+                .lhs = firstItem.node,
                 .rhs = s,
             },
         },
     });
-
-    if (p.findSwitch()) |some| {
-        if (val.value.tag == .unavailable) {
-            try p.errToken(.case_val_unavailable, caseToken + 1);
-            return node;
-        }
-
-        // TODO cast to target type
-        const gop = try some.cases.getOrPut(val);
-        if (gop.found_existing) {
-            if (some.cases.ctx.ty.isUnsignedInt(p.pp.comp)) {
-                try p.errExtra(.duplicate_switch_case_unsigned, caseToken, .{
-                    .unsigned = val.value.data.int,
-                });
-            } else {
-                try p.errExtra(.duplicate_switch_case_signed, caseToken, .{
-                    .signed = val.value.signExtend(val.ty, p.pp.comp),
-                });
-            }
-            try p.errToken(.previous_case, gop.value_ptr.token);
-        } else {
-            gop.value_ptr.* = .{
-                .token = caseToken,
-                .node = node,
-            };
-        }
-    } else {
-        try p.errStr(.case_not_in_switch, caseToken, "case");
-    }
-    return node;
 }
 
 /// default-statement : `default` ':'
@@ -3912,12 +3925,9 @@ fn parseDefaultStmt(p: *Parser, defaultToken: u32) Error!?NodeIndex {
     if (p.findSwitch()) |some| {
         if (some.default) |previous| {
             try p.errToken(.multiple_default, defaultToken);
-            try p.errToken(.previous_case, previous.token);
+            try p.errToken(.previous_case, previous);
         } else {
-            some.default = .{
-                .token = defaultToken,
-                .node = node,
-            };
+            some.default = defaultToken;
         }
     } else {
         try p.errStr(.case_not_in_switch, defaultToken, "default");

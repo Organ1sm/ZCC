@@ -4,6 +4,7 @@ const Type = @import("../AST/Type.zig");
 const Compilation = @import("../Basic/Compilation.zig");
 const Parser = @import("../Parser/Parser.zig");
 const Result = @import("../Parser/Result.zig");
+const Value = @import("../AST/Value.zig");
 
 const TokenIndex = AST.TokenIndex;
 const NodeIndex = AST.NodeIndex;
@@ -35,25 +36,34 @@ pub const Scope = union(enum) {
     };
 
     pub const Switch = struct {
-        cases: CaseMap,
-        default: ?Case = null,
+        default: ?TokenIndex = null,
+        ranges: std.ArrayList(Range),
+        type: Type,
 
-        const ResultContext = struct {
-            ty: Type,
-            comp: *Compilation,
-
-            pub fn eql(self: ResultContext, a: Result, b: Result) bool {
-                return a.value.compare(.eq, b.value, self.ty, self.comp);
-            }
-            pub fn hash(_: ResultContext, a: Result) u64 {
-                return a.value.hash();
-            }
-        };
-
-        pub const CaseMap = std.HashMap(Result, Case, ResultContext, std.hash_map.default_max_load_percentage);
-        const Case = struct {
-            node: NodeIndex,
+        pub const Range = struct {
+            first: Value,
+            last: Value,
             token: TokenIndex,
         };
+
+        pub fn add(
+            self: *Switch,
+            comp: *Compilation,
+            first: Value,
+            last: Value,
+            token: TokenIndex,
+        ) !?Range {
+            for (self.ranges.items) |range| {
+                if (last.compare(.gte, range.first, self.type, comp) and first.compare(.lte, range.last, self.type, comp)) {
+                    return range; // They overlap.
+                }
+            }
+            try self.ranges.append(.{
+                .first = first,
+                .last = last,
+                .token = token,
+            });
+            return null;
+        }
     };
 };

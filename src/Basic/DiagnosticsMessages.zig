@@ -1483,3 +1483,13 @@ pub const cast_to_smaller_int = struct {
     pub const kind = .warning;
     pub const opt = "pointer-to-int-cast";
 };
+pub const gnu_switch_range = struct {
+    pub const msg = "use of GNU case range extension";
+    pub const opt = "gnu-case-range";
+    pub const kind = .off;
+    pub const pedantic = true;
+};
+pub const empty_case_range = struct {
+    pub const msg = "empty case range specified";
+    pub const kind = .warning;
+};

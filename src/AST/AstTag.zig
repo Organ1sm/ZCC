@@ -82,6 +82,9 @@ pub const Tag = enum(u8) {
     /// case first: second
     CaseStmt,
 
+    /// case data[body]...data[body + 1]: condition expr
+    CaseRangeStmt,
+
     /// default: first
     DefaultStmt,
 
