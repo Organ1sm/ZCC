@@ -10,7 +10,8 @@ const Type = @import("../AST/Type.zig");
 const TypeBuilder = @import("../AST/TypeBuilder.zig");
 const Diagnostics = @import("../Basic/Diagnostics.zig");
 const DeclSpec = @import("../AST/DeclSpec.zig");
-const Scope = @import("../Sema/Scope.zig").Scope;
+const SymbolStack = @import("../Sema/SymbolStack.zig");
+const Switch = @import("../Sema/Switch.zig");
 const Result = @import("Result.zig");
 const InitList = @import("InitList.zig");
 const Attribute = @import("../Lexer/Attribute.zig");
@@ -58,7 +59,7 @@ strings: std.ArrayList(u8),
 valueMap: AST.ValueMap,
 
 // buffers used during compilation
-scopes: std.ArrayList(Scope),
+symStack: SymbolStack = .{},
 labels: std.ArrayList(Label),
 listBuffer: NodeList,
 declBuffer: NodeList,
@@ -93,30 +94,20 @@ record: struct {
     // invalid means we're not parsing a record
     kind: TokenType = .Invalid,
     flexibleField: ?TokenIndex = null,
-    scopesTop: usize = undefined,
+    start: usize = 0,
 
-    fn addField(r: @This(), p: *Parser, nameToken: TokenIndex) Error!void {
-        const name = p.getTokenSlice(nameToken);
-        var i = p.scopes.items.len;
-        while (i > r.scopesTop) {
+    fn addField(r: @This(), p: *Parser, token: TokenIndex) Error!void {
+        const name = p.getTokenSlice(token);
+        var i = p.recordMembers.items.len;
+        while (i > r.start) {
             i -= 1;
-            switch (p.scopes.items[i]) {
-                .definition => |d| if (std.mem.eql(u8, d.name, name)) {
-                    try p.errStr(.duplicate_member, nameToken, name);
-                    try p.errToken(.previous_definition, d.nameToken);
-                    break;
-                },
-                else => {},
+            if (std.mem.eql(u8, p.recordMembers.items[i].name, name)) {
+                try p.errStr(.duplicate_member, token, name);
+                try p.errToken(.previous_definition, p.recordMembers.items[i].token);
+                break;
             }
         }
-        try p.scopes.append(.{
-            .definition = .{
-                .name = name,
-                .nameToken = nameToken,
-                .type = undefined, // unused
-                .value = .{},
-            },
-        });
+        try p.recordMembers.append(p.pp.comp.gpa, .{ .name = name, .token = token });
     }
 
     fn addFieldsFromAnonymous(r: @This(), p: *Parser, ty: Type) Error!void {
@@ -129,6 +120,10 @@ record: struct {
         }
     }
 } = .{},
+
+recordMembers: std.ArrayListUnmanaged(struct { token: TokenIndex, name: []const u8 }) = .{},
+@"switch": ?*Switch = null,
+inLoop: bool = false,
 
 const Label = union(enum) {
     unresolvedGoto: TokenIndex,
@@ -305,7 +300,7 @@ fn errOverflow(p: *Parser, op_tok: TokenIndex, res: Result) !void {
     }
 }
 
-fn getTokenSlice(p: *Parser, index: TokenIndex) []const u8 {
+pub fn getTokenSlice(p: *Parser, index: TokenIndex) []const u8 {
     if (p.tokenIds[index].getTokenText()) |some|
         return some;
 
@@ -511,70 +506,6 @@ fn addList(p: *Parser, nodes: []const NodeIndex) Allocator.Error!AST.Range {
     return AST.Range{ .start = start, .end = end };
 }
 
-fn findTypedef(p: *Parser, nameToken: TokenIndex, notTypeYet: bool) !?Scope.Symbol {
-    const name = p.getTokenSlice(nameToken);
-    var i = p.scopes.items.len;
-    while (i > 0) {
-        i -= 1;
-        switch (p.scopes.items[i]) {
-            .typedef => |t| {
-                if (std.mem.eql(u8, t.name, name))
-                    return t;
-            },
-            .@"struct" => |s| if (std.mem.eql(u8, s.name, name)) {
-                if (notTypeYet)
-                    return null;
-                try p.errStr(.must_use_struct, nameToken, name);
-                return s;
-            },
-            .@"union" => |u| if (std.mem.eql(u8, u.name, name)) {
-                if (notTypeYet)
-                    return null;
-                try p.errStr(.must_use_union, nameToken, name);
-                return u;
-            },
-            .@"enum" => |e| if (std.mem.eql(u8, e.name, name)) {
-                if (notTypeYet)
-                    return null;
-                try p.errStr(.must_use_enum, nameToken, name);
-                return e;
-            },
-            .definition,
-            .declaration,
-            => |d| if (std.mem.eql(u8, d.name, name)) return null,
-
-            else => {},
-        }
-    }
-
-    return null;
-}
-
-fn inLoop(p: *Parser) bool {
-    var i = p.scopes.items.len;
-    while (i > 0) {
-        i -= 1;
-        switch (p.scopes.items[i]) {
-            .loop => return true,
-            else => {},
-        }
-    }
-
-    return false;
-}
-
-fn inLoopOrSwitch(p: *Parser) bool {
-    var i = p.scopes.items.len;
-    while (i > 0) {
-        i -= 1;
-        switch (p.scopes.items[i]) {
-            .loop, .@"switch" => return true,
-            else => {},
-        }
-    }
-    return false;
-}
-
 fn findLabel(p: *Parser, name: []const u8) ?TokenIndex {
     for (p.labels.items) |item| {
         switch (item) {
@@ -582,19 +513,6 @@ fn findLabel(p: *Parser, name: []const u8) ?TokenIndex {
             .unresolvedGoto => {},
         }
     }
-    return null;
-}
-
-fn findSwitch(p: *Parser) ?*Scope.Switch {
-    var i = p.scopes.items.len;
-    while (i > 0) {
-        i -= 1;
-        switch (p.scopes.items[i]) {
-            .@"switch" => |s| return s,
-            else => {},
-        }
-    }
-
     return null;
 }
 
@@ -616,66 +534,6 @@ fn getNode(p: *Parser, node: NodeIndex, tag: AstTag) ?NodeIndex {
             return null;
         }
     }
-}
-
-fn findSymbol(p: *Parser, nameToken: TokenIndex, refKind: enum { reference, definition }) ?Scope {
-    const name = p.getTokenSlice(nameToken);
-    var i = p.scopes.items.len;
-    while (i > 0) {
-        i -= 1;
-        const sym = p.scopes.items[i];
-        switch (sym) {
-            .definition, .declaration, .param => |s| if (std.mem.eql(u8, s.name, name)) return sym,
-            .enumeration => |e| if (std.mem.eql(u8, e.name, name)) return sym,
-            .block => if (refKind == .definition) return null,
-            else => {},
-        }
-    }
-
-    return null;
-}
-
-fn findTag(p: *Parser, kind: TokenType, nameToken: TokenIndex, refKind: enum { reference, definition }) !?Scope.Symbol {
-    const name = p.getTokenSlice(nameToken);
-    var i = p.scopes.items.len;
-    var sawBlock = false;
-    while (i > 0) {
-        i -= 1;
-        const sym = p.scopes.items[i];
-        switch (sym) {
-            .@"enum" => |e| if (std.mem.eql(u8, e.name, name)) {
-                if (kind == .KeywordEnum) return e;
-                if (sawBlock) return null;
-                try p.errStr(.wrong_tag, nameToken, name);
-                try p.errToken(.previous_definition, e.nameToken);
-                return null;
-            },
-
-            .@"struct" => |s| if (std.mem.eql(u8, s.name, name)) {
-                if (kind == .KeywordStruct) return s;
-                if (sawBlock) return null;
-                try p.errStr(.wrong_tag, nameToken, name);
-                try p.errToken(.previous_definition, s.nameToken);
-                return null;
-            },
-
-            .@"union" => |u| if (std.mem.eql(u8, u.name, name)) {
-                if (kind == .KeywordUnion) return u;
-                if (sawBlock) return null;
-
-                try p.errStr(.wrong_tag, nameToken, name);
-                try p.errToken(.previous_definition, u.nameToken);
-                return null;
-            },
-
-            .block => if (refKind == .reference) {
-                sawBlock = true;
-            } else return null,
-
-            else => {},
-        }
-    }
-    return null;
 }
 
 fn pragma(p: *Parser) Compilation.Error!bool {
@@ -706,7 +564,6 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
         .pp = pp,
         .arena = arena.allocator(),
         .tokenIds = pp.tokens.items(.id),
-        .scopes = std.ArrayList(Scope).init(pp.comp.gpa),
         .data = NodeList.init(pp.comp.gpa),
         .labels = std.ArrayList(Label).init(pp.comp.gpa),
         .strings = std.ArrayList(u8).init(pp.comp.gpa),
@@ -718,8 +575,11 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
         .recordBuffer = std.ArrayList(Type.Record.Field).init(pp.comp.gpa),
     };
 
+    //bind p to the symbol stack for simplify symbol stack api
+    p.symStack.p = &p;
+
     defer {
-        p.scopes.deinit();
+        p.symStack.deinit(pp.comp.gpa);
         p.data.deinit();
         p.labels.deinit();
         p.listBuffer.deinit();
@@ -727,6 +587,7 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
         p.paramBuffer.deinit();
         p.enumBuffer.deinit();
         p.recordBuffer.deinit();
+        p.recordMembers.deinit(pp.comp.gpa);
         p.attrBuffer.deinit(pp.comp.gpa);
     }
 
@@ -739,10 +600,9 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
     _ = try p.addNode(.{ .tag = .Invalid, .type = undefined, .data = undefined });
     {
         const ty = &pp.comp.types.vaList;
-        const sym = Scope.Symbol{ .name = "__builtin_va_list", .type = ty.*, .nameToken = 0, .value = .{} };
-        try p.scopes.append(.{ .typedef = sym });
-
-        if (ty.isArray()) ty.decayArray();
+        try p.symStack.defineTypedef("__builtin_va_list", ty.*, 0, .none);
+        if (ty.isArray())
+            ty.decayArray();
     }
 
     while (p.eat(.Eof) == null) {
@@ -986,30 +846,15 @@ fn parseDeclaration(p: *Parser) Error!bool {
         if (p.func.type != null)
             try p.err(.func_not_in_root);
 
-        if (p.findSymbol(ID.d.name, .definition)) |sym| {
-            if (sym == .definition) {
-                try p.errStr(.redefinition, ID.d.name, p.getTokenSlice(ID.d.name));
-                try p.errToken(.previous_definition, sym.definition.nameToken);
-            }
-        }
-
-        const sym = Scope.Symbol{
-            .name = p.getTokenSlice(ID.d.name),
-            .type = ID.d.type,
-            .nameToken = ID.d.name,
-            .value = .{},
-        };
-        try p.scopes.append(.{ .definition = sym });
+        const node = try p.addNode(undefined); // reserve space
+        try p.symStack.defineSymbol(ID.d.type, ID.d.name, node, .{});
 
         const func = p.func;
         defer p.func = func;
         p.func = .{ .type = ID.d.type, .name = ID.d.name };
 
-        const scopesTop = p.scopes.items.len;
-        defer p.scopes.items.len = scopesTop;
-
-        // findSymbol stops the search at .block
-        try p.scopes.append(.block);
+        try p.symStack.pushScope();
+        defer p.symStack.popScope();
 
         // collect old style parameters
         if (ID.d.oldTypeFunc != null) {
@@ -1065,13 +910,13 @@ fn parseDeclaration(p: *Parser) Error!bool {
                         try p.errStr(.parameter_missing, d.name, name);
                     }
 
-                    try p.scopes.append(.{
-                        .param = .{
-                            .name = name,
-                            .nameToken = d.name,
-                            .type = d.type,
-                            .value = .{},
-                        },
+                    // bypass redefinition check to avoid duplicate errors
+                    try p.symStack.appendSymbol(.{
+                        .kind = .definition,
+                        .name = name,
+                        .token = d.name,
+                        .type = d.type,
+                        .value = .{},
                     });
                     if (p.eat(.Comma) == null) break;
                 }
@@ -1089,13 +934,13 @@ fn parseDeclaration(p: *Parser) Error!bool {
                     continue;
                 }
 
-                try p.scopes.append(.{
-                    .param = .{
-                        .name = param.name,
-                        .type = param.ty,
-                        .nameToken = param.nameToken,
-                        .value = .{},
-                    },
+                // bypass redefinition check to avoid duplicate errors
+                try p.symStack.appendSymbol(.{
+                    .kind = .definition,
+                    .name = param.name,
+                    .token = param.nameToken,
+                    .type = param.ty,
+                    .value = .{},
                 });
             }
         }
@@ -1105,7 +950,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
             try p.err(.expected_fn_body);
             return true;
         };
-        const node = try p.addNode(.{
+        p.nodes.set(@intFromEnum(node), .{
             .type = ID.d.type,
             .tag = try declSpec.validateFnDef(p),
             .data = .{ .decl = .{ .name = ID.d.name, .node = body } },
@@ -1149,18 +994,19 @@ fn parseDeclaration(p: *Parser) Error!bool {
         });
         try p.declBuffer.append(node);
 
-        const sym = Scope.Symbol{
-            .name = p.getTokenSlice(ID.d.name),
-            .type = ID.d.type,
-            .nameToken = ID.d.name,
-            .value = if (ID.d.type.isConst()) ID.initializer.value else .{},
-        };
         if (declSpec.storageClass == .typedef) {
-            try p.scopes.append(.{ .typedef = sym });
-        } else if (ID.initializer.node != .none) {
-            try p.scopes.append(.{ .definition = sym });
+            try p.symStack.defineTypedef(p.getTokenSlice(ID.d.name), ID.d.type, ID.d.name, node);
+        } else if (ID.initializer.node != .none or
+            (declSpec.storageClass != .@"extern" and p.func.type != null))
+        {
+            try p.symStack.defineSymbol(
+                ID.d.type,
+                ID.d.name,
+                node,
+                if (ID.d.type.isConst()) ID.initializer.value else .{},
+            );
         } else {
-            try p.scopes.append(.{ .declaration = sym });
+            try p.symStack.declareSymbol(ID.d.type, ID.d.name, node);
         }
 
         if (p.eat(.Comma) == null)
@@ -1651,17 +1497,10 @@ fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec) Error!?InitDeclarator {
             return error.ParsingFailed;
         }
 
-        const scopesLen = p.scopes.items.len;
-        defer p.scopes.items.len = scopesLen;
+        try p.symStack.pushScope();
+        defer p.symStack.popScope();
 
-        try p.scopes.append(.{
-            .declaration = .{
-                .name = p.getTokenSlice(ID.d.name),
-                .type = ID.d.type,
-                .nameToken = ID.d.name,
-                .value = .{},
-            },
-        });
+        try p.symStack.declareSymbol(ID.d.type, ID.d.name, .none);
 
         var initListExpr = try p.initializer(ID.d.type);
         ID.initializer = initListExpr;
@@ -1703,33 +1542,6 @@ fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec) Error!?InitDeclarator {
         try p.errStr(.variable_incomplete_ty, name, try p.typeStr(ID.d.type));
         return ID;
     }
-
-    if (p.findSymbol(name, .definition)) |scope| switch (scope) {
-        .enumeration => {
-            try p.errStr(.redefinition_different_sym, name, p.getTokenSlice(name));
-            try p.errToken(.previous_definition, scope.enumeration.nameToken);
-        },
-
-        .declaration => |s| if (!s.type.eql(ID.d.type, p.pp.comp, true)) {
-            try p.errStr(.redefinition, name, p.getTokenSlice(name));
-            try p.errToken(.previous_definition, s.nameToken);
-        },
-
-        .definition => |s| if (!s.type.eql(ID.d.type, p.pp.comp, true)) {
-            try p.errStr(.redefinition_incompatible, name, p.getTokenSlice(name));
-            try p.errToken(.previous_definition, s.nameToken);
-        } else if (ID.initializer.node != .none) {
-            try p.errStr(.redefinition, name, p.getTokenSlice(name));
-            try p.errToken(.previous_definition, s.nameToken);
-        },
-
-        .param => |s| {
-            try p.errStr(.redefinition, name, p.getTokenSlice(name));
-            try p.errToken(.previous_definition, s.nameToken);
-        },
-
-        else => unreachable,
-    };
 
     return ID;
 }
@@ -1826,8 +1638,10 @@ fn parseTypeSpec(p: *Parser, ty: *TypeBuilder) Error!bool {
             },
 
             .Identifier, .ExtendedIdentifier => {
-                const typedef = (try p.findTypedef(p.tokenIdx, ty.specifier != .None)) orelse break;
-                if (!ty.combineTypedef(p, typedef.type, typedef.nameToken))
+                if (ty.typedef != null)
+                    break;
+                const typedef = (try p.symStack.findTypedef(p.tokenIdx, ty.specifier != .None)) orelse break;
+                if (!ty.combineTypedef(p, typedef.type, typedef.token))
                     break;
             },
             else => break,
@@ -1885,17 +1699,23 @@ fn parseRecordSpecifier(p: *Parser) Error!*Type.Record {
         };
 
         // check if this is a reference to a previous type
-        if (try p.findTag(p.tokenIds[kindToken], ident, .reference)) |prev| {
+        if (try p.symStack.findTag(p.tokenIds[kindToken], ident)) |prev| {
             return prev.type.data.record;
         } else {
             // this is a forward declaration, create a new record type.
             const recordType = try Type.Record.create(p.arena, p.getTokenSlice(ident));
-            const ty = Type{
+            const ty = try p.withAttributes(.{
                 .specifier = if (isStruct) .Struct else .Union,
                 .data = .{ .record = recordType },
-            };
-            const sym = Scope.Symbol{ .name = recordType.name, .type = ty, .nameToken = ident, .value = .{} };
-            try p.scopes.append(if (isStruct) .{ .@"struct" = sym } else .{ .@"union" = sym });
+            }, attrBufferTop);
+
+            try p.symStack.symbols.append(p.pp.comp.gpa, .{
+                .kind = if (isStruct) .@"struct" else .@"union",
+                .name = recordType.name,
+                .token = ident,
+                .type = ty,
+                .value = .{},
+            });
             return recordType;
         }
     };
@@ -1903,53 +1723,55 @@ fn parseRecordSpecifier(p: *Parser) Error!*Type.Record {
     // Get forward declared type or create a new one
     var defined = false;
     const recordType: *Type.Record = if (maybeIdent) |ident| recordTy: {
-        if (try p.findTag(p.tokenIds[kindToken], ident, .definition)) |prev| {
-            if (!prev.type.data.record.isIncomplete()) {
+        if (try p.symStack.defineTag(p.tokenIds[kindToken], ident)) |prev| {
+            if (!prev.type.hasIncompleteSize()) {
                 // if the record isn't incomplete, this is a redefinition
                 try p.errStr(.redefinition, ident, p.getTokenSlice(ident));
-                try p.errToken(.previous_definition, prev.nameToken);
+                try p.errToken(.previous_definition, prev.token);
             } else {
                 defined = true;
-                break :recordTy prev.type.data.record;
+                break :recordTy prev.type.get(if (isStruct) .Struct else .Union).?.data.record;
             }
         }
         break :recordTy try Type.Record.create(p.arena, p.getTokenSlice(ident));
     } else try Type.Record.create(p.arena, try p.getAnonymousName(kindToken));
 
-    const ty = Type{
+    const ty = try p.withAttributes(.{
         .specifier = if (isStruct) .Struct else .Union,
         .data = .{ .record = recordType },
-    };
+    }, attrBufferTop);
 
     // declare a symbol for the type
     if (maybeIdent != null and !defined) {
-        const sym = Scope.Symbol{
-            .name = recordType.name,
+        try p.symStack.appendSymbol(.{
+            .kind = if (isStruct) .@"struct" else .@"union",
+            .name = p.getTokenSlice(maybeIdent.?),
+            .token = maybeIdent.?,
             .type = ty,
-            .nameToken = maybeIdent.?,
             .value = .{},
-        };
-        try p.scopes.append(if (isStruct) .{ .@"struct" = sym } else .{ .@"union" = sym });
+        });
     }
 
     // reserve space for this record
     try p.declBuffer.append(.none);
     const declBufferTop = p.declBuffer.items.len;
     const recordBufferTop = p.recordBuffer.items.len;
-    const scopesTop = p.scopes.items.len;
+
+    const oldRecord = p.record;
+    const oldMembers = p.recordMembers.items.len;
+
     errdefer p.declBuffer.items.len = declBufferTop - 1;
 
     defer {
         p.declBuffer.items.len = declBufferTop;
         p.recordBuffer.items.len = recordBufferTop;
-        p.scopes.items.len = scopesTop;
+        p.record = oldRecord;
+        p.recordMembers.items.len = oldMembers;
     }
 
-    const oldRecord = p.record;
-    defer p.record = oldRecord;
     p.record = .{
         .kind = p.tokenIds[kindToken],
-        .scopesTop = scopesTop,
+        .start = p.recordMembers.items.len,
     };
 
     try p.parseRecordDecls();
@@ -2188,13 +2010,22 @@ fn parseEnumSpec(p: *Parser) Error!*Type.Enum {
         };
 
         // check if this is a reference to a previous type
-        if (try p.findTag(.KeywordEnum, ident, .reference)) |prev| {
+        if (try p.symStack.findTag(.KeywordEnum, ident)) |prev| {
             return prev.type.data.@"enum";
         } else {
+            // this is a forward declaration, create a new enum type
             const enumType = try Type.Enum.create(p.arena, p.getTokenSlice(ident));
-            const ty = Type{ .specifier = .Enum, .data = .{ .@"enum" = enumType } };
-            const sym = Scope.Symbol{ .name = enumType.name, .type = ty, .nameToken = ident, .value = .{} };
-            try p.scopes.append(.{ .@"enum" = sym });
+            const ty = try p.withAttributes(
+                .{ .specifier = .Enum, .data = .{ .@"enum" = enumType } },
+                attrBufferTop,
+            );
+            try p.symStack.appendSymbol(.{
+                .kind = .@"enum",
+                .name = enumType.name,
+                .token = ident,
+                .type = ty,
+                .value = .{},
+            });
             return enumType;
         }
     };
@@ -2202,31 +2033,35 @@ fn parseEnumSpec(p: *Parser) Error!*Type.Enum {
     // Get forward declared type or create a new one
     var defined = false;
     const enumType: *Type.Enum = if (maybeID) |ident| enumTy: {
-        if (try p.findTag(.KeywordEnum, ident, .definition)) |prev| {
-            if (!prev.type.data.@"enum".isIncomplete()) {
+        if (try p.symStack.findTag(.KeywordEnum, ident)) |prev| {
+            if (!prev.type.hasIncompleteSize()) {
                 // if the enum isn't incomplete, this is a redefinition
                 try p.errStr(.redefinition, ident, p.getTokenSlice(ident));
-                try p.errToken(.previous_definition, prev.nameToken);
+                try p.errToken(.previous_definition, prev.token);
             } else {
                 defined = true;
-                break :enumTy prev.type.data.@"enum";
+                break :enumTy prev.type.get(.Enum).?.data.@"enum";
             }
         }
         break :enumTy try Type.Enum.create(p.arena, p.getTokenSlice(ident));
     } else try Type.Enum.create(p.arena, try p.getAnonymousName(enumTK));
 
-    const ty = Type{
-        .specifier = .Enum,
-        .data = .{ .@"enum" = enumType },
-    };
+    const ty = try p.withAttributes(
+        .{
+            .specifier = .Enum,
+            .data = .{ .@"enum" = enumType },
+        },
+        attrBufferTop,
+    );
 
     if (maybeID != null and !defined) {
-        try p.scopes.append(.{ .@"enum" = .{
-            .name = enumType.name,
+        try p.symStack.appendSymbol(.{
+            .kind = .@"enum",
+            .name = p.getTokenSlice(maybeID.?),
             .type = ty,
-            .nameToken = maybeID.?,
+            .token = maybeID.?,
             .value = .{},
-        } });
+        });
     }
 
     // reserve space for this enum
@@ -2316,7 +2151,6 @@ fn enumerator(p: *Parser, e: *Enumerator) Error!?EnumFieldAndNode {
         return error.ParsingFailed;
     };
 
-    const name = p.getTokenSlice(nameToken);
     const attrBufferTop = p.attrBuffer.len;
     defer p.attrBuffer.len = attrBufferTop;
 
@@ -2334,29 +2168,10 @@ fn enumerator(p: *Parser, e: *Enumerator) Error!?EnumFieldAndNode {
         try e.incr(p);
     }
 
-    if (p.findSymbol(nameToken, .definition)) |scope| switch (scope) {
-        .enumeration => |sym| {
-            try p.errStr(.redefinition, nameToken, name);
-            try p.errToken(.previous_definition, sym.nameToken);
-        },
-
-        .declaration, .definition, .param => |sym| {
-            try p.errStr(.redefinition_different_sym, nameToken, name);
-            try p.errToken(.previous_definition, sym.nameToken);
-        },
-
-        else => unreachable,
-    };
-
     var res = e.res;
     res.ty = try p.withAttributes(res.ty, attrBufferTop);
 
-    try p.scopes.append(.{ .enumeration = .{
-        .name = name,
-        .value = res,
-        .nameToken = nameToken,
-    } });
-
+    try p.symStack.defineEnumeration(res.ty, nameToken);
     const node = try p.addNode(.{
         .tag = .EnumFieldDecl,
         .type = res.ty,
@@ -2370,7 +2185,7 @@ fn enumerator(p: *Parser, e: *Enumerator) Error!?EnumFieldAndNode {
 
     return EnumFieldAndNode{
         .field = .{
-            .name = name,
+            .name = p.getTokenSlice(nameToken),
             .ty = res.ty,
             .nameToken = nameToken,
             .node = res.node,
@@ -2654,31 +2469,17 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: Declarator
             d.oldTypeFunc = p.tokenIdx;
 
             const paramBufferTop = p.paramBuffer.items.len;
-            const scopesTop = p.scopes.items.len;
+            try p.symStack.pushScope();
 
             defer {
                 p.paramBuffer.items.len = paramBufferTop;
-                p.scopes.items.len = scopesTop;
+                p.symStack.popScope();
             }
-
-            // find Symbol stops search at the block
-            try p.scopes.append(.block);
 
             specifier = .OldStyleFunc;
             while (true) {
                 const nameToken = try p.expectIdentifier();
-                if (p.findSymbol(nameToken, .definition)) |scope| {
-                    try p.errStr(.redefinition_of_parameter, nameToken, p.getTokenSlice(nameToken));
-                    try p.errToken(.previous_definition, scope.param.nameToken);
-                }
-
-                try p.scopes.append(.{ .param = .{
-                    .name = p.getTokenSlice(nameToken),
-                    .type = undefined,
-                    .nameToken = nameToken,
-                    .value = .{},
-                } });
-
+                try p.symStack.defineParam(undefined, nameToken);
                 try p.paramBuffer.append(.{
                     .name = p.getTokenSlice(nameToken),
                     .nameToken = nameToken,
@@ -2730,15 +2531,13 @@ fn parsePointer(p: *Parser, baseType: Type) Error!Type {
 /// paramDecl : decl-specifier (declarator | abstract-declarator)
 fn parseParamDecls(p: *Parser) Error!?[]Type.Function.Param {
     const paramBufferTop = p.paramBuffer.items.len;
-    const scopesTop = p.scopes.items.len;
+
+    try p.symStack.pushScope();
 
     defer {
         p.paramBuffer.items.len = paramBufferTop;
-        p.scopes.items.len = scopesTop;
+        p.symStack.popScope();
     }
-
-    // findSymbol stops the search at .block
-    try p.scopes.append(.block);
 
     while (true) {
         const paramDeclSpec = if (try p.parseDeclSpec(true)) |some|
@@ -2766,24 +2565,8 @@ fn parseParamDecls(p: *Parser) Error!?[]Type.Function.Param {
             nameToken = some.name;
             paramType = try p.withAttributes(some.type, attrBufferTop);
 
-            if (some.name != 0) {
-                if (p.findSymbol(nameToken, .definition)) |scope| {
-                    if (scope == .enumeration) {
-                        try p.errStr(.redefinition_of_parameter, nameToken, p.getTokenSlice(nameToken));
-                        try p.errToken(.previous_definition, scope.enumeration.nameToken);
-                    } else {
-                        try p.errStr(.redefinition_of_parameter, nameToken, p.getTokenSlice(nameToken));
-                        try p.errToken(.previous_definition, scope.param.nameToken);
-                    }
-                }
-
-                try p.scopes.append(.{ .param = .{
-                    .name = p.getTokenSlice(nameToken),
-                    .type = some.type,
-                    .nameToken = nameToken,
-                    .value = .{},
-                } });
-            }
+            if (some.name != 0)
+                try p.symStack.defineParam(paramType, nameToken);
         }
 
         if (paramType.isFunc()) {
@@ -3612,7 +3395,7 @@ fn parseStmt(p: *Parser) Error!NodeIndex {
         return p.parseGotoStmt(gotoToken);
 
     if (p.eat(.KeywordContinue)) |cont| {
-        if (!p.inLoop())
+        if (!p.inLoop)
             try p.errToken(.continue_not_in_loop, cont);
         _ = try p.expectToken(.Semicolon);
 
@@ -3620,7 +3403,7 @@ fn parseStmt(p: *Parser) Error!NodeIndex {
     }
 
     if (p.eat(.KeywordBreak)) |br| {
-        if (!p.inLoopOrSwitch())
+        if (!p.inLoop and p.@"switch" == null)
             try p.errToken(.break_not_in_loop_or_switch, br);
 
         _ = try p.expectToken(.Semicolon);
@@ -3667,9 +3450,6 @@ fn parseStmt(p: *Parser) Error!NodeIndex {
 ///  : `if` '(' expression ')' statement
 ///  | `if` '(' expression ')' statement `else` statement
 fn parseIfStmt(p: *Parser) Error!NodeIndex {
-    const startScopeLen = p.scopes.items.len;
-    defer p.scopes.items.len = startScopeLen;
-
     const lp = try p.expectToken(.LParen);
     const condToken = p.tokenIdx;
     var cond = try p.parseExpr();
@@ -3712,11 +3492,13 @@ fn parseIfStmt(p: *Parser) Error!NodeIndex {
 ///  : `for` '(' expression? ';' expression? ';' expression? ')' statement
 ///  | `for` '(' declaration expression? ';' expression? ')' statement
 fn parseForStmt(p: *Parser) Error!NodeIndex {
-    const startScopeLen = p.scopes.items.len;
-    defer p.scopes.items.len = startScopeLen;
-
+    try p.symStack.pushScope();
     const declBufferTop = p.declBuffer.items.len;
-    defer p.declBuffer.items.len = declBufferTop;
+
+    defer {
+        p.declBuffer.items.len = declBufferTop;
+        p.symStack.popScope();
+    }
 
     const lp = try p.expectToken(.LParen);
     const gotDecl = try p.parseDeclaration();
@@ -3752,8 +3534,12 @@ fn parseForStmt(p: *Parser) Error!NodeIndex {
     try incr.saveValue(p);
     try p.expectClosing(lp, .RParen);
 
-    try p.scopes.append(.loop);
-    const body = try p.parseStmt();
+    const body = body: {
+        const oldLoop = p.inLoop;
+        p.inLoop = true;
+        defer p.inLoop = oldLoop;
+        break :body try p.parseStmt();
+    };
 
     if (gotDecl) {
         const start = (try p.addList(p.declBuffer.items[declBufferTop..])).start;
@@ -3783,9 +3569,6 @@ fn parseForStmt(p: *Parser) Error!NodeIndex {
 
 /// while-statement : `while` '(' expression ')' statement ';'
 fn parseWhileStmt(p: *Parser) Error!NodeIndex {
-    const startScopeLen = p.scopes.items.len;
-    defer p.scopes.items.len = startScopeLen;
-
     const lp = try p.expectToken(.LParen);
     const condToken = p.tokenIdx;
     var cond = try p.parseExpr();
@@ -3800,8 +3583,12 @@ fn parseWhileStmt(p: *Parser) Error!NodeIndex {
     try cond.saveValue(p);
     try p.expectClosing(lp, .RParen);
 
-    try p.scopes.append(.loop);
-    const body = try p.parseStmt();
+    const body = body: {
+        const oldLoop = p.inLoop;
+        p.inLoop = true;
+        defer p.inLoop = oldLoop;
+        break :body try p.parseStmt();
+    };
 
     return try p.addNode(.{
         .tag = .WhileStmt,
@@ -3811,12 +3598,12 @@ fn parseWhileStmt(p: *Parser) Error!NodeIndex {
 
 /// do-while-statement : `do` statement `while` '(' expression ')' ';'
 fn parseDoWhileStmt(p: *Parser) Error!NodeIndex {
-    const startScopeLen = p.scopes.items.len;
-    defer p.scopes.items.len = startScopeLen;
-
-    try p.scopes.append(.loop);
-    const body = try p.parseStmt();
-    p.scopes.items.len = startScopeLen;
+    const body = body: {
+        const oldLoop = p.inLoop;
+        p.inLoop = true;
+        defer p.inLoop = oldLoop;
+        break :body try p.parseStmt();
+    };
 
     _ = try p.expectToken(.KeywordWhile);
     const lp = try p.expectToken(.LParen);
@@ -3888,9 +3675,6 @@ fn parseGotoStmt(p: *Parser, gotoToken: TokenIndex) Error!NodeIndex {
 
 /// switch-statement : `switch` '(' expression ')' statement
 fn parseSwitchStmt(p: *Parser) Error!NodeIndex {
-    const startScopeLen = p.scopes.items.len;
-    defer p.scopes.items.len = startScopeLen;
-
     const lp = try p.expectToken(.LParen);
     const condToken = p.tokenIdx;
     var cond = try p.parseExpr();
@@ -3905,13 +3689,18 @@ fn parseSwitchStmt(p: *Parser) Error!NodeIndex {
     try cond.saveValue(p);
     try p.expectClosing(lp, .RParen);
 
-    var switchScope = Scope.Switch{
-        .ranges = std.ArrayList(Scope.Switch.Range).init(p.pp.comp.gpa),
+    const oldSwitch = p.@"switch";
+    var @"switch" = Switch{
+        .ranges = std.ArrayList(Switch.Range).init(p.pp.comp.gpa),
         .type = cond.ty,
     };
-    defer switchScope.ranges.deinit();
+    p.@"switch" = &@"switch";
 
-    try p.scopes.append(.{ .@"switch" = &switchScope });
+    defer {
+        @"switch".ranges.deinit();
+        p.@"switch" = oldSwitch;
+    }
+
     const body = try p.parseStmt();
 
     return try p.addNode(.{
@@ -3931,7 +3720,7 @@ fn parseCaseStmt(p: *Parser, caseToken: u32) Error!?NodeIndex {
 
     _ = try p.expectToken(.Colon);
 
-    if (p.findSwitch()) |some| check: {
+    if (p.@"switch") |some| check: {
         if (some.type.hasIncompleteSize()) // error already reported for incomplete size
             break :check;
 
@@ -3995,15 +3784,16 @@ fn parseDefaultStmt(p: *Parser, defaultToken: u32) Error!?NodeIndex {
         .data = .{ .unExpr = s },
     });
 
-    if (p.findSwitch()) |some| {
-        if (some.default) |previous| {
-            try p.errToken(.multiple_default, defaultToken);
-            try p.errToken(.previous_case, previous);
-        } else {
-            some.default = defaultToken;
-        }
-    } else {
+    const @"switch" = p.@"switch" orelse {
         try p.errStr(.case_not_in_switch, defaultToken, "default");
+        return node;
+    };
+
+    if (@"switch".default) |previous| {
+        try p.errToken(.multiple_default, defaultToken);
+        try p.errToken(.previous_case, previous);
+    } else {
+        @"switch".default = defaultToken;
     }
 
     return node;
@@ -4064,18 +3854,16 @@ const StmtExprState = struct {
 /// : '{' ( decl | GccExtensionDecl | static-assert-declaration | statememt)* '}'
 fn parseCompoundStmt(p: *Parser, isFnBody: bool, stmtExprState: ?*StmtExprState) Error!?NodeIndex {
     const lBrace = p.eat(.LBrace) orelse return null;
-
     const declBufferTop = p.declBuffer.items.len;
-    const scopeTop = p.scopes.items.len;
-
-    defer {
-        p.declBuffer.items.len = declBufferTop;
-        p.scopes.items.len = scopeTop;
-    }
 
     // the parameters of a function are in the same scope as the body
     if (!isFnBody)
-        try p.scopes.append(.block);
+        try p.symStack.pushScope();
+
+    defer {
+        p.declBuffer.items.len = declBufferTop;
+        if (!isFnBody) p.symStack.popScope();
+    }
 
     var noreturnIdx: ?TokenIndex = null;
     var noreturnLabelCount: u32 = 0;
@@ -5634,12 +5422,12 @@ fn parseCallExpr(p: *Parser, lhs: Result) Error!Result {
                 try p.errToken(.va_start_not_in_func, builtinToken);
                 break :vaStart;
             };
-            if (funcType.specifier != .VarArgsFunc) {
+
+            const funcParams = funcType.getParams();
+            if (funcType.specifier != .VarArgsFunc or funcParams.len == 0) {
                 try p.errToken(.va_start_fixed_args, builtinToken);
                 break :vaStart;
             }
-
-            const funcParams = funcType.getParams();
 
             const lastParamName = funcParams[funcType.data.func.params.len - 1].name;
             const declRef = p.getNode(rawArgNode, .DeclRefExpr);
@@ -5814,76 +5602,53 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
                     }),
                 };
             }
-            const sym = p.findSymbol(nameToken, .reference) orelse {
-                if (p.getCurrToken() == .LParen) {
-                    // implicitly declare simple functions as like `puts("foo")`;
-                    // allow implicitly declaring functions before C99 like `puts("foo")`
-                    if (std.mem.startsWith(u8, name, "__builtin_"))
-                        try p.errStr(.unknown_builtin, nameToken, name)
-                    else
-                        try p.errStr(.implicit_func_decl, nameToken, name);
-
-                    const funcType = try p.arena.create(Type.Function);
-                    funcType.* = .{ .returnType = .{ .specifier = .Int }, .params = &.{} };
-                    const ty: Type = .{ .specifier = .OldStyleFunc, .data = .{ .func = funcType } };
-                    const node = try p.addNode(.{
-                        .type = ty,
-                        .tag = .FnProto,
-                        .data = .{ .decl = .{ .name = nameToken } },
-                    });
-
-                    try p.declBuffer.append(node);
-                    try p.scopes.append(.{ .declaration = .{
-                        .name = name,
-                        .type = ty,
-                        .nameToken = nameToken,
-                        .value = .{},
-                    } });
-
-                    return Result{
-                        .ty = ty,
-                        .node = try p.addNode(.{ .tag = .DeclRefExpr, .type = ty, .data = .{ .declRef = nameToken } }),
-                    };
-                }
-                try p.errStr(.undeclared_identifier, nameToken, p.getTokenSlice(nameToken));
-                return error.ParsingFailed;
-            };
-
-            switch (sym) {
-                .enumeration => |e| {
-                    var res = e.value;
-                    try p.checkDeprecatedUnavailable(res.ty, nameToken, e.nameToken);
-                    res.node = try p.addNode(.{
-                        .tag = .EnumerationRef,
-                        .type = res.ty,
-                        .data = .{ .declRef = nameToken },
-                    });
-
-                    return res;
-                },
-
-                .declaration, .definition, .param => |s| {
-                    try p.checkDeprecatedUnavailable(s.type, nameToken, s.nameToken);
-                    if (s.value.tag == .int) {
-                        switch (p.constDeclFolding) {
-                            .GNUFoldingExtension => try p.errToken(.const_decl_folded, nameToken),
-                            .GNUVLAFoldingExtension => try p.errToken(.const_decl_folded_vla, nameToken),
-                            else => {},
-                        }
+            if (p.symStack.findSymbol(nameToken)) |sym| {
+                try p.checkDeprecatedUnavailable(sym.type, nameToken, sym.token);
+                if (sym.value.tag == .int) {
+                    switch (p.constDeclFolding) {
+                        .GNUFoldingExtension => try p.errToken(.const_decl_folded, nameToken),
+                        .GNUVLAFoldingExtension => try p.errToken(.const_decl_folded_vla, nameToken),
+                        else => {},
                     }
-                    return Result{
-                        .value = if (p.constDeclFolding == .NoConstDeclFolding) Value{} else s.value,
-                        .ty = s.type,
-                        .node = try p.addNode(.{
-                            .tag = .DeclRefExpr,
-                            .type = s.type,
-                            .data = .{ .declRef = nameToken },
-                        }),
-                    };
-                },
-
-                else => unreachable,
+                }
+                return Result{
+                    .value = if (p.constDeclFolding == .NoConstDeclFolding) Value{} else sym.value,
+                    .ty = sym.type,
+                    .node = try p.addNode(.{
+                        .tag = if (sym.kind == .enumeration) .EnumerationRef else .DeclRefExpr,
+                        .type = sym.type,
+                        .data = .{ .declRef = nameToken },
+                    }),
+                };
             }
+
+            if (p.getCurrToken() == .LParen) {
+                // implicitly declare simple functions as like `puts("foo")`;
+                // allow implicitly declaring functions before C99 like `puts("foo")`
+                if (std.mem.startsWith(u8, name, "__builtin_"))
+                    try p.errStr(.unknown_builtin, nameToken, name)
+                else
+                    try p.errStr(.implicit_func_decl, nameToken, name);
+
+                const funcType = try p.arena.create(Type.Function);
+                funcType.* = .{ .returnType = .{ .specifier = .Int }, .params = &.{} };
+                const ty: Type = .{ .specifier = .OldStyleFunc, .data = .{ .func = funcType } };
+                const node = try p.addNode(.{
+                    .type = ty,
+                    .tag = .FnProto,
+                    .data = .{ .decl = .{ .name = nameToken } },
+                });
+
+                try p.declBuffer.append(node);
+                try p.symStack.declareSymbol(ty, nameToken, node);
+
+                return Result{
+                    .ty = ty,
+                    .node = try p.addNode(.{ .tag = .DeclRefExpr, .type = ty, .data = .{ .declRef = nameToken } }),
+                };
+            }
+            try p.errStr(.undeclared_identifier, nameToken, p.getTokenSlice(nameToken));
+            return error.ParsingFailed;
         },
 
         .MacroFunc, .MacroFunction => {

@@ -344,6 +344,7 @@ pub fn boolCast(res: *Result, p: *Parser, boolType: Type, tok: TokenIndex) Error
 /// @param tok      The token index at which the cast occurs.
 /// @return Error   Returns an error if casting fails or the result type has an incomplete size.
 pub fn intCast(res: *Result, p: *Parser, intType: Type, tok: TokenIndex) Error!void {
+    if (intType.hasIncompleteSize()) return error.ParsingFailed;
     // Cast from boolean to integer.
     if (res.ty.is(.Bool)) {
         res.ty = intType;
@@ -369,10 +370,6 @@ pub fn intCast(res: *Result, p: *Parser, intType: Type, tok: TokenIndex) Error!v
 
     // Cast between integer types.
     else if (!res.ty.eql(intType, p.pp.comp, true)) {
-        // Fail if the integer type size is incomplete.
-        if (intType.hasIncompleteSize())
-            return error.ParsingFailed;
-        // Perform the integer cast.
         res.value.intCast(res.ty, intType, p.pp.comp);
         res.ty = intType;
         try res.un(p, .IntCast);

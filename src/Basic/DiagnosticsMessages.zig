@@ -1555,3 +1555,8 @@ pub const const_decl_folded_vla = struct {
     pub const opt = "gnu-folding-constant";
     pub const pedantic = true;
 };
+pub const redefinition_of_typedef = struct {
+    pub const msg = "typedef redefinition with different types ({s})";
+    pub const extra = .str;
+    pub const kind = .@"error";
+};
