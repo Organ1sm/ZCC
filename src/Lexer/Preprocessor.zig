@@ -621,7 +621,6 @@ fn expr(pp: *Preprocessor, lexer: *Lexer) MacroError!bool {
         .tokenIdx = @intCast(start),
         .arena = pp.arena.allocator(),
         .inMacro = true,
-        .scopes = undefined,
         .data = undefined,
         .labels = undefined,
         .strings = undefined,
