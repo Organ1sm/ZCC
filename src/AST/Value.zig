@@ -27,6 +27,13 @@ const Tag = enum {
     bytes, // For raw byte data.
 };
 
+pub fn isNumeric(v: Value) bool {
+    return switch (v.tag) {
+        .int, .float => true,
+        else => false,
+    };
+}
+
 pub fn zero(v: Value) Value {
     return switch (v.tag) {
         .int => int(0),

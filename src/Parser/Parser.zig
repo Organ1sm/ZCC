@@ -4992,8 +4992,11 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
             if (operand.ty.isInt())
                 try operand.intCast(p, operand.ty.integerPromotion(p.pp.comp), token);
 
-            if (operand.value.tag != .unavailable)
+            if (operand.value.isNumeric()) {
                 _ = operand.value.sub(operand.value.zero(), operand.value, operand.ty, p.pp.comp);
+            } else {
+                operand.value.tag = .unavailable;
+            }
 
             try operand.un(p, .NegateExpr);
             return operand;
@@ -5015,9 +5018,11 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
             if (operand.ty.isInt())
                 try operand.intCast(p, operand.ty.integerPromotion(p.pp.comp), token);
 
-            if (operand.value.tag != .unavailable) {
+            if (operand.value.isNumeric()) {
                 if (operand.value.add(operand.value, operand.value.one(), operand.ty, p.pp.comp))
                     try p.errOverflow(token, operand);
+            } else {
+                operand.value.tag = .unavailable;
             }
 
             try operand.un(p, .PreIncExpr);
@@ -5040,9 +5045,11 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
             if (operand.ty.isInt())
                 try operand.intCast(p, operand.ty.integerPromotion(p.pp.comp), token);
 
-            if (operand.value.tag != .unavailable) {
+            if (operand.value.isNumeric()) {
                 if (operand.value.sub(operand.value, operand.value.one(), operand.ty, p.pp.comp))
                     try p.errOverflow(token, operand);
+            } else {
+                operand.value.tag = .unavailable;
             }
 
             try operand.un(p, .PreDecExpr);
@@ -5060,7 +5067,7 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
 
             if (operand.ty.isInt()) {
                 try operand.intCast(p, operand.ty.integerPromotion(p.pp.comp), token);
-                if (operand.value.tag != .unavailable) {
+                if (operand.value.tag == .int) {
                     operand.value = operand.value.bitNot(operand.ty, p.pp.comp);
                 }
             } else {
@@ -5083,9 +5090,11 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
             if (operand.ty.isInt())
                 try operand.intCast(p, operand.ty.integerPromotion(p.pp.comp), token);
 
-            if (operand.value.tag != .unavailable) {
+            if (operand.value.tag == .int) {
                 const res = Value.int(@intFromBool(!operand.value.getBool()));
                 operand.value = res;
+            } else {
+                operand.value.tag = .unavailable;
             }
 
             operand.ty = .{ .specifier = .Int };
