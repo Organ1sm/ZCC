@@ -50,8 +50,9 @@ fn addFuzzStep(b: *std.Build, target: std.Build.ResolvedTarget, aflClangLTOPath:
 
 pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
-
     const mode = b.standardOptimizeOption(.{});
+
+    const TestAllAllocationFailures = b.option(bool, "test-all-allocation-failures", "Test all allocation failures") orelse false;
 
     const depsModule = b.createModule(.{ .root_source_file = .{ .path = "deps/lib.zig" } });
     const zccModule = b.addModule("zcc", .{
@@ -122,6 +123,9 @@ pub fn build(b: *std.Build) !void {
         .optimize = mode,
     });
     integration_tests.root_module.addImport("zcc", zccModule);
+    const test_runner_options = b.addOptions();
+    integration_tests.root_module.addOptions("build_options", test_runner_options);
+    test_runner_options.addOption(bool, "TestAllAllocationFailures", TestAllAllocationFailures);
 
     const integration_test_runner = b.addRunArtifact(integration_tests);
     integration_test_runner.addArg(b.pathFromRoot("test/cases"));
