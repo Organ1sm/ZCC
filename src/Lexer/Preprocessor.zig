@@ -1920,11 +1920,10 @@ fn pragma(
     }, pragmaNameToken.expansionSlice());
 }
 
-fn findIncludeSource(pp: *Preprocessor, lexer: *Lexer) !Source {
+fn findIncludeFilenameToken(pp: *Preprocessor, first: *RawToken, lexer: *Lexer) !Token {
     const start = pp.tokens.len;
     defer pp.tokens.len = start;
 
-    var first = lexer.nextNoWhiteSpace();
     if (first.id == .AngleBracketLeft) to_end: {
         while (lexer.index < lexer.buffer.len) : (lexer.index += 1) {
             switch (lexer.buffer[lexer.index]) {
@@ -1940,18 +1939,18 @@ fn findIncludeSource(pp: *Preprocessor, lexer: *Lexer) !Source {
         }
 
         try pp.comp.diag.add(.{ .tag = .header_str_closing, .loc = .{ .id = first.source, .byteOffset = first.start } }, &.{});
-        try pp.addError(first, .header_str_match);
+        try pp.addError(first.*, .header_str_match);
     }
 
     // Try expand if the argument is a macro
-    try pp.expandMacro(lexer, first);
+    try pp.expandMacro(lexer, first.*);
 
     // check that we actually got a string
-    const fileNameTK = pp.tokens.get(start);
-    switch (fileNameTK.id) {
+    const filenameToken = pp.tokens.get(start);
+    switch (filenameToken.id) {
         .StringLiteral, .MacroString => {},
         else => {
-            try pp.addError(first, .expected_filename);
+            try pp.addError(first.*, .expected_filename);
             try pp.expectNewLine(lexer);
             return error.InvalidInclude;
         },
@@ -1961,11 +1960,18 @@ fn findIncludeSource(pp: *Preprocessor, lexer: *Lexer) !Source {
     const newLine = lexer.nextNoWhiteSpace();
     if ((newLine.id != .NewLine and newLine.id != .Eof) or pp.tokens.len > start + 1) {
         skipToNewLine(lexer);
-        try pp.addError(first, .extra_tokens_directive_end);
+        try pp.addError(first.*, .extra_tokens_directive_end);
     }
 
+    return filenameToken;
+}
+
+fn findIncludeSource(pp: *Preprocessor, lexer: *Lexer) !Source {
+    var first = lexer.nextNoWhiteSpace();
+    const filenameToken = try pp.findIncludeFilenameToken(&first, lexer);
+
     // check for empty filename
-    const tkSlice = pp.expandedSlice(fileNameTK);
+    const tkSlice = pp.expandedSlice(filenameToken);
     if (tkSlice.len < 3) {
         try pp.addError(first, .empty_filename);
         return error.InvalidInclude;
@@ -1973,7 +1979,7 @@ fn findIncludeSource(pp: *Preprocessor, lexer: *Lexer) !Source {
 
     // find the file
     const filename = tkSlice[1 .. tkSlice.len - 1];
-    return (try pp.comp.findInclude(first, filename, fileNameTK.id == .StringLiteral)) orelse
+    return (try pp.comp.findInclude(first, filename, filenameToken.id == .StringLiteral)) orelse
         pp.fatal(first, "'{s}' not found", .{filename});
 }
 
