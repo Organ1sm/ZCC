@@ -1,4 +1,5 @@
 const std = @import("std");
+const buildOptions = @import("build_options");
 const print = std.debug.print;
 const zcc = @import("zcc");
 const CodeGen = zcc.CodeGen;
@@ -8,6 +9,69 @@ const NodeIndex = Tree.NodeIndex;
 const AllocatorError = std.mem.Allocator.Error;
 
 var general_purpose_allocator = std.heap.GeneralPurposeAllocator(.{}){};
+
+fn addCommandLineArgs(comp: *zcc.Compilation, file: zcc.Source) !void {
+    if (std.mem.startsWith(u8, file.buffer, "//zcc-args")) {
+        var testArgs = std.ArrayList([]const u8).init(comp.gpa);
+        defer testArgs.deinit();
+
+        const nl = std.mem.indexOfAny(u8, file.buffer, "\n\r") orelse file.buffer.len;
+        var it = std.mem.tokenize(u8, file.buffer[0..nl], " ");
+        while (it.next()) |some| try testArgs.append(some);
+
+        var sourceFiles = std.ArrayList(zcc.Source).init(std.testing.failing_allocator);
+        _ = try zcc.parseArgs(comp, std.io.null_writer, &sourceFiles, std.io.null_writer, testArgs.items);
+    }
+}
+
+fn testOne(allocator: std.mem.Allocator, path: []const u8) !void {
+    var comp = zcc.Compilation.init(allocator);
+    defer comp.deinit();
+
+    try comp.addDefaultPragmaHandlers();
+    try comp.defineSystemIncludes();
+
+    const file = try comp.addSourceFromPath(path);
+    try addCommandLineArgs(&comp, file);
+
+    const bulitinMacros = try comp.generateBuiltinMacros();
+
+    var pp = zcc.Preprocessor.init(&comp);
+    defer pp.deinit();
+
+    try pp.addBuiltinMacros();
+    _ = try pp.preprocess(bulitinMacros);
+
+    const eof = pp.preprocess(file) catch |err| {
+        if (!std.unicode.utf8ValidateSlice(file.buf)) {
+            if (comp.diag.list.items.len > 0 and comp.diag.list.items[comp.diag.list.items.len - 1].tag == .invalid_utf8) {
+                return;
+            }
+        }
+        return err;
+    };
+    try pp.tokens.append(allocator, eof);
+
+    var tree = try zcc.Parser.parse(&pp);
+    defer tree.deinit();
+    tree.dump(std.io.null_writer) catch {};
+}
+
+fn testAllAllocationFailures(cases: [][]const u8) !void {
+    var progress = std.Progress{};
+    const rootNode = progress.start("Memory Allocation Test", cases.len);
+
+    for (cases) |case| {
+        const caseName = std.mem.sliceTo(std.fs.path.basename(case), '.');
+        var caseNode = rootNode.start(caseName, 0);
+        caseNode.activate();
+        defer caseNode.end();
+        progress.refresh();
+
+        try std.testing.checkAllAllocationFailures(std.testing.allocator, testOne, .{case});
+    }
+    rootNode.end();
+}
 
 pub fn main() !void {
     const gpa = general_purpose_allocator.allocator();
@@ -49,10 +113,12 @@ pub fn main() !void {
             defer buffer.items.len = 0;
             try buffer.writer().print("{s}{c}{s}", .{ args[1], std.fs.path.sep, entry.name });
 
-            const case = try gpa.dupe(u8, buffer.items);
-            errdefer gpa.free(case);
-            try cases.append(case);
+            try cases.append(try gpa.dupe(u8, buffer.items));
         }
+    }
+
+    if (buildOptions.TestAllAllocationFailures) {
+        return testAllAllocationFailures(cases.items);
     }
 
     var progress = std.Progress{};
@@ -94,27 +160,13 @@ pub fn main() !void {
         defer caseNode.end();
         progress.refresh();
 
-        const file = comp.addSourceFromPath(path) catch |err| switch (err) {
-            error.OutOfMemory => return err,
-            else => {
-                failCount += 1;
-                progress.log("could not add source '{s}': {s}\n", .{ path, @errorName(err) });
-                continue;
-            },
+        const file = comp.addSourceFromPath(path) catch |err| {
+            failCount += 1;
+            progress.log("could not add source '{s}': {s}\n", .{ path, @errorName(err) });
+            continue;
         };
 
-        if (std.mem.startsWith(u8, file.buffer, "//zcc-args")) {
-            var testArgs = std.ArrayList([]const u8).init(gpa);
-            defer testArgs.deinit();
-
-            var it = std.mem.tokenize(u8, std.mem.sliceTo(file.buffer, '\n'), " ");
-            while (it.next()) |some|
-                try testArgs.append(some);
-
-            var sourceFiles = std.ArrayList(zcc.Source).init(std.testing.failing_allocator);
-
-            _ = try zcc.parseArgs(&comp, std.io.null_writer, &sourceFiles, std.io.null_writer, testArgs.items);
-        }
+        try addCommandLineArgs(&comp, file);
 
         const builtinMacros = try comp.generateBuiltinMacros();
 
@@ -455,11 +507,7 @@ const StmtTypeDumper = struct {
 
         const ty = tree.nodes.items(.type)[@intFromEnum(node)];
         ty.dump(m.buf.writer()) catch {};
-
-        const slice = try m.buf.toOwnedSlice();
-        errdefer m.buf.allocator.free(slice);
-
-        try self.types.append(slice);
+        try self.types.append(try m.buf.toOwnedSlice());
     }
 
     fn dump(self: *StmtTypeDumper, tree: *const Tree, declIdx: NodeIndex, allocator: std.mem.Allocator) AllocatorError!void {
