@@ -731,6 +731,7 @@ fn deinitMacroArguments(allocator: Allocator, args: *const MacroArguments) void 
 
 fn expandObjMacro(pp: *Preprocessor, simpleMacro: *const Macro) Error!ExpandBuffer {
     var buff = ExpandBuffer.init(pp.comp.gpa);
+    errdefer buff.deinit();
     try buff.ensureTotalCapacity(simpleMacro.tokens.len);
 
     var i: usize = 0;
@@ -1166,6 +1167,7 @@ fn bufCopyTokens(buf: *ExpandBuffer, tokens: []const Token, src: []const Source.
     try buf.ensureUnusedCapacity(tokens.len);
     for (tokens) |tok| {
         var copy = try tok.dupe(buf.allocator);
+        errdefer Token.free(copy.expansionLocs, buf.allocator);
         try copy.addExpansionLocation(buf.allocator, src);
         buf.appendAssumeCapacity(copy);
     }
@@ -1248,29 +1250,42 @@ fn collectMacroFuncArguments(
         const tok = try nextBufToken(pp, lexer, buf, startIdx, endIdx, extendBuffer);
         switch (tok.id) {
             .Comma => {
-                if (parens == 0)
-                    try args.append(try curArgument.toOwnedSlice())
-                else
-                    try curArgument.append(try tok.dupe(pp.comp.gpa));
+                if (parens == 0) {
+                    const owned = try curArgument.toOwnedSlice();
+                    errdefer pp.comp.gpa.free(owned);
+                    try args.append(owned);
+                } else {
+                    const duped = try tok.dupe(pp.comp.gpa);
+                    errdefer Token.free(duped.expansionLocs, pp.comp.gpa);
+                    try curArgument.append(duped);
+                }
             },
 
             .LParen => {
-                try curArgument.append(try tok.dupe(pp.comp.gpa));
+                const duped = try tok.dupe(pp.comp.gpa);
+                errdefer Token.free(duped.expansionLocs, pp.comp.gpa);
+                try curArgument.append(duped);
                 parens += 1;
             },
 
             .RParen => {
                 if (parens == 0) {
-                    try args.append(try curArgument.toOwnedSlice());
+                    const owned = try curArgument.toOwnedSlice();
+                    errdefer pp.comp.gpa.free(owned);
+                    try args.append(owned);
                     break;
                 } else {
-                    try curArgument.append(try tok.dupe(pp.comp.gpa));
+                    const duped = try tok.dupe(pp.comp.gpa);
+                    errdefer Token.free(duped.expansionLocs, pp.comp.gpa);
+                    try curArgument.append(duped);
                     parens -= 1;
                 }
             },
 
             .Eof => {
-                try args.append(try curArgument.toOwnedSlice());
+                const owned = try curArgument.toOwnedSlice();
+                errdefer pp.comp.gpa.free(owned);
+                try args.append(owned);
                 deinitMacroArguments(pp.comp.gpa, &args);
                 lexer.* = savedLexer;
                 endIdx.* = oldEnd;
@@ -1286,7 +1301,9 @@ fn collectMacroFuncArguments(
             },
 
             else => {
-                try curArgument.append(try tok.dupe(pp.comp.gpa));
+                const duped = try tok.dupe(pp.comp.gpa);
+                errdefer Token.free(duped.expansionLocs, pp.comp.gpa);
+                try curArgument.append(duped);
             },
         }
     }
@@ -1375,6 +1392,7 @@ fn expandMacroExhaustive(
                     try expandedArgs.ensureTotalCapacity(args.items.len);
                     for (args.items) |arg| {
                         var expandBuffer = ExpandBuffer.init(pp.comp.gpa);
+                        errdefer expandBuffer.deinit();
                         try expandBuffer.appendSlice(arg);
 
                         try pp.expandMacroExhaustive(lexer, &expandBuffer, 0, expandBuffer.items.len, false);
