@@ -1904,7 +1904,8 @@ fn parseRecordDeclarator(p: *Parser) Error!bool {
         }
 
         if (nameToken == 0 and bitsNode == .none) unnamed: {
-            if (ty.is(.Enum)) break :unnamed;
+            // don't allow incompelete size fields in anonymous record.
+            if (ty.is(.Enum) or ty.hasIncompleteSize()) break :unnamed;
             if (ty.isRecord() and ty.data.record.name[0] == '(') {
                 // An anonymous record appears as indirect fields on the parent
                 try p.recordBuffer.append(.{
