@@ -49,7 +49,9 @@ pub fn main() !void {
             defer buffer.items.len = 0;
             try buffer.writer().print("{s}{c}{s}", .{ args[1], std.fs.path.sep, entry.name });
 
-            try cases.append(try gpa.dupe(u8, buffer.items));
+            const case = try gpa.dupe(u8, buffer.items);
+            errdefer gpa.free(case);
+            try cases.append(case);
         }
     }
 
