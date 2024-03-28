@@ -533,15 +533,17 @@ pub fn getSource(comp: *Compilation, id: Source.ID) Source {
     return comp.sources.values()[@intFromEnum(id) - 2];
 }
 
-/// Write bytes from `reader` into `contents`, performing newline splicing,
-/// line-ending normalization (convert line endings to \n), and UTF-8 validation.
-/// Creates a Source with `contents` as the buf and adds it to the Compilation.
-/// `contents` is assumed to be large enough to hold the entire content of `reader`.
-/// `contents` must have been allocated by `comp`'s allocator since it will be reallocated
-/// if splicing occurred.
-/// Compilation owns `contents` if and only if this call succeeds; caller always retains
-/// ownership of `path`.
-pub fn addSourceFromReader(comp: *Compilation, reader: anytype, path: []const u8, contents: []u8) !Source {
+/// Creates a Source from the contents of `reader` and adds it to the Compilation
+/// Performs newline splicing, line-ending normalization to '\n', and UTF-8 validation.
+/// caller retains ownership of `path`
+/// `expected_size` will be allocated to hold the contents of `reader` and *must* be at least
+/// as large as the entire contents of `reader`.
+/// To add a pre-existing buffer as a Source, see addSourceFromBuffer
+/// To add a file's contents given its path, see addSourceFromPath
+pub fn addSourceFromReader(comp: *Compilation, reader: anytype, path: []const u8, expectedSize: u32) !Source {
+    var contents = try comp.gpa.alloc(u8, expectedSize);
+    errdefer comp.gpa.free(contents);
+
     const dupedPath = try comp.gpa.dupe(u8, path);
     errdefer comp.gpa.free(dupedPath);
 
@@ -629,10 +631,13 @@ pub fn addSourceFromReader(comp: *Compilation, reader: anytype, path: []const u8
     const spliceLocs = try spliceList.toOwnedSlice();
     errdefer comp.gpa.free(spliceLocs);
 
+    if (i != contents.len)
+        contents = try comp.gpa.realloc(contents, i);
+
     var source = Source{
         .id = sourceId,
         .path = dupedPath,
-        .buffer = if (i == contents.len) contents else try comp.gpa.realloc(contents, i),
+        .buffer = contents,
         .spliceLocs = spliceLocs,
     };
 
@@ -648,13 +653,12 @@ pub fn addSourceFromBuffer(comp: *Compilation, path: []const u8, buffer: []const
     if (@as(u64, buffer.len) > std.math.maxInt(u32))
         return error.StreamTooLong;
 
+    const size = std.math.cast(u32, buffer.len) orelse return error.StreamTooLong;
+
     var stream = std.io.fixedBufferStream(buffer);
     const reader = stream.reader();
 
-    const contents = try comp.gpa.alloc(u8, buffer.len);
-    errdefer comp.gpa.free(contents);
-
-    return comp.addSourceFromReader(reader, path, contents);
+    return comp.addSourceFromReader(reader, path, size);
 }
 
 /// Add a source file to the compilation accord to the given path.
@@ -687,14 +691,13 @@ pub fn addSourceFromPath(comp: *Compilation, path: []const u8) !Source {
     const file = try std.fs.cwd().openFile(path, .{});
     defer file.close();
 
-    const size = std.math.cast(u32, try file.getEndPos());
-    const contents = try comp.gpa.alloc(u8, size.?);
-    errdefer comp.gpa.free(contents);
+    const size = std.math.cast(u32, try file.getEndPos()) orelse
+        return error.StreamTooLong;
 
     var bufferReader = std.io.bufferedReader(file.reader());
     const reader = bufferReader.reader();
 
-    return comp.addSourceFromReader(reader, path, contents);
+    return comp.addSourceFromReader(reader, path, size);
 }
 
 pub fn findInclude(comp: *Compilation, token: Token, filename: []const u8, searchWord: bool) !?Source {
@@ -837,15 +840,21 @@ test "addSourceFromReader" {
             var comp = Compilation.init(std.testing.allocator);
             defer comp.deinit();
 
-            const contents = try comp.gpa.alloc(u8, 1024);
-
             var stream = std.io.fixedBufferStream(str);
             const reader = stream.reader();
-            const source = try comp.addSourceFromReader(reader, "path", contents);
+            const source = try comp.addSourceFromReader(reader, "path", @intCast(str.len));
 
             try std.testing.expectEqualStrings(expected, source.buffer);
             try std.testing.expectEqual(warningCount, @as(u32, @intCast(comp.diag.list.items.len)));
             try std.testing.expectEqualSlices(u32, splices, source.spliceLocs);
+        }
+
+        fn withAllocationFailures(allocator: std.mem.Allocator) !void {
+            var comp = Compilation.init(allocator);
+            defer comp.deinit();
+
+            _ = try comp.addSourceFromBuffer("path", "spliced\\\nbuffer\n");
+            _ = try comp.addSourceFromBuffer("path", "non-spliced buffer\n");
         }
     };
     try Test.addSourceFromReader("ab\\\nc", "abc", 0, &.{2});
@@ -874,6 +883,8 @@ test "addSourceFromReader" {
     try Test.addSourceFromReader("ab\r\r\n\r", "ab\n\n\n", 0, &.{});
     try Test.addSourceFromReader("\r\\", "\n\\", 0, &.{});
     try Test.addSourceFromReader("\\\r\\", "\\", 0, &.{0});
+
+    try std.testing.checkAllAllocationFailures(std.testing.allocator, Test.withAllocationFailures, .{});
 }
 
 test "addSourceFromReader - exhaustive check for carriage return elimination" {
