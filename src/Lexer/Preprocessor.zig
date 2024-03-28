@@ -189,7 +189,7 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!Token {
     while (true) {
         var token = lexer.next();
         switch (token.id) {
-            .Hash => if (startOfLine) {
+            .Hash => if (!startOfLine) try pp.tokens.append(pp.comp.gpa, tokenFromRaw(token)) else {
                 const directive = lexer.nextNoWhiteSpace();
                 switch (directive.id) {
                     .KeywordError, .KeywordWarning => {

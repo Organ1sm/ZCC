@@ -175,7 +175,7 @@ pub fn main() !void {
         var macroBuffer = std.ArrayList(u8).init(comp.gpa);
         defer macroBuffer.deinit();
 
-        try addCommandLineArgs(&comp, file);
+        try addCommandLineArgs(&comp, file, macroBuffer.writer());
         const userMacros = try comp.addSourceFromBuffer("<command line>", macroBuffer.items);
 
         const builtinMacros = try comp.generateBuiltinMacros();
