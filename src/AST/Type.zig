@@ -823,7 +823,7 @@ pub fn sizeof(ty: Type, comp: *const Compilation) ?u64 {
         .DecayedTypeofExpr,
         => comp.target.ptrBitWidth() >> 3,
 
-        .Array => ty.data.array.elem.sizeof(comp).? * ty.data.array.len,
+        .Array => if (ty.data.array.elem.sizeof(comp)) |size| size * ty.data.array.len else null,
         .Struct, .Union => if (ty.data.record.isIncomplete()) null else ty.data.record.size,
         .Enum => if (ty.data.@"enum".isIncomplete()) null else ty.data.@"enum".tagType.sizeof(comp),
 
