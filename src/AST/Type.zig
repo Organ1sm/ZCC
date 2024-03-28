@@ -852,8 +852,12 @@ pub fn alignof(ty: Type, comp: *const Compilation) u29 {
 
     // TODO get target from compilation
     return switch (ty.specifier) {
-        .UnspecifiedVariableLenArray => unreachable, // must be bound in function definition
-        .VariableLenArray, .IncompleteArray => ty.getElemType().alignof(comp),
+        .UnspecifiedVariableLenArray,
+        .VariableLenArray,
+        .IncompleteArray,
+        .Array,
+        => ty.getElemType().alignof(comp),
+
         .Func, .VarArgsFunc, .OldStyleFunc => 4, // TODO check target
         .Char, .SChar, .UChar, .Void, .Bool => 1,
         .Short, .UShort => 2,
@@ -886,7 +890,6 @@ pub fn alignof(ty: Type, comp: *const Compilation) u29 {
         .DecayedUnspecifiedVariableLenArray,
         => comp.target.ptrBitWidth() >> 3,
 
-        .Array => ty.data.array.elem.alignof(comp),
         .Struct, .Union => if (ty.data.record.isIncomplete()) 0 else ty.data.record.alignment,
         .Enum => if (ty.data.@"enum".isIncomplete()) 0 else ty.data.@"enum".tagType.alignof(comp),
 
