@@ -10,7 +10,7 @@ const AllocatorError = std.mem.Allocator.Error;
 
 var general_purpose_allocator = std.heap.GeneralPurposeAllocator(.{}){};
 
-fn addCommandLineArgs(comp: *zcc.Compilation, file: zcc.Source) !void {
+fn addCommandLineArgs(comp: *zcc.Compilation, file: zcc.Source, macroBuffer: anytype) !void {
     if (std.mem.startsWith(u8, file.buffer, "//zcc-args")) {
         var testArgs = std.ArrayList([]const u8).init(comp.gpa);
         defer testArgs.deinit();
@@ -20,7 +20,7 @@ fn addCommandLineArgs(comp: *zcc.Compilation, file: zcc.Source) !void {
         while (it.next()) |some| try testArgs.append(some);
 
         var sourceFiles = std.ArrayList(zcc.Source).init(std.testing.failing_allocator);
-        _ = try zcc.parseArgs(comp, std.io.null_writer, &sourceFiles, std.io.null_writer, testArgs.items);
+        _ = try zcc.parseArgs(comp, std.io.null_writer, &sourceFiles, macroBuffer, testArgs.items);
     }
 }
 
@@ -32,7 +32,11 @@ fn testOne(allocator: std.mem.Allocator, path: []const u8) !void {
     try comp.defineSystemIncludes();
 
     const file = try comp.addSourceFromPath(path);
-    try addCommandLineArgs(&comp, file);
+    var macroBuffer = std.ArrayList(u8).init(comp.gpa);
+    defer macroBuffer.deinit();
+
+    try addCommandLineArgs(&comp, file, macroBuffer.writer());
+    const userMacros = try comp.addSourceFromBuffer("<command line>", macroBuffer.items);
 
     const bulitinMacros = try comp.generateBuiltinMacros();
 
@@ -40,7 +44,9 @@ fn testOne(allocator: std.mem.Allocator, path: []const u8) !void {
     defer pp.deinit();
 
     try pp.addBuiltinMacros();
+
     _ = try pp.preprocess(bulitinMacros);
+    _ = try pp.preprocess(userMacros);
 
     const eof = pp.preprocess(file) catch |err| {
         if (!std.unicode.utf8ValidateSlice(file.buf)) {
@@ -166,7 +172,11 @@ pub fn main() !void {
             continue;
         };
 
+        var macroBuffer = std.ArrayList(u8).init(comp.gpa);
+        defer macroBuffer.deinit();
+
         try addCommandLineArgs(&comp, file);
+        const userMacros = try comp.addSourceFromBuffer("<command line>", macroBuffer.items);
 
         const builtinMacros = try comp.generateBuiltinMacros();
 
@@ -177,6 +187,8 @@ pub fn main() !void {
         try pp.addBuiltinMacros();
 
         _ = try pp.preprocess(builtinMacros);
+        _ = try pp.preprocess(userMacros);
+
         const eof = pp.preprocess(file) catch |err| {
             failCount += 1;
             progress.log("could not preprocess file '{s}': {s}\n", .{ path, @errorName(err) });
