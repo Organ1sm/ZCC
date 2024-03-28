@@ -455,7 +455,11 @@ const StmtTypeDumper = struct {
 
         const ty = tree.nodes.items(.type)[@intFromEnum(node)];
         ty.dump(m.buf.writer()) catch {};
-        try self.types.append(try m.buf.toOwnedSlice());
+
+        const slice = try m.buf.toOwnedSlice();
+        errdefer m.buf.allocator.free(slice);
+
+        try self.types.append(slice);
     }
 
     fn dump(self: *StmtTypeDumper, tree: *const Tree, declIdx: NodeIndex, allocator: std.mem.Allocator) AllocatorError!void {
