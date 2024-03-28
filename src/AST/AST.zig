@@ -55,7 +55,8 @@ pub const Token = struct {
             @memset(list.items.ptr[list.items.len..list.capacity], .{});
             // add a sentinel since the allocator is not guaranteed
             // to return the exact desired size
-            list.items.ptr[list.capacity - 1].byteOffset = 1;
+            if (list.capacity > 0)
+                list.items.ptr[list.capacity - 1].byteOffset = 1;
             tok.expansionLocs = list.items.ptr;
         }
 
