@@ -35,6 +35,13 @@ void baz(void) {
     return 1;
 }
 
+char return_char(void) {
+    return 1;
+}
+short return_short(void) {
+    return 2;
+}
+
 #define EXPECTED_ERRORS "return.c:2:5: error: non-void function 'b' should return a value [-Wreturn-type]" \
     "return.c:3:5: warning: unreachable code [-Wunreachable-code]" \
     "return.c:6:12: error: returning 'void' from a function with incompatible result type" \

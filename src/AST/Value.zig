@@ -87,6 +87,8 @@ pub fn signExtend(v: Value, oldTy: Type, comp: *Compilation) i64 {
 
     // Perform sign extension based on the determined size.
     return switch (size) {
+        1 => v.getInt(i8),
+        2 => v.getInt(i16),
         // If the size is 4 bytes, interpret `v` as a 32-bit integer and return it.
         4 => v.getInt(i32),
         // If the size is 8 bytes, interpret `v` as a 64-bit integer and return it.
