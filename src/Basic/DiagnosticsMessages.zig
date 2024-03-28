@@ -1560,3 +1560,9 @@ pub const redefinition_of_typedef = struct {
     pub const extra = .str;
     pub const kind = .@"error";
 };
+pub const undefined_macro = struct {
+    pub const msg = "'{s}' is not defined, evaluates to 0";
+    pub const extra = .str;
+    pub const kind = .off;
+    pub const opt = "undef";
+};

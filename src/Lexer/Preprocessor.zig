@@ -546,19 +546,19 @@ fn expr(pp: *Preprocessor, lexer: *Lexer) MacroError!bool {
         return false;
     }
 
-    for (pp.tokens.items(.id)[start..], 0..) |*tok, i| {
-        switch (tok.*) {
+    for (pp.tokens.items(.id)[start..], 0..) |*id, i| {
+        const token = pp.tokens.get(start + i);
+        switch (id.*) {
             .StringLiteral,
             .StringLiteralUTF_8,
             .StringLiteralUTF_16,
             .StringLiteralUTF_32,
             .StringLiteralWide,
             => {
-                const t = pp.tokens.get(start + i);
                 try pp.comp.diag.add(.{
                     .tag = .string_literal_in_pp_expr,
-                    .loc = t.loc,
-                }, t.expansionSlice());
+                    .loc = token.loc,
+                }, token.expansionSlice());
                 return false;
             },
 
@@ -569,11 +569,10 @@ fn expr(pp: *Preprocessor, lexer: *Lexer) MacroError!bool {
             .ImaginaryLiteral_F,
             .ImaginaryLiteral_L,
             => {
-                const t = pp.tokens.get(start + i);
                 try pp.comp.diag.add(.{
                     .tag = .float_literal_in_pp_expr,
-                    .loc = t.loc,
-                }, t.expansionSlice());
+                    .loc = token.loc,
+                }, token.expansionSlice());
                 return false;
             },
 
@@ -601,16 +600,21 @@ fn expr(pp: *Preprocessor, lexer: *Lexer) MacroError!bool {
             .Arrow,
             .Period,
             => {
-                const t = pp.tokens.get(start + i);
                 try pp.comp.diag.add(.{
                     .tag = .invalid_preproc_operator,
-                    .loc = t.loc,
-                }, t.expansionSlice());
+                    .loc = token.loc,
+                }, token.expansionSlice());
                 return false;
             },
 
-            else => if (tok.isMacroIdentifier()) {
-                tok.* = .Zero; // undefined macro
+            else => if (id.isMacroIdentifier()) {
+                try pp.comp.diag.add(.{
+                    .tag = .undefined_macro,
+                    .loc = token.loc,
+                    .extra = .{ .str = pp.expandedSlice(token) },
+                }, token.expansionSlice());
+
+                id.* = .Zero; // undefined macro
             },
         }
     }
