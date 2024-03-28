@@ -94,10 +94,13 @@ pub fn main() !void {
         defer caseNode.end();
         progress.refresh();
 
-        const file = comp.addSourceFromPath(path) catch |err| {
-            failCount += 1;
-            progress.log("could not add source '{s}': {s}\n", .{ path, @errorName(err) });
-            continue;
+        const file = comp.addSourceFromPath(path) catch |err| switch (err) {
+            error.OutOfMemory => return err,
+            else => {
+                failCount += 1;
+                progress.log("could not add source '{s}': {s}\n", .{ path, @errorName(err) });
+                continue;
+            },
         };
 
         if (std.mem.startsWith(u8, file.buffer, "//zcc-args")) {
