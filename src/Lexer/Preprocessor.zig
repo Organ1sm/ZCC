@@ -400,7 +400,7 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!Token {
                     token.id.simplifyMacroKeyword();
                     try pp.comp.diag.add(.{
                         .tag = .preprocessing_directive_only,
-                        .loc = .{.id = token.source, .byteOffset = token.start, .line = token.line},
+                        .loc = .{ .id = token.source, .byteOffset = token.start, .line = token.line },
                         .extra = .{ .str = lexer.buffer[token.start..token.end] },
                     }, &.{});
                 }
@@ -2013,13 +2013,14 @@ fn pragma(
 
 fn findIncludeFilenameToken(
     pp: *Preprocessor,
-    first: *RawToken,
+    firstToken: RawToken,
     lexer: *Lexer,
     trailingTokenBehavior: enum { IgnoreTrailingTokens, expectNlEof },
 ) !Token {
     const start = pp.tokens.len;
     defer pp.tokens.len = start;
 
+    var first = firstToken;
     if (first.id == .AngleBracketLeft) to_end: {
         while (lexer.index < lexer.buffer.len) : (lexer.index += 1) {
             switch (lexer.buffer[lexer.index]) {
@@ -2042,18 +2043,18 @@ fn findIncludeFilenameToken(
                 .line = first.line,
             },
         }, &.{});
-        try pp.addError(first.*, .header_str_match);
+        try pp.addError(first, .header_str_match);
     }
 
     // Try expand if the argument is a macro
-    try pp.expandMacro(lexer, first.*);
+    try pp.expandMacro(lexer, first);
 
     // check that we actually got a string
     const filenameToken = pp.tokens.get(start);
     switch (filenameToken.id) {
         .StringLiteral, .MacroString => {},
         else => {
-            try pp.addError(first.*, .expected_filename);
+            try pp.addError(first, .expected_filename);
             try pp.expectNewLine(lexer);
             return error.InvalidInclude;
         },
@@ -2065,7 +2066,7 @@ fn findIncludeFilenameToken(
             const newLine = lexer.nextNoWhiteSpace();
             if ((newLine.id != .NewLine and newLine.id != .Eof) or pp.tokens.len > start + 1) {
                 skipToNewLine(lexer);
-                try pp.addError(first.*, .extra_tokens_directive_end);
+                try pp.addError(first, .extra_tokens_directive_end);
             }
         },
         .IgnoreTrailingTokens => {},
@@ -2075,8 +2076,8 @@ fn findIncludeFilenameToken(
 }
 
 fn findIncludeSource(pp: *Preprocessor, lexer: *Lexer) !Source {
-    var first = lexer.nextNoWhiteSpace();
-    const filenameToken = try pp.findIncludeFilenameToken(&first, lexer, .expectNlEof);
+    const first = lexer.nextNoWhiteSpace();
+    const filenameToken = try pp.findIncludeFilenameToken(first, lexer, .expectNlEof);
 
     // check for empty filename
     const tkSlice = pp.expandedSlice(filenameToken);
