@@ -523,7 +523,7 @@ pub fn defineSystemIncludes(comp: *Compilation) !void {
     try comp.systemIncludeDirs.append("/usr/include");
 }
 
-pub fn getSource(comp: *Compilation, id: Source.ID) Source {
+pub fn getSource(comp: *const Compilation, id: Source.ID) Source {
     if (id == .generated) return .{
         .path = "<scratch space>",
         .buffer = comp.generatedBuffer.items,
@@ -700,41 +700,68 @@ pub fn addSourceFromPath(comp: *Compilation, path: []const u8) !Source {
     return comp.addSourceFromReader(reader, path, size);
 }
 
-pub fn findInclude(comp: *Compilation, token: Token, filename: []const u8, searchWord: bool) !?Source {
-    var pathBuff: [std.fs.MAX_PATH_BYTES]u8 = undefined;
-    var fib = std.heap.FixedBufferAllocator.init(&pathBuff);
+pub const IncludeDirIterator = struct {
+    /// A reference to the Compilation instance.
+    comp: *const Compilation,
+    /// An optional Source.ID representing the current working directory's source.
+    cwdSourceID: ?Source.ID,
+    /// Index tracking the next include directory to iterate over.
+    includeDirsIndex: usize = 0,
+    /// Index tracking the next system include directory to iterate over.
+    sysIncludeDirsIndex: usize = 0,
+    /// nextWithFile will use this to hold the full path for its return value
+    /// not required if `nextWithFile` is not used
+    pathBuffer: []u8 = undefined,
 
-    if (searchWord) blk: {
-        const source = comp.getSource(token.source);
-        const path = if (std.fs.path.dirname(source.path)) |some|
-            std.fs.path.join(fib.allocator(), &.{ some, filename }) catch break :blk
-        else
-            std.fs.path.join(fib.allocator(), &.{ ".", filename }) catch break :blk;
-
-        if (comp.addSourceFromPath(path)) |some|
-            return some
-        else |err| switch (err) {
-            error.OutOfMemory => return error.OutOfMemory,
-            else => {},
+    /// Retrieves the next include directory path.
+    /// If a current working directory source ID is set, it returns its directory path
+    /// and clears the source ID. Then it iterates over the include directories and system
+    /// include directories of the Compilation instance until all are visited.
+    /// @return  The next directory path or null if there are no more directories.
+    fn next(self: *IncludeDirIterator) ?[]const u8 {
+        // If cwdSourceID is set, return the directory of the corresponding source and unset it.
+        if (self.cwdSourceID) |sourceID| {
+            self.cwdSourceID = null;
+            const path = self.comp.getSource(sourceID).path;
+            return std.fs.path.dirname(path) orelse ".";
         }
+
+        // Iterate over the include directories and return the next one if available.
+        while (self.includeDirsIndex < self.comp.includeDirs.items.len) {
+            defer self.includeDirsIndex += 1;
+            return self.comp.includeDirs.items[self.includeDirsIndex];
+        }
+
+        // Iterate over the system include directories and return the next one if available.
+        while (self.sysIncludeDirsIndex < self.comp.systemIncludeDirs.items.len) {
+            defer self.sysIncludeDirsIndex += 1;
+            return self.comp.systemIncludeDirs.items[self.sysIncludeDirsIndex];
+        }
+
+        // If no more directories are left, return null.
+        return null;
     }
 
-    for (comp.includeDirs.items) |dir| {
-        fib.end_index = 0;
-        const path = std.fs.path.join(fib.allocator(), &.{ dir, filename }) catch continue;
-
-        if (comp.addSourceFromPath(path)) |some|
-            return some
-        else |err| switch (err) {
-            error.OutOfMemory => return error.OutOfMemory,
-            else => {},
+    /// Return value is invalidated by subsequent calls to nextWithFile
+    fn nextWithFile(self: *IncludeDirIterator, filename: []const u8) ?[]const u8 {
+        var fib = std.heap.FixedBufferAllocator.init(self.pathBuffer);
+        while (self.next()) |dir| : (fib.end_index = 0) {
+            const path = std.fs.path.join(fib.allocator(), &.{ dir, filename }) catch continue;
+            return path;
         }
+        return null;
     }
+};
 
-    for (comp.systemIncludeDirs.items) |dir| {
-        fib.end_index = 0;
-        const path = std.fs.path.join(fib.allocator(), &.{ dir, filename }) catch continue;
+pub fn findInclude(comp: *Compilation, filename: []const u8, cwdSourceID: ?Source.ID) !?Source {
+    var pathBuffer: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+    var it = IncludeDirIterator{
+        .comp = comp,
+        .cwdSourceID = cwdSourceID,
+        .pathBuffer = &pathBuffer,
+    };
 
+    while (it.nextWithFile(filename)) |path| {
         if (comp.addSourceFromPath(path)) |some|
             return some
         else |err| switch (err) {
