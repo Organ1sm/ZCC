@@ -1357,7 +1357,7 @@ fn collectMacroFuncArguments(
             },
 
             .NewLine, .WhiteSpace => {
-                try curArgument.append(.{ .id = .MacroWS, .loc = .{ .id = .generated } });
+                try curArgument.append(.{ .id = .MacroWS, .loc = tok.loc });
             },
 
             else => {
