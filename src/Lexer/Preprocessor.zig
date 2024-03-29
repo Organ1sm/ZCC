@@ -1938,7 +1938,14 @@ fn findIncludeFilenameToken(pp: *Preprocessor, first: *RawToken, lexer: *Lexer) 
             }
         }
 
-        try pp.comp.diag.add(.{ .tag = .header_str_closing, .loc = .{ .id = first.source, .byteOffset = first.start } }, &.{});
+        try pp.comp.diag.add(.{
+            .tag = .header_str_closing,
+            .loc = .{
+                .id = first.source,
+                .byteOffset = lexer.index,
+                .line = first.line,
+            },
+        }, &.{});
         try pp.addError(first.*, .header_str_match);
     }
 
