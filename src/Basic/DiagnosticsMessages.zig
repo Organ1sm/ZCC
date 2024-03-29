@@ -171,6 +171,11 @@ pub const expected_token = struct {
     pub const extra = .tok_id;
     pub const kind = .@"error";
 };
+pub const missing_token_after = struct {
+    pub const msg = "missing '{s}' after '{s}'";
+    pub const extra = .tok_id;
+    pub const kind = .@"error";
+};
 pub const expected_expr = struct {
     pub const msg = "expected expression";
     pub const kind = .@"error";
@@ -1565,4 +1570,9 @@ pub const undefined_macro = struct {
     pub const extra = .str;
     pub const kind = .off;
     pub const opt = "undef";
+};
+pub const preprocessing_directive_only = struct {
+    pub const msg = "'{s}' must be used within a preprocessing directive";
+    pub const extra = .str;
+    pub const kind = .@"error";
 };

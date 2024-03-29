@@ -92,6 +92,7 @@ const BuiltinMacros = struct {
     const hasFeature = [1]RawToken{makeFeatCheckMacro(.MacroParamHasFeature)};
     const hasExtension = [1]RawToken{makeFeatCheckMacro(.MacroParamHasExtension)};
     const hasBuiltin = [1]RawToken{makeFeatCheckMacro(.MacroParamHasBuiltin)};
+    const hasInclude = [1]RawToken{makeFeatCheckMacro(.MacroParamHasInclude)};
     const isIdentifier = [1]RawToken{makeFeatCheckMacro(.MacroParamIsIdentifier)};
     const file = [1]RawToken{makeFeatCheckMacro(.MacroFile)};
     const line = [1]RawToken{makeFeatCheckMacro(.MacroLine)};
@@ -123,6 +124,7 @@ pub fn addBuiltinMacros(pp: *Preprocessor) !void {
     try pp.addBuiltinMacro("__has_feature", true, &BuiltinMacros.hasFeature);
     try pp.addBuiltinMacro("__has_extension", true, &BuiltinMacros.hasExtension);
     try pp.addBuiltinMacro("__has_builtin", true, &BuiltinMacros.hasBuiltin);
+    try pp.addBuiltinMacro("__has_include", true, &BuiltinMacros.hasInclude);
     try pp.addBuiltinMacro("__is_identifier", true, &BuiltinMacros.isIdentifier);
     try pp.addBuiltinMacro("_Pragma", true, &BuiltinMacros.pragmaOperator);
     try pp.addBuiltinMacro("__FILE__", false, &BuiltinMacros.file);
@@ -393,6 +395,15 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!Token {
             else => {
                 if (token.id.isMacroIdentifier() and pp.poisonedIdentifiers.get(pp.getTokenSlice(token)) != null)
                     try pp.addError(token, .poisoned_identifier);
+
+                // if (std.mem.eql(u8, lexer.buffer[token.start..token.end], "__has_include")) {
+                //     token.id.simplifyMacroKeyword();
+                //     try pp.comp.diag.add(.{
+                //         .tag = .preprocessing_directive_only,
+                //         .loc = .{.id = token.source, .byteOffset = token.start, .line = token.line},
+                //         .extra = .{ .str = lexer.buffer[token.start..token.end] },
+                //     }, &.{});
+                // }
 
                 // add the token to the buffer do any necessary expansions
                 startOfLine = false;
@@ -1009,6 +1020,50 @@ fn handleBuiltinMacro(
             return id == .Identifier or id == .ExtendedIdentifier;
         },
 
+        .MacroParamHasInclude => {
+            const charTop = pp.charBuffer.items.len;
+            defer pp.charBuffer.items.len = charTop;
+            var actualParams = if (paramTokens[0].id == .MacroWS) paramTokens[1..] else paramTokens;
+            if (actualParams.len > 0) {
+                actualParams = if (actualParams[actualParams.len - 1].id == .MacroWS) actualParams[0 .. actualParams.len - 1] else actualParams;
+            }
+            for (actualParams) |tok| {
+                const str = if (tok.id == .MacroWS) blk: {
+                    // preserve whitespace in case we have a path within < > that has multiple consecutive spaces
+                    var tmpLexer = Lexer{
+                        .buffer = pp.comp.getSource(tok.loc.id).buffer,
+                        .comp = pp.comp,
+                        .index = tok.loc.byteOffset,
+                        .source = .generated,
+                    };
+                    const res = tmpLexer.next();
+                    break :blk tmpLexer.buffer[res.start..res.end];
+                } else pp.expandedSlice(tok);
+                try pp.charBuffer.appendSlice(str);
+            }
+            const full = pp.charBuffer.items[charTop..];
+            if (full.len < 3) {
+                try pp.comp.diag.add(.{
+                    .tag = .empty_filename,
+                    .loc = actualParams[0].loc,
+                }, actualParams[0].expansionSlice());
+                return false;
+            }
+            const cwdSourceID = switch (full[0]) {
+                '<' => null,
+                '"' => actualParams[0].loc.id,
+                else => {
+                    try pp.comp.diag.add(.{
+                        .tag = .expected_filename,
+                        .loc = actualParams[0].loc,
+                    }, actualParams[0].expansionSlice());
+                    return false;
+                },
+            };
+            const filename = full[1 .. full.len - 1];
+            return pp.comp.hasInclude(filename, cwdSourceID);
+        },
+
         else => unreachable,
     }
 }
@@ -1105,8 +1160,9 @@ fn expandFuncMacro(
             .MacroParamHasWarning,
             .MacroParamHasFeature,
             .MacroParamHasExtension,
-            .MacroParamIsIdentifier,
             .MacroParamHasBuiltin,
+            .MacroParamHasInclude,
+            .MacroParamIsIdentifier,
             => {
                 const arg = expandedArgs.items[0];
                 const result = if (arg.len == 0) blk: {
@@ -1920,7 +1976,12 @@ fn pragma(
     }, pragmaNameToken.expansionSlice());
 }
 
-fn findIncludeFilenameToken(pp: *Preprocessor, first: *RawToken, lexer: *Lexer) !Token {
+fn findIncludeFilenameToken(
+    pp: *Preprocessor,
+    first: *RawToken,
+    lexer: *Lexer,
+    trailingTokenBehavior: enum { IgnoreTrailingTokens, expectNlEof },
+) !Token {
     const start = pp.tokens.len;
     defer pp.tokens.len = start;
 
@@ -1964,10 +2025,15 @@ fn findIncludeFilenameToken(pp: *Preprocessor, first: *RawToken, lexer: *Lexer) 
     }
 
     // error on the extra tokens.
-    const newLine = lexer.nextNoWhiteSpace();
-    if ((newLine.id != .NewLine and newLine.id != .Eof) or pp.tokens.len > start + 1) {
-        skipToNewLine(lexer);
-        try pp.addError(first.*, .extra_tokens_directive_end);
+    switch (trailingTokenBehavior) {
+        .expectNlEof => {
+            const newLine = lexer.nextNoWhiteSpace();
+            if ((newLine.id != .NewLine and newLine.id != .Eof) or pp.tokens.len > start + 1) {
+                skipToNewLine(lexer);
+                try pp.addError(first.*, .extra_tokens_directive_end);
+            }
+        },
+        .IgnoreTrailingTokens => {},
     }
 
     return filenameToken;
@@ -1975,7 +2041,7 @@ fn findIncludeFilenameToken(pp: *Preprocessor, first: *RawToken, lexer: *Lexer) 
 
 fn findIncludeSource(pp: *Preprocessor, lexer: *Lexer) !Source {
     var first = lexer.nextNoWhiteSpace();
-    const filenameToken = try pp.findIncludeFilenameToken(&first, lexer);
+    const filenameToken = try pp.findIncludeFilenameToken(&first, lexer, .expectNlEof);
 
     // check for empty filename
     const tkSlice = pp.expandedSlice(filenameToken);
@@ -1986,7 +2052,8 @@ fn findIncludeSource(pp: *Preprocessor, lexer: *Lexer) !Source {
 
     // find the file
     const filename = tkSlice[1 .. tkSlice.len - 1];
-    return (try pp.comp.findInclude(first, filename, filenameToken.id == .StringLiteral)) orelse
+    const cwdSourceID = if (filenameToken.id == .StringLiteral) first.source else null;
+    return (try pp.comp.findInclude(filename, cwdSourceID)) orelse
         pp.fatal(first, "'{s}' not found", .{filename});
 }
 
