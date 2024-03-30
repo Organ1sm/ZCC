@@ -1566,3 +1566,13 @@ pub const undefined_macro = struct {
     pub const kind = .off;
     pub const opt = "undef";
 };
+pub const preprocessing_directive_only = struct {
+    pub const msg = "'{s}' must be used within a preprocessing directive";
+    pub const extra = .str;
+    pub const kind = .@"error";
+};
+pub const missing_lparen_after_builtin = struct {
+    pub const msg = "Missing '(' after built-in macro '{s}'";
+    pub const extra = .str;
+    pub const kind = .@"error";
+};
