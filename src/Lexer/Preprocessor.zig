@@ -934,6 +934,14 @@ fn reconstructIncludeString(pp: *Preprocessor, paramTokens: []const Token) !?[]c
     while (end > begin and paramTokens[end - 1].id == .MacroWS) end -= 1;
     const params = paramTokens[begin..end];
 
+    if (params.len == 0) {
+        try pp.comp.diag.add(.{
+            .tag = .expected_filename,
+            .loc = paramTokens[0].loc,
+        }, paramTokens[0].expansionSlice());
+        return null;
+    }
+
     // no string pasting
     if (params[0].id == .StringLiteral and params.len > 1) {
         try pp.comp.diag.add(.{
