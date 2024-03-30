@@ -134,6 +134,11 @@ pub fn main() !void {
     var initialComp = zcc.Compilation.init(gpa);
     defer initialComp.deinit();
 
+    const casesIncludeDir = try std.fs.path.join(gpa, &.{ args[1], "include" });
+    defer gpa.free(casesIncludeDir);
+
+    try initialComp.includeDirs.append(casesIncludeDir);
+
     try initialComp.addDefaultPragmaHandlers();
     try initialComp.defineSystemIncludes();
 
@@ -152,6 +157,7 @@ pub fn main() !void {
     next_test: for (cases.items) |path| {
         var comp = initialComp;
         defer {
+            comp.includeDirs = @TypeOf(comp.includeDirs).init(gpa);
             comp.systemIncludeDirs = @TypeOf(comp.systemIncludeDirs).init(gpa);
             comp.pragmaHandlers = .{};
             comp.builtinHeaderPath = null;
