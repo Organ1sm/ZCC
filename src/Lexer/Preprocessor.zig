@@ -926,11 +926,13 @@ fn stringify(pp: *Preprocessor, tokens: []const Token) !void {
 fn reconstructIncludeString(pp: *Preprocessor, paramTokens: []const Token) !?[]const u8 {
     const charTop = pp.charBuffer.items.len;
     defer pp.charBuffer.items.len = charTop;
-    var params = paramTokens;
 
     // Trim leading/trailing whitespace
-    if (params[0].id == .MacroWS) params = params[1..];
-    if (params.len > 0 and params[params.len - 1].id == .MacroWS) params = params[0 .. params.len - 1];
+    var begin: usize = 0;
+    var end = paramTokens.len;
+    while (begin < end and paramTokens[begin].id == .MacroWS) begin += 1;
+    while (end > begin and paramTokens[end - 1].id == .MacroWS) end -= 1;
+    const params = paramTokens[begin..end];
 
     // no string pasting
     if (params[0].id == .StringLiteral and params.len > 1) {
