@@ -642,7 +642,7 @@ pub fn addSourceFromReader(comp: *Compilation, reader: anytype, path: []const u8
     };
 
     source.checkUtf8();
-    try comp.sources.put(path, source);
+    try comp.sources.put(dupedPath, source);
     return source;
 }
 
