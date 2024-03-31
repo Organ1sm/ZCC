@@ -1580,3 +1580,14 @@ pub const too_many_includes = struct {
     pub const msg = "#include nested too deeply";
     pub const kind = .@"error";
 };
+pub const include_next = struct {
+    pub const msg = "#include_next is a language extension";
+    pub const kind = .off;
+    pub const pedantic = true;
+    pub const opt = "gnu-include-next";
+};
+pub const include_next_outside_header = struct {
+    pub const msg = "#include_next in primary source file; will search from start of include path";
+    pub const kind = .warning;
+    pub const opt = "include-next-outside-header";
+};

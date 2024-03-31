@@ -769,22 +769,55 @@ pub fn hasInclude(comp: *const Compilation, filename: []const u8, cwdSourceID: ?
 }
 
 pub const WhichInclude = enum {
-    first,
-    next,
+    First,
+    Next,
+};
+
+pub const IncludeType = enum {
+    Quotes, // `"`
+    AngleBrackets, // `<`
 };
 
 pub fn findInclude(
     comp: *Compilation,
     filename: []const u8,
-    cwdSourceID: ?Source.ID,
-    _: WhichInclude,
+    includeTokenSource: Source.ID,
+    includeType: IncludeType,
+    which: WhichInclude,
 ) !?Source {
     var pathBuffer: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+
+    if (std.fs.path.isAbsolute(filename)) {
+        if (which == .Next) return null;
+        return if (comp.addSourceFromPath(filename)) |some|
+            return some
+        else |err| switch (err) {
+            error.OutOfMemory => return error.OutOfMemory,
+            else => null,
+        };
+    }
+
+    const cwdSourceID = switch (includeType) {
+        .Quotes => switch (which) {
+            .First => includeTokenSource,
+            .Next => null,
+        },
+        .AngleBrackets => null,
+    };
+
     var it = IncludeDirIterator{
         .comp = comp,
         .cwdSourceID = cwdSourceID,
         .pathBuffer = &pathBuffer,
     };
+
+    if (which == .Next) {
+        const path = comp.getSource(includeTokenSource).path;
+        const includePath = std.fs.path.dirname(path) orelse ".";
+        while (it.next()) |dir| {
+            if (std.mem.eql(u8, includePath, dir)) break;
+        }
+    }
 
     while (it.nextWithFile(filename)) |path| {
         if (comp.addSourceFromPath(path)) |some|

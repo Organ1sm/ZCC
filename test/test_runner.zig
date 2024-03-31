@@ -135,9 +135,14 @@ pub fn main() !void {
     defer initialComp.deinit();
 
     const casesIncludeDir = try std.fs.path.join(gpa, &.{ args[1], "include" });
-    defer gpa.free(casesIncludeDir);
+    const caseNextIncludeDir = try std.fs.path.join(gpa, &.{ args[1], "include", "next" });
+    defer {
+        gpa.free(casesIncludeDir);
+        gpa.free(caseNextIncludeDir);
+    }
 
     try initialComp.includeDirs.append(casesIncludeDir);
+    try initialComp.includeDirs.append(caseNextIncludeDir);
 
     try initialComp.addDefaultPragmaHandlers();
     try initialComp.defineSystemIncludes();

@@ -327,8 +327,22 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!Token {
                     },
 
                     .KeywordDefine => try pp.define(&lexer),
-                    .KeywordInclude => try pp.include(&lexer, .first),
-                    .KeywordIncludeNext => try pp.include(&lexer, .next),
+                    .KeywordInclude => try pp.include(&lexer, .First),
+                    .KeywordIncludeNext => {
+                        try pp.comp.diag.add(.{
+                            .tag = .include_next,
+                            .loc = .{ .id = token.source, .byteOffset = directive.start, .line = directive.line },
+                        }, &.{});
+                        if (pp.includeDepth == 0) {
+                            try pp.comp.diag.add(.{
+                                .tag = .include_next_outside_header,
+                                .loc = .{ .id = token.source, .byteOffset = directive.start, .line = directive.line },
+                            }, &.{});
+                            try pp.include(&lexer, .First);
+                        } else {
+                            try pp.include(&lexer, .Next);
+                        }
+                    },
                     .KeywordPragma => try pp.pragma(&lexer, directive, null, &.{}),
 
                     .KeywordLine => {
@@ -2109,8 +2123,12 @@ fn findIncludeSource(
 
     // find the file
     const filename = tkSlice[1 .. tkSlice.len - 1];
-    const cwdSourceID = if (filenameToken.id == .StringLiteral) first.source else null;
-    return (try pp.comp.findInclude(filename, cwdSourceID, which)) orelse
+    const includeType: Compilation.IncludeType = switch (filenameToken.id) {
+        .StringLiteral => .Quotes,
+        .MacroString => .AngleBrackets,
+        else => unreachable,
+    };
+    return (try pp.comp.findInclude(filename, first.source, includeType, which)) orelse
         pp.fatal(first, "'{s}' not found", .{filename});
 }
 
