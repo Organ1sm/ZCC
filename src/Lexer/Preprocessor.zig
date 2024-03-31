@@ -1943,15 +1943,21 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: RawToken, lParen: Raw
 }
 
 fn include(pp: *Preprocessor, lexer: *Lexer) MacroError!void {
-    const newSource = pp.findIncludeSource(lexer) catch |er| switch (er) {
+    const first = lexer.nextNoWhiteSpace();
+    const newSource = pp.findIncludeSource(first, lexer) catch |er| switch (er) {
         error.InvalidInclude => return,
         else => |e| return e,
     };
 
     pp.includeDepth += 1;
     defer pp.includeDepth -= 1;
-    if (pp.includeDepth > MaxIncludeDepth)
-        return;
+    if (pp.includeDepth > MaxIncludeDepth) {
+        try pp.comp.diag.add(.{
+            .tag = .too_many_includes,
+            .loc = .{ .id = first.source, .byteOffset = first.start, .line = first.line },
+        }, &.{});
+        return error.StopPreprocessing;
+    }
 
     _ = pp.preprocessExtra(newSource) catch |err| switch (err) {
         error.StopPreprocessing => {},
@@ -2085,8 +2091,7 @@ fn findIncludeFilenameToken(
     return filenameToken;
 }
 
-fn findIncludeSource(pp: *Preprocessor, lexer: *Lexer) !Source {
-    const first = lexer.nextNoWhiteSpace();
+fn findIncludeSource(pp: *Preprocessor, first: RawToken, lexer: *Lexer) !Source {
     const filenameToken = try pp.findIncludeFilenameToken(first, lexer, .expectNlEof);
 
     // check for empty filename

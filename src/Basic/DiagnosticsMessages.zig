@@ -1576,3 +1576,7 @@ pub const missing_lparen_after_builtin = struct {
     pub const extra = .str;
     pub const kind = .@"error";
 };
+pub const too_many_includes = struct {
+    pub const msg = "#include nested too deeply";
+    pub const kind = .@"error";
+};
