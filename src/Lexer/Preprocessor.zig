@@ -327,7 +327,8 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!Token {
                     },
 
                     .KeywordDefine => try pp.define(&lexer),
-                    .KeywordInclude => try pp.include(&lexer),
+                    .KeywordInclude => try pp.include(&lexer, .first),
+                    .KeywordIncludeNext => try pp.include(&lexer, .next),
                     .KeywordPragma => try pp.pragma(&lexer, directive, null, &.{}),
 
                     .KeywordLine => {
@@ -1942,9 +1943,9 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: RawToken, lParen: Raw
     });
 }
 
-fn include(pp: *Preprocessor, lexer: *Lexer) MacroError!void {
+fn include(pp: *Preprocessor, lexer: *Lexer, which: Compilation.WhichInclude) MacroError!void {
     const first = lexer.nextNoWhiteSpace();
-    const newSource = pp.findIncludeSource(first, lexer) catch |er| switch (er) {
+    const newSource = pp.findIncludeSource(lexer, first, which) catch |er| switch (er) {
         error.InvalidInclude => return,
         else => |e| return e,
     };
@@ -2091,7 +2092,12 @@ fn findIncludeFilenameToken(
     return filenameToken;
 }
 
-fn findIncludeSource(pp: *Preprocessor, first: RawToken, lexer: *Lexer) !Source {
+fn findIncludeSource(
+    pp: *Preprocessor,
+    lexer: *Lexer,
+    first: RawToken,
+    which: Compilation.WhichInclude,
+) !Source {
     const filenameToken = try pp.findIncludeFilenameToken(first, lexer, .expectNlEof);
 
     // check for empty filename
@@ -2104,7 +2110,7 @@ fn findIncludeSource(pp: *Preprocessor, first: RawToken, lexer: *Lexer) !Source 
     // find the file
     const filename = tkSlice[1 .. tkSlice.len - 1];
     const cwdSourceID = if (filenameToken.id == .StringLiteral) first.source else null;
-    return (try pp.comp.findInclude(filename, cwdSourceID)) orelse
+    return (try pp.comp.findInclude(filename, cwdSourceID, which)) orelse
         pp.fatal(first, "'{s}' not found", .{filename});
 }
 

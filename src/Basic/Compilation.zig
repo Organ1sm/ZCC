@@ -768,7 +768,17 @@ pub fn hasInclude(comp: *const Compilation, filename: []const u8, cwdSourceID: ?
     return false;
 }
 
-pub fn findInclude(comp: *Compilation, filename: []const u8, cwdSourceID: ?Source.ID) !?Source {
+pub const WhichInclude = enum {
+    first,
+    next,
+};
+
+pub fn findInclude(
+    comp: *Compilation,
+    filename: []const u8,
+    cwdSourceID: ?Source.ID,
+    _: WhichInclude,
+) !?Source {
     var pathBuffer: [std.fs.MAX_PATH_BYTES]u8 = undefined;
     var it = IncludeDirIterator{
         .comp = comp,
