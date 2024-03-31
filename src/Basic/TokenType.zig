@@ -228,6 +228,7 @@ pub const TokenType = enum(u8) {
 
     // Preprocessor directives
     KeywordInclude,
+    KeywordIncludeNext,
     KeywordDefine,
     KeywordDefined,
     KeywordUndef,
@@ -259,6 +260,7 @@ pub const TokenType = enum(u8) {
     pub fn isMacroIdentifier(id: TokenType) bool {
         return switch (id) {
             .KeywordInclude,
+            .KeywordIncludeNext,
             .KeywordDefine,
             .KeywordDefined,
             .KeywordIfdef,
@@ -358,6 +360,7 @@ pub const TokenType = enum(u8) {
     pub fn simplifyMacroKeyword(id: *TokenType) void {
         switch (id.*) {
             .KeywordInclude,
+            .KeywordIncludeNext,
             .KeywordDefine,
             .KeywordDefined,
             .KeywordUndef,
@@ -552,6 +555,7 @@ pub const TokenType = enum(u8) {
             .KeywordDeclSpec => "__declspec",
 
             .KeywordInclude => "include",
+            .KeywordIncludeNext => "include_next",
             .KeywordDefine => "define",
             .KeywordDefined => "defined",
             .KeywordUndef => "undef",
