@@ -1627,13 +1627,13 @@ fn parseTypeSpec(p: *Parser, ty: *TypeBuilder) Error!bool {
 
             .KeywordStruct => {
                 const tagToken = p.tokenIdx;
-                try ty.combine(p, .{ .Struct = try p.parseRecordSpecifier() }, tagToken);
+                try ty.combine(p, .{ .Struct = try p.parseRecordSpec() }, tagToken);
                 continue;
             },
 
             .KeywordUnion => {
                 const tagToken = p.tokenIdx;
-                try ty.combine(p, .{ .Union = try p.parseRecordSpecifier() }, tagToken);
+                try ty.combine(p, .{ .Union = try p.parseRecordSpec() }, tagToken);
                 continue;
             },
 
@@ -1681,7 +1681,7 @@ fn getAnonymousName(p: *Parser, kindToken: TokenIndex) ![]const u8 {
 /// StructOrUnion
 ///  : 'struct'
 ///  | 'union'
-fn parseRecordSpecifier(p: *Parser) Error!*Type.Record {
+fn parseRecordSpec(p: *Parser) Error!*Type.Record {
     const kindToken = p.tokenIdx;
     const isStruct = p.tokenIds[kindToken] == .KeywordStruct;
     p.tokenIdx += 1;
@@ -1737,13 +1737,17 @@ fn parseRecordSpecifier(p: *Parser) Error!*Type.Record {
         break :recordTy try Type.Record.create(p.arena, p.getTokenSlice(ident));
     } else try Type.Record.create(p.arena, try p.getAnonymousName(kindToken));
 
-    const ty = try p.withAttributes(.{
+    // Initially create ty as a regular non-attributed type, since attributes for a record
+    // can be specified after the closing rbrace, which we haven't encountered yet.
+    var ty = Type{
         .specifier = if (isStruct) .Struct else .Union,
         .data = .{ .record = recordType },
-    }, attrBufferTop);
+    };
 
     // declare a symbol for the type
+    var symbolIndex: ?usize = null; // We need to replace the symbol's type if it has attributes
     if (maybeIdent != null and !defined) {
+        symbolIndex = p.symStack.symbols.len;
         try p.symStack.appendSymbol(.{
             .kind = if (isStruct) .@"struct" else .@"union",
             .name = p.getTokenSlice(maybeIdent.?),
@@ -1796,6 +1800,15 @@ fn parseRecordSpecifier(p: *Parser) Error!*Type.Record {
 
     try p.expectClosing(lb, .RBrace);
     try p.parseAttrSpec(); // .record
+
+    ty = try p.withAttributes(.{
+        .specifier = if (isStruct) .Struct else .Union,
+        .data = .{ .record = recordType },
+    }, attrBufferTop);
+
+    if (ty.specifier == .Attributed and symbolIndex != null) {
+        p.symStack.symbols.items(.type)[symbolIndex.?] = ty;
+    }
 
     // finish by creating a node
     var node: AST.Node = .{

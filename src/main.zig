@@ -422,5 +422,4 @@ test "simple test" {
     _ = @import("Basic/Compilation.zig");
     _ = @import("AST/AST.zig");
     _ = @import("AST/Type.zig");
-    _ = @import("CodeGen/Codegen.zig");
 }
