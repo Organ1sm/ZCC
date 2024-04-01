@@ -763,7 +763,31 @@ pub const IncludeDirIterator = struct {
     }
 };
 
-pub fn hasInclude(comp: *const Compilation, filename: []const u8, cwdSourceID: ?Source.ID) bool {
+fn getCwdSourceID(includerTokenSource: Source.ID, includeType: IncludeType, which: WhichInclude) ?Source.ID {
+    return switch (includeType) {
+        .Quotes => switch (which) {
+            .First => includerTokenSource,
+            .Next => null,
+        },
+
+        .AngleBrackets => null,
+    };
+}
+
+pub fn hasInclude(
+    comp: *const Compilation,
+    filename: []const u8,
+    includerTokenSource: Source.ID, // include token belong to which source
+    includeType: IncludeType, // angle bracket or quotes
+    which: WhichInclude, // __has_include or __has_include_next
+) bool {
+    const cwd = std.fs.cwd();
+    if (std.fs.path.isAbsolute(filename)) {
+        if (which == .Next) return false;
+        return !std.meta.isError(cwd.access(filename, .{}));
+    }
+
+    const cwdSourceID = getCwdSourceID(includerTokenSource, includeType, which);
     var pathBuffer: [std.fs.MAX_PATH_BYTES]u8 = undefined;
     var it = IncludeDirIterator{
         .comp = comp,
@@ -771,7 +795,9 @@ pub fn hasInclude(comp: *const Compilation, filename: []const u8, cwdSourceID: ?
         .pathBuffer = &pathBuffer,
     };
 
-    const cwd = std.fs.cwd();
+    if (which == .Next)
+        it.skipUntilDirMatch(includerTokenSource);
+
     while (it.nextWithFile(filename)) |path| {
         if (!std.meta.isError(cwd.access(path, .{}))) return true;
     }
@@ -792,8 +818,8 @@ pub fn findInclude(
     comp: *Compilation,
     filename: []const u8,
     includeTokenSource: Source.ID, // include token belong to which source
-    includeType: IncludeType,
-    which: WhichInclude,
+    includeType: IncludeType, // angle bracket or quotes
+    which: WhichInclude, // include or include_next
 ) !?Source {
     var pathBuffer: [std.fs.MAX_PATH_BYTES]u8 = undefined;
 
@@ -807,14 +833,7 @@ pub fn findInclude(
         };
     }
 
-    const cwdSourceID = switch (includeType) {
-        .Quotes => switch (which) {
-            .First => includeTokenSource,
-            .Next => null,
-        },
-        .AngleBrackets => null,
-    };
-
+    const cwdSourceID = getCwdSourceID(includeTokenSource, includeType, which);
     var it = IncludeDirIterator{
         .comp = comp,
         .cwdSourceID = cwdSourceID,
