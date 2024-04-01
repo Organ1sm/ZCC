@@ -1700,7 +1700,8 @@ fn parseRecordSpecifier(p: *Parser) Error!*Type.Record {
 
         // check if this is a reference to a previous type
         if (try p.symStack.findTag(p.tokenIds[kindToken], ident)) |prev| {
-            return prev.type.data.record;
+            const recordTy = prev.type.get(.Struct) orelse prev.type.get(.Union) orelse return error.ParsingFailed;
+            return recordTy.data.record;
         } else {
             // this is a forward declaration, create a new record type.
             const recordType = try Type.Record.create(p.arena, p.getTokenSlice(ident));
