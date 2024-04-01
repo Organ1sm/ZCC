@@ -751,6 +751,16 @@ pub const IncludeDirIterator = struct {
         }
         return null;
     }
+
+    /// Advance the iterator until it finds an include directory that matches
+    /// the directory which contains `source`.
+    fn skipUntilDirMatch(self: *IncludeDirIterator, source: Source.ID) void {
+        const path = self.comp.getSource(source).path;
+        const includerPath = std.fs.path.dirname(path) orelse ".";
+        while (self.next()) |dir| {
+            if (std.mem.eql(u8, includerPath, dir)) break;
+        }
+    }
 };
 
 pub fn hasInclude(comp: *const Compilation, filename: []const u8, cwdSourceID: ?Source.ID) bool {
@@ -781,7 +791,7 @@ pub const IncludeType = enum {
 pub fn findInclude(
     comp: *Compilation,
     filename: []const u8,
-    includeTokenSource: Source.ID,
+    includeTokenSource: Source.ID, // include token belong to which source
     includeType: IncludeType,
     which: WhichInclude,
 ) !?Source {
@@ -811,13 +821,8 @@ pub fn findInclude(
         .pathBuffer = &pathBuffer,
     };
 
-    if (which == .Next) {
-        const path = comp.getSource(includeTokenSource).path;
-        const includePath = std.fs.path.dirname(path) orelse ".";
-        while (it.next()) |dir| {
-            if (std.mem.eql(u8, includePath, dir)) break;
-        }
-    }
+    if (which == .Next)
+        it.skipUntilDirMatch(includeTokenSource);
 
     while (it.nextWithFile(filename)) |path| {
         if (comp.addSourceFromPath(path)) |some|
