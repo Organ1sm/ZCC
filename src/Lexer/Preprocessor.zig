@@ -93,6 +93,7 @@ const BuiltinMacros = struct {
     const hasExtension = [1]RawToken{makeFeatCheckMacro(.MacroParamHasExtension)};
     const hasBuiltin = [1]RawToken{makeFeatCheckMacro(.MacroParamHasBuiltin)};
     const hasInclude = [1]RawToken{makeFeatCheckMacro(.MacroParamHasInclude)};
+    const hasIncludeNext = [1]RawToken{makeFeatCheckMacro(.MacroParamHasIncludeNext)};
     const isIdentifier = [1]RawToken{makeFeatCheckMacro(.MacroParamIsIdentifier)};
     const file = [1]RawToken{makeFeatCheckMacro(.MacroFile)};
     const line = [1]RawToken{makeFeatCheckMacro(.MacroLine)};
@@ -125,6 +126,7 @@ pub fn addBuiltinMacros(pp: *Preprocessor) !void {
     try pp.addBuiltinMacro("__has_extension", true, &BuiltinMacros.hasExtension);
     try pp.addBuiltinMacro("__has_builtin", true, &BuiltinMacros.hasBuiltin);
     try pp.addBuiltinMacro("__has_include", true, &BuiltinMacros.hasInclude);
+    try pp.addBuiltinMacro("__has_include_next", true, &BuiltinMacros.hasIncludeNext);
     try pp.addBuiltinMacro("__is_identifier", true, &BuiltinMacros.isIdentifier);
     try pp.addBuiltinMacro("_Pragma", true, &BuiltinMacros.pragmaOperator);
     try pp.addBuiltinMacro("__FILE__", false, &BuiltinMacros.file);
@@ -1108,15 +1110,25 @@ fn handleBuiltinMacro(
             return id == .Identifier or id == .ExtendedIdentifier;
         },
 
-        .MacroParamHasInclude => {
+        .MacroParamHasInclude, .MacroParamHasIncludeNext => {
             const includeStr = (try pp.reconstructIncludeString(paramTokens)) orelse return false;
-            const cwdSourceID = switch (includeStr[0]) {
-                '<' => null,
-                '"' => paramTokens[0].loc.id,
+            const includeType: Compilation.IncludeType = switch (includeStr[0]) {
+                '"' => .Quotes,
+                '<' => .AngleBrackets,
                 else => unreachable,
             };
             const filename = includeStr[1 .. includeStr.len - 1];
-            return pp.comp.hasInclude(filename, cwdSourceID);
+
+            if (builtin == .MacroParamHasInclude or pp.includeDepth == 0) {
+                if (builtin == .MacroParamHasIncludeNext) {
+                    try pp.comp.diag.add(.{
+                        .tag = .include_next_outside_header,
+                        .loc = srcLoc,
+                    }, &.{});
+                }
+                return pp.comp.hasInclude(filename, srcLoc.id, includeType, .First);
+            }
+            return pp.comp.hasInclude(filename, srcLoc.id, includeType, .Next);
         },
 
         else => unreachable,
@@ -1217,6 +1229,7 @@ fn expandFuncMacro(
             .MacroParamHasExtension,
             .MacroParamHasBuiltin,
             .MacroParamHasInclude,
+            .MacroParamHasIncludeNext,
             .MacroParamIsIdentifier,
             => {
                 const arg = expandedArgs.items[0];

@@ -125,6 +125,8 @@ pub const TokenType = enum(u8) {
     MacroParamHasBuiltin,
     /// Special token for implementing __has_include
     MacroParamHasInclude,
+    /// Special token for implementing __has_include_next
+    MacroParamHasIncludeNext,
     /// Special token for implementing __is_identifier
     MacroParamIsIdentifier,
     /// Special token for implementing __FILE__
@@ -418,6 +420,7 @@ pub const TokenType = enum(u8) {
             .MacroParamHasExtension,
             .MacroParamHasBuiltin,
             .MacroParamHasInclude,
+            .MacroParamHasIncludeNext,
             .MacroParamIsIdentifier,
             .MacroFile,
             .MacroLine,
