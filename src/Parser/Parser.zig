@@ -3036,7 +3036,7 @@ fn coerceArrayInit(p: *Parser, item: *Result, token: TokenIndex, target: Type) !
         return false;
 
     const isStrLiteral = p.nodeIs(item.node, .StringLiteralExpr);
-    if (!isStrLiteral and !p.nodeIs(item.node, .CompoundLiteralExpr)) {
+    if (!isStrLiteral and !p.nodeIs(item.node, .CompoundLiteralExpr) or !item.ty.isArray()) {
         try p.errToken(.array_init_str, token);
         return true; // do not do further coercion
     }
