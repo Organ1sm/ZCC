@@ -764,6 +764,10 @@ pub const IncludeDirIterator = struct {
 };
 
 pub fn hasInclude(comp: *const Compilation, filename: []const u8, cwdSourceID: ?Source.ID) bool {
+    const cwd = std.fs.cwd();
+    if (std.fs.path.isAbsolute(filename)) 
+        return !std.meta.isError(cwd.access(filename, .{}));
+
     var pathBuffer: [std.fs.MAX_PATH_BYTES]u8 = undefined;
     var it = IncludeDirIterator{
         .comp = comp,
@@ -771,7 +775,6 @@ pub fn hasInclude(comp: *const Compilation, filename: []const u8, cwdSourceID: ?
         .pathBuffer = &pathBuffer,
     };
 
-    const cwd = std.fs.cwd();
     while (it.nextWithFile(filename)) |path| {
         if (!std.meta.isError(cwd.access(path, .{}))) return true;
     }
