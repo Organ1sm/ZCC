@@ -2026,7 +2026,7 @@ fn parseEnumSpec(p: *Parser) Error!*Type.Enum {
 
         // check if this is a reference to a previous type
         if (try p.symStack.findTag(.KeywordEnum, ident)) |prev| {
-            return prev.type.data.@"enum";
+            return prev.type.get(.Enum).?.data.@"enum";
         } else {
             // this is a forward declaration, create a new enum type
             const enumType = try Type.Enum.create(p.arena, p.getTokenSlice(ident));
