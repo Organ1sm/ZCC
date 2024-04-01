@@ -15,7 +15,6 @@ _Static_assert(HAS_INCLUDE_NEXT_WORKED == 1, "HAS_INCLUDE_NEXT_WORKED");
 #endif
 _Static_assert(TOP_LEVEL_INCLUDE_NEXT == 1, "TOP_LEVEL_INCLUDE_NEXT");
 
-HAS_INCLUDE_NEXT_WORKED
 
 #define EXPECTED_ERRORS \
 	"my-include.h:3:2: warning: #include_next is a language extension [-Wgnu-include-next]" \
