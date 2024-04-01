@@ -2121,16 +2121,19 @@ const Enumerator = struct {
     res: Result,
 
     fn init(p: *Parser) Enumerator {
+        // Enumerator value is captured after increment in p.enumerator(), and we want the first enumeration constant
+        // to have a value of 0
+        const initialValue = Value.int(@as(i64, -1));
         return .{ .res = .{
             .ty = .{ .specifier = if (p.pp.comp.langOpts.shortEnums) .SChar else .Int },
-            .value = Value.int(0),
+            .value = initialValue,
         } };
     }
 
     /// Increment enumerator value adjusting type if needed.
     fn incr(e: *Enumerator, p: *Parser) !void {
         e.res.node = .none;
-        _ = e.res.value.add(e.res.value, Value.int(0), e.res.ty, p.pp.comp);
+        _ = e.res.value.add(e.res.value, Value.int(1), e.res.ty, p.pp.comp);
         // TODO adjust type if value does not fit current
     }
 
@@ -2173,7 +2176,7 @@ fn enumerator(p: *Parser, e: *Enumerator) Error!?EnumFieldAndNode {
     var res = e.res;
     res.ty = try p.withAttributes(res.ty, attrBufferTop);
 
-    try p.symStack.defineEnumeration(res.ty, nameToken);
+    try p.symStack.defineEnumeration(res.ty, nameToken, e.res.value);
     const node = try p.addNode(.{
         .tag = .EnumFieldDecl,
         .type = res.ty,
@@ -5623,7 +5626,7 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
                     }
                 }
                 return Result{
-                    .value = if (p.constDeclFolding == .NoConstDeclFolding) Value{} else sym.value,
+                    .value = if (p.constDeclFolding == .NoConstDeclFolding and sym.kind != .enumeration) Value{} else sym.value,
                     .ty = sym.type,
                     .node = try p.addNode(.{
                         .tag = if (sym.kind == .enumeration) .EnumerationRef else .DeclRefExpr,

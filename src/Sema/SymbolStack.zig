@@ -373,6 +373,7 @@ pub fn defineEnumeration(
     self: *SymbolStack,
     ty: Type,
     token: TokenIndex,
+    value: Value,
 ) !void {
     const name = self.p.getTokenSlice(token);
     const kinds = self.symbols.items(.kind);
@@ -400,6 +401,6 @@ pub fn defineEnumeration(
         .name = name,
         .token = token,
         .type = ty,
-        .value = .{},
+        .value = value,
     });
 }
