@@ -133,6 +133,9 @@ pub const Options = packed struct {
     @"float-conversion": Kind = .default,
     @"gnu-folding-constant": Kind = .default,
     undef: Kind = .default,
+    @"gnu-include-next": Kind = .default,
+    @"include-next-outside-header": Kind = .default,
+    @"include-next-absolute-path": Kind = .default,
 };
 
 list: std.ArrayListUnmanaged(Message) = .{},

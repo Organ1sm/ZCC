@@ -327,7 +327,22 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!Token {
                     },
 
                     .KeywordDefine => try pp.define(&lexer),
-                    .KeywordInclude => try pp.include(&lexer),
+                    .KeywordInclude => try pp.include(&lexer, .First),
+                    .KeywordIncludeNext => {
+                        try pp.comp.diag.add(.{
+                            .tag = .include_next,
+                            .loc = .{ .id = token.source, .byteOffset = directive.start, .line = directive.line },
+                        }, &.{});
+                        if (pp.includeDepth == 0) {
+                            try pp.comp.diag.add(.{
+                                .tag = .include_next_outside_header,
+                                .loc = .{ .id = token.source, .byteOffset = directive.start, .line = directive.line },
+                            }, &.{});
+                            try pp.include(&lexer, .First);
+                        } else {
+                            try pp.include(&lexer, .Next);
+                        }
+                    },
                     .KeywordPragma => try pp.pragma(&lexer, directive, null, &.{}),
 
                     .KeywordLine => {
@@ -1942,16 +1957,22 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: RawToken, lParen: Raw
     });
 }
 
-fn include(pp: *Preprocessor, lexer: *Lexer) MacroError!void {
-    const newSource = pp.findIncludeSource(lexer) catch |er| switch (er) {
+fn include(pp: *Preprocessor, lexer: *Lexer, which: Compilation.WhichInclude) MacroError!void {
+    const first = lexer.nextNoWhiteSpace();
+    const newSource = pp.findIncludeSource(lexer, first, which) catch |er| switch (er) {
         error.InvalidInclude => return,
         else => |e| return e,
     };
 
     pp.includeDepth += 1;
     defer pp.includeDepth -= 1;
-    if (pp.includeDepth > MaxIncludeDepth)
-        return;
+    if (pp.includeDepth > MaxIncludeDepth) {
+        try pp.comp.diag.add(.{
+            .tag = .too_many_includes,
+            .loc = .{ .id = first.source, .byteOffset = first.start, .line = first.line },
+        }, &.{});
+        return error.StopPreprocessing;
+    }
 
     _ = pp.preprocessExtra(newSource) catch |err| switch (err) {
         error.StopPreprocessing => {},
@@ -2085,8 +2106,12 @@ fn findIncludeFilenameToken(
     return filenameToken;
 }
 
-fn findIncludeSource(pp: *Preprocessor, lexer: *Lexer) !Source {
-    const first = lexer.nextNoWhiteSpace();
+fn findIncludeSource(
+    pp: *Preprocessor,
+    lexer: *Lexer,
+    first: RawToken,
+    which: Compilation.WhichInclude,
+) !Source {
     const filenameToken = try pp.findIncludeFilenameToken(first, lexer, .expectNlEof);
 
     // check for empty filename
@@ -2098,8 +2123,12 @@ fn findIncludeSource(pp: *Preprocessor, lexer: *Lexer) !Source {
 
     // find the file
     const filename = tkSlice[1 .. tkSlice.len - 1];
-    const cwdSourceID = if (filenameToken.id == .StringLiteral) first.source else null;
-    return (try pp.comp.findInclude(filename, cwdSourceID)) orelse
+    const includeType: Compilation.IncludeType = switch (filenameToken.id) {
+        .StringLiteral => .Quotes,
+        .MacroString => .AngleBrackets,
+        else => unreachable,
+    };
+    return (try pp.comp.findInclude(filename, first.source, includeType, which)) orelse
         pp.fatal(first, "'{s}' not found", .{filename});
 }
 

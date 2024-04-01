@@ -1181,6 +1181,7 @@ test "keywords" {
 test "preprocessor directives" {
     try expectTokens(
         \\#include
+        \\#include_next
         \\#define
         \\#ifdef
         \\#ifndef
@@ -1188,12 +1189,13 @@ test "preprocessor directives" {
         \\#pragma
         \\
     , &.{
-        .Hash, .KeywordInclude, .NewLine,
-        .Hash, .KeywordDefine,  .NewLine,
-        .Hash, .KeywordIfdef,   .NewLine,
-        .Hash, .KeywordIfndef,  .NewLine,
-        .Hash, .KeywordError,   .NewLine,
-        .Hash, .KeywordPragma,  .NewLine,
+        .Hash, .KeywordInclude,     .NewLine,
+        .Hash, .KeywordIncludeNext, .NewLine,
+        .Hash, .KeywordDefine,      .NewLine,
+        .Hash, .KeywordIfdef,       .NewLine,
+        .Hash, .KeywordIfndef,      .NewLine,
+        .Hash, .KeywordError,       .NewLine,
+        .Hash, .KeywordPragma,      .NewLine,
     });
 }
 

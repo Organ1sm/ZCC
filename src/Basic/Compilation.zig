@@ -751,6 +751,16 @@ pub const IncludeDirIterator = struct {
         }
         return null;
     }
+
+    /// Advance the iterator until it finds an include directory that matches
+    /// the directory which contains `source`.
+    fn skipUntilDirMatch(self: *IncludeDirIterator, source: Source.ID) void {
+        const path = self.comp.getSource(source).path;
+        const includerPath = std.fs.path.dirname(path) orelse ".";
+        while (self.next()) |dir| {
+            if (std.mem.eql(u8, includerPath, dir)) break;
+        }
+    }
 };
 
 pub fn hasInclude(comp: *const Compilation, filename: []const u8, cwdSourceID: ?Source.ID) bool {
@@ -768,13 +778,51 @@ pub fn hasInclude(comp: *const Compilation, filename: []const u8, cwdSourceID: ?
     return false;
 }
 
-pub fn findInclude(comp: *Compilation, filename: []const u8, cwdSourceID: ?Source.ID) !?Source {
+pub const WhichInclude = enum {
+    First,
+    Next,
+};
+
+pub const IncludeType = enum {
+    Quotes, // `"`
+    AngleBrackets, // `<`
+};
+
+pub fn findInclude(
+    comp: *Compilation,
+    filename: []const u8,
+    includeTokenSource: Source.ID, // include token belong to which source
+    includeType: IncludeType,
+    which: WhichInclude,
+) !?Source {
     var pathBuffer: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+
+    if (std.fs.path.isAbsolute(filename)) {
+        if (which == .Next) return null;
+        return if (comp.addSourceFromPath(filename)) |some|
+            return some
+        else |err| switch (err) {
+            error.OutOfMemory => return error.OutOfMemory,
+            else => null,
+        };
+    }
+
+    const cwdSourceID = switch (includeType) {
+        .Quotes => switch (which) {
+            .First => includeTokenSource,
+            .Next => null,
+        },
+        .AngleBrackets => null,
+    };
+
     var it = IncludeDirIterator{
         .comp = comp,
         .cwdSourceID = cwdSourceID,
         .pathBuffer = &pathBuffer,
     };
+
+    if (which == .Next)
+        it.skipUntilDirMatch(includeTokenSource);
 
     while (it.nextWithFile(filename)) |path| {
         if (comp.addSourceFromPath(path)) |some|
