@@ -142,6 +142,40 @@ pub const Specifier = union(enum) {
 
 pub fn finish(b: @This(), p: *Parser, attrBufferStart: usize) Parser.Error!Type {
     var ty = Type{ .specifier = undefined };
+    if (b.typedef) |typedef| {
+        ty = typedef.type;
+        if (ty.isArray()) {
+            var elem = ty.getElemType();
+            try b.qual.finish(p, &elem);
+            // TODO this really should be easier
+            switch (ty.specifier) {
+                .Array, .StaticArray, .IncompleteArray => {
+                    const old = ty.data.array;
+                    ty.data.array = try p.arena.create(Type.Array);
+                    ty.data.array.* = .{
+                        .len = old.len,
+                        .elem = elem,
+                    };
+                },
+                .VariableLenArray, .UnspecifiedVariableLenArray => {
+                    const old = ty.data.expr;
+                    ty.data.expr = try p.arena.create(Type.Expr);
+                    ty.data.expr.* = .{
+                        .node = old.node,
+                        .ty = elem,
+                    };
+                },
+                .TypeofExpr => {}, // TODO handle
+                .TypeofType => {}, // TODO handle
+                .Attributed => {}, // TODO handle
+                else => unreachable,
+            }
+
+            return p.withAttributes(ty, attrBufferStart);
+        }
+        try b.qual.finish(p, &ty);
+        return p.withAttributes(ty, attrBufferStart);
+    }
     switch (b.specifier) {
         Specifier.None => {
             if (b.typeof) |typeof| {
