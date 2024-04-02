@@ -1591,3 +1591,18 @@ pub const include_next_outside_header = struct {
     pub const kind = .warning;
     pub const opt = "include-next-outside-header";
 };
+pub const offsetof_ty = struct {
+    pub const msg = "offsetof requires struct or union type, '{s}' invalid";
+    pub const extra = .str;
+    pub const kind = .@"error";
+};
+pub const offsetof_incomplete = struct {
+    pub const msg = "offsetof of incomplete type '{s}'";
+    pub const extra = .str;
+    pub const kind = .@"error";
+};
+pub const offsetof_array = struct {
+    pub const msg = "offsetof requires array type, '{s}' invalid";
+    pub const extra = .str;
+    pub const kind = .@"error";
+};
