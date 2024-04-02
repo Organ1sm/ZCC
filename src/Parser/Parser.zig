@@ -1625,15 +1625,10 @@ fn parseTypeSpec(p: *Parser, ty: *TypeBuilder) Error!bool {
                 continue;
             },
 
-            .KeywordStruct => {
+            .KeywordStruct, .KeywordUnion => {
                 const tagToken = p.tokenIdx;
-                try ty.combine(p, .{ .Struct = try p.parseRecordSpec() }, tagToken);
-                continue;
-            },
-
-            .KeywordUnion => {
-                const tagToken = p.tokenIdx;
-                try ty.combine(p, .{ .Union = try p.parseRecordSpec() }, tagToken);
+                const recordTy = try p.parseRecordSpec();
+                try ty.combine(p, TypeBuilder.fromType(recordTy), tagToken);
                 continue;
             },
 
@@ -1681,7 +1676,7 @@ fn getAnonymousName(p: *Parser, kindToken: TokenIndex) ![]const u8 {
 /// StructOrUnion
 ///  : 'struct'
 ///  | 'union'
-fn parseRecordSpec(p: *Parser) Error!*Type.Record {
+fn parseRecordSpec(p: *Parser) Error!Type {
     const kindToken = p.tokenIdx;
     const isStruct = p.tokenIds[kindToken] == .KeywordStruct;
     p.tokenIdx += 1;
@@ -1700,8 +1695,7 @@ fn parseRecordSpec(p: *Parser) Error!*Type.Record {
 
         // check if this is a reference to a previous type
         if (try p.symStack.findTag(p.tokenIds[kindToken], ident)) |prev| {
-            const recordTy = prev.type.get(.Struct) orelse prev.type.get(.Union) orelse return error.ParsingFailed;
-            return recordTy.data.record;
+            return prev.type;
         } else {
             // this is a forward declaration, create a new record type.
             const recordType = try Type.Record.create(p.arena, p.getTokenSlice(ident));
@@ -1717,7 +1711,7 @@ fn parseRecordSpec(p: *Parser) Error!*Type.Record {
                 .type = ty,
                 .value = .{},
             });
-            return recordType;
+            return ty;
         }
     };
 
@@ -1828,7 +1822,7 @@ fn parseRecordSpec(p: *Parser) Error!*Type.Record {
     }
 
     p.declBuffer.items[declBufferTop - 1] = try p.addNode(node);
-    return recordType;
+    return ty;
 }
 
 /// record-declarations
