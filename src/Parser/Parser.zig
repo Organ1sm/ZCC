@@ -875,11 +875,16 @@ fn parseDeclaration(p: *Parser) Error!bool {
                 }
 
                 while (true) {
+                    const attrBufferTopDeclarator = p.attrBuffer.len;
+                    defer p.attrBuffer.len = attrBufferTopDeclarator;
+
                     var d = (try p.declarator(paramDeclSpec.type, .normal)) orelse {
                         try p.errToken(.missing_declaration, firstTokenIndex);
                         _ = try p.expectToken(.Semicolon);
                         continue :paramLoop;
                     };
+
+                    try p.parseAttrSpec();
 
                     if (d.type.hasIncompleteSize() and !d.type.is(.Void))
                         try p.errStr(.parameter_incomplete_ty, d.name, try p.typeStr(d.type));
@@ -909,6 +914,8 @@ fn parseDeclaration(p: *Parser) Error!bool {
                     } else {
                         try p.errStr(.parameter_missing, d.name, name);
                     }
+
+                    d.type = try p.withAttributes(d.type, attrBufferTop);
 
                     // bypass redefinition check to avoid duplicate errors
                     try p.symStack.appendSymbol(.{
@@ -984,9 +991,6 @@ fn parseDeclaration(p: *Parser) Error!bool {
             try p.errToken(.invalid_old_style_params, tokenIdx);
 
         const tag = try declSpec.validate(p, &ID.d.type, ID.initializer.node != .none);
-        // const attrs = p.attrBuffer.items(.attr)[attrBufferTop..];
-        // ID.d.type = try ID.d.type.withAttributes(p.arena, attrs);
-
         const node = try p.addNode(.{
             .type = ID.d.type,
             .tag = tag,
@@ -1478,9 +1482,16 @@ const InitDeclarator = struct { d: Declarator, initializer: Result = .{} };
 
 /// init-declarator : declarator assembly? attribute-specifier? ('=' initializer)?
 fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec) Error!?InitDeclarator {
+    const attrBufferTop = p.attrBuffer.len;
+    defer p.attrBuffer.len = attrBufferTop;
+
     var ID = InitDeclarator{ .d = (try p.declarator(declSpec.type, .normal)) orelse return null };
+
+    try p.parseAttrSpec(); //if (ID.d.type.isFunc()) .function else .variable
     _ = try p.parseAssembly(.declLable);
     try p.parseAttrSpec(); //if (ID.d.type.isFunc()) .function else .variable
+
+    ID.d.type = try p.withAttributes(ID.d.type, attrBufferTop);
 
     if (p.eat(.Equal)) |eq| init: {
         if (declSpec.storageClass == .typedef or ID.d.funcDeclarator != null)
@@ -1876,9 +1887,6 @@ fn parseRecordDeclarator(p: *Parser) Error!bool {
             ty = d.type;
         }
 
-        try p.parseAttrSpec(); // .record
-        ty = try p.withAttributes(ty, attrBuffTop);
-
         if (p.eat(.Colon)) |_| bits: {
             const bitsToken = p.tokenIdx;
             const res = try p.parseConstExpr(.GNUFoldingExtension);
@@ -1910,6 +1918,9 @@ fn parseRecordDeclarator(p: *Parser) Error!bool {
             bits = res.value.getInt(u32);
             bitsNode = res.node;
         }
+
+        try p.parseAttrSpec(); // .record
+        ty = try p.withAttributes(ty, attrBuffTop);
 
         if (nameToken == 0 and bitsNode == .none) unnamed: {
             // don't allow incompelete size fields in anonymous record.
@@ -2279,16 +2290,12 @@ fn declarator(p: *Parser, baseType: Type, kind: DeclaratorKind) Error!?Declarato
     const start = p.tokenIdx;
     var d = Declarator{ .name = 0, .type = try p.parsePointer(baseType) };
 
-    const attrBufferTop = p.attrBuffer.len;
-    defer p.attrBuffer.len = attrBufferTop;
-
     const maybeIdent = p.tokenIdx;
     if (kind != .abstract and (try p.eatIdentifier()) != null) {
         d.name = maybeIdent;
         const combineToken = p.tokenIdx;
         d.type = try p.directDeclarator(d.type, &d, kind);
         try d.type.validateCombinedType(p, combineToken);
-        d.type = try p.withAttributes(d.type, attrBufferTop);
         return d;
     } else if (p.eat(.LParen)) |lp| blk: {
         var res = (try p.declarator(.{ .specifier = .Void }, kind)) orelse {
@@ -2313,8 +2320,6 @@ fn declarator(p: *Parser, baseType: Type, kind: DeclaratorKind) Error!?Declarato
         try p.errToken(.expected_ident_or_l_paren, expectedIdent);
         return error.ParsingFailed;
     }
-
-    d.type = try p.withAttributes(d.type, attrBufferTop);
 
     if (start == p.tokenIdx)
         return null;
@@ -2349,8 +2354,19 @@ fn declarator(p: *Parser, baseType: Type, kind: DeclaratorKind) Error!?Declarato
 ///  | '[' '*' ']'
 ///  | '(' param-decls? ')'
 fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: DeclaratorKind) Error!Type {
-    try p.parseAttrSpec();
     if (p.eat(.LBracket)) |lb| {
+        if (p.getCurrToken() == .LBracket) {
+            switch (kind) {
+                .normal, .record => if (p.pp.comp.langOpts.standard.atLeast(.c2x)) {
+                    p.tokenIdx -= 1;
+                    return baseType;
+                },
+                .param, .abstract => {},
+            }
+            try p.err(.expected_expr);
+            return error.ParsingFailed;
+        }
+
         var resType = Type{ .specifier = .Pointer };
         var qualsBuilder = Type.Qualifiers.Builder{};
         var gotQuals = try p.parseTypeQual(&qualsBuilder);
