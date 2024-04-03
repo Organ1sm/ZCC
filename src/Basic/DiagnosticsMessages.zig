@@ -1645,3 +1645,8 @@ pub const pragma_pack_empty_stack = struct {
     pub const opt = "ignored-pragmas";
     pub const kind = .warning;
 };
+pub const cond_expr_type = struct {
+    pub const msg = "used type '{s}' where arithmetic or pointer type is required";
+    pub const extra = .str;
+    pub const kind = .@"error";
+};
