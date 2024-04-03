@@ -424,7 +424,11 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
             }
         },
 
-        .CondExpr, .IfThenElseStmt, .BuiltinChooseExpr => {
+        .BinaryCondExpr,
+        .CondExpr,
+        .IfThenElseStmt,
+        .BuiltinChooseExpr,
+        => {
             try w.writeByteNTimes(' ', level + half);
             try w.writeAll("cond:\n");
             try tree.dumpNode(data.if3.cond, level + delta, w);
@@ -703,7 +707,6 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
         },
 
         .CommaExpr,
-        .BinaryCondExpr,
         .AssignExpr,
         .MulAssignExpr,
         .DivAssignExpr,
@@ -881,6 +884,6 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
             util.setColor(.reset, w);
         },
 
-        .DefaultInitExpr => {},
+        .DefaultInitExpr, .CondDummyExpr => {},
     }
 }

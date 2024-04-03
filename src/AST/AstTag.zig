@@ -118,8 +118,10 @@ pub const Tag = enum(u8) {
     // ====== Expr ======
     /// lhs , rhs
     CommaExpr,
-    /// lhs ?: rhs
+    /// lhs ? data[0] : data[1]
     BinaryCondExpr,
+    /// Used as the base for casts of the lhs in `BinaryCondExpr`.
+    CondDummyExpr,
     /// lhs ? data[0] : data[1]
     CondExpr,
     /// lhs = rhs
@@ -348,6 +350,7 @@ pub const Tag = enum(u8) {
             .NullToPointer,
             .ArrayFillerExpr,
             .DefaultInitExpr,
+            .CondDummyExpr,
             => true,
 
             else => false,
