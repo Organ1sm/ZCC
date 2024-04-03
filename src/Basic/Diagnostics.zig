@@ -392,7 +392,7 @@ pub fn renderExtra(comp: *Compilation, m: anytype) void {
 
 fn tagKind(diag: *Diagnostics, tag: Tag) Kind {
     // XXX: horrible hack, do not do this
-    const comp = @fieldParentPtr(Compilation, "diag", diag);
+    const comp: *Compilation = @fieldParentPtr( "diag", diag);
 
     var kind: Kind = undefined;
     inline for (std.meta.fields(Tag)) |field| {

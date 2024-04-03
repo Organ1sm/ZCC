@@ -29,7 +29,7 @@ pub fn RegisterManager(
         const ShiftInt = math.Log2Int(FreeRegInt);
 
         fn getFunction(self: *Self) *Function {
-            return @fieldParentPtr(Function, "register_manager", self);
+            return @fieldParentPtr("register_manager", self);
         }
 
         fn markRegUsed(self: *Self, reg: Register) void {
@@ -79,7 +79,7 @@ pub fn RegisterManager(
             comptime assert(count > 0 and count <= calleePreservedRegs.len);
             assert(count + exceptions.len <= calleePreservedRegs.len);
 
-            const freeRegisters = @popCount( self.freeRegisters);
+            const freeRegisters = @popCount(self.freeRegisters);
             if (freeRegisters < count) return null;
 
             var regs: [count]Register = undefined;
