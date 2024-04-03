@@ -224,6 +224,7 @@ pub const TokenType = enum(u8) {
     // gcc builtins
     BuiltinChooseExpr,
     BuiltinVaArg,
+    BuiltinOffsetof,
 
     // MS extension
     KeywordDeclSpec,
@@ -338,6 +339,7 @@ pub const TokenType = enum(u8) {
             .KeywordGccExtension,
             .BuiltinChooseExpr,
             .BuiltinVaArg,
+            .BuiltinOffsetof,
             .KeywordAttribute1,
             .KeywordAttribute2,
             .Identifier,
@@ -575,6 +577,7 @@ pub const TokenType = enum(u8) {
             .KeywordTypeof2 => "__typeof__",
             .BuiltinChooseExpr => "__builtin_choose_expr",
             .BuiltinVaArg => "__builtin_va_arg",
+            .BuiltinOffsetof => "__builtin_offsetof",
             .KeywordAttribute1 => "__attribute",
             .KeywordAttribute2 => "__attribute__",
         };
@@ -589,6 +592,7 @@ pub const TokenType = enum(u8) {
             .MacroPrettyFunc,
             .BuiltinChooseExpr,
             .BuiltinVaArg,
+            .BuiltinOffsetof,
             => "an identifier",
 
             .StringLiteral,

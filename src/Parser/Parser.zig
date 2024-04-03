@@ -4733,6 +4733,7 @@ fn removeUnusedWarningForTok(p: *Parser, lastExprToken: TokenIndex) void {
 ///  | '(' typeName ')' '{' initializerItems '}'
 ///  | __builtin_choose_expr '(' const-expression ',' assign-expression ',' assign-expression ')'
 ///  | __builtin_va_arg '('  assign-expression ',' typeName ')'
+///  | __builtin_offsetof '('  Type Name ',' offsetofMemberDesignator ')'
 ///  | unary-expression
 fn parseCastExpr(p: *Parser) Error!Result {
     if (p.eat(.LParen)) |lp| castExpr: {
@@ -4834,6 +4835,7 @@ fn parseCastExpr(p: *Parser) Error!Result {
     switch (p.getCurrToken()) {
         .BuiltinChooseExpr => return p.parseBuiltinChooseExpr(),
         .BuiltinVaArg => return p.builtinVaArg(),
+        .BuiltinOffsetof => return p.builtinOffsetof(),
         // TODO: other special-cased builtins
         else => {},
     }
@@ -4907,6 +4909,105 @@ fn builtinVaArg(p: *Parser) Error!Result {
         .type = ty,
         .data = .{ .decl = .{ .name = builtinToken, .node = vaList.node } },
     }) };
+}
+
+fn builtinOffsetof(p: *Parser) Error!Result {
+    const builtinToken = p.tokenIdx;
+    p.tokenIdx += 1;
+
+    const lparen = try p.expectToken(.LParen);
+    const tyToken = p.tokenIdx;
+
+    const ty = (try p.parseTypeName()) orelse {
+        try p.err(.expected_type);
+        p.skipTo(.RParen);
+        return error.ParsingFailed;
+    };
+
+    if (!ty.isRecord()) {
+        try p.errStr(.offsetof_ty, tyToken, try p.typeStr(ty));
+        p.skipTo(.RParen);
+        return error.ParsingFailed;
+    } else if (ty.hasIncompleteSize()) {
+        try p.errStr(.offsetof_incomplete, tyToken, try p.typeStr(ty));
+        p.skipTo(.RParen);
+        return error.ParsingFailed;
+    }
+
+    _ = try p.expectToken(.Comma);
+
+    const offsetofExpr = try p.offsetofMemberDesignator(ty);
+
+    try p.expectClosing(lparen, .RParen);
+
+    return Result{
+        .ty = p.pp.comp.types.size,
+        .value = if (offsetofExpr.value.tag == .int)
+            Value.int(offsetofExpr.value.data.int / 8)
+        else
+            offsetofExpr.value,
+
+        .node = try p.addNode(.{
+            .tag = .BuiltinCallExprOne,
+            .type = p.pp.comp.types.size,
+            .data = .{ .decl = .{ .name = builtinToken, .node = offsetofExpr.node } },
+        }),
+    };
+}
+
+/// offsetofMemberDesignator: Identifier ('.' Identifier | '[' expr ']' )*
+fn offsetofMemberDesignator(p: *Parser, baseType: Type) Error!Result {
+    errdefer p.skipTo(.RParen);
+    const baseFieldNameToken = try p.expectIdentifier();
+    const baseFieldName = p.getTokenSlice(baseFieldNameToken);
+
+    try p.validateFieldAccess(baseType, baseType, baseFieldNameToken, baseFieldName);
+
+    const baseNode = try p.addNode(.{ .tag = .DefaultInitExpr, .type = baseType, .data = undefined });
+    const bitOffset = Value.int(0);
+    var lhs = try p.fieldAccessExtra(baseNode, baseType, baseFieldName, false);
+
+    while (true) switch (p.getCurrToken()) {
+        .Period => {
+            p.tokenIdx += 1;
+            const fieldNameToken = try p.expectIdentifier();
+            const fieldName = p.getTokenSlice(fieldNameToken);
+
+            if (!lhs.ty.isRecord()) {
+                try p.errStr(.offsetof_ty, fieldNameToken, try p.typeStr(lhs.ty));
+                return error.ParsingFailed;
+            }
+            try p.validateFieldAccess(lhs.ty, lhs.ty, fieldNameToken, fieldName);
+            lhs = try p.fieldAccessExtra(lhs.node, lhs.ty, fieldName, false);
+        },
+        .LBracket => {
+            const lbracketToken = p.tokenIdx;
+            p.tokenIdx += 1;
+            var index = try p.parseExpr();
+            try index.expect(p);
+            _ = try p.expectClosing(lbracketToken, .RBracket);
+
+            if (!lhs.ty.isArray()) {
+                try p.errStr(.offsetof_array, lbracketToken, try p.typeStr(lhs.ty));
+                return error.ParsingFailed;
+            }
+
+            var ptr = lhs;
+            try ptr.lvalConversion(p);
+            try index.lvalConversion(p);
+
+            if (!index.ty.isInt())
+                try p.errToken(.invalid_index, lbracketToken);
+            try p.checkArrayBounds(index, lhs.ty, lbracketToken);
+
+            try index.saveValue(p);
+            try ptr.bin(p, .ArrayAccessExpr, index);
+            lhs = ptr;
+        },
+        else => break,
+    };
+
+    return Result{ .ty = baseType, .value = bitOffset, .node = lhs.node };
 }
 
 /// unaryExpr
@@ -5344,19 +5445,29 @@ fn fieldAccess(
     if (!isArrow and isPtr) try p.errStr(.member_expr_ptr, fieldNameToken, try p.typeStr(exprType));
 
     const fieldName = p.getTokenSlice(fieldNameToken);
-    if (!recordType.hasField(fieldName)) {
-        p.strings.items.len = 0;
-
-        try p.strings.writer().print("'{s}' in '", .{fieldName});
-        try exprType.print(p.strings.writer());
-        try p.strings.append('\'');
-
-        const duped = try p.pp.comp.diag.arena.allocator().dupe(u8, p.strings.items);
-        try p.errStr(.no_such_member, fieldNameToken, duped);
-        return error.ParsingFailed;
-    }
-
+    try p.validateFieldAccess(recordType, exprType, fieldNameToken, fieldName);
     return p.fieldAccessExtra(lhs.node, recordType, fieldName, isArrow);
+}
+
+fn validateFieldAccess(
+    p: *Parser,
+    recordType: Type,
+    exprType: Type,
+    fieldNameToken: TokenIndex,
+    fieldName: []const u8,
+) Error!void {
+    if (recordType.hasField(fieldName))
+        return;
+
+    p.strings.items.len = 0;
+
+    try p.strings.writer().print("'{s}' in '", .{fieldName});
+    try exprType.print(p.strings.writer());
+    try p.strings.append('\'');
+
+    const duped = try p.pp.comp.diag.arena.allocator().dupe(u8, p.strings.items);
+    try p.errStr(.no_such_member, fieldNameToken, duped);
+    return error.ParsingFailed;
 }
 
 /// This function handles extra field access for a given record type.
