@@ -124,6 +124,8 @@ record: struct {
 recordMembers: std.ArrayListUnmanaged(struct { token: TokenIndex, name: []const u8 }) = .{},
 @"switch": ?*Switch = null,
 inLoop: bool = false,
+/// #pragma pack value
+pragmaPack: u8 = 8,
 
 const Label = union(enum) {
     unresolvedGoto: TokenIndex,

@@ -869,15 +869,20 @@ pub fn addDefaultPragmaHandlers(comp: *Compilation) Allocator.Error!void {
     const Message = @import("../Lexer/Pragmas/message.zig");
     var message = try Message.init(comp.gpa);
 
+    const Pack = @import("../Lexer/Pragmas/pack.zig");
+    var pack = try Pack.init(comp.gpa);
+
     errdefer {
         gcc.deinit(gcc, comp);
         once.deinit(once, comp);
         message.deinit(message, comp);
+        pack.deinit(pack, comp);
     }
 
     try comp.addPragmaHandler("GCC", gcc);
     try comp.addPragmaHandler("once", once);
     try comp.addPragmaHandler("message", message);
+    try comp.addPragmaHandler("pack", pack);
 }
 
 pub fn getPragma(comp: *Compilation, name: []const u8) ?*Pragma {

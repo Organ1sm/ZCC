@@ -136,6 +136,7 @@ pub const Options = packed struct {
     @"gnu-include-next": Kind = .default,
     @"include-next-outside-header": Kind = .default,
     @"include-next-absolute-path": Kind = .default,
+    @"ignored-pragmas": Kind = .default,
 };
 
 list: std.ArrayListUnmanaged(Message) = .{},

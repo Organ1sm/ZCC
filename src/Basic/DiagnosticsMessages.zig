@@ -1606,3 +1606,42 @@ pub const offsetof_array = struct {
     pub const extra = .str;
     pub const kind = .@"error";
 };
+pub const pragma_pack_lparen = struct {
+    pub const msg = "missing '(' after '#pragma pack' - ignoring";
+    pub const kind = .warning;
+    pub const opt = "ignored-pragmas";
+};
+pub const pragma_pack_rparen = struct {
+    pub const msg = "missing ')' after '#pragma pack' - ignoring";
+    pub const kind = .warning;
+    pub const opt = "ignored-pragmas";
+};
+pub const pragma_pack_unknown_action = struct {
+    pub const msg = "unknown action for '#pragma pack' - ignoring";
+    pub const opt = "ignored-pragmas";
+    pub const kind = .warning;
+};
+pub const pragma_pack_show = struct {
+    pub const msg = "value of #pragma pack(show) == {d}";
+    pub const extra = .unsigned;
+    pub const kind = .warning;
+};
+pub const pragma_pack_int = struct {
+    pub const msg = "expected #pragma pack parameter to be '1', '2', '4', '8', or '16'";
+    pub const opt = "ignored-pragmas";
+    pub const kind = .warning;
+};
+pub const pragma_pack_int_ident = struct {
+    pub const msg = "expected integer or identifier in '#pragma pack' - ignored";
+    pub const opt = "ignored-pragmas";
+    pub const kind = .warning;
+};
+pub const pragma_pack_undefined_pop = struct {
+    pub const msg = "specifying both a name and alignment to 'pop' is undefined";
+    pub const kind = .warning;
+};
+pub const pragma_pack_empty_stack = struct {
+    pub const msg = "#pragma pack(pop, ...) failed: stack empty";
+    pub const opt = "ignored-pragmas";
+    pub const kind = .warning;
+};
