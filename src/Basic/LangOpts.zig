@@ -91,6 +91,7 @@ shortEnums: bool = false,
 dollarsInIdentifiers: bool = true,
 /// This field indicates whether ms extension declaration specifiers and attributes are enabled.
 declSpecAttrs: bool = false,
+msExtensions: bool = false,
 
 pub fn setStandard(self: *LangOpts, name: []const u8) error{InvalidStandard}!void {
     self.standard = Standard.NameMap.get(name) orelse return error.InvalidStandard;
@@ -98,8 +99,10 @@ pub fn setStandard(self: *LangOpts, name: []const u8) error{InvalidStandard}!voi
 
 pub fn enableMSExtensions(self: *LangOpts) void {
     self.declSpecAttrs = true;
+    self.msExtensions = true;
 }
 
 pub fn disableMSExtensions(self: *LangOpts) void {
     self.declSpecAttrs = false;
+    self.msExtensions = true;
 }

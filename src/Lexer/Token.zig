@@ -39,6 +39,7 @@ pub const Token = struct {
             .KeywordRestrict => if (standard.atLeast(.c99)) kw else .Identifier,
             .KeywordGccTypeof => if (standard.isGNU()) kw else .Identifier,
             .KeywordGccAsm => if (standard.isGNU()) kw else .Identifier,
+            .KeywordDeclSpec => if (comp.langOpts.msExtensions) kw else .Identifier,
             else => kw,
         };
     }
