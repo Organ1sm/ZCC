@@ -647,6 +647,17 @@ fn expr(pp: *Preprocessor, lexer: *Lexer) MacroError!bool {
                     .extra = .{ .str = pp.expandedSlice(token) },
                 }, token.expansionSlice());
 
+                if (i + 1 < pp.topExpansionBuffer.items.len and
+                    pp.topExpansionBuffer.items[i + 1].id == .LParen)
+                {
+                    try pp.comp.diag.add(.{
+                        .tag = .fn_macro_undefined,
+                        .loc = token.loc,
+                        .extra = .{ .str = pp.expandedSlice(token) },
+                    }, token.expansionSlice());
+                    return false;
+                }
+
                 token.id = .Zero; // undefined macro
             },
         }

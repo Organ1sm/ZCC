@@ -1566,6 +1566,11 @@ pub const undefined_macro = struct {
     pub const kind = .off;
     pub const opt = "undef";
 };
+pub const fn_macro_undefined = struct {
+    pub const msg = "function-like macro '{s}' is not defined";
+    pub const extra = .str;
+    pub const kind = .@"error";
+};
 pub const preprocessing_directive_only = struct {
     pub const msg = "'{s}' must be used within a preprocessing directive";
     pub const extra = .str;
