@@ -36,18 +36,18 @@ const Directive = enum {
 };
 
 fn beforePreprocess(pragma: *Pragma, comp: *Compilation) void {
-    var self = @fieldParentPtr(GCC, "pragma", pragma);
+    var self: *GCC = @fieldParentPtr("pragma", pragma);
     self.originalOptions = comp.diag.options;
 }
 
 fn beforeParse(pragma: *Pragma, comp: *Compilation) void {
-    const self = @fieldParentPtr(GCC, "pragma", pragma);
+    var self: *GCC = @fieldParentPtr("pragma", pragma);
     comp.diag.options = self.originalOptions;
     self.optionsStack.items.len = 0;
 }
 
 fn afterParse(pragma: *Pragma, comp: *Compilation) void {
-    const self = @fieldParentPtr(GCC, "pragma", pragma);
+    var self: *GCC = @fieldParentPtr("pragma", pragma);
     comp.diag.options = self.originalOptions;
     self.optionsStack.items.len = 0;
 }
@@ -59,7 +59,7 @@ pub fn init(allocator: std.mem.Allocator) !*Pragma {
 }
 
 pub fn deinit(pragma: *Pragma, comp: *Compilation) void {
-    const self = @fieldParentPtr(GCC, "pragma", pragma);
+    const self: *GCC = @fieldParentPtr("pragma", pragma);
     self.optionsStack.deinit(comp.gpa);
     comp.gpa.destroy(self);
 }
@@ -108,7 +108,7 @@ fn diagnosticHandler(self: *GCC, pp: *Preprocessor, startIdx: TokenIndex) Pragma
 }
 
 fn preprocessorHandler(pragma: *Pragma, pp: *Preprocessor, startIdx: TokenIndex) Pragma.Error!void {
-    var self = @fieldParentPtr(GCC, "pragma", pragma);
+    var self: *GCC = @fieldParentPtr("pragma", pragma);
     const directiveToken = pp.tokens.get(startIdx + 1);
     if (directiveToken.id == .NewLine)
         return;
@@ -177,7 +177,7 @@ fn preprocessorHandler(pragma: *Pragma, pp: *Preprocessor, startIdx: TokenIndex)
 }
 
 fn parserHandler(pragma: *Pragma, p: *Parser, startIdx: TokenIndex) Compilation.Error!void {
-    var self = @fieldParentPtr(GCC, "pragma", pragma);
+    var self: *GCC = @fieldParentPtr("pragma", pragma);
     const directiveToken = p.pp.tokens.get(startIdx + 1);
     if (directiveToken.id == .NewLine)
         return;

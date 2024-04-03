@@ -26,18 +26,18 @@ pub fn init(allocator: std.mem.Allocator) !*Pragma {
 }
 
 fn afterParse(pragma: *Pragma, _: *Compilation) void {
-    var self = @fieldParentPtr(Once, "pragma", pragma);
+    var self: *Once = @fieldParentPtr("pragma", pragma);
     self.pragmaOnce.clearRetainingCapacity();
 }
 
 pub fn deinit(pragma: *Pragma, comp: *Compilation) void {
-    var self = @fieldParentPtr(Once, "pragma", pragma);
+    var self: *Once = @fieldParentPtr("pragma", pragma);
     self.pragmaOnce.deinit();
     comp.gpa.destroy(self);
 }
 
 fn preprocessorHandler(pragma: *Pragma, pp: *Preprocessor, startIdx: TokenIndex) Pragma.Error!void {
-    var self = @fieldParentPtr(Once, "pragma", pragma);
+    var self: *Once = @fieldParentPtr("pragma", pragma);
     const nameToken = pp.tokens.get(startIdx);
     const next = pp.tokens.get(startIdx + 1);
     if (next.id != .NewLine) {
