@@ -1414,12 +1414,7 @@ fn c23Attribute(p: *Parser) !bool {
 }
 
 fn msvcAttribute(p: *Parser) !bool {
-    const declspecTok = p.eat(.KeywordDeclSpec) orelse return false;
-    if (!p.pp.comp.langOpts.declSpecAttrs) {
-        try p.errToken(.declspec_not_enabled, declspecTok);
-        return error.ParsingFailed;
-    }
-
+    _ = p.eat(.KeywordDeclSpec) orelse return false;
     const lparen = try p.expectToken(.LParen);
     try p.parseMSVCAttrList();
     _ = try p.expectClosing(lparen, .RParen);
@@ -1646,6 +1641,15 @@ fn parseTypeSpec(p: *Parser, ty: *TypeBuilder) Error!bool {
             },
 
             .Identifier, .ExtendedIdentifier => {
+                if (std.mem.eql(u8, p.getTokenSlice(p.tokenIdx), "__declspec")) {
+                    try p.errToken(.declspec_not_enabled, p.tokenIdx);
+                    p.tokenIdx += 1;
+
+                    if (p.eat(.LParen)) |_| {
+                        p.skipTo(.RParen);
+                        continue;
+                    }
+                }
                 if (ty.typedef != null)
                     break;
                 const typedef = (try p.symStack.findTypedef(p.tokenIdx, ty.specifier != .None)) orelse break;
