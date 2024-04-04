@@ -219,14 +219,19 @@ pub const Specifier = enum {
     ULong,
     LongLong,
     ULongLong,
+    Int128,
+    UInt128,
 
     // floating point numbers
+    FP16,
     Float,
     Double,
     LongDouble,
     ComplexFloat,
     ComplexDouble,
     ComplexLongDouble,
+    Float80,
+    Float128,
 
     // data.SubType
     Pointer,
@@ -358,6 +363,8 @@ pub fn isInt(ty: Type) bool {
         .ULong,
         .LongLong,
         .ULongLong,
+        .Int128,
+        .UInt128,
         => true,
 
         .TypeofType => ty.data.subType.isInt(),
@@ -376,6 +383,9 @@ pub fn isFloat(ty: Type) bool {
         .ComplexFloat,
         .ComplexDouble,
         .ComplexLongDouble,
+        .FP16,
+        .Float80,
+        .Float128,
         => true,
 
         .TypeofType => ty.data.subType.isFloat(),
@@ -632,6 +642,8 @@ pub fn integerPromotion(ty: Type, comp: *Compilation) Type {
             .ULong => .ULong,
             .LongLong => .LongLong,
             .ULongLong => .ULongLong,
+            .Int128 => .Int128,
+            .UInt128 => .UInt128,
 
             .TypeofType => return ty.data.subType.integerPromotion(comp),
             .TypeofExpr => return ty.data.expr.ty.integerPromotion(comp),
@@ -789,7 +801,9 @@ pub fn sizeof(ty: Type, comp: *const Compilation) ?u64 {
         .Short, .UShort => 2,
         .Int, .UInt => 4,
 
-        .Long, .ULong, .LongLong, .ULongLong => switch (comp.target.os.tag) {
+        .Long,
+        .ULong,
+        => switch (comp.target.os.tag) {
             .linux,
             .macos,
             .freebsd,
@@ -801,16 +815,21 @@ pub fn sizeof(ty: Type, comp: *const Compilation) ?u64 {
             => comp.target.ptrBitWidth() >> 3,
 
             .windows, .uefi => 4,
-
             else => 4,
         },
 
+        .LongLong, .ULongLong => 8,
+        .Int128, .UInt128 => 16,
+
+        .FP16 => 2,
         .Float => 4,
         .Double => 8,
         .LongDouble => 16,
         .ComplexFloat => 8,
         .ComplexDouble => 16,
         .ComplexLongDouble => 32,
+        .Float80 => 16,
+        .Float128 => 16,
 
         .Pointer,
         .StaticArray,
@@ -1008,6 +1027,7 @@ pub fn decayArray(ty: *Type) void {
     ty.specifier = @as(Type.Specifier, @enumFromInt(@intFromEnum(ty.specifier) + 1));
 }
 
+/// Combines types recursively in the order they were parsed, uses `.void` specifier as a sentinel value.
 pub fn combine(inner: *Type, outer: Type, p: *Parser, sourceToken: TokenIndex) Parser.Error!void {
     switch (inner.specifier) {
         .Pointer => return inner.data.subType.combine(outer, p, sourceToken),
@@ -1036,7 +1056,8 @@ pub fn combine(inner: *Type, outer: Type, p: *Parser, sourceToken: TokenIndex) P
         .DecayedTypeofExpr,
         => unreachable,
 
-        else => inner.* = outer,
+        .Void => inner.* = outer,
+        else => unreachable,
     }
 }
 
