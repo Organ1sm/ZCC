@@ -220,6 +220,12 @@ pub const TokenType = enum(u8) {
     KeywordGccAsm,
     KeywordGccAsm1,
     KeywordGccAsm2,
+    KeywordFloat80,
+    KeywordFloat128,
+    KeywordInt128,
+
+    // clang keywords
+    KeywordFp16,
 
     // gcc builtins
     BuiltinChooseExpr,
@@ -228,6 +234,14 @@ pub const TokenType = enum(u8) {
 
     // MS extension
     KeywordDeclSpec,
+    KeywordMSInt64_,
+    KeywordMSInt64__,
+    KeywordMSInt32_,
+    KeywordMSInt32__,
+    KeywordMSInt16_,
+    KeywordMSInt16__,
+    KeywordMSInt8_,
+    KeywordMSInt8__,
 
     // Preprocessor directives
     KeywordInclude,
@@ -347,7 +361,19 @@ pub const TokenType = enum(u8) {
             .KeywordGccAsm,
             .KeywordGccAsm1,
             .KeywordGccAsm2,
+            .KeywordFloat80,
+            .KeywordFloat128,
+            .KeywordInt128,
+            .KeywordFp16,
             .KeywordDeclSpec,
+            .KeywordMSInt64_,
+            .KeywordMSInt64__,
+            .KeywordMSInt32_,
+            .KeywordMSInt32__,
+            .KeywordMSInt16_,
+            .KeywordMSInt16__,
+            .KeywordMSInt8_,
+            .KeywordMSInt8__,
             => return true,
             else => false,
         };
@@ -557,6 +583,18 @@ pub const TokenType = enum(u8) {
             .KeywordGccAsm => "asm",
             .KeywordGccAsm1 => "__asm",
             .KeywordGccAsm2 => "__asm__",
+            .KeywordFloat80 => "__float80",
+            .KeywordFloat128 => "__float128",
+            .KeywordInt128 => "__int128",
+            .KeywordFp16 => "__fp16",
+            .KeywordMSInt64_ => "_int64",
+            .KeywordMSInt64__ => "__int64",
+            .KeywordMSInt32_ => "_int32",
+            .KeywordMSInt32__ => "__int32",
+            .KeywordMSInt16_ => "_int16",
+            .KeywordMSInt16__ => "__int16",
+            .KeywordMSInt8_ => "_int8",
+            .KeywordMSInt8__ => "__int8",
             .KeywordDeclSpec => "__declspec",
 
             .KeywordInclude => "include",

@@ -40,6 +40,15 @@ pub const Token = struct {
             .KeywordGccTypeof => if (standard.isGNU()) kw else .Identifier,
             .KeywordGccAsm => if (standard.isGNU()) kw else .Identifier,
             .KeywordDeclSpec => if (comp.langOpts.msExtensions) kw else .Identifier,
+            .KeywordMSInt64_,
+            .KeywordMSInt64__,
+            .KeywordMSInt32_,
+            .KeywordMSInt32__,
+            .KeywordMSInt16_,
+            .KeywordMSInt16__,
+            .KeywordMSInt8_,
+            .KeywordMSInt8__,
+            => if (comp.langOpts.msExtensions) kw else .Identifier,
             else => kw,
         };
     }
@@ -141,9 +150,23 @@ pub const Token = struct {
         .{ "__asm__", .KeywordGccAsm2 },
         .{ "__attribute", .KeywordAttribute1 },
         .{ "__attribute__", .KeywordAttribute2 },
+        .{ "__float80", .KeywordFloat80 },
+        .{ "__float128", .KeywordFloat128 },
+        .{ "__int128", .KeywordInt128 },
+
+        // clang keywords
+        .{ "__fp16", .KeywordFp16 },
 
         // MS keywords
         .{ "__declspec", .KeywordDeclSpec },
+        .{ "_int64", .KeywordMSInt64_ },
+        .{ "__int64", .KeywordMSInt64__ },
+        .{ "_int32", .KeywordMSInt32_ },
+        .{ "__int32", .KeywordMSInt32__ },
+        .{ "_int16", .KeywordMSInt16_ },
+        .{ "__int16", .KeywordMSInt16__ },
+        .{ "_int8", .KeywordMSInt8_ },
+        .{ "__int8", .KeywordMSInt8__ },
 
         // gcc builtins
         .{ "__builtin_choose_expr", .BuiltinChooseExpr },

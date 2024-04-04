@@ -601,6 +601,16 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
 
     _ = try p.addNode(.{ .tag = .Invalid, .type = undefined, .data = undefined });
     {
+        try p.symStack.defineTypedef("__int128_t", .{ .specifier = .Int128 }, 0, .none);
+        try p.symStack.defineTypedef("__uint128_t", .{ .specifier = .UInt128 }, 0, .none);
+
+        const elemTy = try p.arena.create(Type);
+        elemTy.* = .{ .specifier = .Char };
+        try p.symStack.defineTypedef("__builtin_ms_va_list", .{
+            .specifier = .Pointer,
+            .data = .{ .subType = elemTy },
+        }, 0, .none);
+
         const ty = &pp.comp.types.vaList;
         try p.symStack.defineTypedef("__builtin_va_list", ty.*, 0, .none);
         if (ty.isArray())
@@ -1591,15 +1601,20 @@ fn parseTypeSpec(p: *Parser, ty: *TypeBuilder) Error!bool {
         switch (p.getCurrToken()) {
             .KeywordVoid => try ty.combine(p, .Void, p.tokenIdx),
             .KeywordBool => try ty.combine(p, .Bool, p.tokenIdx),
-            .KeywordChar => try ty.combine(p, .Char, p.tokenIdx),
-            .KeywordShort => try ty.combine(p, .Short, p.tokenIdx),
-            .KeywordInt => try ty.combine(p, .Int, p.tokenIdx),
+            .KeywordMSInt8_, .KeywordMSInt8__, .KeywordChar => try ty.combine(p, .Char, p.tokenIdx),
+            .KeywordMSInt16_, .KeywordMSInt16__, .KeywordShort => try ty.combine(p, .Short, p.tokenIdx),
+            .KeywordMSInt32_, .KeywordMSInt32__, .KeywordInt => try ty.combine(p, .Int, p.tokenIdx),
             .KeywordLong => try ty.combine(p, .Long, p.tokenIdx),
+            .KeywordMSInt64_, .KeywordMSInt64__ => try ty.combine(p, .LongLong, p.tokenIdx),
+            .KeywordInt128 => try ty.combine(p, .Int128, p.tokenIdx),
             .KeywordSigned => try ty.combine(p, .Signed, p.tokenIdx),
             .KeywordUnsigned => try ty.combine(p, .Unsigned, p.tokenIdx),
+            .KeywordFp16 => try ty.combine(p, .FP16, p.tokenIdx),
             .KeywordFloat => try ty.combine(p, .Float, p.tokenIdx),
             .KeywordDouble => try ty.combine(p, .Double, p.tokenIdx),
             .KeywordComplex => try ty.combine(p, .Complex, p.tokenIdx),
+            .KeywordFloat80 => try ty.combine(p, .Float80, p.tokenIdx),
+            .KeywordFloat128 => try ty.combine(p, .Float128, p.tokenIdx),
 
             .KeywordAtomic => {
                 const atomicToken = p.tokenIdx;
