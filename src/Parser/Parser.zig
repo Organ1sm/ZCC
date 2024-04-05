@@ -2215,6 +2215,22 @@ fn enumerator(p: *Parser, e: *Enumerator) Error!?EnumFieldAndNode {
     var res = e.res;
     res.ty = try p.withAttributes(res.ty, attrBufferTop);
 
+    if (e.res.value.compare(.lt, Value.int(0), e.res.ty, p.pp.comp)) {
+        const value = e.res.value.getInt(i64);
+        if (value < p.pp.comp.minInt()) {
+            try p.errExtra(.enumerator_too_small, nameToken, .{
+                .signed = value,
+            });
+        }
+    } else {
+        const value = e.res.value.getInt(u64);
+        if (value > p.pp.comp.maxInt()) {
+            try p.errExtra(.enumerator_too_large, nameToken, .{
+                .unsigned = value,
+            });
+        }
+    }
+
     try p.symStack.defineEnumeration(res.ty, nameToken, e.res.value);
     const node = try p.addNode(.{
         .tag = .EnumFieldDecl,
