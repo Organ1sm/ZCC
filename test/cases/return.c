@@ -35,11 +35,43 @@ void baz(void) {
     return 1;
 }
 
+int *return_func(void)(void) {
+    return 0;
+}
+
 char return_char(void) {
     return 1;
 }
 short return_short(void) {
     return 2;
+}
+
+int func1(int arg) {
+    switch (arg) {
+    case 1:
+        return 1;
+    case 2:
+        return 2;
+    default:
+        return 3;
+    } // no warning expected
+}
+
+int func2(int arg) {
+    switch (arg) {
+    case 1:
+        func1(1);
+    case 2:
+        func1(2);
+    default:
+        func1(3);
+    }
+    return 1; // this is reachable
+}
+
+int func3(int arg) {
+    switch (arg) return arg;
+    return 1; // this is reachable
 }
 
 #define EXPECTED_ERRORS "return.c:2:5: error: non-void function 'b' should return a value [-Wreturn-type]" \
@@ -56,3 +88,5 @@ short return_short(void) {
     "return.c:30:1: warning: non-void function 'foo' does not return a value [-Wreturn-type]" \
     "return.c:32:5: error: non-void function 'bar' should return a value [-Wreturn-type]" \
     "return.c:35:12: error: void function 'baz' should not return a value [-Wreturn-type]" \
+    "return.c:38:17: error: function cannot return a function" \
+    "return.c:74:5: warning: unreachable code [-Wunreachable-code]" \
