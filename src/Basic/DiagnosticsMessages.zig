@@ -1655,3 +1655,15 @@ pub const cond_expr_type = struct {
     pub const extra = .str;
     pub const kind = .@"error";
 };
+pub const enumerator_too_small = struct {
+    pub const msg = "ISO C restricts enumerator values to range of 'int' ({d} is too small)";
+    pub const extra = .signed;
+    pub const kind = .off;
+    pub const opt = "pedantic";
+};
+pub const enumerator_too_large = struct {
+    pub const msg = "ISO C restricts enumerator values to range of 'int' ({d} is too large)";
+    pub const extra = .unsigned;
+    pub const kind = .off;
+    pub const opt = "pedantic";
+};
