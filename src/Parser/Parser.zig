@@ -3977,7 +3977,7 @@ fn parseCompoundStmt(p: *Parser, isFnBody: bool, stmtExprState: ?*StmtExprState)
         }
         try p.declBuffer.append(s);
 
-        if (noreturnIdx == null and p.nodeIsNoreturn(s)) {
+        if (noreturnIdx == null and p.nodeIsNoreturn(s) == .yes) {
             noreturnIdx = p.tokenIdx;
             noreturnLabelCount = p.labelCount;
         }
@@ -3993,18 +3993,23 @@ fn parseCompoundStmt(p: *Parser, isFnBody: bool, stmtExprState: ?*StmtExprState)
             try p.errToken(.unreachable_code, some);
     }
 
-    if (isFnBody and (p.declBuffer.items.len == declBufferTop or !p.nodeIsNoreturn(p.declBuffer.items[p.declBuffer.items.len - 1]))) {
-        if (!p.func.type.?.getReturnType().is(.Void))
-            try p.errStr(.func_does_not_return, p.tokenIdx - 1, p.getTokenSlice(p.func.name));
-
-        try p.declBuffer.append(try p.addNode(.{
-            .tag = .ImplicitReturn,
-            .type = p.func.type.?.getReturnType(),
-            .data = undefined,
-        }));
-    }
-
     if (isFnBody) {
+        const lastNoreturn = if (p.declBuffer.items.len == declBufferTop)
+            .no
+        else
+            p.nodeIsNoreturn(p.declBuffer.items[p.declBuffer.items.len - 1]);
+
+        if (lastNoreturn != .yes) {
+            if (lastNoreturn == .no and !p.func.type.?.getReturnType().is(.Void))
+                try p.errStr(.func_does_not_return, p.tokenIdx - 1, p.getTokenSlice(p.func.name));
+
+            try p.declBuffer.append(try p.addNode(.{
+                .tag = .ImplicitReturn,
+                .type = p.func.type.?.getReturnType(),
+                .data = undefined,
+            }));
+        }
+
         if (p.func.ident) |some| try p.declBuffer.insert(declBufferTop, some.node);
         if (p.func.prettyIdent) |some| try p.declBuffer.insert(declBufferTop, some.node);
     }
@@ -4082,6 +4087,8 @@ fn parseReturnStmt(p: *Parser) Error!?NodeIndex {
         if (!returnType.eql(expr.ty, p.pp.comp, false)) {
             try p.errStr(.incompatible_return, eToken, try p.typeStr(expr.ty));
         }
+    } else if (returnType.isFunc()) {
+        // Syntax error reported earlier; just let this return as-is since it is a parse failure anyway
     } else {
         unreachable;
     }
@@ -4090,19 +4097,28 @@ fn parseReturnStmt(p: *Parser) Error!?NodeIndex {
     return try p.addNode(.{ .tag = .ReturnStmt, .data = .{ .unExpr = expr.node } });
 }
 
-fn nodeIsNoreturn(p: *Parser, node: NodeIndex) bool {
+const NoreturnKind = enum { no, yes, complex };
+
+fn nodeIsNoreturn(p: *Parser, node: NodeIndex) NoreturnKind {
     switch (p.nodes.items(.tag)[@intFromEnum(node)]) {
-        .BreakStmt, .ContinueStmt, .ReturnStmt => return true,
+        .BreakStmt, .ContinueStmt, .ReturnStmt => return .yes,
         .IfThenElseStmt => {
             const data = p.data.items[p.nodes.items(.data)[@intFromEnum(node)].if3.body..];
-            return p.nodeIsNoreturn(data[0]) and p.nodeIsNoreturn(data[1]);
+            switch (p.nodeIsNoreturn(data[0])) {
+                .yes, .complex => |kind| return kind,
+                .no => {},
+            }
+            switch (p.nodeIsNoreturn(data[1])) {
+                .yes, .complex => |kind| return kind,
+                .no => return .no,
+            }
         },
 
         .CompoundStmtTwo => {
             const data = p.nodes.items(.data)[@intFromEnum(node)];
             if (data.binExpr.rhs != .none) return p.nodeIsNoreturn(data.binExpr.rhs);
             if (data.binExpr.lhs != .none) return p.nodeIsNoreturn(data.binExpr.lhs);
-            return false;
+            return .no;
         },
 
         .CompoundStmt => {
@@ -4115,7 +4131,14 @@ fn nodeIsNoreturn(p: *Parser, node: NodeIndex) bool {
             return p.nodeIsNoreturn(data.decl.node);
         },
 
-        else => return false,
+        .SwitchStmt => {
+            const data = p.nodes.items(.data)[@intFromEnum(node)];
+            if (data.binExpr.rhs == .none) return .complex;
+            if (p.nodeIsNoreturn(data.binExpr.rhs) == .yes) return .yes;
+            return .complex;
+        },
+
+        else => return .no,
     }
 }
 
