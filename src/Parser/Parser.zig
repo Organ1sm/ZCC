@@ -366,7 +366,7 @@ pub fn errToken(p: *Parser, tag: Diagnostics.Tag, index: TokenIndex) Compilation
 
 pub fn err(p: *Parser, tag: Diagnostics.Tag) Compilation.Error!void {
     @setCold(true);
-    return p.errToken(tag, p.tokenIdx);
+    return p.errExtra(tag, p.tokenIdx, .{ .none = {} });
 }
 
 pub fn todo(p: *Parser, msg: []const u8) Error {
@@ -2747,7 +2747,7 @@ pub fn initializerItem(p: *Parser, il: *InitList, initType: Type) Error!bool {
         return true;
     };
 
-    const isScalar = initType.isInt() or initType.isFloat() or initType.isPointer();
+    const isScalar = initType.isScalar();
     if (p.eat(.RBrace)) |_| {
         if (isScalar)
             try p.errToken(.empty_scalar_init, lb);
@@ -3130,7 +3130,7 @@ fn coerceInit(p: *Parser, item: *Result, token: TokenIndex, target: Type) !void 
     try item.lvalConversion(p);
     if (unqualType.is(.Bool)) {
         // this is ridiculous but it's what clang does
-        if (item.ty.isInt() or item.ty.isFloat() or item.ty.isPointer()) {
+        if (item.ty.isScalar()) {
             try item.boolCast(p, unqualType, token);
         } else {
             try p.errStr(.incompatible_init, token, try p.typePairStrExtra(target, eMsg, item.ty));
@@ -3202,7 +3202,7 @@ fn isStringInit(p: *Parser, ty: Type) bool {
 
 /// Convert InitList into an AST
 fn convertInitList(p: *Parser, il: InitList, initType: Type) Error!NodeIndex {
-    if (initType.isInt() or initType.isFloat() or initType.isPointer()) {
+    if (initType.isScalar()) {
         if (il.node == .none) {
             return p.addNode(.{
                 .tag = .DefaultInitExpr,
@@ -4054,7 +4054,7 @@ fn parseReturnStmt(p: *Parser) Error!?NodeIndex {
     // Return type conversion is done as if it was assignment
     if (returnType.is(.Bool)) {
         // this is ridiculous but it's what clang does
-        if (expr.ty.isInt() or expr.ty.isFloat() or expr.ty.isPointer()) {
+        if (expr.ty.isScalar()) {
             try expr.boolCast(p, returnType, eToken);
         } else {
             try p.errStr(.incompatible_return, eToken, try p.typeStr(expr.ty));
@@ -4379,7 +4379,7 @@ fn parseAssignExpr(p: *Parser) Error!Result {
     const eMsg = " from incompatible type ";
     if (lhs.ty.is(.Bool)) {
         // this is ridiculous but it's what clang does
-        if (rhs.ty.isInt() or rhs.ty.isFloat() or rhs.ty.isPointer()) {
+        if (rhs.ty.isScalar()) {
             try rhs.boolCast(p, lhs.ty, token);
         } else {
             try p.errStr(.incompatible_assign, token, try p.typePairStrExtra(lhs.ty, eMsg, rhs.ty));
@@ -4460,7 +4460,7 @@ fn parseCondExpr(p: *Parser) Error!Result {
     try cond.lvalConversion(p);
     const savedEval = p.noEval;
 
-    if (!cond.ty.isInt() and !cond.ty.isFloat() and !cond.ty.isPointer()) {
+    if (!cond.ty.isScalar()) {
         try p.errStr(.cond_expr_type, condToken, try p.typeStr(cond.ty));
         return error.ParsingFailed;
     }
@@ -4871,7 +4871,7 @@ fn parseCastExpr(p: *Parser) Error!Result {
         if (ty.is(.Void)) {
             // everything can cast to void
             operand.value.tag = .unavailable;
-        } else if (ty.isInt() or ty.isFloat() or ty.isPointer()) cast: {
+        } else if (ty.isScalar()) cast: {
             try operand.lvalConversion(p);
 
             const oldFloat = operand.ty.isFloat();
@@ -5221,7 +5221,7 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
             var operand = try p.parseCastExpr();
             try operand.expect(p);
 
-            if (!operand.ty.isInt() and !operand.ty.isFloat() and !operand.ty.isReal() and !operand.ty.isPointer())
+            if (!operand.ty.isScalar())
                 try p.errStr(.invalid_argument_un, token, try p.typeStr(operand.ty));
 
             if (!AST.isLValue(p.nodes.slice(), p.data.items, p.valueMap, operand.node) or operand.ty.isConst()) {
@@ -5248,7 +5248,7 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
             var operand = try p.parseCastExpr();
             try operand.expect(p);
 
-            if (!operand.ty.isInt() and !operand.ty.isFloat() and !operand.ty.isReal() and !operand.ty.isPointer())
+            if (!operand.ty.isScalar())
                 try p.errStr(.invalid_argument_un, token, try p.typeStr(operand.ty));
 
             if (!AST.isLValue(p.nodes.slice(), p.data.items, p.valueMap, operand.node) or operand.ty.isConst()) {
@@ -5298,7 +5298,7 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
             try operand.expect(p);
             try operand.lvalConversion(p);
 
-            if (!operand.ty.isInt() and !operand.ty.isFloat() and !operand.ty.isPointer())
+            if (!operand.ty.isScalar())
                 try p.errStr(.invalid_argument_un, token, try p.typeStr(operand.ty));
 
             if (operand.ty.isInt())
@@ -5464,7 +5464,7 @@ fn parseSuffixExpr(p: *Parser, lhs: Result) Error!Result {
             defer p.tokenIdx += 1;
             var operand = lhs;
 
-            if (!operand.ty.isInt() and !operand.ty.isFloat() and !operand.ty.isReal() and !operand.ty.isPointer())
+            if (!operand.ty.isScalar())
                 try p.errStr(.invalid_argument_un, p.tokenIdx, try p.typeStr(operand.ty));
 
             if (!AST.isLValue(p.nodes.slice(), p.data.items, p.valueMap, operand.node) or operand.ty.isConst()) {
@@ -5483,7 +5483,7 @@ fn parseSuffixExpr(p: *Parser, lhs: Result) Error!Result {
             defer p.tokenIdx += 1;
             var operand = lhs;
 
-            if (!operand.ty.isInt() and !operand.ty.isFloat() and !operand.ty.isReal() and !operand.ty.isPointer())
+            if (!operand.ty.isScalar())
                 try p.errStr(.invalid_argument_un, p.tokenIdx, try p.typeStr(operand.ty));
 
             if (!AST.isLValue(p.nodes.slice(), p.data.items, p.valueMap, operand.node) or operand.ty.isConst()) {
@@ -5671,7 +5671,7 @@ fn parseCallExpr(p: *Parser, lhs: Result) Error!Result {
             }
         } else if (paramType.is(.Bool)) {
             // this is ridiculous but it's what clang does
-            if (arg.ty.isInt() or arg.ty.isFloat() or arg.ty.isPointer())
+            if (arg.ty.isScalar())
                 try arg.boolCast(p, paramType, params[argCount].nameToken)
             else
                 try p.reportParam(paramToken, arg, argCount, params);
