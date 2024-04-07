@@ -1335,6 +1335,11 @@ pub const cli_invalid_target = struct {
     pub const extra = .str;
     pub const kind = .@"error";
 };
+pub const cli_invalid_emulate = struct {
+    pub const msg = "invalid compiler '{s}'";
+    pub const extra = .str;
+    pub const kind = .@"error";
+};
 pub const cli_unknown_arg = struct {
     pub const msg = "unknown argument '{s}'";
     pub const extra = .str;

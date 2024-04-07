@@ -6,6 +6,7 @@ const Source = @import("Basic/Source.zig");
 const Preprocessor = @import("Lexer/Preprocessor.zig");
 const Lexer = @import("Lexer/Lexer.zig");
 const Parser = @import("Parser/Parser.zig");
+const LangOpts = @import("Basic/LangOpts.zig");
 
 var GeneralPurposeAllocator = std.heap.GeneralPurposeAllocator(.{}){};
 
@@ -33,6 +34,10 @@ pub fn main() u8 {
             return 1;
         },
     };
+
+    if (comp.target.abi == .msvc or comp.target.os.tag == .windows) {
+        comp.langOpts.setEmulatedCompiler(.msvc);
+    }
 
     mainExtra(&comp, args) catch |er| switch (er) {
         error.OutOfMemory => {
@@ -77,6 +82,8 @@ const usage =
     \\                          Set limit on how many macro expansion traces are shown in errors (default 6)
     \\  -I <dir>                Add directory to include search path
     \\  -isystem                Add directory to system include search path
+    \\  --emulate=[clang|gcc|msvc]
+    \\                          Select which C compiler to emulate (default clang)
     \\  -o <file>               Write output to <file>
     \\  -pedantic               Warn on language extensions
     \\  -std=<standard>         Specify language standard
@@ -197,6 +204,13 @@ pub fn parseArgs(
                     path = args[i];
                 }
                 try comp.systemIncludeDirs.append(path);
+            } else if (std.mem.startsWith(u8, arg, "--emulate=")) {
+                const compilerStr = arg["--emulate=".len..];
+                const compiler = std.meta.stringToEnum(LangOpts.Compiler, compilerStr) orelse {
+                    try comp.diag.add(.{ .tag = .cli_invalid_emulate, .extra = .{ .str = arg } }, &.{});
+                    continue;
+                };
+                comp.langOpts.setEmulatedCompiler(compiler);
             } else if (std.mem.startsWith(u8, arg, "-o")) {
                 var filename = arg["-o".len..];
                 if (filename.len == 0) {
@@ -230,7 +244,7 @@ pub fn parseArgs(
             } else if (std.mem.startsWith(u8, arg, "-std=")) {
                 const standard = arg["-std=".len..];
                 comp.langOpts.setStandard(standard) catch
-                    try comp.diag.add(.{ .tag = .cli_invalid_standard, .extra = .{ .str = standard } }, &.{});
+                    try comp.diag.add(.{ .tag = .cli_invalid_standard, .extra = .{ .str = arg } }, &.{});
             } else if (std.mem.startsWith(u8, arg, "--target=")) {
                 const triple = arg["--target=".len..];
                 const query = std.Target.Query.parse(.{ .arch_os_abi = triple }) catch {
@@ -240,6 +254,9 @@ pub fn parseArgs(
                     return comp.diag.fatalNoSrc("unable to resolve target: {s}", .{@errorName(e)});
                 };
                 comp.target = target;
+                if (comp.target.abi == .msvc or comp.target.os.tag == .windows) {
+                    comp.langOpts.setEmulatedCompiler(.msvc);
+                }
             } else if (std.mem.eql(u8, arg, "-dump-ast")) {
                 comp.dumpAst = true;
             } else if (std.mem.eql(u8, arg, "-dump-tokens")) {
