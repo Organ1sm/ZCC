@@ -4,7 +4,13 @@ const CharInfo = @import("CharInfo.zig");
 
 const LangOpts = @This();
 
-const Standard = enum {
+pub const Compiler = enum {
+    clang,
+    gcc,
+    msvc,
+};
+
+pub const Standard = enum {
     /// ISO C 1990
     c89,
     /// ISO C 1990 with amendment 1
@@ -84,6 +90,7 @@ const Standard = enum {
     }
 };
 
+emulate: Compiler = .clang,
 standard: Standard = .default,
 /// -fshort-enums option, makes enums only take up as much space as they need to hold all the values.
 shortEnums: bool = false,
@@ -105,4 +112,9 @@ pub fn enableMSExtensions(self: *LangOpts) void {
 pub fn disableMSExtensions(self: *LangOpts) void {
     self.declSpecAttrs = false;
     self.msExtensions = true;
+}
+
+pub fn setEmulatedCompiler(self: *LangOpts, compiler: Compiler) void {
+    self.emulate = compiler;
+    if (compiler == .msvc) self.enableMSExtensions();
 }
