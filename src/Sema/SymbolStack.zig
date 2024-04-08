@@ -59,7 +59,7 @@ pub fn scopeEnd(self: SymbolStack) u32 {
 }
 
 pub fn pushScope(self: *SymbolStack) !void {
-    try self.scopes.append(self.p.pp.comp.gpa, @intCast(self.symbols.len));
+    try self.scopes.append(self.p.comp.gpa, @intCast(self.symbols.len));
 }
 
 pub fn popScope(self: *SymbolStack) void {
@@ -67,7 +67,7 @@ pub fn popScope(self: *SymbolStack) void {
 }
 
 pub fn appendSymbol(self: *SymbolStack, symbol: Symbol) !void {
-    try self.symbols.append(self.p.pp.comp.gpa, symbol);
+    try self.symbols.append(self.p.comp.gpa, symbol);
 }
 
 /// findTypedef searches for a typedef symbol with the given name within the symbol stack.
@@ -190,7 +190,7 @@ pub fn defineTypedef(
         switch (kinds[i]) {
             .typedef => if (mem.eql(u8, names[i], name)) {
                 const prevTy = self.symbols.items(.type)[i];
-                if (ty.eql(prevTy, self.p.pp.comp, true))
+                if (ty.eql(prevTy, self.p.comp, true))
                     break;
                 try self.p.errStr(.redefinition_of_typedef, token, try self.p.typePairStrExtra(ty, " vs ", prevTy));
                 const prevToken = self.symbols.items(.token)[i];
@@ -233,7 +233,7 @@ pub fn defineSymbol(
             },
             .declaration => if (mem.eql(u8, names[i], name)) {
                 const prevTy = self.symbols.items(.type)[i];
-                if (!ty.eql(prevTy, self.p.pp.comp, true)) { // TODO adjusted equality check
+                if (!ty.eql(prevTy, self.p.comp, true)) { // TODO adjusted equality check
                     try self.p.errStr(.redefinition_incompatible, token, name);
                     try self.p.errToken(.previous_definition, self.symbols.items(.token)[i]);
                 }
@@ -278,7 +278,7 @@ pub fn declareSymbol(
             },
             .declaration => if (mem.eql(u8, names[i], name)) {
                 const prevTy = self.symbols.items(.type)[i];
-                if (!ty.eql(prevTy, self.p.pp.comp, true)) { // TODO adjusted equality check
+                if (!ty.eql(prevTy, self.p.comp, true)) { // TODO adjusted equality check
                     try self.p.errStr(.redefinition_incompatible, token, name);
                     try self.p.errToken(.previous_definition, self.symbols.items(.token)[i]);
                 }
@@ -286,7 +286,7 @@ pub fn declareSymbol(
             },
             .definition => if (mem.eql(u8, names[i], name)) {
                 const prevTy = self.symbols.items(.type)[i];
-                if (!ty.eql(prevTy, self.p.pp.comp, true)) { // TODO adjusted equality check
+                if (!ty.eql(prevTy, self.p.comp, true)) { // TODO adjusted equality check
                     try self.p.errStr(.redefinition_incompatible, token, name);
                     try self.p.errToken(.previous_definition, self.symbols.items(.token)[i]);
                     break;

@@ -42,8 +42,8 @@ pub fn maybeWarnUnused(res: Result, p: *Parser, exprStart: TokenIndex, errStart:
 
     // don't warn about unused result if the expression contained errors besides other unused results
     var i = errStart;
-    while (i < p.pp.comp.diag.list.items.len) : (i += 1) {
-        if (p.pp.comp.diag.list.items[i].tag != .unused_value) return;
+    while (i < p.comp.diag.list.items.len) : (i += 1) {
+        if (p.comp.diag.list.items[i].tag != .unused_value) return;
     }
 
     var curNode = res.node;
@@ -122,14 +122,14 @@ pub fn adjustCondExprPtrs(a: *Result, tok: TokenIndex, b: *Result, p: *Parser) !
 
     const aElem = a.ty.getElemType();
     const bElem = b.ty.getElemType();
-    if (aElem.eql(bElem, p.pp.comp, true))
+    if (aElem.eql(bElem, p.comp, true))
         return true;
 
     var adjustedElemType = try p.arena.create(Type);
     adjustedElemType.* = aElem;
 
     const hasVoidStarBranch = a.ty.isVoidStar() or b.ty.isVoidStar();
-    const onlyQualsDiffer = aElem.eql(bElem, p.pp.comp, false);
+    const onlyQualsDiffer = aElem.eql(bElem, p.comp, false);
     const pointersCompatible = onlyQualsDiffer or hasVoidStarBranch;
 
     if (!pointersCompatible or hasVoidStarBranch) {
@@ -141,8 +141,8 @@ pub fn adjustCondExprPtrs(a: *Result, tok: TokenIndex, b: *Result, p: *Parser) !
     if (pointersCompatible) {
         adjustedElemType.qual = aElem.qual.mergeCVQualifiers(bElem.qual);
     }
-    if (!adjustedElemType.eql(aElem, p.pp.comp, true)) try a.qualCast(p, adjustedElemType);
-    if (!adjustedElemType.eql(bElem, p.pp.comp, true)) try b.qualCast(p, adjustedElemType);
+    if (!adjustedElemType.eql(aElem, p.comp, true)) try a.qualCast(p, adjustedElemType);
+    if (!adjustedElemType.eql(bElem, p.comp, true)) try b.qualCast(p, adjustedElemType);
     return true;
 }
 
@@ -197,8 +197,8 @@ pub fn adjustTypes(a: *Result, token: TokenIndex, b: *Result, p: *Parser, kind: 
             if (!aIsScalar or !bIsScalar) return a.invalidBinTy(token, b, p);
 
             // Do integer promotions but nothing else
-            if (aIsInt) try a.intCast(p, a.ty.integerPromotion(p.pp.comp), token);
-            if (bIsInt) try b.intCast(p, b.ty.integerPromotion(p.pp.comp), token);
+            if (aIsInt) try a.intCast(p, a.ty.integerPromotion(p.comp), token);
+            if (bIsInt) try b.intCast(p, b.ty.integerPromotion(p.comp), token);
             return a.shouldEval(b, p);
         },
 
@@ -210,7 +210,7 @@ pub fn adjustTypes(a: *Result, token: TokenIndex, b: *Result, p: *Parser, kind: 
             if ((aIsInt or bIsInt) and !(a.value.isZero() or b.value.isZero())) {
                 try p.errStr(.comparison_ptr_int, token, try p.typePairStr(a.ty, b.ty));
             } else if (aIsPtr and bIsPtr) {
-                if (!a.ty.isVoidStar() and !b.ty.isVoidStar() and !a.ty.eql(b.ty, p.pp.comp, false))
+                if (!a.ty.isVoidStar() and !b.ty.isVoidStar() and !a.ty.eql(b.ty, p.comp, false))
                     try p.errStr(.comparison_distinct_ptr, token, try p.typePairStr(a.ty, b.ty));
             } else if (aIsPtr) {
                 try b.ptrCast(p, a.ty);
@@ -248,7 +248,7 @@ pub fn adjustTypes(a: *Result, token: TokenIndex, b: *Result, p: *Parser, kind: 
             if (aIsPtr and bIsPtr)
                 return a.adjustCondExprPtrs(token, b, p);
 
-            if (a.ty.isRecord() and b.ty.isRecord() and a.ty.eql(b.ty, p.pp.comp, false))
+            if (a.ty.isRecord() and b.ty.isRecord() and a.ty.eql(b.ty, p.comp, false))
                 return true;
 
             return a.invalidBinTy(token, b, p);
@@ -260,8 +260,8 @@ pub fn adjustTypes(a: *Result, token: TokenIndex, b: *Result, p: *Parser, kind: 
                 return a.invalidBinTy(token, b, p);
 
             // Do integer promotions but nothing else
-            if (aIsInt) try a.intCast(p, a.ty.integerPromotion(p.pp.comp), token);
-            if (bIsInt) try b.intCast(p, b.ty.integerPromotion(p.pp.comp), token);
+            if (aIsInt) try a.intCast(p, a.ty.integerPromotion(p.comp), token);
+            if (bIsInt) try b.intCast(p, b.ty.integerPromotion(p.comp), token);
 
             // The result type is the type of the pointer operand
             if (aIsInt) a.ty = b.ty else b.ty = a.ty;
@@ -273,13 +273,13 @@ pub fn adjustTypes(a: *Result, token: TokenIndex, b: *Result, p: *Parser, kind: 
             if (!aIsPtr or !(bIsPtr or bIsInt)) return a.invalidBinTy(token, b, p);
 
             if (aIsPtr and bIsPtr) {
-                if (!a.ty.eql(b.ty, p.pp.comp, false))
+                if (!a.ty.eql(b.ty, p.comp, false))
                     try p.errStr(.incompatible_pointers, token, try p.typePairStr(a.ty, b.ty));
-                a.ty = p.pp.comp.types.ptrdiff;
+                a.ty = p.comp.types.ptrdiff;
             }
 
             // Do integer promotion on b if needed
-            if (bIsInt) try b.intCast(p, b.ty.integerPromotion(p.pp.comp), token);
+            if (bIsInt) try b.intCast(p, b.ty.integerPromotion(p.comp), token);
             return a.shouldEval(b, p);
         },
 
@@ -327,7 +327,7 @@ pub fn boolCast(res: *Result, p: *Parser, boolType: Type, tok: TokenIndex) Error
         try res.un(p, .IntToBool);
     } else if (res.ty.isFloat()) {
         const oldValue = res.value;
-        const valueChangeKind = res.value.floatToInt(res.ty, boolType, p.pp.comp);
+        const valueChangeKind = res.value.floatToInt(res.ty, boolType, p.comp);
         try res.floatToIntWarning(p, boolType, oldValue, valueChangeKind, tok);
         res.ty = boolType;
         try res.un(p, .FloatToBool);
@@ -363,7 +363,7 @@ pub fn intCast(res: *Result, p: *Parser, intType: Type, tok: TokenIndex) Error!v
     else if (res.ty.isFloat()) {
         const oldValue = res.value;
         // Check for the kind of value change that will occur during the cast.
-        const valueChangeKind = res.value.floatToInt(res.ty, intType, p.pp.comp);
+        const valueChangeKind = res.value.floatToInt(res.ty, intType, p.comp);
         // Warn if there are issues with the float to int conversion.
         try res.floatToIntWarning(p, intType, oldValue, valueChangeKind, tok);
         res.ty = intType;
@@ -371,8 +371,8 @@ pub fn intCast(res: *Result, p: *Parser, intType: Type, tok: TokenIndex) Error!v
     }
 
     // Cast between integer types.
-    else if (!res.ty.eql(intType, p.pp.comp, true)) {
-        res.value.intCast(res.ty, intType, p.pp.comp);
+    else if (!res.ty.eql(intType, p.comp, true)) {
+        res.value.intCast(res.ty, intType, p.comp);
         res.ty = intType;
         try res.un(p, .IntCast);
     }
@@ -390,15 +390,15 @@ fn floatToIntWarning(res: *Result, p: *Parser, intTy: Type, oldValue: Value, cha
 
 pub fn floatCast(res: *Result, p: *Parser, floatType: Type) Error!void {
     if (res.ty.is(.Bool)) {
-        res.value.intToFloat(res.ty, floatType, p.pp.comp);
+        res.value.intToFloat(res.ty, floatType, p.comp);
         res.ty = floatType;
         try res.un(p, .BoolToFloat);
     } else if (res.ty.isInt()) {
-        res.value.intToFloat(res.ty, floatType, p.pp.comp);
+        res.value.intToFloat(res.ty, floatType, p.comp);
         res.ty = floatType;
         try res.un(p, .IntToFloat);
-    } else if (!res.ty.eql(floatType, p.pp.comp, true)) {
-        res.value.floatCast(res.ty, floatType, p.pp.comp);
+    } else if (!res.ty.eql(floatType, p.comp, true)) {
+        res.value.floatCast(res.ty, floatType, p.comp);
         res.ty = floatType;
         try res.un(p, .FloatCast);
     }
@@ -409,7 +409,7 @@ pub fn ptrCast(res: *Result, p: *Parser, ptrType: Type) Error!void {
         res.ty = ptrType;
         try res.un(p, .BoolToPointer);
     } else if (res.ty.isInt()) {
-        res.value.intCast(res.ty, ptrType, p.pp.comp);
+        res.value.intCast(res.ty, ptrType, p.comp);
         res.ty = ptrType;
         try res.un(p, .IntToPointer);
     }
@@ -456,17 +456,17 @@ fn usualArithmeticConversion(lhs: *Result, rhs: *Result, p: *Parser, tok: TokenI
     }
 
     // Do integer promotion on both operands
-    const lhsPromoted = lhs.ty.integerPromotion(p.pp.comp);
-    const rhsPromoted = rhs.ty.integerPromotion(p.pp.comp);
-    if (lhsPromoted.eql(rhsPromoted, p.pp.comp, true)) {
+    const lhsPromoted = lhs.ty.integerPromotion(p.comp);
+    const rhsPromoted = rhs.ty.integerPromotion(p.comp);
+    if (lhsPromoted.eql(rhsPromoted, p.comp, true)) {
         // cast to promoted type
         try lhs.intCast(p, lhsPromoted, tok);
         try rhs.intCast(p, lhsPromoted, tok);
         return;
     }
 
-    const lhsIsUnsigned = lhsPromoted.isUnsignedInt(p.pp.comp);
-    const rhsIsUnsigned = rhsPromoted.isUnsignedInt(p.pp.comp);
+    const lhsIsUnsigned = lhsPromoted.isUnsignedInt(p.comp);
+    const rhsIsUnsigned = rhsPromoted.isUnsignedInt(p.comp);
     if (lhsIsUnsigned == rhsIsUnsigned) {
         // cast to greater signed or unsigned type
         const resSpecifier = @max(@intFromEnum(lhsPromoted.specifier), @intFromEnum(rhsPromoted.specifier));

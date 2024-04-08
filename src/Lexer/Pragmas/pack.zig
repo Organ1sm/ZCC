@@ -34,7 +34,7 @@ fn parserHandler(pragma: *Pragma, p: *Parser, startIdx: TokenIndex) Compilation.
     var idx = startIdx + 1;
     const lparen = p.pp.tokens.get(idx);
     if (lparen.id != .LParen) {
-        return p.pp.comp.diag.add(.{
+        return p.comp.diag.add(.{
             .tag = .pragma_pack_lparen,
             .loc = lparen.loc,
         }, lparen.expansionSlice());
@@ -53,14 +53,14 @@ fn parserHandler(pragma: *Pragma, p: *Parser, startIdx: TokenIndex) Compilation.
                 pop,
             };
             const action = std.meta.stringToEnum(Action, p.pp.expandedSlice(arg)) orelse {
-                return p.pp.comp.diag.add(.{
+                return p.comp.diag.add(.{
                     .tag = .pragma_pack_unknown_action,
                     .loc = arg.loc,
                 }, arg.expansionSlice());
             };
             switch (action) {
                 .show => {
-                    try p.pp.comp.diag.add(.{
+                    try p.comp.diag.add(.{
                         .tag = .pragma_pack_show,
                         .loc = arg.loc,
                         .extra = .{ .unsigned = p.pragmaPack },
@@ -81,7 +81,7 @@ fn parserHandler(pragma: *Pragma, p: *Parser, startIdx: TokenIndex) Compilation.
                                     idx += 1;
                                     const int = p.pp.tokens.get(idx);
                                     idx += 1;
-                                    if (int.id != .IntegerLiteral) return p.pp.comp.diag.add(.{
+                                    if (int.id != .IntegerLiteral) return p.comp.diag.add(.{
                                         .tag = .pragma_pack_int_ident,
                                         .loc = int.loc,
                                     }, int.expansionSlice());
@@ -89,23 +89,23 @@ fn parserHandler(pragma: *Pragma, p: *Parser, startIdx: TokenIndex) Compilation.
                                     newVal = (try packInt(p, int)) orelse return;
                                 }
                             },
-                            else => return p.pp.comp.diag.add(.{
+                            else => return p.comp.diag.add(.{
                                 .tag = .pragma_pack_int_ident,
                                 .loc = next.loc,
                             }, next.expansionSlice()),
                         }
                     }
                     if (action == .push) {
-                        try pack.stack.append(p.pp.comp.gpa, .{ .label = label orelse "", .val = p.pragmaPack });
+                        try pack.stack.append(p.comp.gpa, .{ .label = label orelse "", .val = p.pragmaPack });
                     } else {
                         pack.pop(p, label);
                         if (newVal != null) {
-                            try p.pp.comp.diag.add(.{
+                            try p.comp.diag.add(.{
                                 .tag = .pragma_pack_undefined_pop,
                                 .loc = arg.loc,
                             }, arg.expansionSlice());
                         } else if (pack.stack.items.len == 0) {
-                            try p.pp.comp.diag.add(.{
+                            try p.comp.diag.add(.{
                                 .tag = .pragma_pack_empty_stack,
                                 .loc = arg.loc,
                             }, arg.expansionSlice());
@@ -128,7 +128,7 @@ fn parserHandler(pragma: *Pragma, p: *Parser, startIdx: TokenIndex) Compilation.
             idx += 1;
             const new_val = (try packInt(p, arg)) orelse return;
             if (appleOrXL) {
-                try pack.stack.append(p.pp.comp.gpa, .{ .label = "", .val = p.pragmaPack });
+                try pack.stack.append(p.comp.gpa, .{ .label = "", .val = p.pragmaPack });
             }
             p.pragmaPack = new_val;
         },
@@ -137,7 +137,7 @@ fn parserHandler(pragma: *Pragma, p: *Parser, startIdx: TokenIndex) Compilation.
 
     const rparen = p.pp.tokens.get(idx);
     if (rparen.id != .RParen) {
-        return p.pp.comp.diag.add(.{
+        return p.comp.diag.add(.{
             .tag = .pragma_pack_rparen,
             .loc = rparen.loc,
         }, rparen.expansionSlice());
@@ -149,7 +149,7 @@ fn packInt(p: *Parser, arg: Tree.Token) Compilation.Error!?u8 {
     switch (int) {
         1, 2, 4, 8, 16 => return int,
         else => {
-            try p.pp.comp.diag.add(.{
+            try p.comp.diag.add(.{
                 .tag = .pragma_pack_int,
                 .loc = arg.loc,
             }, arg.expansionSlice());
