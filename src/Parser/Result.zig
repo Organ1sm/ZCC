@@ -109,12 +109,20 @@ pub fn un(operand: *Result, p: *Parser, tag: AstTag) Error!void {
     });
 }
 
+pub fn implicitCast(operand: *Result, p: *Parser, kind: AST.CastKind) Error!void {
+    operand.node = try p.addNode(.{
+        .tag = .ImplicitCast,
+        .type = operand.ty,
+        .data = .{ .cast = .{ .operand = operand.node, .kind = kind } },
+    });
+}
+
 pub fn qualCast(res: *Result, p: *Parser, elemType: *Type) Error!void {
     res.ty = .{
         .data = .{ .subType = elemType },
         .specifier = .Pointer,
     };
-    try res.un(p, .QualCast);
+    try res.implicitCast(p, .QualCast);
 }
 
 pub fn adjustCondExprPtrs(a: *Result, tok: TokenIndex, b: *Result, p: *Parser) !bool {
@@ -302,17 +310,17 @@ pub fn lvalConversion(res: *Result, p: *Parser) Error!void {
         elemType.* = res.ty;
         res.ty.specifier = .Pointer;
         res.ty.data = .{ .subType = elemType };
-        try res.un(p, .FunctionToPointer);
+        try res.implicitCast(p, .FunctionToPointer);
         // Decay an array type to a pointer to its first element.
     } else if (res.ty.isArray()) {
         res.value.tag = .unavailable;
         res.ty.decayArray();
-        try res.un(p, .ArrayToPointer);
+        try res.implicitCast(p, .ArrayToPointer);
         // Perform l-value to r-value conversion if the type is an l-value and we are not in a macro.
     } else if (!p.inMacro and AST.isLValue(p.nodes.slice(), p.data.items, p.valueMap, res.node)) {
         res.ty.qual = .{};
         // Update the AST to reflect the l-value to r-value conversion.
-        try res.un(p, .LValueToRValue);
+        try res.implicitCast(p, .LValToRVal);
     }
 }
 
@@ -320,17 +328,17 @@ pub fn boolCast(res: *Result, p: *Parser, boolType: Type, tok: TokenIndex) Error
     if (res.ty.isPointer()) {
         res.value.toBool();
         res.ty = boolType;
-        try res.un(p, .PointerToBool);
+        try res.implicitCast(p, .PointerToBool);
     } else if (res.ty.isInt() and !res.ty.is(.Bool)) {
         res.value.toBool();
         res.ty = boolType;
-        try res.un(p, .IntToBool);
+        try res.implicitCast(p, .IntToBool);
     } else if (res.ty.isFloat()) {
         const oldValue = res.value;
         const valueChangeKind = res.value.floatToInt(res.ty, boolType, p.comp);
         try res.floatToIntWarning(p, boolType, oldValue, valueChangeKind, tok);
         res.ty = boolType;
-        try res.un(p, .FloatToBool);
+        try res.implicitCast(p, .FloatToBool);
     }
 }
 
@@ -350,13 +358,13 @@ pub fn intCast(res: *Result, p: *Parser, intType: Type, tok: TokenIndex) Error!v
     // Cast from boolean to integer.
     if (res.ty.is(.Bool)) {
         res.ty = intType;
-        try res.un(p, .BoolToInt);
+        try res.implicitCast(p, .BoolToInt);
     }
 
     // Cast from pointer to integer.
     else if (res.ty.isPointer()) {
         res.ty = intType;
-        try res.un(p, .PointerToInt);
+        try res.implicitCast(p, .PointerToInt);
     }
 
     // Cast from floating point to integer.
@@ -367,14 +375,14 @@ pub fn intCast(res: *Result, p: *Parser, intType: Type, tok: TokenIndex) Error!v
         // Warn if there are issues with the float to int conversion.
         try res.floatToIntWarning(p, intType, oldValue, valueChangeKind, tok);
         res.ty = intType;
-        try res.un(p, .FloatToInt);
+        try res.implicitCast(p, .FloatToInt);
     }
 
     // Cast between integer types.
     else if (!res.ty.eql(intType, p.comp, true)) {
         res.value.intCast(res.ty, intType, p.comp);
         res.ty = intType;
-        try res.un(p, .IntCast);
+        try res.implicitCast(p, .IntCast);
     }
 }
 
@@ -392,45 +400,40 @@ pub fn floatCast(res: *Result, p: *Parser, floatType: Type) Error!void {
     if (res.ty.is(.Bool)) {
         res.value.intToFloat(res.ty, floatType, p.comp);
         res.ty = floatType;
-        try res.un(p, .BoolToFloat);
+        try res.implicitCast(p, .BoolToFloat);
     } else if (res.ty.isInt()) {
         res.value.intToFloat(res.ty, floatType, p.comp);
         res.ty = floatType;
-        try res.un(p, .IntToFloat);
+        try res.implicitCast(p, .IntToFloat);
     } else if (!res.ty.eql(floatType, p.comp, true)) {
         res.value.floatCast(res.ty, floatType, p.comp);
         res.ty = floatType;
-        try res.un(p, .FloatCast);
+        try res.implicitCast(p, .FloatCast);
     }
 }
 
 pub fn ptrCast(res: *Result, p: *Parser, ptrType: Type) Error!void {
     if (res.ty.is(.Bool)) {
         res.ty = ptrType;
-        try res.un(p, .BoolToPointer);
+        try res.implicitCast(p, .BoolToPointer);
     } else if (res.ty.isInt()) {
         res.value.intCast(res.ty, ptrType, p.comp);
         res.ty = ptrType;
-        try res.un(p, .IntToPointer);
+        try res.implicitCast(p, .IntToPointer);
     }
 }
 
 pub fn toVoid(res: *Result, p: *Parser) Error!void {
     if (!res.ty.is(.Void)) {
         res.ty = .{ .specifier = .Void };
-        res.node = try p.addNode(.{
-            .tag = .ToVoid,
-            .type = res.ty,
-            .data = .{ .unExpr = res.node },
-        });
+        try res.implicitCast(p, .ToVoid);
     }
-    res.value.tag = .unavailable;
 }
 
 pub fn nullCast(res: *Result, p: *Parser, ptrType: Type) Error!void {
     if (!res.value.isZero()) return;
     res.ty = ptrType;
-    try res.un(p, .NullToPointer);
+    try res.implicitCast(p, .NullToPointer);
 }
 
 fn usualArithmeticConversion(lhs: *Result, rhs: *Result, p: *Parser, tok: TokenIndex) Error!void {
@@ -517,4 +520,57 @@ pub fn saveValue(res: *Result, p: *Parser) !void {
     if (!p.inMacro)
         try p.valueMap.put(res.node, res.value);
     res.value.tag = .unavailable;
+}
+
+pub fn castType(res: *Result, p: *Parser, to: Type, tok: TokenIndex) !void {
+    var castKind: AST.CastKind = undefined;
+    if (to.is(.Void)) {
+        // everything can cast to void
+        castKind = .ToVoid;
+        res.value.tag = .unavailable;
+    } else if (res.value.isZero() and to.isPointer()) {
+        castKind = .NullToPointer;
+    } else if (to.isScalar()) cast: {
+        const oldFloat = res.ty.isFloat();
+        const newFloat = to.isFloat();
+
+        if (newFloat and res.ty.isPointer()) {
+            try p.errStr(.invalid_cast_to_float, tok, try p.typeStr(to));
+            return error.ParsingFailed;
+        } else if (oldFloat and to.isPointer()) {
+            try p.errStr(.invalid_cast_to_pointer, tok, try p.typeStr(res.ty));
+            return error.ParsingFailed;
+        }
+        castKind = AST.CastKind.fromExplicitCast(to, res.ty, p.comp);
+        if (res.value.tag == .unavailable) break :cast;
+
+        const oldInt = res.ty.isInt() or res.ty.isPointer();
+        const newInt = to.isInt() or to.isPointer();
+        if (to.is(.Bool)) {
+            res.value.toBool();
+        } else if (oldFloat and newInt) {
+            // Explicit cast, no conversion warning
+            _ = res.value.floatToInt(res.ty, to, p.comp);
+        } else if (newFloat and oldInt) {
+            res.value.intToFloat(res.ty, to, p.comp);
+        } else if (newFloat and oldFloat) {
+            res.value.floatCast(res.ty, to, p.comp);
+        }
+    } else {
+        try p.errStr(.invalid_cast_type, tok, try p.typeStr(res.ty));
+        return error.ParsingFailed;
+    }
+
+    if (to.containAnyQual()) try p.errStr(.qual_cast, tok, try p.typeStr(to));
+    if (to.isInt() and res.ty.isPointer() and to.sizeCompare(res.ty, p.comp) == .lt) {
+        try p.errStr(.cast_to_smaller_int, tok, try p.typePairStrExtra(to, " from ", res.ty));
+    }
+
+    res.ty = to;
+    res.ty.qual = .{};
+    res.node = try p.addNode(.{
+        .tag = .ExplicitCast,
+        .type = res.ty,
+        .data = .{ .cast = .{ .operand = res.node, .kind = castKind } },
+    });
 }

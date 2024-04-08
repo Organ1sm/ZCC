@@ -108,7 +108,6 @@ pub const Node = struct {
     pub const Data = union {
         decl: struct { name: TokenIndex, node: NodeIndex = .none },
         declRef: TokenIndex,
-
         range: Range,
 
         if3: struct { cond: NodeIndex, body: u32 },
@@ -118,6 +117,8 @@ pub const Node = struct {
 
         member: struct { lhs: NodeIndex, index: u32 },
         unionInit: struct { fieldIndex: u32, node: NodeIndex },
+
+        cast: struct { operand: NodeIndex, kind: CastKind },
 
         int: u64,
 
@@ -155,6 +156,79 @@ pub const Node = struct {
     };
 
     pub const List = std.MultiArrayList(Node);
+};
+
+pub const CastKind = enum(u8) {
+    /// Does nothing except possibly add qualifiers
+    NoOP,
+    /// Interpret one bit pattern as another. Used for operands which have the same
+    /// size and unrelated types, e.g. casting one pointer type to another
+    Bitcast,
+    /// Convert T[] to T *
+    ArrayToPointer,
+    /// Converts an lvalue to an rvalue
+    LValToRVal,
+    /// Convert a function type to a pointer to a function
+    FunctionToPointer,
+    /// Convert a pointer type to a _Bool
+    PointerToBool,
+    /// Convert a pointer type to an integer type
+    PointerToInt,
+    /// Convert _Bool to an integer type
+    BoolToInt,
+    /// Convert _Bool to a floating type
+    BoolToFloat,
+    /// Convert a _Bool to a pointer; will cause a  warning
+    BoolToPointer,
+    /// Convert an integer type to _Bool
+    IntToBool,
+    /// Convert an integer to a floating
+    IntToFloat,
+    /// Convert an integer type to a pointer type
+    IntToPointer,
+    /// Convert a floating type to a _Bool
+    FloatToBool,
+    /// Convert a floating type to an integer
+    FloatToInt,
+    /// Convert one integer type to another
+    IntCast,
+    /// Convert one floating type to another
+    FloatCast,
+    /// Convert pointer to one with same child type but more CV-quals,
+    /// OR to appropriately-qualified void *
+    /// only appears on the branches of a conditional expr
+    QualCast,
+    /// Convert type to void
+    ToVoid,
+    /// Convert a literal 0 to a null pointer
+    NullToPointer,
+    /// GNU cast-to-union extension
+    UnionCast,
+
+    pub fn fromExplicitCast(to: Type, from: Type, comp: *Compilation) CastKind {
+        if (to.eql(from, comp, false)) return .NoOP;
+        if (to.is(.Bool)) {
+            if (from.isPointer()) return .PointerToBool;
+            if (from.isInt()) return .IntToBool;
+            if (from.isFloat()) return .FloatToBool;
+        } else if (to.isInt()) {
+            if (from.is(.Bool)) return .BoolToInt;
+            if (from.isInt()) return .IntCast;
+            if (from.isPointer()) return .PointerToInt;
+            if (from.isFloat()) return .FloatToInt;
+        } else if (to.isPointer()) {
+            if (from.isArray()) return .ArrayToPointer;
+            if (from.isPointer()) return .Bitcast;
+            if (from.isFunc()) return .FunctionToPointer;
+            if (from.is(.Bool)) return .BoolToPointer;
+            if (from.isInt()) return .IntToPointer;
+        } else if (to.isFloat()) {
+            if (from.is(.Bool)) return .BoolToFloat;
+            if (from.isInt()) return .IntToFloat;
+            if (from.isFloat()) return .FloatCast;
+        }
+        unreachable;
+    }
 };
 
 pub fn isLValue(nodes: Node.List.Slice, extra: []const NodeIndex, valueMap: ValueMap, node: NodeIndex) bool {
@@ -296,6 +370,10 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
     util.setColor(if (tag.isImplicit()) IMPLICIT else TAG, w);
 
     try w.print("{s}: ", .{@tagName(tag)});
+    if (tag == .ImplicitCast or tag == .ExplicitCast) {
+        util.setColor(.white, w);
+        try w.print("({s}) ", .{@tagName(data.cast.kind)});
+    }
     util.setColor(TYPE, w);
     try w.writeByte('\'');
     try ty.dump(w);
@@ -745,7 +823,10 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
             try tree.dumpNode(data.binExpr.rhs, level + delta, w);
         },
 
-        .CastExpr,
+        .ExplicitCast,
+        .ImplicitCast,
+        => try tree.dumpNode(data.cast.operand, level + delta, w),
+
         .AddrOfExpr,
         .ComputedGotoStmt,
         .DerefExpr,
@@ -853,28 +934,6 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
         .StmtExpr,
         .ImaginaryLiteral,
         => try tree.dumpNode(data.unExpr, level + delta, w),
-
-        .ArrayToPointer,
-        .LValueToRValue,
-        .FunctionToPointer,
-        .PointerToBool,
-        .PointerToInt,
-        .BoolToInt,
-        .BoolToFloat,
-        .BoolToPointer,
-        .IntToBool,
-        .IntToFloat,
-        .IntToPointer,
-        .FloatToBool,
-        .FloatToInt,
-        .IntCast,
-        .FloatCast,
-        .ToVoid,
-        .QualCast,
-        .NullToPointer,
-        => {
-            try tree.dumpNode(data.unExpr, level + delta, w);
-        },
 
         .ArrayFillerExpr => {
             try w.writeByteNTimes(' ', level + 1);
