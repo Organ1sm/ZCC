@@ -1730,7 +1730,7 @@ fn parseRecordSpec(p: *Parser) Error!Type {
         };
 
         // check if this is a reference to a previous type
-        if (try p.symStack.findTag(p.tokenIds[kindToken], ident)) |prev| {
+        if (try p.symStack.findTag(p.tokenIds[kindToken], ident, p.getCurrToken())) |prev| {
             return prev.type;
         } else {
             // this is a forward declaration, create a new record type.
@@ -1747,6 +1747,12 @@ fn parseRecordSpec(p: *Parser) Error!Type {
                 .type = ty,
                 .value = .{},
             });
+
+            try p.declBuffer.append(try p.addNode(.{
+                .tag = if (isStruct) .StructForwardDecl else .UnionForwardDecl,
+                .type = ty,
+                .data = undefined,
+            }));
             return ty;
         }
     };
@@ -2055,7 +2061,7 @@ fn parseEnumSpec(p: *Parser) Error!*Type.Enum {
         };
 
         // check if this is a reference to a previous type
-        if (try p.symStack.findTag(.KeywordEnum, ident)) |prev| {
+        if (try p.symStack.findTag(.KeywordEnum, ident, p.getCurrToken())) |prev| {
             return prev.type.get(.Enum).?.data.@"enum";
         } else {
             // this is a forward declaration, create a new enum type
@@ -2071,6 +2077,11 @@ fn parseEnumSpec(p: *Parser) Error!*Type.Enum {
                 .type = ty,
                 .value = .{},
             });
+            try p.declBuffer.append(try p.addNode(.{
+                .tag = .EnumForwardDecl,
+                .type = ty,
+                .data = undefined,
+            }));
             return enumType;
         }
     };
@@ -2078,7 +2089,7 @@ fn parseEnumSpec(p: *Parser) Error!*Type.Enum {
     // Get forward declared type or create a new one
     var defined = false;
     const enumType: *Type.Enum = if (maybeID) |ident| enumTy: {
-        if (try p.symStack.findTag(.KeywordEnum, ident)) |prev| {
+        if (try p.symStack.defineTag(.KeywordEnum, ident)) |prev| {
             if (!prev.type.hasIncompleteSize()) {
                 // if the enum isn't incomplete, this is a redefinition
                 try p.errStr(.redefinition, ident, p.getTokenSlice(ident));

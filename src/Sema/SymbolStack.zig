@@ -138,13 +138,21 @@ pub fn findSymbol(self: *SymbolStack, nameToken: TokenIndex) ?Symbol {
 /// @param kind       The TokenType representing the kind of tag (enum, struct, union).
 /// @param nameToken  The token index used to identify the symbol's name.
 /// @return           A nullable Symbol if a matching tag is found, or null otherwise.
-pub fn findTag(self: *SymbolStack, kind: TokenType, nameToken: TokenIndex) !?Symbol {
+pub fn findTag(
+    self: *SymbolStack,
+    kind: TokenType,
+    nameToken: TokenIndex,
+    nextTokenID: TokenType,
+) !?Symbol {
     const name = self.p.getTokenSlice(nameToken);
     const kinds = self.symbols.items(.kind);
     const names = self.symbols.items(.name);
 
+    // `tag Name;` should always result in a new type if in a new scope.
+    const end = if (nextTokenID == .Semicolon) self.scopeEnd() else 0;
+
     var i = self.symbols.len;
-    while (i > 0) {
+    while (i > end) {
         i -= 1;
         switch (kinds[i]) {
             .@"enum" => if (mem.eql(u8, names[i], name)) {
@@ -161,15 +169,15 @@ pub fn findTag(self: *SymbolStack, kind: TokenType, nameToken: TokenIndex) !?Sym
             },
             else => {},
         }
-    }
-    
+    } else return null;
+
     // If we've exited the loop because i reached 0, return null indicating no symbol was found.
-    if (i <= self.scopeEnd()) return null;
-    
+    if (i < self.scopeEnd()) return null;
+
     // If we've reached this point, the symbol was found but did not match the kind. Report an error.
     try self.p.errStr(.wrong_tag, nameToken, name);
     try self.p.errToken(.previous_definition, self.symbols.items(.token)[i]);
-    
+
     // Return null as no matching symbol was found.
     return null;
 }
