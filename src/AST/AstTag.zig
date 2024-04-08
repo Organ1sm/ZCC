@@ -49,6 +49,12 @@ pub const Tag = enum(u8) {
     UnionDecl,
     /// { range }
     EnumDecl,
+    /// struct Name;
+    StructForwardDecl,
+    /// union Name;
+    UnionForwardDecl,
+    /// enum Name;
+    EnumForwardDecl,
 
     /// name = node
     EnumFieldDecl,

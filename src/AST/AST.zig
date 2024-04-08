@@ -884,6 +884,11 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
             util.setColor(.reset, w);
         },
 
-        .DefaultInitExpr, .CondDummyExpr => {},
+        .StructForwardDecl,
+        .UnionForwardDecl,
+        .EnumForwardDecl,
+        .DefaultInitExpr,
+        .CondDummyExpr,
+        => {},
     }
 }
