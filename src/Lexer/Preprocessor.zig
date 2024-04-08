@@ -1509,8 +1509,11 @@ fn expandMacroExhaustive(
                             break :macroHandler;
                         },
                         error.Unterminated => {
+                            if (pp.comp.langOpts.emulate == .gcc)
+                                idx += 1;
                             const tokensRemoved = macroScanIdx - idx;
-                            for (buf.items[idx .. idx + tokensRemoved]) |tok| Token.free(tok.expansionLocs, pp.gpa);
+                            for (buf.items[idx..][0..tokensRemoved]) |tok|
+                                Token.free(tok.expansionLocs, pp.gpa);
                             try buf.replaceRange(idx, tokensRemoved, &.{});
                             movingEndIdx -|= tokensRemoved;
                             break :macroHandler;
