@@ -117,14 +117,6 @@ pub fn implicitCast(operand: *Result, p: *Parser, kind: AST.CastKind) Error!void
     });
 }
 
-pub fn qualCast(res: *Result, p: *Parser, elemType: *Type) Error!void {
-    res.ty = .{
-        .data = .{ .subType = elemType },
-        .specifier = .Pointer,
-    };
-    try res.implicitCast(p, .QualCast);
-}
-
 pub fn adjustCondExprPtrs(a: *Result, tok: TokenIndex, b: *Result, p: *Parser) !bool {
     std.debug.assert(a.ty.isPointer() and b.ty.isPointer());
 
@@ -149,8 +141,22 @@ pub fn adjustCondExprPtrs(a: *Result, tok: TokenIndex, b: *Result, p: *Parser) !
     if (pointersCompatible) {
         adjustedElemType.qual = aElem.qual.mergeCVQualifiers(bElem.qual);
     }
-    if (!adjustedElemType.eql(aElem, p.comp, true)) try a.qualCast(p, adjustedElemType);
-    if (!adjustedElemType.eql(bElem, p.comp, true)) try b.qualCast(p, adjustedElemType);
+
+    if (!adjustedElemType.eql(aElem, p.comp, true)) {
+        a.ty = .{
+            .data = .{ .subType = adjustedElemType },
+            .specifier = .Pointer,
+        };
+        try a.implicitCast(p, .Bitcast);
+    }
+    
+    if (!adjustedElemType.eql(bElem, p.comp, true)) {
+        b.ty = .{
+            .data = .{ .subType = adjustedElemType },
+            .specifier = .Pointer,
+        };
+        try b.implicitCast(p, .Bitcast);
+    }
     return true;
 }
 
