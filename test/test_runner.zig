@@ -238,7 +238,11 @@ pub fn main() !void {
                 const expandedPath = try std.fs.path.join(gpa, &.{ args[1], "expanded", std.fs.path.basename(path) });
                 defer gpa.free(expandedPath);
 
-                break :blk try std.fs.cwd().readFileAlloc(gpa, expandedPath, std.math.maxInt(u32));
+                break :blk std.fs.cwd().readFileAlloc(gpa, expandedPath, std.math.maxInt(u32)) catch |err| {
+                    failCount += 1;
+                    progress.log("could not open expanded file '{s}': {s}\n", .{ path, @errorName(err) });
+                    continue;
+                };
             };
             defer gpa.free(expectedOutput);
 
