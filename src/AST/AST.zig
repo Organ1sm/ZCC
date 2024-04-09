@@ -337,11 +337,33 @@ pub fn dump(tree: AST, writer: anytype) @TypeOf(writer).Error!void {
 }
 
 fn dumpAttribute(attr: Attribute, writer: anytype) !void {
-    inline for (std.meta.fields(Attribute.Tag)) |e| {
-        if (e.value == @intFromEnum(attr.tag)) {
-            try writer.print("{}\n", .{@field(attr.args, e.name)});
+    switch (attr.tag) {
+        inline else => |tag| {
+            const args = @field(attr.args, @tagName(tag));
+            if (@TypeOf(args) == void) {
+                try writer.writeByte('\n');
+                return;
+            }
+            try writer.writeByte(' ');
+            inline for (@typeInfo(@TypeOf(args)).Struct.fields, 0..) |f, i| {
+                if (comptime std.mem.eql(u8, f.name, "__name_token")) continue;
+                if (i != 0) {
+                    try writer.writeAll(", ");
+                }
+                try writer.writeAll(f.name);
+                try writer.writeAll(": ");
+                switch (f.type) {
+                    []const u8 => try writer.print("\"{s}\"", .{@field(args, f.name)}),
+                    ?[]const u8 => try writer.print("\"{?s}\"", .{@field(args, f.name)}),
+                    else => switch (@typeInfo(f.type)) {
+                        .Enum => try writer.writeAll(@tagName(@field(args, f.name))),
+                        else => try writer.print("{any}", .{@field(args, f.name)}),
+                    },
+                }
+            }
+            try writer.writeByte('\n');
             return;
-        }
+        },
     }
 }
 
@@ -402,7 +424,7 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
             util.setColor(ATTRIBUTE, w);
         for (ty.data.attributed.attributes) |attr| {
             try w.writeByteNTimes(' ', level + half);
-            try w.print("attr: {s}\n", .{@tagName(attr.tag)});
+            try w.print("attr: {s}", .{@tagName(attr.tag)});
             try dumpAttribute(attr, w);
         }
 
