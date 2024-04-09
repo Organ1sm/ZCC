@@ -2232,14 +2232,14 @@ fn enumerator(p: *Parser, e: *Enumerator) Error!?EnumFieldAndNode {
 
     if (e.res.value.compare(.lt, Value.int(0), e.res.ty, p.comp)) {
         const value = e.res.value.getInt(i64);
-        if (value < p.comp.minInt()) {
+        if (value < (Type{ .specifier = .Int }).minInt(p.comp)) {
             try p.errExtra(.enumerator_too_small, nameToken, .{
                 .signed = value,
             });
         }
     } else {
         const value = e.res.value.getInt(u64);
-        if (value > p.comp.maxInt()) {
+        if (value > (Type{ .specifier = .Int }).maxInt(p.comp)) {
             try p.errExtra(.enumerator_too_large, nameToken, .{
                 .unsigned = value,
             });

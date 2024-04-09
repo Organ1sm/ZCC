@@ -721,6 +721,18 @@ pub fn maxInt(ty: Type, comp: *const Compilation) u64 {
     };
 }
 
+pub fn minInt(ty: Type, comp: *const Compilation) i64 {
+    std.debug.assert(ty.isInt());
+    if (ty.isUnsignedInt(comp)) return 0;
+    return switch (ty.sizeof(comp).?) {
+        1 => std.math.minInt(i8),
+        2 => std.math.minInt(i16),
+        4 => std.math.minInt(i32),
+        8 => std.math.minInt(i64),
+        else => unreachable,
+    };
+}
+
 /// Check if the given type `ty` has a field with the specified `name`
 pub fn hasField(ty: Type, name: []const u8) bool {
     switch (ty.specifier) {
