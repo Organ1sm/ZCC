@@ -4883,52 +4883,9 @@ fn parseCastExpr(p: *Parser) Error!Result {
         var operand = try p.parseCastExpr();
         try operand.expect(p);
 
-        if (ty.is(.Void)) {
-            // everything can cast to void
-            operand.value.tag = .unavailable;
-        } else if (ty.isScalar()) cast: {
-            try operand.lvalConversion(p);
+        try operand.lvalConversion(p);
+        try operand.castType(p, ty, lp);
 
-            const oldFloat = operand.ty.isFloat();
-            const newFloat = ty.isFloat();
-
-            if (newFloat and operand.ty.isPointer()) {
-                try p.errStr(.invalid_cast_to_float, lp, try p.typeStr(ty));
-                return error.ParsingFailed;
-            } else if (oldFloat and ty.isPointer()) {
-                try p.errStr(.invalid_cast_to_pointer, lp, try p.typeStr(operand.ty));
-                return error.ParsingFailed;
-            }
-
-            if (operand.value.tag == .unavailable)
-                break :cast;
-
-            const oldInt = operand.ty.isInt() or operand.ty.isPointer();
-            const newInt = ty.isInt() or ty.isPointer();
-            if (ty.is(.Bool)) {
-                operand.value.toBool();
-            } else if (oldFloat and newInt) {
-                _ = operand.value.floatToInt(operand.ty, ty, p.comp); // no warnings for explicit cast
-            } else if (newFloat and oldInt) {
-                operand.value.intToFloat(operand.ty, ty, p.comp);
-            } else if (newFloat and oldFloat) {
-                operand.value.floatCast(operand.ty, ty, p.comp);
-            }
-        } else {
-            try p.errStr(.invalid_cast_type, lp, try p.typeStr(operand.ty));
-            return error.ParsingFailed;
-        }
-
-        if (ty.containAnyQual())
-            try p.errStr(.qual_cast, lp, try p.typeStr(ty));
-
-        if (ty.isInt() and operand.ty.isPointer() and ty.sizeCompare(operand.ty, p.comp) == .lt)
-            try p.errStr(.cast_to_smaller_int, lp, try p.typePairStrExtra(ty, " from ", operand.ty));
-
-        operand.ty = ty;
-        operand.ty.qual = .{};
-
-        try operand.un(p, .CastExpr);
         return operand;
     }
 
@@ -5469,7 +5426,7 @@ fn parseSuffixExpr(p: *Parser, lhs: Result) Error!Result {
             if (lhs.ty.isArray()) {
                 var copy = lhs;
                 copy.ty.decayArray();
-                try copy.un(p, .ArrayToPointer);
+                try copy.implicitCast(p, .ArrayToPointer);
                 return p.fieldAccess(copy, name, true);
             }
             return p.fieldAccess(lhs, name, true);
@@ -5777,7 +5734,7 @@ fn parseCallExpr(p: *Parser, lhs: Result) Error!Result {
     var callNode: AST.Node = .{
         .tag = .CallExprOne,
         .type = ty.getReturnType(),
-        .data = .{ .binExpr = .{ .lhs = lhs.node, .rhs = .none } },
+        .data = .{ .binExpr = .{ .lhs = func.node, .rhs = .none } },
     };
 
     const args = p.listBuffer.items[listBufferTop..];

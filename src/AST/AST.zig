@@ -108,7 +108,6 @@ pub const Node = struct {
     pub const Data = union {
         decl: struct { name: TokenIndex, node: NodeIndex = .none },
         declRef: TokenIndex,
-
         range: Range,
 
         if3: struct { cond: NodeIndex, body: u32 },
@@ -118,6 +117,8 @@ pub const Node = struct {
 
         member: struct { lhs: NodeIndex, index: u32 },
         unionInit: struct { fieldIndex: u32, node: NodeIndex },
+
+        cast: struct { operand: NodeIndex, kind: CastKind },
 
         int: u64,
 
@@ -155,6 +156,75 @@ pub const Node = struct {
     };
 
     pub const List = std.MultiArrayList(Node);
+};
+
+pub const CastKind = enum(u8) {
+    /// Does nothing except possibly add qualifiers
+    NoOP,
+    /// Interpret one bit pattern as another. Used for operands which have the same
+    /// size and unrelated types, e.g. casting one pointer type to another
+    Bitcast,
+    /// Convert T[] to T *
+    ArrayToPointer,
+    /// Converts an lvalue to an rvalue
+    LValToRVal,
+    /// Convert a function type to a pointer to a function
+    FunctionToPointer,
+    /// Convert a pointer type to a _Bool
+    PointerToBool,
+    /// Convert a pointer type to an integer type
+    PointerToInt,
+    /// Convert _Bool to an integer type
+    BoolToInt,
+    /// Convert _Bool to a floating type
+    BoolToFloat,
+    /// Convert a _Bool to a pointer; will cause a  warning
+    BoolToPointer,
+    /// Convert an integer type to _Bool
+    IntToBool,
+    /// Convert an integer to a floating
+    IntToFloat,
+    /// Convert an integer type to a pointer type
+    IntToPointer,
+    /// Convert a floating type to a _Bool
+    FloatToBool,
+    /// Convert a floating type to an integer
+    FloatToInt,
+    /// Convert one integer type to another
+    IntCast,
+    /// Convert one floating type to another
+    FloatCast,
+    /// Convert type to void
+    ToVoid,
+    /// Convert a literal 0 to a null pointer
+    NullToPointer,
+    /// GNU cast-to-union extension
+    UnionCast,
+
+    pub fn fromExplicitCast(to: Type, from: Type, comp: *Compilation) CastKind {
+        if (to.eql(from, comp, false)) return .NoOP;
+        if (to.is(.Bool)) {
+            if (from.isPointer()) return .PointerToBool;
+            if (from.isInt()) return .IntToBool;
+            if (from.isFloat()) return .FloatToBool;
+        } else if (to.isInt()) {
+            if (from.is(.Bool)) return .BoolToInt;
+            if (from.isInt()) return .IntCast;
+            if (from.isPointer()) return .PointerToInt;
+            if (from.isFloat()) return .FloatToInt;
+        } else if (to.isPointer()) {
+            if (from.isArray()) return .ArrayToPointer;
+            if (from.isPointer()) return .Bitcast;
+            if (from.isFunc()) return .FunctionToPointer;
+            if (from.is(.Bool)) return .BoolToPointer;
+            if (from.isInt()) return .IntToPointer;
+        } else if (to.isFloat()) {
+            if (from.is(.Bool)) return .BoolToFloat;
+            if (from.isInt()) return .IntToFloat;
+            if (from.isFloat()) return .FloatCast;
+        }
+        unreachable;
+    }
 };
 
 pub fn isLValue(nodes: Node.List.Slice, extra: []const NodeIndex, valueMap: ValueMap, node: NodeIndex) bool {
@@ -267,11 +337,33 @@ pub fn dump(tree: AST, writer: anytype) @TypeOf(writer).Error!void {
 }
 
 fn dumpAttribute(attr: Attribute, writer: anytype) !void {
-    inline for (std.meta.fields(Attribute.Tag)) |e| {
-        if (e.value == @intFromEnum(attr.tag)) {
-            try writer.print("{}\n", .{@field(attr.args, e.name)});
+    switch (attr.tag) {
+        inline else => |tag| {
+            const args = @field(attr.args, @tagName(tag));
+            if (@TypeOf(args) == void) {
+                try writer.writeByte('\n');
+                return;
+            }
+            try writer.writeByte(' ');
+            inline for (@typeInfo(@TypeOf(args)).Struct.fields, 0..) |f, i| {
+                if (comptime std.mem.eql(u8, f.name, "__name_token")) continue;
+                if (i != 0) {
+                    try writer.writeAll(", ");
+                }
+                try writer.writeAll(f.name);
+                try writer.writeAll(": ");
+                switch (f.type) {
+                    []const u8 => try writer.print("\"{s}\"", .{@field(args, f.name)}),
+                    ?[]const u8 => try writer.print("\"{?s}\"", .{@field(args, f.name)}),
+                    else => switch (@typeInfo(f.type)) {
+                        .Enum => try writer.writeAll(@tagName(@field(args, f.name))),
+                        else => try writer.print("{any}", .{@field(args, f.name)}),
+                    },
+                }
+            }
+            try writer.writeByte('\n');
             return;
-        }
+        },
     }
 }
 
@@ -293,37 +385,51 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
     const ty = tree.nodes.items(.type)[@intFromEnum(node)];
     try w.writeByteNTimes(' ', level);
 
-    util.setColor(if (tag.isImplicit()) IMPLICIT else TAG, w);
+    if (tree.comp.diag.color)
+        util.setColor(if (tag.isImplicit()) IMPLICIT else TAG, w);
 
     try w.print("{s}: ", .{@tagName(tag)});
-    util.setColor(TYPE, w);
+    if (tag == .ImplicitCast or tag == .ExplicitCast) {
+        if (tree.comp.diag.color)
+            util.setColor(.white, w);
+        try w.print("({s}) ", .{@tagName(data.cast.kind)});
+    }
+
+    if (tree.comp.diag.color)
+        util.setColor(TYPE, w);
     try w.writeByte('\'');
     try ty.dump(w);
     try w.writeByte('\'');
 
     if (isLValue(tree.nodes, tree.data, tree.valueMap, node)) {
-        util.setColor(ATTRIBUTE, w);
+        if (tree.comp.diag.color)
+            util.setColor(ATTRIBUTE, w);
         try w.writeAll(" lvalue");
     }
 
     if (tree.valueMap.get(node)) |val| {
-        util.setColor(LITERAL, w);
+        if (tree.comp.diag.color)
+            util.setColor(LITERAL, w);
         try w.writeAll(" (value: ");
         try val.dump(ty, tree.comp, w);
         try w.writeByte(')');
     }
 
     try w.writeAll("\n");
-    util.setColor(.reset, w);
+    if (tree.comp.diag.color)
+        util.setColor(.reset, w);
 
     if (ty.specifier == .Attributed) {
-        util.setColor(ATTRIBUTE, w);
+        if (tree.comp.diag.color)
+            util.setColor(ATTRIBUTE, w);
         for (ty.data.attributed.attributes) |attr| {
             try w.writeByteNTimes(' ', level + half);
-            try w.print("attr: {s}\n", .{@tagName(attr.tag)});
+            try w.print("attr: {s}", .{@tagName(attr.tag)});
             try dumpAttribute(attr, w);
         }
-        util.setColor(.reset, w);
+
+        if (tree.comp.diag.color)
+            util.setColor(.reset, w);
     }
 
     switch (tag) {
@@ -347,9 +453,12 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
         => {
             try w.writeByteNTimes(' ', level + half);
             try w.writeAll("name: ");
-            util.setColor(NAME, w);
+
+            if (tree.comp.diag.color)
+                util.setColor(NAME, w);
             try w.print("{s}\n", .{tree.getTokenSlice(data.decl.name)});
-            util.setColor(.reset, w);
+            if (tree.comp.diag.color)
+                util.setColor(.reset, w);
         },
 
         .FnDef,
@@ -359,9 +468,15 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
         => {
             try w.writeByteNTimes(' ', level + half);
             try w.writeAll("name: ");
-            util.setColor(NAME, w);
+
+            if (tree.comp.diag.color)
+                util.setColor(NAME, w);
+
             try w.print("{s}\n", .{tree.getTokenSlice(data.decl.name)});
-            util.setColor(.reset, w);
+
+            if (tree.comp.diag.color)
+                util.setColor(.reset, w);
+
             try w.writeByteNTimes(' ', level + half);
             try w.writeAll("body:\n");
             try tree.dumpNode(data.decl.node, level + delta, w);
@@ -399,9 +514,15 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
         .UnionInitExpr => {
             try w.writeByteNTimes(' ', level + half);
             try w.writeAll("field index: ");
-            util.setColor(LITERAL, w);
+
+            if (tree.comp.diag.color)
+                util.setColor(LITERAL, w);
+
             try w.print("{d}\n", .{data.unionInit.fieldIndex});
-            util.setColor(.reset, w);
+
+            if (tree.comp.diag.color)
+                util.setColor(.reset, w);
+
             if (data.unionInit.node != .none) {
                 try tree.dumpNode(data.unionInit.node, level + delta, w);
             }
@@ -414,9 +535,14 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
         .LabeledStmt => {
             try w.writeByteNTimes(' ', level + half);
             try w.writeAll("label: ");
-            util.setColor(LITERAL, w);
+
+            if (tree.comp.diag.color)
+                util.setColor(LITERAL, w);
+
             try w.print("{s}\n", .{tree.getTokenSlice(data.decl.name)});
-            util.setColor(.reset, w);
+
+            if (tree.comp.diag.color)
+                util.setColor(.reset, w);
             if (data.decl.node != .none) {
                 try w.writeByteNTimes(' ', level + half);
                 try w.writeAll("stmt:\n");
@@ -467,9 +593,14 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
         .GotoStmt, .AddrOfLabel => {
             try w.writeByteNTimes(' ', level + half);
             try w.writeAll("label: ");
-            util.setColor(LITERAL, w);
+
+            if (tree.comp.diag.color)
+                util.setColor(LITERAL, w);
+
             try w.print("{s}\n", .{tree.getTokenSlice(data.declRef)});
-            util.setColor(.reset, w);
+
+            if (tree.comp.diag.color)
+                util.setColor(.reset, w);
         },
 
         .ContinueStmt,
@@ -610,9 +741,11 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
         => {
             try w.writeByteNTimes(' ', level + half);
             try w.writeAll("name: ");
-            util.setColor(NAME, w);
+            if (tree.comp.diag.color)
+                util.setColor(NAME, w);
             try w.print("{s}\n", .{tree.getTokenSlice(data.decl.name)});
-            util.setColor(.reset, w);
+            if (tree.comp.diag.color)
+                util.setColor(.reset, w);
 
             if (data.decl.node != .none) {
                 try w.writeByteNTimes(' ', level + half);
@@ -624,9 +757,11 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
         .EnumFieldDecl => {
             try w.writeByteNTimes(' ', level + half);
             try w.writeAll("name: ");
-            util.setColor(NAME, w);
+            if (tree.comp.diag.color)
+                util.setColor(NAME, w);
             try w.print("{s}\n", .{tree.getTokenSlice(data.decl.name)});
-            util.setColor(.reset, w);
+            if (tree.comp.diag.color)
+                util.setColor(.reset, w);
             if (data.decl.node != .none) {
                 try w.writeByteNTimes(' ', level + half);
                 try w.writeAll("value:\n");
@@ -638,9 +773,11 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
             if (data.decl.name != 0) {
                 try w.writeByteNTimes(' ', level + half);
                 try w.writeAll("name: ");
-                util.setColor(NAME, w);
+                if (tree.comp.diag.color)
+                    util.setColor(NAME, w);
                 try w.print("{s}\n", .{tree.getTokenSlice(data.decl.name)});
-                util.setColor(.reset, w);
+                if (tree.comp.diag.color)
+                    util.setColor(.reset, w);
             }
 
             if (data.decl.node != .none) {
@@ -652,9 +789,11 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
 
         .AttrArgIdentifier => {
             try w.writeByteNTimes(' ', level + half);
-            util.setColor(ATTRIBUTE, w);
+            if (tree.comp.diag.color)
+                util.setColor(ATTRIBUTE, w);
             try w.print("name: {s}\n", .{tree.getTokenSlice(data.declRef)});
-            util.setColor(.reset, w);
+            if (tree.comp.diag.color)
+                util.setColor(.reset, w);
         },
 
         .CallExpr => {
@@ -683,9 +822,11 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
         .BuiltinCallExpr => {
             try w.writeByteNTimes(' ', level + half);
             try w.writeAll("name: ");
-            util.setColor(NAME, w);
+            if (tree.comp.diag.color)
+                util.setColor(NAME, w);
             try w.print("{s}\n", .{tree.getTokenSlice(@intFromEnum(tree.data[data.range.start]))});
-            util.setColor(.reset, w);
+            if (tree.comp.diag.color)
+                util.setColor(.reset, w);
 
             try w.writeByteNTimes(' ', level + half);
             try w.writeAll("args:\n");
@@ -696,9 +837,11 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
         .BuiltinCallExprOne => {
             try w.writeByteNTimes(' ', level + half);
             try w.writeAll("name: ");
-            util.setColor(NAME, w);
+            if (tree.comp.diag.color)
+                util.setColor(NAME, w);
             try w.print("{s}\n", .{tree.getTokenSlice(data.decl.name)});
-            util.setColor(.reset, w);
+            if (tree.comp.diag.color)
+                util.setColor(.reset, w);
             if (data.decl.node != .none) {
                 try w.writeByteNTimes(' ', level + half);
                 try w.writeAll("arg:\n");
@@ -745,7 +888,10 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
             try tree.dumpNode(data.binExpr.rhs, level + delta, w);
         },
 
-        .CastExpr,
+        .ExplicitCast,
+        .ImplicitCast,
+        => try tree.dumpNode(data.cast.operand, level + delta, w),
+
         .AddrOfExpr,
         .ComputedGotoStmt,
         .DerefExpr,
@@ -767,17 +913,21 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
         .DeclRefExpr => {
             try w.writeByteNTimes(' ', level + 1);
             try w.writeAll("name: ");
-            util.setColor(NAME, w);
+            if (tree.comp.diag.color)
+                util.setColor(NAME, w);
             try w.print("{s}\n", .{tree.getTokenSlice(data.declRef)});
-            util.setColor(.reset, w);
+            if (tree.comp.diag.color)
+                util.setColor(.reset, w);
         },
 
         .EnumerationRef => {
             try w.writeByteNTimes(' ', level + 1);
             try w.writeAll("name: ");
-            util.setColor(NAME, w);
+            if (tree.comp.diag.color)
+                util.setColor(NAME, w);
             try w.print("{s}\n", .{tree.getTokenSlice(data.declRef)});
-            util.setColor(.reset, w);
+            if (tree.comp.diag.color)
+                util.setColor(.reset, w);
         },
 
         .CharLiteral,
@@ -798,9 +948,11 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
 
             try w.writeByteNTimes(' ', level + 1);
             try w.writeAll("name: ");
-            util.setColor(NAME, w);
+            if (tree.comp.diag.color)
+                util.setColor(NAME, w);
             try w.print("{s}\n", .{lhsType.data.record.fields[data.member.index].name});
-            util.setColor(.reset, w);
+            if (tree.comp.diag.color)
+                util.setColor(.reset, w);
         },
 
         .ArrayAccessExpr => {
@@ -854,34 +1006,14 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
         .ImaginaryLiteral,
         => try tree.dumpNode(data.unExpr, level + delta, w),
 
-        .ArrayToPointer,
-        .LValueToRValue,
-        .FunctionToPointer,
-        .PointerToBool,
-        .PointerToInt,
-        .BoolToInt,
-        .BoolToFloat,
-        .BoolToPointer,
-        .IntToBool,
-        .IntToFloat,
-        .IntToPointer,
-        .FloatToBool,
-        .FloatToInt,
-        .IntCast,
-        .FloatCast,
-        .ToVoid,
-        .QualCast,
-        .NullToPointer,
-        => {
-            try tree.dumpNode(data.unExpr, level + delta, w);
-        },
-
         .ArrayFillerExpr => {
             try w.writeByteNTimes(' ', level + 1);
             try w.writeAll("count: ");
-            util.setColor(LITERAL, w);
+            if (tree.comp.diag.color)
+                util.setColor(LITERAL, w);
             try w.print("{d}\n", .{data.int});
-            util.setColor(.reset, w);
+            if (tree.comp.diag.color)
+                util.setColor(.reset, w);
         },
 
         .StructForwardDecl,

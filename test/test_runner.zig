@@ -271,7 +271,25 @@ pub fn main() !void {
         };
         defer tree.deinit();
 
-        tree.dump(std.io.null_writer) catch {};
+        const astPath = try std.fs.path.join(gpa, &.{ args[1], "ast", std.fs.path.basename(path) });
+        defer gpa.free(astPath);
+
+        const maybeAST = std.fs.cwd().readFileAlloc(gpa, astPath, std.math.maxInt(u32)) catch null;
+        if (maybeAST) |expectedAST| {
+            defer gpa.free(expectedAST);
+            var actualAST = std.ArrayList(u8).init(gpa);
+            defer actualAST.deinit();
+
+            const oldColorSetting = comp.diag.color;
+            defer comp.diag.color = oldColorSetting;
+            comp.diag.color = false;
+
+            try tree.dump(actualAST.writer());
+            std.testing.expectEqualStrings(expectedAST, actualAST.items) catch {
+                failCount += 1;
+                break;
+            };
+        } else tree.dump(std.io.null_writer) catch {};
 
         if (expectedTypes) |types| {
             const testFn = for (tree.rootDecls) |decl| {

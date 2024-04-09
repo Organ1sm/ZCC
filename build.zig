@@ -21,6 +21,7 @@ pub fn build(b: *std.Build) !void {
         .target = target,
         .optimize = .Debug,
     });
+    exe.root_module.addImport("zcc", zccModule);
     exe.root_module.addImport("deps", depsModule);
 
     // This declares intent for the executable to be installed into the

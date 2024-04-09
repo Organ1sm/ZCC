@@ -151,9 +151,14 @@ fn genNode(func: *Fn, node: Tree.NodeIndex) Codegen.Error!Value {
 
         .CallExpr => return func.genCall(func.c.tree.data[data.range.start], func.c.tree.data[data.range.start + 1 .. data.range.end]),
 
-        .FunctionToPointer,
-        .ArrayToPointer,
-        => return func.genNode(data.unExpr), // no-op
+        .ExplicitCast, .ImplicitCast => {
+            switch (data.cast.kind) {
+                .FunctionToPointer,
+                .ArrayToPointer,
+                => return func.genNode(data.cast.operand), // no-op
+                else => return func.c.comp.diag.fatalNoSrc("TODO x86_64 genNode for cast {s}\n", .{@tagName(data.cast.kind)}),
+            }
+        },
 
         .DeclRefExpr => {
             // TODO locals and arguments

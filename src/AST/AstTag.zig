@@ -188,8 +188,10 @@ pub const Tag = enum(u8) {
     DivExpr,
     /// lhs % rhs
     ModExpr,
-    /// Explicit (type)lhs
-    CastExpr,
+    /// Explicit: (type) cast
+    ExplicitCast,
+    /// Implicit: cast
+    ImplicitCast,
     /// &lhs
     AddrOfExpr,
     /// &&DeclRef
@@ -274,44 +276,6 @@ pub const Tag = enum(u8) {
     /// (ty){ un }
     CompoundLiteralExpr,
 
-    // implicit casts
-    /// convert T[] to T*
-    ArrayToPointer,
-    /// Converts an lvalue to an rvalue
-    LValueToRValue,
-    /// Convert a function type to a pointer to a function
-    FunctionToPointer,
-    /// Convert a pointer type to a _Bool
-    PointerToBool,
-    /// Convert a pointer type to an integer type
-    PointerToInt,
-    /// Convert _Bool to an integer type
-    BoolToInt,
-    /// Convert _Bool to a floating type
-    BoolToFloat,
-    /// Convert a _Bool to a pointer; will cause a  warning
-    BoolToPointer,
-    /// Convert an integer type to _Bool
-    IntToBool,
-    /// Convert an integer to a floating
-    IntToFloat,
-    /// Convert an integer type to a pointer type
-    IntToPointer,
-    /// Convert a floating type to a _Bool
-    FloatToBool,
-    /// Convert a floating type to an integer
-    FloatToInt,
-    /// Convert one integer type to another
-    IntCast,
-    /// Convert one floating type to another
-    FloatCast,
-    /// Convert pointer to one with same child type but more CV-quals,
-    /// OR to appropriately-qualified void *
-    /// only appears on the branches of a conditional expr
-    QualCast,
-    /// Convert type to void; only appears on the branches of a conditional expr
-    ToVoid,
-
     /// Inserted at the end of a function body if no return stmt is found.
     /// ty is the functions return type
     ImplicitReturn,
@@ -329,31 +293,11 @@ pub const Tag = enum(u8) {
     /// range
     AttrParams,
 
-    /// Convert a literal 0 to a null pointer
-    NullToPointer,
-
     pub fn isImplicit(tag: Tag) bool {
         return switch (tag) {
-            .ArrayToPointer,
-            .LValueToRValue,
-            .FunctionToPointer,
-            .PointerToBool,
-            .PointerToInt,
-            .BoolToInt,
-            .BoolToFloat,
-            .BoolToPointer,
-            .IntToBool,
-            .IntToFloat,
-            .IntToPointer,
-            .FloatToBool,
-            .FloatToInt,
-            .IntCast,
-            .FloatCast,
-            .ToVoid,
+            .ImplicitCast,
             .ImplicitReturn,
             .ImplicitStaticVar,
-            .QualCast,
-            .NullToPointer,
             .ArrayFillerExpr,
             .DefaultInitExpr,
             .CondDummyExpr,
