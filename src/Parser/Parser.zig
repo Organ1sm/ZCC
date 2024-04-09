@@ -5734,7 +5734,7 @@ fn parseCallExpr(p: *Parser, lhs: Result) Error!Result {
     var callNode: AST.Node = .{
         .tag = .CallExprOne,
         .type = ty.getReturnType(),
-        .data = .{ .binExpr = .{ .lhs = lhs.node, .rhs = .none } },
+        .data = .{ .binExpr = .{ .lhs = func.node, .rhs = .none } },
     };
 
     const args = p.listBuffer.items[listBufferTop..];
