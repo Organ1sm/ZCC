@@ -370,9 +370,11 @@ fn cannotCombine(b: @This(), p: *Parser, sourceToken: TokenIndex) !void {
         try p.errStr(.spec_from_typedef, some.token, try p.typeStr(some.type));
 }
 
-fn duplicateSpec(b: *@This(), p: *Parser, spec: []const u8) !void {
+fn duplicateSpec(b: *@This(), p: *Parser, sourceToken: TokenIndex, spec: []const u8) !void {
     if (b.errorOnInvalid)
         return error.CannotCombine;
+    if (p.comp.langOpts.emulate != .clang)
+        return b.cannotCombine(p, sourceToken);
     try p.errStr(.duplicate_declspec, p.tokenIdx, spec);
 }
 
@@ -435,6 +437,7 @@ fn combineExtra(b: *@This(), p: *Parser, new: Specifier, sourceToken: TokenIndex
             Specifier.LongLongInt => Specifier.SLongLongInt,
             Specifier.Int128 => Specifier.SInt128,
 
+            Specifier.Signed,
             Specifier.SShort,
             Specifier.SShortInt,
             Specifier.SInt,
@@ -443,7 +446,7 @@ fn combineExtra(b: *@This(), p: *Parser, new: Specifier, sourceToken: TokenIndex
             Specifier.SLongLong,
             Specifier.SLongLongInt,
             Specifier.SInt128,
-            => return b.duplicateSpec(p, "signed"),
+            => return b.duplicateSpec(p, sourceToken, "signed"),
             else => return b.cannotCombine(p, sourceToken),
         },
 
@@ -458,6 +461,7 @@ fn combineExtra(b: *@This(), p: *Parser, new: Specifier, sourceToken: TokenIndex
             Specifier.LongLong => Specifier.ULongLong,
             Specifier.LongLongInt => Specifier.ULongLongInt,
             Specifier.Int128 => Specifier.UInt128,
+            Specifier.Unsigned,
             Specifier.UShort,
             Specifier.UShortInt,
             Specifier.UInt,
@@ -466,7 +470,7 @@ fn combineExtra(b: *@This(), p: *Parser, new: Specifier, sourceToken: TokenIndex
             Specifier.ULongLong, //
             Specifier.ULongLongInt,
             Specifier.UInt128,
-            => return b.duplicateSpec(p, "unsigned"),
+            => return b.duplicateSpec(p, sourceToken, "unsigned"),
             else => return b.cannotCombine(p, sourceToken),
         },
 
@@ -474,7 +478,6 @@ fn combineExtra(b: *@This(), p: *Parser, new: Specifier, sourceToken: TokenIndex
             Specifier.None => Specifier.Char,
             Specifier.Unsigned => Specifier.UChar,
             Specifier.Signed => Specifier.SChar,
-            Specifier.Char, Specifier.SChar, Specifier.UChar => return b.duplicateSpec(p, "char"),
             else => return b.cannotCombine(p, sourceToken),
         },
 
@@ -498,20 +501,6 @@ fn combineExtra(b: *@This(), p: *Parser, new: Specifier, sourceToken: TokenIndex
             Specifier.LongLong => Specifier.LongLongInt,
             Specifier.SLongLong => Specifier.SLongLongInt,
             Specifier.ULongLong => Specifier.ULongLongInt,
-
-            Specifier.Int,
-            Specifier.SInt,
-            Specifier.UInt,
-            Specifier.ShortInt,
-            Specifier.SShortInt,
-            Specifier.UShortInt,
-            Specifier.LongInt,
-            Specifier.SLongInt,
-            Specifier.ULongInt,
-            Specifier.LongLongInt,
-            Specifier.SLongLongInt,
-            Specifier.ULongLongInt,
-            => return b.duplicateSpec(p, "int"),
             else => return b.cannotCombine(p, sourceToken),
         },
 
@@ -523,15 +512,20 @@ fn combineExtra(b: *@This(), p: *Parser, new: Specifier, sourceToken: TokenIndex
             Specifier.Int => Specifier.LongInt,
             Specifier.SInt => Specifier.SLongInt,
             Specifier.ULong => Specifier.ULongLong,
-            Specifier.LongLong, Specifier.ULongLong => return b.duplicateSpec(p, "long"),
             Specifier.Complex => .ComplexLong,
+            else => return b.cannotCombine(p, sourceToken),
+        },
+
+        Specifier.Int128 => b.specifier = switch (b.specifier) {
+            Specifier.None => Specifier.Int128,
+            Specifier.Unsigned => Specifier.UInt128,
+            Specifier.Signed => Specifier.SInt128,
             else => return b.cannotCombine(p, sourceToken),
         },
 
         Specifier.Float => b.specifier = switch (b.specifier) {
             Specifier.None => Specifier.Float,
             Specifier.Complex => Specifier.ComplexFloat,
-            Specifier.ComplexFloat, Specifier.Float => return b.duplicateSpec(p, "float"),
             else => return b.cannotCombine(p, sourceToken),
         },
 
@@ -541,11 +535,6 @@ fn combineExtra(b: *@This(), p: *Parser, new: Specifier, sourceToken: TokenIndex
             Specifier.Complex => Specifier.ComplexDouble,
             Specifier.ComplexLong => Specifier.ComplexLongDouble,
 
-            Specifier.LongDouble,
-            Specifier.ComplexLongDouble,
-            Specifier.ComplexDouble,
-            Specifier.Double,
-            => return b.duplicateSpec(p, "double"),
             else => return b.cannotCombine(p, sourceToken),
         },
 
@@ -561,7 +550,7 @@ fn combineExtra(b: *@This(), p: *Parser, new: Specifier, sourceToken: TokenIndex
             Specifier.ComplexFloat,
             Specifier.ComplexDouble, //
             Specifier.ComplexLongDouble,
-            => return b.duplicateSpec(p, "_Complex"),
+            => return b.duplicateSpec(p, sourceToken, "_Complex"),
             else => return b.cannotCombine(p, sourceToken),
         },
 
