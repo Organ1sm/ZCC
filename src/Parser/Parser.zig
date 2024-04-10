@@ -2051,7 +2051,7 @@ fn parseEnumSpec(p: *Parser) Error!*Type.Enum {
     const attrBufferTop = p.attrBuffer.len;
     defer p.attrBuffer.len = attrBufferTop;
 
-    try p.parseAttrSpec(); 
+    try p.parseAttrSpec();
 
     const maybeID = try p.eatIdentifier();
     const lb = p.eat(.LBrace) orelse {
@@ -2173,6 +2173,8 @@ fn parseEnumSpec(p: *Parser) Error!*Type.Enum {
 
 const Enumerator = struct {
     res: Result,
+    numPositiveBits: usize = 0,
+    numNegativeBits: usize = 0,
 
     fn init(p: *Parser) Enumerator {
         // Enumerator value is captured after increment in p.enumerator(), and we want the first enumeration constant
@@ -2242,6 +2244,12 @@ fn enumerator(p: *Parser, e: *Enumerator) Error!?EnumFieldAndNode {
 
     var res = e.res;
     res.ty = try p.withAttributes(res.ty, attrBufferTop);
+
+    if (res.ty.isUnsignedInt(p.comp) or res.value.compare(.gte, Value.int(0), res.ty, p.comp)) {
+        e.numPositiveBits = @max(e.numPositiveBits, res.value.minUnsignedBits(res.ty, p.comp));
+    } else {
+        e.numNegativeBits = @max(e.numNegativeBits, res.value.minSignedBits(res.ty, p.comp));
+    }
 
     if (errStart == p.comp.diag.list.items.len) {
         // only do these warnings if we didn't already warn about overflow or non-representable values
