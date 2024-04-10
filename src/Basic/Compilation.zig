@@ -487,6 +487,20 @@ fn generateSizeofType(comp: *Compilation, w: anytype, name: []const u8, ty: Type
     try w.print("#define {s} {d}\n", .{ name, ty.sizeof(comp).? });
 }
 
+pub fn nextLargestIntSameSign(comp: *const Compilation, ty: Type) ?Type {
+    std.debug.assert(ty.isInt());
+    const specifiers = if (ty.isUnsignedInt(comp))
+        [_]Type.Specifier{ .Short, .Int, .Long, .LongLong }
+    else
+        [_]Type.Specifier{ .UShort, .UInt, .ULong, .ULongLong };
+    const size = ty.sizeof(comp).?;
+    for (specifiers) |specifier| {
+        const candidate = Type{ .specifier = specifier };
+        if (candidate.sizeof(comp).? > size) return candidate;
+    }
+    return null;
+}
+
 /// Define the system header file include directories for Zcc
 ///
 /// This function will search the directory containing the executable,

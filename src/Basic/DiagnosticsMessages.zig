@@ -1672,3 +1672,13 @@ pub const enumerator_too_large = struct {
     pub const kind = .off;
     pub const opt = "pedantic";
 };
+pub const enumerator_overflow = struct {
+    pub const msg = "overflow in enumeration value";
+    pub const kind = .warning;
+};
+pub const enum_not_representable = struct {
+    pub const msg = "incremented enumerator value {s} is not representable in the largest integer type";
+    pub const kind = .warning;
+    pub const opt = "enum-too-large";
+    pub const extra = .pow_2_as_string;
+};

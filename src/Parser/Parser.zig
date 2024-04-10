@@ -2051,7 +2051,7 @@ fn parseEnumSpec(p: *Parser) Error!*Type.Enum {
     const attrBufferTop = p.attrBuffer.len;
     defer p.attrBuffer.len = attrBufferTop;
 
-    try p.parseAttrSpec(); //.record
+    try p.parseAttrSpec(); 
 
     const maybeID = try p.eatIdentifier();
     const lb = p.eat(.LBrace) orelse {
@@ -2185,10 +2185,22 @@ const Enumerator = struct {
     }
 
     /// Increment enumerator value adjusting type if needed.
-    fn incr(e: *Enumerator, p: *Parser) !void {
+    fn incr(e: *Enumerator, p: *Parser, token: TokenIndex) !void {
         e.res.node = .none;
-        _ = e.res.value.add(e.res.value, Value.int(1), e.res.ty, p.comp);
-        // TODO adjust type if value does not fit current
+        const oldVal = e.res.value;
+        if (e.res.value.add(e.res.value, Value.int(1), e.res.ty, p.comp)) {
+            const newTy = if (p.comp.nextLargestIntSameSign(e.res.ty)) |larger| blk: {
+                try p.errToken(.enumerator_overflow, token);
+                break :blk larger;
+            } else blk: {
+                const byteSize = e.res.ty.sizeof(p.comp).?;
+                const bitSize: u8 = @intCast(if (e.res.ty.isUnsignedInt(p.comp)) byteSize * 8 else byteSize * 8 - 1);
+                try p.errExtra(.enum_not_representable, token, .{ .pow2AsString = bitSize });
+                break :blk Type{ .specifier = .ULongLong };
+            };
+            e.res.ty = newTy;
+            _ = e.res.value.add(oldVal, Value.int(1), e.res.ty, p.comp);
+        }
     }
 
     /// Set enumerator value to specified value, adjusting type if needed.
@@ -2215,34 +2227,38 @@ fn enumerator(p: *Parser, e: *Enumerator) Error!?EnumFieldAndNode {
 
     try p.parseAttrSpec();
 
+    const errStart = p.comp.diag.list.items.len;
     if (p.eat(.Equal)) |_| {
         const specified = try p.parseConstExpr(.GNUFoldingExtension);
         if (specified.value.tag == .unavailable) {
             try p.errToken(.enum_val_unavailable, nameToken + 2);
-            try e.incr(p);
+            try e.incr(p, nameToken);
         } else {
             try e.set(p, specified);
         }
     } else {
-        try e.incr(p);
+        try e.incr(p, nameToken);
     }
 
     var res = e.res;
     res.ty = try p.withAttributes(res.ty, attrBufferTop);
 
-    if (e.res.value.compare(.lt, Value.int(0), e.res.ty, p.comp)) {
-        const value = e.res.value.getInt(i64);
-        if (value < (Type{ .specifier = .Int }).minInt(p.comp)) {
-            try p.errExtra(.enumerator_too_small, nameToken, .{
-                .signed = value,
-            });
-        }
-    } else {
-        const value = e.res.value.getInt(u64);
-        if (value > (Type{ .specifier = .Int }).maxInt(p.comp)) {
-            try p.errExtra(.enumerator_too_large, nameToken, .{
-                .unsigned = value,
-            });
+    if (errStart == p.comp.diag.list.items.len) {
+        // only do these warnings if we didn't already warn about overflow or non-representable values
+        if (e.res.value.compare(.lt, Value.int(0), e.res.ty, p.comp)) {
+            const value = e.res.value.getInt(i64);
+            if (value < (Type{ .specifier = .Int }).minInt(p.comp)) {
+                try p.errExtra(.enumerator_too_small, nameToken, .{
+                    .signed = value,
+                });
+            }
+        } else {
+            const value = e.res.value.getInt(u64);
+            if (value > (Type{ .specifier = .Int }).maxInt(p.comp)) {
+                try p.errExtra(.enumerator_too_large, nameToken, .{
+                    .unsigned = value,
+                });
+            }
         }
     }
 
