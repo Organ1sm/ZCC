@@ -1172,6 +1172,13 @@ pub fn getAttributes(ty: Type) []const Attribute {
     };
 }
 
+pub fn hasAttribute(ty: Type, tag: Attribute.Tag) bool {
+    for (ty.getAttributes()) |attr| {
+        if (attr.tag == tag) return true;
+    }
+    return false;
+}
+
 /// Print type in C style
 pub fn print(ty: Type, w: anytype) @TypeOf(w).Error!void {
     _ = try ty.printPrologue(w);

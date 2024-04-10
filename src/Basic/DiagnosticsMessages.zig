@@ -1682,3 +1682,8 @@ pub const enum_not_representable = struct {
     pub const opt = "enum-too-large";
     pub const extra = .pow_2_as_string;
 };
+pub const enum_too_large = struct {
+    pub const msg = "enumeration values exceed range of largest integer";
+    pub const kind = .warning;
+    pub const opt = "enum-too-large";
+};

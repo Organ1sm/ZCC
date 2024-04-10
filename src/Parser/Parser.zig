@@ -2102,6 +2102,35 @@ fn parseEnumSpec(p: *Parser) Error!*Type.Enum {
         break :enumTy try Type.Enum.create(p.arena, p.getTokenSlice(ident));
     } else try Type.Enum.create(p.arena, try p.getAnonymousName(enumTK));
 
+    // reserve space for this enum
+    try p.declBuffer.append(.none);
+    const declBufferTop = p.declBuffer.items.len;
+    const listBufferTop = p.listBuffer.items.len;
+    const enumBufferTop = p.enumBuffer.items.len;
+    errdefer p.declBuffer.items.len = declBufferTop - 1;
+
+    defer {
+        p.declBuffer.items.len = declBufferTop;
+        p.listBuffer.items.len = listBufferTop;
+        p.enumBuffer.items.len = enumBufferTop;
+    }
+
+    var e = Enumerator{};
+    while (try p.enumerator(&e)) |fieldAndNode| {
+        try p.enumBuffer.append(fieldAndNode.field);
+        try p.listBuffer.append(fieldAndNode.node);
+        if (p.eat(.Comma) == null) break;
+    }
+
+    enumType.fields = try p.arena.dupe(Type.Enum.Field, p.enumBuffer.items[enumBufferTop..]);
+    enumType.tagType = e.res.ty;
+
+    if (p.enumBuffer.items.len == enumBufferTop)
+        try p.err(.empty_enum);
+
+    try p.expectClosing(lb, .RBrace);
+    try p.parseAttrSpec(); //.record
+
     const ty = try p.withAttributes(
         .{
             .specifier = .Enum,
@@ -2120,34 +2149,9 @@ fn parseEnumSpec(p: *Parser) Error!*Type.Enum {
         });
     }
 
-    // reserve space for this enum
-    try p.declBuffer.append(.none);
-    const declBufferTop = p.declBuffer.items.len;
-    const listBufferTop = p.listBuffer.items.len;
-    const enumBufferTop = p.enumBuffer.items.len;
-    errdefer p.declBuffer.items.len = declBufferTop - 1;
-
-    defer {
-        p.declBuffer.items.len = declBufferTop;
-        p.listBuffer.items.len = listBufferTop;
-        p.enumBuffer.items.len = enumBufferTop;
-    }
-
-    var e = Enumerator.init(p);
-    while (try p.enumerator(&e)) |fieldAndNode| {
-        try p.enumBuffer.append(fieldAndNode.field);
-        try p.listBuffer.append(fieldAndNode.node);
-        if (p.eat(.Comma) == null) break;
-    }
-
-    enumType.fields = try p.arena.dupe(Type.Enum.Field, p.enumBuffer.items[enumBufferTop..]);
-    enumType.tagType = e.res.ty;
-
-    if (p.enumBuffer.items.len == enumBufferTop)
-        try p.err(.empty_enum);
-
-    try p.expectClosing(lb, .RBrace);
-    try p.parseAttrSpec(); //.record
+    const isPacked = ty.hasAttribute(.@"packed") or p.comp.langOpts.shortEnums;
+    const tagSpecifier = try e.getTypeSpecifier(p, isPacked, maybeID orelse enumTK);
+    enumType.tagType = .{ .specifier = tagSpecifier };
 
     // finish by creating a node
     var node: AST.Node = .{
@@ -2172,19 +2176,17 @@ fn parseEnumSpec(p: *Parser) Error!*Type.Enum {
 }
 
 const Enumerator = struct {
-    res: Result,
-    numPositiveBits: usize = 0,
-    numNegativeBits: usize = 0,
-
-    fn init(p: *Parser) Enumerator {
+    res: Result = .{
+        .ty = .{ .specifier = .Int },
         // Enumerator value is captured after increment in p.enumerator(), and we want the first enumeration constant
         // to have a value of 0
-        const initialValue = Value.int(@as(i64, -1));
-        return .{ .res = .{
-            .ty = .{ .specifier = if (p.comp.langOpts.shortEnums) .SChar else .Int },
-            .value = initialValue,
-        } };
-    }
+        .value = Value.int(@as(i64, -1)),
+    },
+
+    // tracks the minimum number of bits required to represent the positive part of the enumeration constant
+    numPositiveBits: usize = 0,
+    // tracks the minimum number of bits required to represent the negative part of the enumeration constant
+    numNegativeBits: usize = 0,
 
     /// Increment enumerator value adjusting type if needed.
     fn incr(e: *Enumerator, p: *Parser, token: TokenIndex) !void {
@@ -2209,6 +2211,41 @@ const Enumerator = struct {
     fn set(e: *Enumerator, _: *Parser, res: Result) !void {
         e.res = res;
         // TODO adjust res type to try to fit with the previous type
+    }
+
+    fn getTypeSpecifier(e: *const Enumerator, p: *Parser, isPacked: bool, token: TokenIndex) !Type.Specifier {
+        const charWidth = (Type{ .specifier = .SChar }).sizeof(p.comp).? * 8;
+        const shortWidth = (Type{ .specifier = .Short }).sizeof(p.comp).? * 8;
+        const intWidth = (Type{ .specifier = .Int }).sizeof(p.comp).? * 8;
+        if (e.numNegativeBits > 0) {
+            if (isPacked and e.numNegativeBits <= charWidth and e.numPositiveBits < charWidth) {
+                return .SChar;
+            } else if (isPacked and e.numNegativeBits <= shortWidth and e.numPositiveBits < shortWidth) {
+                return .Short;
+            } else if (e.numNegativeBits <= intWidth and e.numPositiveBits < intWidth) {
+                return .Int;
+            }
+
+            const longWidth = (Type{ .specifier = .Long }).sizeof(p.comp).? * 8;
+            if (e.numNegativeBits <= longWidth and e.numPositiveBits < longWidth)
+                return .Long;
+
+            const llongWidth = (Type{ .specifier = .LongLong }).sizeof(p.comp).? * 8;
+            if (e.numNegativeBits > llongWidth or e.numPositiveBits >= llongWidth)
+                try p.errToken(.enum_too_large, token);
+            return .LongLong;
+        }
+
+        if (isPacked and e.numPositiveBits <= charWidth) {
+            return .UChar;
+        } else if (isPacked and e.numPositiveBits <= shortWidth) {
+            return .UShort;
+        } else if (e.numPositiveBits <= intWidth) {
+            return .UInt;
+        } else if (e.numPositiveBits <= (Type{ .specifier = .Long }).sizeof(p.comp).? * 8) {
+            return .ULong;
+        }
+        return .ULongLong;
     }
 };
 
