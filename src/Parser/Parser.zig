@@ -1758,6 +1758,9 @@ fn parseRecordSpec(p: *Parser) Error!Type {
         }
     };
 
+    var done = false;
+    errdefer if (!done) p.skipTo(.RBrace);
+
     // Get forward declared type or create a new one
     var defined = false;
     const recordType: *Type.Record = if (maybeIdent) |ident| recordTy: {
@@ -1836,6 +1839,7 @@ fn parseRecordSpec(p: *Parser) Error!Type {
     }
 
     try p.expectClosing(lb, .RBrace);
+    done = true;
     try p.parseAttrSpec(); // .record
 
     ty = try p.withAttributes(.{
@@ -2125,6 +2129,9 @@ fn parseEnumSpec(p: *Parser) Error!*Type.Enum {
         }
     };
 
+    var done = false;
+    errdefer if (!done) p.skipTo(.RBrace);
+
     // Get forward declared type or create a new one
     var defined = false;
     const enumType: *Type.Enum = if (maybeID) |ident| enumTy: {
@@ -2170,6 +2177,7 @@ fn parseEnumSpec(p: *Parser) Error!*Type.Enum {
         try p.err(.empty_enum);
 
     try p.expectClosing(lb, .RBrace);
+    done = true;
     try p.parseAttrSpec(); //.record
 
     const ty = try p.withAttributes(
