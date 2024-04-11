@@ -501,6 +501,19 @@ pub fn nextLargestIntSameSign(comp: *const Compilation, ty: Type) ?Type {
     return null;
 }
 
+/// If `enum E { ... }` syntax has a fixed underlying integer type regardless of the presence of
+/// __attribute__((packed)) or the range of values of the corresponding enumerator constants,
+/// specify it here.
+/// TODO: likely incomplete
+pub fn fixedEnumTagSpecifier(comp: *const Compilation) ?Type.Specifier {
+    switch (comp.langOpts.emulate) {
+        .msvc => return .Int,
+        .clang => if (comp.target.os.tag == .windows) return .Int,
+        .gcc => {},
+    }
+    return null;
+}
+
 /// Define the system header file include directories for Zcc
 ///
 /// This function will search the directory containing the executable,

@@ -153,6 +153,7 @@ pub const Enum = struct {
     name: []const u8,
     tagType: Type,
     fields: []Field,
+    fixed: bool,
 
     pub const Field = struct {
         name: []const u8,
@@ -165,10 +166,12 @@ pub const Enum = struct {
         return e.fields.len == std.math.maxInt(usize);
     }
 
-    pub fn create(allocator: std.mem.Allocator, name: []const u8) !*Enum {
+    pub fn create(allocator: std.mem.Allocator, name: []const u8, fixedTy: ?Type) !*Enum {
         var e = try allocator.create(Enum);
         e.name = name;
         e.fields.len = std.math.maxInt(usize);
+        if (fixedTy) |some| e.tagType = some;
+        e.fixed = (fixedTy != null);
         return e;
     }
 };
@@ -664,7 +667,7 @@ pub fn hasIncompleteSize(ty: Type) bool {
         .IncompleteArray,
         => true,
 
-        .Enum => ty.data.@"enum".isIncomplete(),
+        .Enum => ty.data.@"enum".isIncomplete() and !ty.data.@"enum".fixed,
         .Struct, .Union => ty.data.record.isIncomplete(),
 
         .Array, .StaticArray => ty.data.array.elem.hasIncompleteSize(),
@@ -860,7 +863,7 @@ pub fn sizeof(ty: Type, comp: *const Compilation) ?u64 {
 
         .Array => if (ty.data.array.elem.sizeof(comp)) |size| size * ty.data.array.len else null,
         .Struct, .Union => if (ty.data.record.isIncomplete()) null else ty.data.record.size,
-        .Enum => if (ty.data.@"enum".isIncomplete()) null else ty.data.@"enum".tagType.sizeof(comp),
+        .Enum => if (ty.data.@"enum".isIncomplete() and !ty.data.@"enum".fixed) null else ty.data.@"enum".tagType.sizeof(comp),
 
         .TypeofType => ty.data.subType.sizeof(comp),
         .TypeofExpr => ty.data.expr.ty.sizeof(comp),
@@ -926,7 +929,7 @@ pub fn alignof(ty: Type, comp: *const Compilation) u29 {
         => comp.target.ptrBitWidth() >> 3,
 
         .Struct, .Union => if (ty.data.record.isIncomplete()) 0 else ty.data.record.alignment,
-        .Enum => if (ty.data.@"enum".isIncomplete()) 0 else ty.data.@"enum".tagType.alignof(comp),
+        .Enum => if (ty.data.@"enum".isIncomplete() and !ty.data.@"enum".fixed) 0 else ty.data.@"enum".tagType.alignof(comp),
 
         .TypeofType, .DecayedTypeofType => ty.data.subType.alignof(comp),
         .TypeofExpr, .DecayedTypeofExpr => ty.data.expr.ty.alignof(comp),
@@ -1258,7 +1261,12 @@ fn printPrologue(ty: Type, w: anytype) @TypeOf(w).Error!bool {
     try ty.qual.dump(w);
 
     switch (ty.specifier) {
-        .Enum => try w.print("enum {s}", .{ty.data.@"enum".name}),
+        .Enum => if (ty.data.@"enum".fixed) {
+            try w.print("enum {s}: ", .{ty.data.@"enum".name});
+            try ty.data.@"enum".tagType.dump(w);
+        } else {
+            try w.print("enum {s}", .{ty.data.@"enum".name});
+        },
         .Struct => try w.print("struct {s}", .{ty.data.record.name}),
         .Union => try w.print("union {s}", .{ty.data.record.name}),
         else => try w.writeAll(TypeBuilder.fromType(ty).toString().?),
@@ -1380,9 +1388,16 @@ pub fn dump(ty: Type, w: anytype) @TypeOf(w).Error!void {
         },
 
         .Enum => {
-            try w.print("enum {s}", .{ty.data.@"enum".name});
+            const enumTy = ty.data.@"enum";
+            if (enumTy.isIncomplete() and !enumTy.fixed) {
+                try w.print("enum {s}", .{enumTy.name});
+            } else {
+                try w.print("enum {s}: ", .{enumTy.name});
+                try enumTy.tagType.dump(w);
+            }
+
             if (DumpDetailedContainers)
-                try dumpEnum(ty.data.@"enum", w);
+                try dumpEnum(enumTy, w);
         },
 
         .Struct => {

@@ -1,3 +1,5 @@
+//zcc-args --target=x86_64-linux-gnu
+
 enum Small {
 	A
 } __attribute__((packed));

@@ -1687,3 +1687,28 @@ pub const enum_too_large = struct {
     pub const kind = .warning;
     pub const opt = "enum-too-large";
 };
+pub const enum_fixed = struct {
+    pub const msg = "enumeration types with a fixed underlying type are a Clang extension";
+    pub const kind = .off;
+    pub const pedantic = true;
+    pub const opt = "fixed-enum-extension";
+};
+pub const enum_prev_nonfixed = struct {
+    pub const msg = "enumeration previously declared with nonfixed underlying type";
+    pub const kind = .@"error";
+};
+pub const enum_prev_fixed = struct {
+    pub const msg = "enumeration previously declared with fixed underlying type";
+    pub const kind = .@"error";
+};
+pub const enum_different_explicit_ty = struct {
+    // str will be like 'new' (was 'old'
+    pub const msg = "enumeration redeclared with different underlying type {s})";
+    pub const extra = .str;
+    pub const kind = .@"error";
+};
+pub const enum_not_representable_fixed = struct {
+    pub const msg = "enumerator value is not representable in the underlying type '{s}'";
+    pub const extra = .str;
+    pub const kind = .@"error";
+};

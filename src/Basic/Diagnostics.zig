@@ -139,6 +139,7 @@ pub const Options = packed struct {
     @"include-next-absolute-path": Kind = .default,
     @"ignored-pragmas": Kind = .default,
     @"enum-too-large": Kind = .default,
+    @"fixed-enum-extension": Kind = .default,
 };
 
 list: std.ArrayListUnmanaged(Message) = .{},
@@ -366,7 +367,7 @@ pub fn renderExtra(comp: *Compilation, m: anytype) void {
                             @tagName(msg.extra.ignoredRecordAttr.tag),
                             @tagName(msg.extra.ignoredRecordAttr.specifier),
                         }),
-                        else => unreachable,
+                        else => @compileError("invalid extra kind " ++ @tagName(info.extra)),
                     }
                 } else {
                     m.write(info.msg);
