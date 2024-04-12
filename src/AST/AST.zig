@@ -102,7 +102,7 @@ pub const Token = struct {
 pub const Range = struct { start: u32, end: u32 };
 pub const Node = struct {
     tag: AstTag,
-    type: Type = .{ .specifier = .Void },
+    type: Type = Type.Void,
     data: Data,
 
     pub const Data = union {

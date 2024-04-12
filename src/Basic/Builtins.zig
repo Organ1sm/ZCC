@@ -92,7 +92,7 @@ pub fn create(comp: *Compilation) !Builtins {
     var fib_state = std.heap.FixedBufferAllocator.init(std.mem.sliceAsBytes(_params));
     const a = fib_state.allocator();
 
-    const voidType = Type{ .specifier = .Void };
+    const voidType = Type.Void;
     var vaList = comp.types.vaList;
     if (vaList.isArray()) vaList.decayArray();
 

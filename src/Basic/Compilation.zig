@@ -311,11 +311,11 @@ pub fn generateBuiltinMacros(comp: *Compilation) !Source {
     try w.writeAll("#define __CHAR_BIT__ 8\n");
 
     // int maxs
-    try comp.generateIntMax(w, "__SCHAR_MAX__", .{ .specifier = .SChar });
-    try comp.generateIntMax(w, "__SHRT_MAX__", .{ .specifier = .Short });
-    try comp.generateIntMax(w, "__INT_MAX__", .{ .specifier = .Int });
-    try comp.generateIntMax(w, "__LONG_MAX__", .{ .specifier = .Long });
-    try comp.generateIntMax(w, "__LONG_LONG_MAX__", .{ .specifier = .LongLong });
+    try comp.generateIntMax(w, "__SCHAR_MAX__", Type.SChar);
+    try comp.generateIntMax(w, "__SHRT_MAX__", Type.Short);
+    try comp.generateIntMax(w, "__INT_MAX__", Type.Int);
+    try comp.generateIntMax(w, "__LONG_MAX__", Type.Long);
+    try comp.generateIntMax(w, "__LONG_LONG_MAX__", Type.LongLong);
     try comp.generateIntMax(w, "__WCHAR_MAX__", comp.types.wchar);
     // try comp.generateIntMax(w, "__WINT_MAX__", Type.wideChar(comp));
     // try comp.generateIntMax(w, "__INTMAX_MAX__", Type.wideChar(comp));
@@ -326,18 +326,18 @@ pub fn generateBuiltinMacros(comp: *Compilation) !Source {
     // try comp.generateIntMax(w, "__UINTPTR_MAX__", Type.sizeT(comp));
 
     // sizeof types
-    try comp.generateSizeofType(w, "__SIZEOF_FLOAT__", .{ .specifier = .Float });
-    try comp.generateSizeofType(w, "__SIZEOF_DOUBLE__", .{ .specifier = .Double });
-    try comp.generateSizeofType(w, "__SIZEOF_LONG_DOUBLE__", .{ .specifier = .LongDouble });
-    try comp.generateSizeofType(w, "__SIZEOF_SHORT__", .{ .specifier = .Short });
-    try comp.generateSizeofType(w, "__SIZEOF_INT__", .{ .specifier = .Int });
-    try comp.generateSizeofType(w, "__SIZEOF_LONG__", .{ .specifier = .Long });
-    try comp.generateSizeofType(w, "__SIZEOF_LONG_LONG__", .{ .specifier = .LongLong });
-    try comp.generateSizeofType(w, "__SIZEOF_POINTER__", .{ .specifier = .Pointer });
+    try comp.generateSizeofType(w, "__SIZEOF_FLOAT__", Type.Float);
+    try comp.generateSizeofType(w, "__SIZEOF_DOUBLE__", Type.Double);
+    try comp.generateSizeofType(w, "__SIZEOF_LONG_DOUBLE__", Type.LongDouble);
+    try comp.generateSizeofType(w, "__SIZEOF_SHORT__", Type.Short);
+    try comp.generateSizeofType(w, "__SIZEOF_INT__", Type.Int);
+    try comp.generateSizeofType(w, "__SIZEOF_LONG__", Type.Long);
+    try comp.generateSizeofType(w, "__SIZEOF_LONG_LONG__", Type.LongLong);
+    try comp.generateSizeofType(w, "__SIZEOF_POINTER__", Type.Pointer);
     try comp.generateSizeofType(w, "__SIZEOF_PTRDIFF_T__", comp.types.ptrdiff);
     try comp.generateSizeofType(w, "__SIZEOF_SIZE_T__", comp.types.size);
     try comp.generateSizeofType(w, "__SIZEOF_WCHAR_T__", comp.types.wchar);
-    // try comp.generateSizeofType(w, "__SIZEOF_WINT_T__", .{ .specifier = .Pointer });
+    // try comp.generateSizeofType(w, "__SIZEOF_WINT_T__", Type.Pointer);
 
     // various int types
     try generateTypeMacro(w, "__PTRDIFF_TYPE__", comp.types.ptrdiff);
@@ -355,34 +355,28 @@ fn generateTypeMacro(w: anytype, name: []const u8, ty: Type) !void {
 
 fn generateBuiltinTypes(comp: *Compilation) !void {
     const os = comp.target.os.tag;
-    const wchar: Type = switch (comp.target.cpu.arch) {
-        .xcore => .{ .specifier = .UChar },
-        .ve => .{ .specifier = .UInt },
-        .arm, .armeb, .thumb, .thumbeb => .{
-            .specifier = if (os != .windows and os != .netbsd and os != .openbsd) .UInt else .Int,
-        },
-        .aarch64, .aarch64_be, .aarch64_32 => .{
-            .specifier = if (!os.isDarwin() and os != .netbsd) .UInt else .Int,
-        },
-        .x86_64,
-        .x86,
-        => .{ .specifier = if (os == .windows) .UShort else .Int },
-        else => .{ .specifier = .Int },
+    const wchar = switch (comp.target.cpu.arch) {
+        .xcore => Type.UChar,
+        .ve => Type.UInt,
+        .arm, .armeb, .thumb, .thumbeb => if (os != .windows and os != .netbsd and os != .openbsd) Type.UInt else Type.Int,
+        .aarch64, .aarch64_be, .aarch64_32 => if (!os.isDarwin() and os != .netbsd) Type.UInt else Type.Int,
+        .x86_64, .x86 => if (os == .windows) Type.UShort else Type.Int,
+        else => Type.Int,
     };
 
     const ptrdiff = if (os == .windows and comp.target.ptrBitWidth() == 64)
-        Type{ .specifier = .LongLong }
+        Type.LongLong
     else switch (comp.target.ptrBitWidth()) {
-        32 => Type{ .specifier = .Int },
-        64 => Type{ .specifier = .Long },
+        32 => Type.Int,
+        64 => Type.Long,
         else => unreachable,
     };
 
     const size = if (os == .windows and comp.target.ptrBitWidth() == 64)
-        Type{ .specifier = .ULongLong }
+        Type.ULongLong
     else switch (comp.target.ptrBitWidth()) {
-        32 => Type{ .specifier = .UInt },
-        64 => Type{ .specifier = .ULong },
+        32 => Type.UInt,
+        64 => Type.ULong,
         else => unreachable,
     };
 
@@ -406,14 +400,14 @@ fn generateVaListType(comp: *Compilation) !Type {
         .sparc, .wasm32, .wasm64, .bpfel, .bpfeb, .riscv32, .riscv64, .avr, .spirv32, .spirv64 => .void_ptr,
         .powerpc => switch (comp.target.os.tag) {
             .ios, .macos, .tvos, .watchos, .aix => @as(Kind, .char_ptr),
-            else => return Type{ .specifier = .Void }, // unknown
+            else => return Type.Void, // unknown
         },
         .x86 => .char_ptr,
         .x86_64 => switch (comp.target.os.tag) {
             .windows => @as(Kind, .char_ptr),
             else => .x86_64_va_list,
         },
-        else => return Type{ .specifier = .Void }, // unknown
+        else => return Type.Void, // unknown
     };
 
     // TODO this might be bad?
@@ -421,8 +415,8 @@ fn generateVaListType(comp: *Compilation) !Type {
 
     var ty: Type = undefined;
     switch (kind) {
-        .char_ptr => ty = .{ .specifier = .Char },
-        .void_ptr => ty = .{ .specifier = .Void },
+        .char_ptr => ty = Type.Char,
+        .void_ptr => ty = Type.Void,
         .aarch64_va_list => {
             const recordType = try arena.create(Type.Record);
             recordType.* = .{
@@ -432,13 +426,13 @@ fn generateVaListType(comp: *Compilation) !Type {
                 .alignment = 8,
             };
             const voidType = try arena.create(Type);
-            voidType.* = .{ .specifier = .Void };
+            voidType.* = Type.Void;
             const voidPtr = Type{ .specifier = .Pointer, .data = .{ .subType = voidType } };
             recordType.fields[0] = .{ .name = "__stack", .ty = voidPtr };
             recordType.fields[1] = .{ .name = "__gr_top", .ty = voidPtr };
             recordType.fields[2] = .{ .name = "__vr_top", .ty = voidPtr };
-            recordType.fields[3] = .{ .name = "__gr_offs", .ty = .{ .specifier = .Int } };
-            recordType.fields[4] = .{ .name = "__vr_offs", .ty = .{ .specifier = .Int } };
+            recordType.fields[3] = .{ .name = "__gr_offs", .ty = Type.Int };
+            recordType.fields[4] = .{ .name = "__vr_offs", .ty = Type.Int };
             ty = .{ .specifier = .Struct, .data = .{ .record = recordType } };
         },
         .x86_64_va_list => {
@@ -450,10 +444,10 @@ fn generateVaListType(comp: *Compilation) !Type {
                 .alignment = 8,
             };
             const voidType = try arena.create(Type);
-            voidType.* = .{ .specifier = .Void };
+            voidType.* = Type.Void;
             const voidPtr = Type{ .specifier = .Pointer, .data = .{ .subType = voidType } };
-            recordType.fields[0] = .{ .name = "gp_offset", .ty = .{ .specifier = .UInt } };
-            recordType.fields[1] = .{ .name = "fp_offset", .ty = .{ .specifier = .UInt } };
+            recordType.fields[0] = .{ .name = "gp_offset", .ty = Type.UInt };
+            recordType.fields[1] = .{ .name = "fp_offset", .ty = Type.UInt };
             recordType.fields[2] = .{ .name = "overflow_arg_area", .ty = voidPtr };
             recordType.fields[3] = .{ .name = "reg_save_area", .ty = voidPtr };
             ty = .{ .specifier = .Struct, .data = .{ .record = recordType } };
@@ -495,7 +489,7 @@ pub fn nextLargestIntSameSign(comp: *const Compilation, ty: Type) ?Type {
         [_]Type.Specifier{ .UShort, .UInt, .ULong, .ULongLong };
     const size = ty.sizeof(comp).?;
     for (specifiers) |specifier| {
-        const candidate = Type{ .specifier = specifier };
+        const candidate = Type.create(specifier);
         if (candidate.sizeof(comp).? > size) return candidate;
     }
     return null;

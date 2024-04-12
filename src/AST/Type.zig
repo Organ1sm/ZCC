@@ -24,6 +24,33 @@ data: union {
 qual: Qualifiers = .{},
 specifier: Specifier,
 
+pub const Void = create(.Void);
+pub const Pointer = create(.Pointer);
+
+pub const Char = create(.Char);
+pub const UChar = create(.UChar);
+pub const SChar = create(.SChar);
+pub const Short = create(.Short);
+pub const UShort = create(.UShort);
+pub const Int = create(.Int);
+pub const UInt = create(.UInt);
+pub const ULong = create(.ULong);
+pub const Long = create(.Long);
+pub const LongLong = create(.LongLong);
+pub const ULongLong = create(.ULongLong);
+pub const Int128 = create(.Int128);
+pub const UInt128 = create(.Int128);
+
+pub const Float = create(.Float);
+pub const Double = create(.Double);
+pub const LongDouble = create(.LongDouble);
+pub const ComplexFloat = create(.ComplexFloat);
+pub const ComplexDouble = create(.ComplexDouble);
+
+pub inline fn create(specifier: Specifier) Type {
+    return .{ .specifier = specifier };
+}
+
 pub const Qualifiers = packed struct {
     @"const": bool = false,
     atomic: bool = false,
@@ -635,14 +662,14 @@ pub fn integerPromotion(ty: Type, comp: *Compilation) Type {
     if (specifier == .Enum) {
         // promote incomplete enums to int type
         if (ty.hasIncompleteSize())
-            return .{ .specifier = .Int };
+            return Type.Int;
         specifier = ty.data.@"enum".tagType.specifier;
     }
 
     return .{
         .specifier = switch (specifier) {
             .Bool, .Char, .SChar, .UChar, .Short => .Int,
-            .UShort => if (ty.sizeof(comp).? == sizeof(.{ .specifier = .Int }, comp)) Specifier.UInt else Specifier.Int,
+            .UShort => if (ty.sizeof(comp).? == sizeof(Type.Int, comp)) Specifier.UInt else Specifier.Int,
             .Int => .Int,
             .UInt => .UInt,
             .Long => .Long,

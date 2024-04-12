@@ -12,7 +12,7 @@ const Error = Parser.Error;
 const Result = @This();
 
 node: NodeIndex = .none,
-ty: Type = .{ .specifier = .Int },
+ty: Type = Type.Int,
 value: Value = .{},
 
 pub fn expect(res: Result, p: *Parser) Error!void {
@@ -136,7 +136,7 @@ pub fn adjustCondExprPtrs(a: *Result, tok: TokenIndex, b: *Result, p: *Parser) !
         if (!pointersCompatible)
             try p.errStr(.pointer_mismatch, tok, try p.typePairStrExtra(a.ty, " and ", b.ty));
 
-        adjustedElemType.* = .{ .specifier = .Void };
+        adjustedElemType.* = Type.Void;
     }
     if (pointersCompatible) {
         adjustedElemType.qual = aElem.qual.mergeCVQualifiers(bElem.qual);
@@ -431,7 +431,7 @@ pub fn ptrCast(res: *Result, p: *Parser, ptrType: Type) Error!void {
 
 pub fn toVoid(res: *Result, p: *Parser) Error!void {
     if (!res.ty.is(.Void)) {
-        res.ty = .{ .specifier = .Void };
+        res.ty = Type.Void;
         try res.implicitCast(p, .ToVoid);
     }
 }

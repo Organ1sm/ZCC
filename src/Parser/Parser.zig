@@ -606,11 +606,11 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
 
     _ = try p.addNode(.{ .tag = .Invalid, .type = undefined, .data = undefined });
     {
-        try p.symStack.defineTypedef("__int128_t", .{ .specifier = .Int128 }, 0, .none);
-        try p.symStack.defineTypedef("__uint128_t", .{ .specifier = .UInt128 }, 0, .none);
+        try p.symStack.defineTypedef("__int128_t", Type.Int128, 0, .none);
+        try p.symStack.defineTypedef("__uint128_t", Type.UInt128, 0, .none);
 
         const elemTy = try p.arena.create(Type);
-        elemTy.* = .{ .specifier = .Char };
+        elemTy.* = Type.Char;
         try p.symStack.defineTypedef("__builtin_ms_va_list", .{
             .specifier = .Pointer,
             .data = .{ .subType = elemTy },
@@ -2238,7 +2238,7 @@ const Enumerator = struct {
     fn init(fixedTy: ?Type) Enumerator {
         return .{
             .res = .{
-                .ty = fixedTy orelse Type{ .specifier = .Int },
+                .ty = fixedTy orelse Type.Int,
                 .value = .{ .tag = .unavailable },
             },
             .fixed = fixedTy != null,
@@ -2268,7 +2268,7 @@ const Enumerator = struct {
                 break :blk larger;
             } else blk: {
                 try p.errExtra(.enum_not_representable, token, .{ .pow2AsString = bitSize });
-                break :blk Type{ .specifier = .ULongLong };
+                break :blk Type.ULongLong;
             };
             e.res.ty = newTy;
             _ = e.res.value.add(oldVal, Value.int(1), e.res.ty, p.comp);
@@ -2297,9 +2297,9 @@ const Enumerator = struct {
         if (p.comp.fixedEnumTagSpecifier()) |tagSpecifier|
             return tagSpecifier;
 
-        const charWidth = (Type{ .specifier = .SChar }).sizeof(p.comp).? * 8;
-        const shortWidth = (Type{ .specifier = .Short }).sizeof(p.comp).? * 8;
-        const intWidth = (Type{ .specifier = .Int }).sizeof(p.comp).? * 8;
+        const charWidth = Type.SChar.sizeof(p.comp).? * 8;
+        const shortWidth = Type.Short.sizeof(p.comp).? * 8;
+        const intWidth = Type.Int.sizeof(p.comp).? * 8;
         if (e.numNegativeBits > 0) {
             if (isPacked and e.numNegativeBits <= charWidth and e.numPositiveBits < charWidth) {
                 return .SChar;
@@ -2309,11 +2309,11 @@ const Enumerator = struct {
                 return .Int;
             }
 
-            const longWidth = (Type{ .specifier = .Long }).sizeof(p.comp).? * 8;
+            const longWidth = Type.Long.sizeof(p.comp).? * 8;
             if (e.numNegativeBits <= longWidth and e.numPositiveBits < longWidth)
                 return .Long;
 
-            const llongWidth = (Type{ .specifier = .LongLong }).sizeof(p.comp).? * 8;
+            const llongWidth = Type.LongLong.sizeof(p.comp).? * 8;
             if (e.numNegativeBits > llongWidth or e.numPositiveBits >= llongWidth)
                 try p.errToken(.enum_too_large, token);
             return .LongLong;
@@ -2325,7 +2325,7 @@ const Enumerator = struct {
             return .UShort;
         } else if (e.numPositiveBits <= intWidth) {
             return .UInt;
-        } else if (e.numPositiveBits <= (Type{ .specifier = .Long }).sizeof(p.comp).? * 8) {
+        } else if (e.numPositiveBits <= Type.Long.sizeof(p.comp).? * 8) {
             return .ULong;
         }
         return .ULongLong;
@@ -2375,14 +2375,14 @@ fn enumerator(p: *Parser, e: *Enumerator) Error!?EnumFieldAndNode {
         // only do these warnings if we didn't already warn about overflow or non-representable values
         if (e.res.value.compare(.lt, Value.int(0), e.res.ty, p.comp)) {
             const value = e.res.value.getInt(i64);
-            if (value < (Type{ .specifier = .Int }).minInt(p.comp)) {
+            if (value < Type.Int.minInt(p.comp)) {
                 try p.errExtra(.enumerator_too_small, nameToken, .{
                     .signed = value,
                 });
             }
         } else {
             const value = e.res.value.getInt(u64);
-            if (value > (Type{ .specifier = .Int }).maxInt(p.comp)) {
+            if (value > Type.Int.maxInt(p.comp)) {
                 try p.errExtra(.enumerator_too_large, nameToken, .{
                     .unsigned = value,
                 });
@@ -2494,7 +2494,7 @@ fn declarator(p: *Parser, baseType: Type, kind: DeclaratorKind) Error!?Declarato
         try d.type.validateCombinedType(p, combineToken);
         return d;
     } else if (p.eat(.LParen)) |lp| blk: {
-        var res = (try p.declarator(.{ .specifier = .Void }, kind)) orelse {
+        var res = (try p.declarator(Type.Void, kind)) orelse {
             p.tokenIdx = lp;
             break :blk;
         };
@@ -2563,7 +2563,7 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: Declarator
             return error.ParsingFailed;
         }
 
-        var resType = Type{ .specifier = .Pointer };
+        var resType = Type.Pointer;
         var qualsBuilder = Type.Qualifiers.Builder{};
         var gotQuals = try p.parseTypeQual(&qualsBuilder);
         var static = p.eat(.KeywordStatic);
@@ -2625,7 +2625,7 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: Declarator
                     try p.errToken(.variable_len_array_file_scope, d.name);
 
                 const exprType = try p.arena.create(Type.Expr);
-                exprType.ty = .{ .specifier = .Void };
+                exprType.ty = Type.Void;
                 exprType.node = size.node;
                 resType.data = .{ .expr = exprType };
                 resType.specifier = .VariableLenArray;
@@ -2634,12 +2634,12 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: Declarator
                     try p.errToken(.useless_static, some);
             } else if (star) |_| {
                 const elemType = try p.arena.create(Type);
-                elemType.* = .{ .specifier = .Void };
+                elemType.* = Type.Void;
                 resType.data = .{ .subType = elemType };
                 resType.specifier = .UnspecifiedVariableLenArray;
             } else {
                 const arrayType = try p.arena.create(Type.Array);
-                arrayType.elem = .{ .specifier = .Void };
+                arrayType.elem = Type.Void;
                 arrayType.len = 0;
                 resType.data = .{ .array = arrayType };
                 resType.specifier = .IncompleteArray;
@@ -2652,7 +2652,7 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: Declarator
                 try p.errToken(.negative_array_size, lb);
 
             const arrayType = try p.arena.create(Type.Array);
-            arrayType.elem = .{ .specifier = .Void };
+            arrayType.elem = Type.Void;
             if (sizeValue.compare(.gt, Value.int(maxElems), size_t, p.comp)) {
                 try p.errToken(.array_too_large, lb);
                 arrayType.len = maxElems;
@@ -2707,7 +2707,7 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: Declarator
                 try p.paramBuffer.append(.{
                     .name = p.getTokenSlice(nameToken),
                     .nameToken = nameToken,
-                    .ty = .{ .specifier = .Int },
+                    .ty = Type.Int,
                 });
 
                 if (p.eat(.Comma) == null) break;
@@ -3010,14 +3010,14 @@ pub fn initializerItem(p: *Parser, il: *InitList, initType: Type) Error!bool {
         if (isStrInit and p.isStringInit(initType)) {
             var tempIL = InitList{};
             defer tempIL.deinit(p.gpa);
-            saw = try p.initializerItem(&tempIL, .{ .specifier = .Void });
+            saw = try p.initializerItem(&tempIL, Type.Void);
         } else if (count == 0 and p.isStringInit(initType)) {
             saw = try p.initializerItem(il, initType);
         } else if (isScalar and count != 0) {
             // discard further scalars
             var tempIL = InitList{};
             defer tempIL.deinit(p.gpa);
-            saw = try p.initializerItem(&tempIL, .{ .specifier = .Void });
+            saw = try p.initializerItem(&tempIL, Type.Void);
         } else if (p.getCurrToken() == .LBrace) {
             if (designation) {
                 // designation overrides previous value, let existing mechanism handle it
@@ -3030,7 +3030,7 @@ pub fn initializerItem(p: *Parser, il: *InitList, initType: Type) Error!bool {
                 defer tempIL.deinit(p.gpa);
 
                 saw = try p.initializerItem(curIL, curType);
-                saw = try p.initializerItem(&tempIL, .{ .specifier = .Void });
+                saw = try p.initializerItem(&tempIL, Type.Void);
                 if (!warnedExcess)
                     try p.errToken(if (initType.isArray()) .excess_array_init else .excess_struct_init, firstToken);
                 warnedExcess = true;
@@ -3046,7 +3046,7 @@ pub fn initializerItem(p: *Parser, il: *InitList, initType: Type) Error!bool {
             // discard further values
             var tempIL = InitList{};
             defer tempIL.deinit(p.gpa);
-            saw = try p.initializerItem(&tempIL, .{ .specifier = .Void });
+            saw = try p.initializerItem(&tempIL, Type.Void);
             if (!warnedExcess and saw)
                 try p.errToken(if (initType.isArray()) .excess_array_init else .excess_struct_init, firstToken);
             warnedExcess = true;
@@ -4071,7 +4071,7 @@ fn parseLabeledStmt(p: *Parser) Error!?NodeIndex {
 
 const StmtExprState = struct {
     lastExprToken: TokenIndex = 0,
-    lastExprRes: Result = .{ .ty = .{ .specifier = .Void } },
+    lastExprRes: Result = .{ .ty = Type.Void },
 };
 
 /// compound-statement
@@ -4701,7 +4701,7 @@ fn logicalOrExpr(p: *Parser) Error!Result {
             lhs.value = Value.int(res);
         }
 
-        lhs.ty = .{ .specifier = .Int };
+        lhs.ty = Type.Int;
         try lhs.bin(p, .BoolOrExpr, rhs);
     }
 
@@ -4729,7 +4729,7 @@ fn logicalAndExpr(p: *Parser) Error!Result {
             lhs.value = Value.int(res);
         }
 
-        lhs.ty = .{ .specifier = .Int };
+        lhs.ty = Type.Int;
         try lhs.bin(p, .BoolAndExpr, rhs);
     }
     return lhs;
@@ -4809,7 +4809,7 @@ fn parseEqExpr(p: *Parser) Error!Result {
             lhs.value = Value.int(@intFromBool(res));
         }
 
-        lhs.ty = .{ .specifier = .Int };
+        lhs.ty = Type.Int;
         try lhs.bin(p, tag, rhs);
     }
     return lhs;
@@ -4843,7 +4843,7 @@ fn parseCompExpr(p: *Parser) Error!Result {
             lhs.value = Value.int(@intFromBool(res));
         }
 
-        lhs.ty = .{ .specifier = .Int };
+        lhs.ty = Type.Int;
         try lhs.bin(p, tag, rhs);
     }
 
@@ -5262,7 +5262,7 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
                 try p.labels.append(.{ .unresolvedGoto = nameToken });
 
             const elemType = try p.arena.create(Type);
-            elemType.* = .{ .specifier = .Void };
+            elemType.* = Type.Void;
 
             const resultType = Type{ .specifier = .Pointer, .data = .{ .subType = elemType } };
             return Result{
@@ -5427,7 +5427,7 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
                 operand.value.tag = .unavailable;
             }
 
-            operand.ty = .{ .specifier = .Int };
+            operand.ty = Type.Int;
             try operand.un(p, .BoolNotExpr);
             return operand;
         },
@@ -5752,7 +5752,7 @@ fn parseCallExpr(p: *Parser, lhs: Result) Error!Result {
 
         if (argCount >= params.len) {
             if (arg.ty.isInt()) try arg.intCast(p, arg.ty.integerPromotion(p.comp), paramToken);
-            if (arg.ty.is(.Float)) try arg.floatCast(p, .{ .specifier = .Double });
+            if (arg.ty.is(.Float)) try arg.floatCast(p, Type.Double);
             try arg.saveValue(p);
             try p.listBuffer.append(arg.node);
             argCount += 1;
@@ -5980,7 +5980,7 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
                     try p.errStr(.implicit_func_decl, nameToken, name);
 
                 const funcType = try p.arena.create(Type.Function);
-                funcType.* = .{ .returnType = .{ .specifier = .Int }, .params = &.{} };
+                funcType.* = .{ .returnType = Type.Int, .params = &.{} };
                 const ty: Type = .{ .specifier = .OldStyleFunc, .data = .{ .func = funcType } };
                 const node = try p.addNode(.{
                     .type = ty,
@@ -6083,7 +6083,7 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
         .FloatLiteral, .ImaginaryLiteral => |tag| {
             defer p.tokenIdx += 1;
 
-            const ty = Type{ .specifier = .Double };
+            const ty = Type.Double;
             const dValue = try p.parseFloat(p.tokenIdx, f64);
             var res = Result{
                 .ty = ty,
@@ -6096,7 +6096,7 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
 
             if (tag == .ImaginaryLiteral) {
                 try p.err(.gnu_imaginary_constant);
-                res.ty = .{ .specifier = .ComplexDouble };
+                res.ty = Type.ComplexDouble;
                 res.value.tag = .unavailable;
                 try res.un(p, .ImaginaryLiteral);
             }
@@ -6108,7 +6108,7 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
         => |tag| {
             defer p.tokenIdx += 1;
 
-            const ty = Type{ .specifier = .Float };
+            const ty = Type.Float;
             const fValue = try p.parseFloat(p.tokenIdx, f64);
             var res = Result{
                 .ty = ty,
@@ -6121,7 +6121,7 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
 
             if (tag == .ImaginaryLiteral_F) {
                 try p.err(.gnu_imaginary_constant);
-                res.ty = .{ .specifier = .ComplexFloat };
+                res.ty = Type.ComplexFloat;
                 res.value.tag = .unavailable;
                 try res.un(p, .ImaginaryLiteral);
             }
@@ -6229,7 +6229,7 @@ fn castInt(p: *Parser, val: u64, specs: []const Type.Specifier) Error!Result {
             }
         }
     } else {
-        res.ty = .{ .specifier = .ULongLong };
+        res.ty = Type.ULongLong;
     }
 
     res.node = try p.addNode(.{ .tag = .IntLiteral, .type = res.ty, .data = .{ .int = val } });
@@ -6381,7 +6381,7 @@ fn parseIntegerLiteral(p: *Parser) Error!Result {
 
     if (overflow) {
         try p.err(.int_literal_too_big);
-        var res: Result = .{ .ty = .{ .specifier = .ULongLong }, .value = Value.int(value) };
+        var res: Result = .{ .ty = Type.ULongLong, .value = Value.int(value) };
         res.node = try p.addNode(.{ .tag = .IntLiteral, .type = res.ty, .data = undefined });
         if (!p.inMacro)
             try p.valueMap.put(res.node, res.value);
@@ -6425,10 +6425,10 @@ fn parseIntegerLiteral(p: *Parser) Error!Result {
 fn parseCharLiteral(p: *Parser) Error!Result {
     defer p.tokenIdx += 1;
     const ty: Type = switch (p.getCurrToken()) {
-        .CharLiteral => .{ .specifier = .Int },
+        .CharLiteral => Type.Int,
         .CharLiteralWide => p.comp.types.wchar,
-        .CharLiteralUTF_16 => .{ .specifier = .UShort },
-        .CharLiteralUTF_32 => .{ .specifier = .ULong },
+        .CharLiteralUTF_16 => Type.UShort,
+        .CharLiteralUTF_32 => Type.ULong,
         else => unreachable,
     };
 
@@ -6632,7 +6632,7 @@ fn parseStringLiteral(p: *Parser) Error!Result {
     const slice = p.strings.items;
 
     const arrayType = try p.arena.create(Type.Array);
-    arrayType.* = .{ .elem = .{ .specifier = .Char }, .len = slice.len };
+    arrayType.* = .{ .elem = Type.Char, .len = slice.len };
 
     var res: Result = .{
         .ty = .{
