@@ -55,15 +55,12 @@ pub const Qualifiers = packed struct {
     @"const": bool = false,
     atomic: bool = false,
     @"volatile": bool = false,
-
     // for function parameters only, stored here since it fits in the padding
     register: bool = false,
     restrict: bool = false,
-
     pub fn any(quals: Qualifiers) bool {
         return quals.@"const" or quals.restrict or quals.@"volatile" or quals.atomic;
     }
-
     pub fn dump(quals: Qualifiers, w: anytype) !void {
         if (quals.@"const") try w.writeAll("const ");
         if (quals.atomic) try w.writeAll("_Atomic ");

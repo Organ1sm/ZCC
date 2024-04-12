@@ -149,7 +149,7 @@ pub fn adjustCondExprPtrs(a: *Result, tok: TokenIndex, b: *Result, p: *Parser) !
         };
         try a.implicitCast(p, .Bitcast);
     }
-    
+
     if (!adjustedElemType.eql(bElem, p.comp, true)) {
         b.ty = .{
             .data = .{ .subType = adjustedElemType },
@@ -487,7 +487,7 @@ fn usualArithmeticConversion(lhs: *Result, rhs: *Result, p: *Parser, tok: TokenI
 
     // cast to the unsigned type with greater rank
     const lhsLarger = @intFromEnum(lhsPromoted.specifier) > @intFromEnum(rhsPromoted.specifier);
-    const rhsLarger = @intFromEnum(rhsPromoted.specifier) > @intFromEnum(rhsPromoted.specifier);
+    const rhsLarger = @intFromEnum(rhsPromoted.specifier) > @intFromEnum(lhsPromoted.specifier);
     if (lhsIsUnsigned) {
         const target = if (lhsLarger) lhsPromoted else rhsPromoted;
         try lhs.intCast(p, target, tok);
@@ -561,6 +561,8 @@ pub fn castType(res: *Result, p: *Parser, to: Type, tok: TokenIndex) !void {
             res.value.intToFloat(res.ty, to, p.comp);
         } else if (newFloat and oldFloat) {
             res.value.floatCast(res.ty, to, p.comp);
+        } else if (oldInt and newInt) {
+            res.value.intCast(res.ty, to, p.comp);
         }
     } else {
         try p.errStr(.invalid_cast_type, tok, try p.typeStr(res.ty));
@@ -579,4 +581,19 @@ pub fn castType(res: *Result, p: *Parser, to: Type, tok: TokenIndex) !void {
         .type = res.ty,
         .data = .{ .cast = .{ .operand = res.node, .kind = castKind } },
     });
+}
+
+/// Check if the integer value represented by `res` fits within the type bounds of `ty`.
+/// This function compares the `res` value against the maximum and minimum values that
+/// can be represented by the type `ty`.
+/// @param res   The result object containing the value to be checked.
+/// @param p     A pointer to the Parser object.
+/// @param ty    The type within which the value should fit.
+/// @return      Returns true if the value fits within the type bounds, false otherwise.
+pub fn intFitsInType(res: Result, p: *Parser, ty: Type) bool {
+    const maxInt = Value.int(ty.maxInt(p.comp));
+    const minInt = Value.int(ty.minInt(p.comp));
+
+    return res.value.compare(.lte, maxInt, res.ty, p.comp) and
+        (res.ty.isUnsignedInt(p.comp) or res.value.compare(.gte, minInt, res.ty, p.comp));
 }

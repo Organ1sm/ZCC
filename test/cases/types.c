@@ -21,3 +21,9 @@ void baz(I const a, const I b) {
     b += 1;
     a += 1;
 }
+
+enum E {
+    A = (char) 2,
+    B = (long) 3,
+};
+

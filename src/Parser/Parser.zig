@@ -2163,15 +2163,13 @@ fn parseEnumSpec(p: *Parser) Error!*Type.Enum {
         p.enumBuffer.items.len = enumBufferTop;
     }
 
+    const symstackTop = p.symStack.symbols.len;
     var e = Enumerator.init(fixedTy);
     while (try p.enumerator(&e)) |fieldAndNode| {
         try p.enumBuffer.append(fieldAndNode.field);
         try p.listBuffer.append(fieldAndNode.node);
         if (p.eat(.Comma) == null) break;
     }
-
-    enumType.fields = try p.arena.dupe(Type.Enum.Field, p.enumBuffer.items[enumBufferTop..]);
-    enumType.tagType = e.res.ty;
 
     if (p.enumBuffer.items.len == enumBufferTop)
         try p.err(.empty_enum);
@@ -2188,6 +2186,48 @@ fn parseEnumSpec(p: *Parser) Error!*Type.Enum {
         attrBufferTop,
     );
 
+    const isPacked = ty.hasAttribute(.@"packed") or p.comp.langOpts.shortEnums;
+    if (!enumType.fixed) {
+        const tagSpecifier = try e.getTypeSpecifier(p, isPacked, maybeID orelse enumTK);
+        enumType.tagType = .{ .specifier = tagSpecifier };
+    }
+
+    const enumFields = p.enumBuffer.items[enumBufferTop..];
+    const fieldNodes = p.listBuffer.items[listBufferTop..];
+
+    if (fixedTy == null) {
+        const values = p.symStack.symbols.items(.value)[symstackTop..];
+        const types = p.symStack.symbols.items(.type)[symstackTop..];
+
+        for (enumFields, 0..) |*field, i| {
+            if (field.ty.eql(Type.Int, p.comp, false)) continue;
+
+            var res = Result{ .node = field.node, .ty = field.ty, .value = values[i] };
+            const destTy = if (p.comp.fixedEnumTagSpecifier()) |some|
+                Type{ .specifier = some }
+            else if (res.intFitsInType(p, Type.Int))
+                Type.Int
+            else if (!res.ty.eql(enumType.tagType, p.comp, false))
+                enumType.tagType
+            else
+                continue;
+
+            values[i].intCast(field.ty, destTy, p.comp);
+            types[i] = destTy;
+            p.nodes.items(.type)[@intFromEnum(fieldNodes[i])] = destTy;
+            field.ty = destTy;
+            res.ty = destTy;
+
+            if (res.node != .none) {
+                try res.implicitCast(p, .IntCast);
+                field.node = res.node;
+                p.nodes.items(.data)[@intFromEnum(fieldNodes[i])].decl.node = res.node;
+            }
+        }
+    }
+
+    enumType.fields = try p.arena.dupe(Type.Enum.Field, enumFields);
+    // declare a symbol for the type
     if (maybeID != null and !defined) {
         try p.symStack.appendSymbol(.{
             .kind = .@"enum",
@@ -2197,13 +2237,6 @@ fn parseEnumSpec(p: *Parser) Error!*Type.Enum {
             .value = .{},
         });
     }
-
-    const isPacked = ty.hasAttribute(.@"packed") or p.comp.langOpts.shortEnums;
-    if (!enumType.fixed) {
-        const tagSpecifier = try e.getTypeSpecifier(p, isPacked, maybeID orelse enumTK);
-        enumType.tagType = .{ .specifier = tagSpecifier };
-    }
-
     // finish by creating a node
     var node: AST.Node = .{
         .tag = .EnumDeclTwo,
@@ -2211,7 +2244,6 @@ fn parseEnumSpec(p: *Parser) Error!*Type.Enum {
         .data = .{ .binExpr = .{ .lhs = .none, .rhs = .none } },
     };
 
-    const fieldNodes = p.listBuffer.items[listBufferTop..];
     switch (fieldNodes.len) {
         0 => {},
         1 => node.data = .{ .binExpr = .{ .lhs = fieldNodes[0], .rhs = .none } },
@@ -2278,9 +2310,7 @@ const Enumerator = struct {
     /// Set enumerator value to specified value.
     fn set(e: *Enumerator, p: *Parser, res: Result, token: TokenIndex) !void {
         if (e.fixed and !res.ty.eql(e.res.ty, p.comp, false)) {
-            if (res.value.compare(.gt, Value.int(e.res.ty.maxInt(p.comp)), res.ty, p.comp) or
-                res.value.compare(.lt, Value.int(e.res.ty.minInt(p.comp)), res.ty, p.comp))
-            {
+            if (!res.intFitsInType(p, e.res.ty)) {
                 try p.errStr(.enum_not_representable_fixed, token, try p.typeStr(e.res.ty));
                 return error.ParsingFailed;
             }
@@ -2290,6 +2320,7 @@ const Enumerator = struct {
             e.res = copy;
         } else {
             e.res = res;
+            try e.res.intCast(p, e.res.ty.integerPromotion(p.comp), token);
         }
     }
 
