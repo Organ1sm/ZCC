@@ -51,6 +51,7 @@ pub const Message = struct {
             specifier: enum { @"struct", @"union", @"enum" },
         },
         actualCodePoint: u21,
+        pow2AsString: u8,
         unsigned: u64,
         signed: i64,
         none: void,
@@ -137,6 +138,8 @@ pub const Options = packed struct {
     @"include-next-outside-header": Kind = .default,
     @"include-next-absolute-path": Kind = .default,
     @"ignored-pragmas": Kind = .default,
+    @"enum-too-large": Kind = .default,
+    @"fixed-enum-extension": Kind = .default,
 };
 
 list: std.ArrayListUnmanaged(Message) = .{},
@@ -347,6 +350,13 @@ pub fn renderExtra(comp: *Compilation, m: anytype) void {
                             msg.extra.attrArgType.actual.toString(),
                         }),
                         .actual_codepoint => m.print(info.msg, .{msg.extra.actualCodePoint}),
+                        .pow_2_as_string => m.print(info.msg, .{switch (msg.extra.pow2AsString) {
+                            63 => "9223372036854775808",
+                            64 => "18446744073709551616",
+                            127 => "170141183460469231731687303715884105728",
+                            128 => "340282366920938463463374607431768211456",
+                            else => unreachable,
+                        }}),
                         .unsigned => m.print(info.msg, .{msg.extra.unsigned}),
                         .signed => m.print(info.msg, .{msg.extra.signed}),
                         .attr_enum => m.print(info.msg, .{
@@ -357,7 +367,7 @@ pub fn renderExtra(comp: *Compilation, m: anytype) void {
                             @tagName(msg.extra.ignoredRecordAttr.tag),
                             @tagName(msg.extra.ignoredRecordAttr.specifier),
                         }),
-                        else => unreachable,
+                        else => @compileError("invalid extra kind " ++ @tagName(info.extra)),
                     }
                 } else {
                     m.write(info.msg);
@@ -392,7 +402,7 @@ pub fn renderExtra(comp: *Compilation, m: anytype) void {
 
 fn tagKind(diag: *Diagnostics, tag: Tag) Kind {
     // XXX: horrible hack, do not do this
-    const comp: *Compilation = @fieldParentPtr( "diag", diag);
+    const comp: *Compilation = @fieldParentPtr("diag", diag);
 
     var kind: Kind = undefined;
     inline for (std.meta.fields(Tag)) |field| {

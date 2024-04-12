@@ -11,6 +11,7 @@ const TypeBuilder = @import("../AST/TypeBuilder.zig");
 const Diagnostics = @import("../Basic/Diagnostics.zig");
 const DeclSpec = @import("../AST/DeclSpec.zig");
 const SymbolStack = @import("../Sema/SymbolStack.zig");
+const Symbol = SymbolStack.Symbol;
 const Switch = @import("../Sema/Switch.zig");
 const Result = @import("Result.zig");
 const InitList = @import("InitList.zig");
@@ -605,11 +606,11 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
 
     _ = try p.addNode(.{ .tag = .Invalid, .type = undefined, .data = undefined });
     {
-        try p.symStack.defineTypedef("__int128_t", .{ .specifier = .Int128 }, 0, .none);
-        try p.symStack.defineTypedef("__uint128_t", .{ .specifier = .UInt128 }, 0, .none);
+        try p.symStack.defineTypedef("__int128_t", Type.Int128, 0, .none);
+        try p.symStack.defineTypedef("__uint128_t", Type.UInt128, 0, .none);
 
         const elemTy = try p.arena.create(Type);
-        elemTy.* = .{ .specifier = .Char };
+        elemTy.* = Type.Char;
         try p.symStack.defineTypedef("__builtin_ms_va_list", .{
             .specifier = .Pointer,
             .data = .{ .subType = elemTy },
@@ -1757,6 +1758,9 @@ fn parseRecordSpec(p: *Parser) Error!Type {
         }
     };
 
+    var done = false;
+    errdefer if (!done) p.skipTo(.RBrace);
+
     // Get forward declared type or create a new one
     var defined = false;
     const recordType: *Type.Record = if (maybeIdent) |ident| recordTy: {
@@ -1835,6 +1839,7 @@ fn parseRecordSpec(p: *Parser) Error!Type {
     }
 
     try p.expectClosing(lb, .RBrace);
+    done = true;
     try p.parseAttrSpec(); // .record
 
     ty = try p.withAttributes(.{
@@ -2041,9 +2046,31 @@ fn parseSpecQuals(p: *Parser) Error!?Type {
     return null;
 }
 
+fn checkEnumFixedTy(p: *Parser, fixedTy: ?Type, identToken: TokenIndex, prev: Symbol) !void {
+    const enumTy = prev.type.get(.Enum).?.data.@"enum";
+    if (fixedTy) |some| {
+        if (!enumTy.fixed) {
+            try p.errToken(.enum_prev_nonfixed, identToken);
+            try p.errToken(.previous_definition, prev.token);
+            return error.ParsingFailed;
+        }
+
+        if (!enumTy.tagType.eql(some, p.comp, false)) {
+            const str = try p.typePairStrExtra(some, " (was ", enumTy.tagType);
+            try p.errStr(.enum_different_explicit_ty, identToken, str);
+            try p.errToken(.previous_definition, prev.token);
+            return error.ParsingFailed;
+        }
+    } else if (enumTy.fixed) {
+        try p.errToken(.enum_prev_fixed, identToken);
+        try p.errToken(.previous_definition, prev.token);
+        return error.ParsingFailed;
+    }
+}
+
 /// enum-specifier
-///  : `enum` identifier? { enumerator (',' enumerator)? ',') }
-///  | `enum` identifier
+///  : `enum` identifier? (':', type-name)? { enumerator (',' enumerator)? ',') }
+///  | `enum` identifier (':', type-name)?
 fn parseEnumSpec(p: *Parser) Error!*Type.Enum {
     const enumTK = p.tokenIdx;
     p.tokenIdx += 1;
@@ -2051,9 +2078,24 @@ fn parseEnumSpec(p: *Parser) Error!*Type.Enum {
     const attrBufferTop = p.attrBuffer.len;
     defer p.attrBuffer.len = attrBufferTop;
 
-    try p.parseAttrSpec(); //.record
+    try p.parseAttrSpec();
 
     const maybeID = try p.eatIdentifier();
+    const fixedTy = if (p.eat(.Colon)) |colon| fixed: {
+        const fixed = (try p.parseTypeName()) orelse {
+            if (p.record.kind != .Invalid) {
+                // This is a bit field.
+                p.tokenIdx -= 1;
+                break :fixed null;
+            }
+            try p.err(.expected_type);
+            try p.errToken(.enum_fixed, colon);
+            break :fixed null;
+        };
+        try p.errToken(.enum_fixed, colon);
+        break :fixed fixed;
+    } else null;
+
     const lb = p.eat(.LBrace) orelse {
         const ident = maybeID orelse {
             try p.err(.ident_or_l_brace);
@@ -2062,10 +2104,11 @@ fn parseEnumSpec(p: *Parser) Error!*Type.Enum {
 
         // check if this is a reference to a previous type
         if (try p.symStack.findTag(.KeywordEnum, ident, p.getCurrToken())) |prev| {
+            try p.checkEnumFixedTy(fixedTy, ident, prev);
             return prev.type.get(.Enum).?.data.@"enum";
         } else {
             // this is a forward declaration, create a new enum type
-            const enumType = try Type.Enum.create(p.arena, p.getTokenSlice(ident));
+            const enumType = try Type.Enum.create(p.arena, p.getTokenSlice(ident), fixedTy);
             const ty = try p.withAttributes(
                 .{ .specifier = .Enum, .data = .{ .@"enum" = enumType } },
                 attrBufferTop,
@@ -2086,39 +2129,26 @@ fn parseEnumSpec(p: *Parser) Error!*Type.Enum {
         }
     };
 
+    var done = false;
+    errdefer if (!done) p.skipTo(.RBrace);
+
     // Get forward declared type or create a new one
     var defined = false;
     const enumType: *Type.Enum = if (maybeID) |ident| enumTy: {
         if (try p.symStack.defineTag(.KeywordEnum, ident)) |prev| {
-            if (!prev.type.hasIncompleteSize()) {
+            const enumTy = prev.type.get(.Enum).?.data.@"enum";
+            if (!enumTy.fixed and !enumTy.isIncomplete()) {
                 // if the enum isn't incomplete, this is a redefinition
                 try p.errStr(.redefinition, ident, p.getTokenSlice(ident));
                 try p.errToken(.previous_definition, prev.token);
             } else {
+                try p.checkEnumFixedTy(fixedTy, ident, prev);
                 defined = true;
-                break :enumTy prev.type.get(.Enum).?.data.@"enum";
+                break :enumTy enumTy;
             }
         }
-        break :enumTy try Type.Enum.create(p.arena, p.getTokenSlice(ident));
-    } else try Type.Enum.create(p.arena, try p.getAnonymousName(enumTK));
-
-    const ty = try p.withAttributes(
-        .{
-            .specifier = .Enum,
-            .data = .{ .@"enum" = enumType },
-        },
-        attrBufferTop,
-    );
-
-    if (maybeID != null and !defined) {
-        try p.symStack.appendSymbol(.{
-            .kind = .@"enum",
-            .name = p.getTokenSlice(maybeID.?),
-            .type = ty,
-            .token = maybeID.?,
-            .value = .{},
-        });
-    }
+        break :enumTy try Type.Enum.create(p.arena, p.getTokenSlice(ident), fixedTy);
+    } else try Type.Enum.create(p.arena, try p.getAnonymousName(enumTK), fixedTy);
 
     // reserve space for this enum
     try p.declBuffer.append(.none);
@@ -2133,22 +2163,80 @@ fn parseEnumSpec(p: *Parser) Error!*Type.Enum {
         p.enumBuffer.items.len = enumBufferTop;
     }
 
-    var e = Enumerator.init(p);
+    const symstackTop = p.symStack.symbols.len;
+    var e = Enumerator.init(fixedTy);
     while (try p.enumerator(&e)) |fieldAndNode| {
         try p.enumBuffer.append(fieldAndNode.field);
         try p.listBuffer.append(fieldAndNode.node);
         if (p.eat(.Comma) == null) break;
     }
 
-    enumType.fields = try p.arena.dupe(Type.Enum.Field, p.enumBuffer.items[enumBufferTop..]);
-    enumType.tagType = e.res.ty;
-
     if (p.enumBuffer.items.len == enumBufferTop)
         try p.err(.empty_enum);
 
     try p.expectClosing(lb, .RBrace);
+    done = true;
     try p.parseAttrSpec(); //.record
 
+    const ty = try p.withAttributes(
+        .{
+            .specifier = .Enum,
+            .data = .{ .@"enum" = enumType },
+        },
+        attrBufferTop,
+    );
+
+    const isPacked = ty.hasAttribute(.@"packed") or p.comp.langOpts.shortEnums;
+    if (!enumType.fixed) {
+        const tagSpecifier = try e.getTypeSpecifier(p, isPacked, maybeID orelse enumTK);
+        enumType.tagType = .{ .specifier = tagSpecifier };
+    }
+
+    const enumFields = p.enumBuffer.items[enumBufferTop..];
+    const fieldNodes = p.listBuffer.items[listBufferTop..];
+
+    if (fixedTy == null) {
+        const values = p.symStack.symbols.items(.value)[symstackTop..];
+        const types = p.symStack.symbols.items(.type)[symstackTop..];
+
+        for (enumFields, 0..) |*field, i| {
+            if (field.ty.eql(Type.Int, p.comp, false)) continue;
+
+            var res = Result{ .node = field.node, .ty = field.ty, .value = values[i] };
+            const destTy = if (p.comp.fixedEnumTagSpecifier()) |some|
+                Type{ .specifier = some }
+            else if (res.intFitsInType(p, Type.Int))
+                Type.Int
+            else if (!res.ty.eql(enumType.tagType, p.comp, false))
+                enumType.tagType
+            else
+                continue;
+
+            values[i].intCast(field.ty, destTy, p.comp);
+            types[i] = destTy;
+            p.nodes.items(.type)[@intFromEnum(fieldNodes[i])] = destTy;
+            field.ty = destTy;
+            res.ty = destTy;
+
+            if (res.node != .none) {
+                try res.implicitCast(p, .IntCast);
+                field.node = res.node;
+                p.nodes.items(.data)[@intFromEnum(fieldNodes[i])].decl.node = res.node;
+            }
+        }
+    }
+
+    enumType.fields = try p.arena.dupe(Type.Enum.Field, enumFields);
+    // declare a symbol for the type
+    if (maybeID != null and !defined) {
+        try p.symStack.appendSymbol(.{
+            .kind = .@"enum",
+            .name = p.getTokenSlice(maybeID.?),
+            .type = ty,
+            .token = maybeID.?,
+            .value = .{},
+        });
+    }
     // finish by creating a node
     var node: AST.Node = .{
         .tag = .EnumDeclTwo,
@@ -2156,7 +2244,6 @@ fn parseEnumSpec(p: *Parser) Error!*Type.Enum {
         .data = .{ .binExpr = .{ .lhs = .none, .rhs = .none } },
     };
 
-    const fieldNodes = p.listBuffer.items[listBufferTop..];
     switch (fieldNodes.len) {
         0 => {},
         1 => node.data = .{ .binExpr = .{ .lhs = fieldNodes[0], .rhs = .none } },
@@ -2173,28 +2260,106 @@ fn parseEnumSpec(p: *Parser) Error!*Type.Enum {
 
 const Enumerator = struct {
     res: Result,
+    // tracks the minimum number of bits required to represent the positive part of the enumeration constant
+    numPositiveBits: usize = 0,
+    // tracks the minimum number of bits required to represent the negative part of the enumeration constant
+    numNegativeBits: usize = 0,
+    // whether indicate fixed type
+    fixed: bool,
 
-    fn init(p: *Parser) Enumerator {
-        // Enumerator value is captured after increment in p.enumerator(), and we want the first enumeration constant
-        // to have a value of 0
-        const initialValue = Value.int(@as(i64, -1));
-        return .{ .res = .{
-            .ty = .{ .specifier = if (p.comp.langOpts.shortEnums) .SChar else .Int },
-            .value = initialValue,
-        } };
+    fn init(fixedTy: ?Type) Enumerator {
+        return .{
+            .res = .{
+                .ty = fixedTy orelse Type.Int,
+                .value = .{ .tag = .unavailable },
+            },
+            .fixed = fixedTy != null,
+        };
     }
 
     /// Increment enumerator value adjusting type if needed.
-    fn incr(e: *Enumerator, p: *Parser) !void {
+    fn incr(e: *Enumerator, p: *Parser, token: TokenIndex) !void {
         e.res.node = .none;
-        _ = e.res.value.add(e.res.value, Value.int(1), e.res.ty, p.comp);
-        // TODO adjust type if value does not fit current
+        const oldVal = e.res.value;
+        if (oldVal.tag == .unavailable) {
+            // First enumerator, set to 0 fits in all types.
+            e.res.value = Value.int(0);
+            return;
+        }
+        if (e.res.value.add(e.res.value, Value.int(1), e.res.ty, p.comp)) {
+            const byteSize = e.res.ty.sizeof(p.comp).?;
+            const bitSize: u8 = @intCast(if (e.res.ty.isUnsignedInt(p.comp)) byteSize * 8 else byteSize * 8 - 1);
+
+            if (e.fixed) {
+                try p.errStr(.enum_not_representable_fixed, token, try p.typeStr(e.res.ty));
+                return;
+            }
+
+            const newTy = if (p.comp.nextLargestIntSameSign(e.res.ty)) |larger| blk: {
+                try p.errToken(.enumerator_overflow, token);
+                break :blk larger;
+            } else blk: {
+                try p.errExtra(.enum_not_representable, token, .{ .pow2AsString = bitSize });
+                break :blk Type.ULongLong;
+            };
+            e.res.ty = newTy;
+            _ = e.res.value.add(oldVal, Value.int(1), e.res.ty, p.comp);
+        }
     }
 
-    /// Set enumerator value to specified value, adjusting type if needed.
-    fn set(e: *Enumerator, _: *Parser, res: Result) !void {
-        e.res = res;
-        // TODO adjust res type to try to fit with the previous type
+    /// Set enumerator value to specified value.
+    fn set(e: *Enumerator, p: *Parser, res: Result, token: TokenIndex) !void {
+        if (e.fixed and !res.ty.eql(e.res.ty, p.comp, false)) {
+            if (!res.intFitsInType(p, e.res.ty)) {
+                try p.errStr(.enum_not_representable_fixed, token, try p.typeStr(e.res.ty));
+                return error.ParsingFailed;
+            }
+            var copy = res;
+            copy.ty = e.res.ty;
+            try copy.implicitCast(p, .IntCast);
+            e.res = copy;
+        } else {
+            e.res = res;
+            try e.res.intCast(p, e.res.ty.integerPromotion(p.comp), token);
+        }
+    }
+
+    fn getTypeSpecifier(e: *const Enumerator, p: *Parser, isPacked: bool, token: TokenIndex) !Type.Specifier {
+        if (p.comp.fixedEnumTagSpecifier()) |tagSpecifier|
+            return tagSpecifier;
+
+        const charWidth = Type.SChar.sizeof(p.comp).? * 8;
+        const shortWidth = Type.Short.sizeof(p.comp).? * 8;
+        const intWidth = Type.Int.sizeof(p.comp).? * 8;
+        if (e.numNegativeBits > 0) {
+            if (isPacked and e.numNegativeBits <= charWidth and e.numPositiveBits < charWidth) {
+                return .SChar;
+            } else if (isPacked and e.numNegativeBits <= shortWidth and e.numPositiveBits < shortWidth) {
+                return .Short;
+            } else if (e.numNegativeBits <= intWidth and e.numPositiveBits < intWidth) {
+                return .Int;
+            }
+
+            const longWidth = Type.Long.sizeof(p.comp).? * 8;
+            if (e.numNegativeBits <= longWidth and e.numPositiveBits < longWidth)
+                return .Long;
+
+            const llongWidth = Type.LongLong.sizeof(p.comp).? * 8;
+            if (e.numNegativeBits > llongWidth or e.numPositiveBits >= llongWidth)
+                try p.errToken(.enum_too_large, token);
+            return .LongLong;
+        }
+
+        if (isPacked and e.numPositiveBits <= charWidth) {
+            return .UChar;
+        } else if (isPacked and e.numPositiveBits <= shortWidth) {
+            return .UShort;
+        } else if (e.numPositiveBits <= intWidth) {
+            return .UInt;
+        } else if (e.numPositiveBits <= Type.Long.sizeof(p.comp).? * 8) {
+            return .ULong;
+        }
+        return .ULongLong;
     }
 };
 
@@ -2215,34 +2380,44 @@ fn enumerator(p: *Parser, e: *Enumerator) Error!?EnumFieldAndNode {
 
     try p.parseAttrSpec();
 
+    const errStart = p.comp.diag.list.items.len;
     if (p.eat(.Equal)) |_| {
         const specified = try p.parseConstExpr(.GNUFoldingExtension);
         if (specified.value.tag == .unavailable) {
             try p.errToken(.enum_val_unavailable, nameToken + 2);
-            try e.incr(p);
+            try e.incr(p, nameToken);
         } else {
-            try e.set(p, specified);
+            try e.set(p, specified, nameToken);
         }
     } else {
-        try e.incr(p);
+        try e.incr(p, nameToken);
     }
 
     var res = e.res;
     res.ty = try p.withAttributes(res.ty, attrBufferTop);
 
-    if (e.res.value.compare(.lt, Value.int(0), e.res.ty, p.comp)) {
-        const value = e.res.value.getInt(i64);
-        if (value < p.comp.minInt()) {
-            try p.errExtra(.enumerator_too_small, nameToken, .{
-                .signed = value,
-            });
-        }
+    if (res.ty.isUnsignedInt(p.comp) or res.value.compare(.gte, Value.int(0), res.ty, p.comp)) {
+        e.numPositiveBits = @max(e.numPositiveBits, res.value.minUnsignedBits(res.ty, p.comp));
     } else {
-        const value = e.res.value.getInt(u64);
-        if (value > p.comp.maxInt()) {
-            try p.errExtra(.enumerator_too_large, nameToken, .{
-                .unsigned = value,
-            });
+        e.numNegativeBits = @max(e.numNegativeBits, res.value.minSignedBits(res.ty, p.comp));
+    }
+
+    if (errStart == p.comp.diag.list.items.len) {
+        // only do these warnings if we didn't already warn about overflow or non-representable values
+        if (e.res.value.compare(.lt, Value.int(0), e.res.ty, p.comp)) {
+            const value = e.res.value.getInt(i64);
+            if (value < Type.Int.minInt(p.comp)) {
+                try p.errExtra(.enumerator_too_small, nameToken, .{
+                    .signed = value,
+                });
+            }
+        } else {
+            const value = e.res.value.getInt(u64);
+            if (value > Type.Int.maxInt(p.comp)) {
+                try p.errExtra(.enumerator_too_large, nameToken, .{
+                    .unsigned = value,
+                });
+            }
         }
     }
 
@@ -2350,7 +2525,7 @@ fn declarator(p: *Parser, baseType: Type, kind: DeclaratorKind) Error!?Declarato
         try d.type.validateCombinedType(p, combineToken);
         return d;
     } else if (p.eat(.LParen)) |lp| blk: {
-        var res = (try p.declarator(.{ .specifier = .Void }, kind)) orelse {
+        var res = (try p.declarator(Type.Void, kind)) orelse {
             p.tokenIdx = lp;
             break :blk;
         };
@@ -2419,7 +2594,7 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: Declarator
             return error.ParsingFailed;
         }
 
-        var resType = Type{ .specifier = .Pointer };
+        var resType = Type.Pointer;
         var qualsBuilder = Type.Qualifiers.Builder{};
         var gotQuals = try p.parseTypeQual(&qualsBuilder);
         var static = p.eat(.KeywordStatic);
@@ -2481,7 +2656,7 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: Declarator
                     try p.errToken(.variable_len_array_file_scope, d.name);
 
                 const exprType = try p.arena.create(Type.Expr);
-                exprType.ty = .{ .specifier = .Void };
+                exprType.ty = Type.Void;
                 exprType.node = size.node;
                 resType.data = .{ .expr = exprType };
                 resType.specifier = .VariableLenArray;
@@ -2490,12 +2665,12 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: Declarator
                     try p.errToken(.useless_static, some);
             } else if (star) |_| {
                 const elemType = try p.arena.create(Type);
-                elemType.* = .{ .specifier = .Void };
+                elemType.* = Type.Void;
                 resType.data = .{ .subType = elemType };
                 resType.specifier = .UnspecifiedVariableLenArray;
             } else {
                 const arrayType = try p.arena.create(Type.Array);
-                arrayType.elem = .{ .specifier = .Void };
+                arrayType.elem = Type.Void;
                 arrayType.len = 0;
                 resType.data = .{ .array = arrayType };
                 resType.specifier = .IncompleteArray;
@@ -2508,7 +2683,7 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: Declarator
                 try p.errToken(.negative_array_size, lb);
 
             const arrayType = try p.arena.create(Type.Array);
-            arrayType.elem = .{ .specifier = .Void };
+            arrayType.elem = Type.Void;
             if (sizeValue.compare(.gt, Value.int(maxElems), size_t, p.comp)) {
                 try p.errToken(.array_too_large, lb);
                 arrayType.len = maxElems;
@@ -2563,7 +2738,7 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: Declarator
                 try p.paramBuffer.append(.{
                     .name = p.getTokenSlice(nameToken),
                     .nameToken = nameToken,
-                    .ty = .{ .specifier = .Int },
+                    .ty = Type.Int,
                 });
 
                 if (p.eat(.Comma) == null) break;
@@ -2866,14 +3041,14 @@ pub fn initializerItem(p: *Parser, il: *InitList, initType: Type) Error!bool {
         if (isStrInit and p.isStringInit(initType)) {
             var tempIL = InitList{};
             defer tempIL.deinit(p.gpa);
-            saw = try p.initializerItem(&tempIL, .{ .specifier = .Void });
+            saw = try p.initializerItem(&tempIL, Type.Void);
         } else if (count == 0 and p.isStringInit(initType)) {
             saw = try p.initializerItem(il, initType);
         } else if (isScalar and count != 0) {
             // discard further scalars
             var tempIL = InitList{};
             defer tempIL.deinit(p.gpa);
-            saw = try p.initializerItem(&tempIL, .{ .specifier = .Void });
+            saw = try p.initializerItem(&tempIL, Type.Void);
         } else if (p.getCurrToken() == .LBrace) {
             if (designation) {
                 // designation overrides previous value, let existing mechanism handle it
@@ -2886,7 +3061,7 @@ pub fn initializerItem(p: *Parser, il: *InitList, initType: Type) Error!bool {
                 defer tempIL.deinit(p.gpa);
 
                 saw = try p.initializerItem(curIL, curType);
-                saw = try p.initializerItem(&tempIL, .{ .specifier = .Void });
+                saw = try p.initializerItem(&tempIL, Type.Void);
                 if (!warnedExcess)
                     try p.errToken(if (initType.isArray()) .excess_array_init else .excess_struct_init, firstToken);
                 warnedExcess = true;
@@ -2902,7 +3077,7 @@ pub fn initializerItem(p: *Parser, il: *InitList, initType: Type) Error!bool {
             // discard further values
             var tempIL = InitList{};
             defer tempIL.deinit(p.gpa);
-            saw = try p.initializerItem(&tempIL, .{ .specifier = .Void });
+            saw = try p.initializerItem(&tempIL, Type.Void);
             if (!warnedExcess and saw)
                 try p.errToken(if (initType.isArray()) .excess_array_init else .excess_struct_init, firstToken);
             warnedExcess = true;
@@ -3927,7 +4102,7 @@ fn parseLabeledStmt(p: *Parser) Error!?NodeIndex {
 
 const StmtExprState = struct {
     lastExprToken: TokenIndex = 0,
-    lastExprRes: Result = .{ .ty = .{ .specifier = .Void } },
+    lastExprRes: Result = .{ .ty = Type.Void },
 };
 
 /// compound-statement
@@ -4557,7 +4732,7 @@ fn logicalOrExpr(p: *Parser) Error!Result {
             lhs.value = Value.int(res);
         }
 
-        lhs.ty = .{ .specifier = .Int };
+        lhs.ty = Type.Int;
         try lhs.bin(p, .BoolOrExpr, rhs);
     }
 
@@ -4585,7 +4760,7 @@ fn logicalAndExpr(p: *Parser) Error!Result {
             lhs.value = Value.int(res);
         }
 
-        lhs.ty = .{ .specifier = .Int };
+        lhs.ty = Type.Int;
         try lhs.bin(p, .BoolAndExpr, rhs);
     }
     return lhs;
@@ -4665,7 +4840,7 @@ fn parseEqExpr(p: *Parser) Error!Result {
             lhs.value = Value.int(@intFromBool(res));
         }
 
-        lhs.ty = .{ .specifier = .Int };
+        lhs.ty = Type.Int;
         try lhs.bin(p, tag, rhs);
     }
     return lhs;
@@ -4699,7 +4874,7 @@ fn parseCompExpr(p: *Parser) Error!Result {
             lhs.value = Value.int(@intFromBool(res));
         }
 
-        lhs.ty = .{ .specifier = .Int };
+        lhs.ty = Type.Int;
         try lhs.bin(p, tag, rhs);
     }
 
@@ -5118,7 +5293,7 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
                 try p.labels.append(.{ .unresolvedGoto = nameToken });
 
             const elemType = try p.arena.create(Type);
-            elemType.* = .{ .specifier = .Void };
+            elemType.* = Type.Void;
 
             const resultType = Type{ .specifier = .Pointer, .data = .{ .subType = elemType } };
             return Result{
@@ -5283,7 +5458,7 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
                 operand.value.tag = .unavailable;
             }
 
-            operand.ty = .{ .specifier = .Int };
+            operand.ty = Type.Int;
             try operand.un(p, .BoolNotExpr);
             return operand;
         },
@@ -5608,7 +5783,7 @@ fn parseCallExpr(p: *Parser, lhs: Result) Error!Result {
 
         if (argCount >= params.len) {
             if (arg.ty.isInt()) try arg.intCast(p, arg.ty.integerPromotion(p.comp), paramToken);
-            if (arg.ty.is(.Float)) try arg.floatCast(p, .{ .specifier = .Double });
+            if (arg.ty.is(.Float)) try arg.floatCast(p, Type.Double);
             try arg.saveValue(p);
             try p.listBuffer.append(arg.node);
             argCount += 1;
@@ -5836,7 +6011,7 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
                     try p.errStr(.implicit_func_decl, nameToken, name);
 
                 const funcType = try p.arena.create(Type.Function);
-                funcType.* = .{ .returnType = .{ .specifier = .Int }, .params = &.{} };
+                funcType.* = .{ .returnType = Type.Int, .params = &.{} };
                 const ty: Type = .{ .specifier = .OldStyleFunc, .data = .{ .func = funcType } };
                 const node = try p.addNode(.{
                     .type = ty,
@@ -5939,7 +6114,7 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
         .FloatLiteral, .ImaginaryLiteral => |tag| {
             defer p.tokenIdx += 1;
 
-            const ty = Type{ .specifier = .Double };
+            const ty = Type.Double;
             const dValue = try p.parseFloat(p.tokenIdx, f64);
             var res = Result{
                 .ty = ty,
@@ -5952,7 +6127,7 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
 
             if (tag == .ImaginaryLiteral) {
                 try p.err(.gnu_imaginary_constant);
-                res.ty = .{ .specifier = .ComplexDouble };
+                res.ty = Type.ComplexDouble;
                 res.value.tag = .unavailable;
                 try res.un(p, .ImaginaryLiteral);
             }
@@ -5964,7 +6139,7 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
         => |tag| {
             defer p.tokenIdx += 1;
 
-            const ty = Type{ .specifier = .Float };
+            const ty = Type.Float;
             const fValue = try p.parseFloat(p.tokenIdx, f64);
             var res = Result{
                 .ty = ty,
@@ -5977,7 +6152,7 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
 
             if (tag == .ImaginaryLiteral_F) {
                 try p.err(.gnu_imaginary_constant);
-                res.ty = .{ .specifier = .ComplexFloat };
+                res.ty = Type.ComplexFloat;
                 res.value.tag = .unavailable;
                 try res.un(p, .ImaginaryLiteral);
             }
@@ -6085,7 +6260,7 @@ fn castInt(p: *Parser, val: u64, specs: []const Type.Specifier) Error!Result {
             }
         }
     } else {
-        res.ty = .{ .specifier = .ULongLong };
+        res.ty = Type.ULongLong;
     }
 
     res.node = try p.addNode(.{ .tag = .IntLiteral, .type = res.ty, .data = .{ .int = val } });
@@ -6237,7 +6412,7 @@ fn parseIntegerLiteral(p: *Parser) Error!Result {
 
     if (overflow) {
         try p.err(.int_literal_too_big);
-        var res: Result = .{ .ty = .{ .specifier = .ULongLong }, .value = Value.int(value) };
+        var res: Result = .{ .ty = Type.ULongLong, .value = Value.int(value) };
         res.node = try p.addNode(.{ .tag = .IntLiteral, .type = res.ty, .data = undefined });
         if (!p.inMacro)
             try p.valueMap.put(res.node, res.value);
@@ -6281,10 +6456,10 @@ fn parseIntegerLiteral(p: *Parser) Error!Result {
 fn parseCharLiteral(p: *Parser) Error!Result {
     defer p.tokenIdx += 1;
     const ty: Type = switch (p.getCurrToken()) {
-        .CharLiteral => .{ .specifier = .Int },
+        .CharLiteral => Type.Int,
         .CharLiteralWide => p.comp.types.wchar,
-        .CharLiteralUTF_16 => .{ .specifier = .UShort },
-        .CharLiteralUTF_32 => .{ .specifier = .ULong },
+        .CharLiteralUTF_16 => Type.UShort,
+        .CharLiteralUTF_32 => Type.ULong,
         else => unreachable,
     };
 
@@ -6488,7 +6663,7 @@ fn parseStringLiteral(p: *Parser) Error!Result {
     const slice = p.strings.items;
 
     const arrayType = try p.arena.create(Type.Array);
-    arrayType.* = .{ .elem = .{ .specifier = .Char }, .len = slice.len };
+    arrayType.* = .{ .elem = Type.Char, .len = slice.len };
 
     var res: Result = .{
         .ty = .{

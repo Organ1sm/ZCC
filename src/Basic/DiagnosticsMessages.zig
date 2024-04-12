@@ -1672,3 +1672,43 @@ pub const enumerator_too_large = struct {
     pub const kind = .off;
     pub const opt = "pedantic";
 };
+pub const enumerator_overflow = struct {
+    pub const msg = "overflow in enumeration value";
+    pub const kind = .warning;
+};
+pub const enum_not_representable = struct {
+    pub const msg = "incremented enumerator value {s} is not representable in the largest integer type";
+    pub const kind = .warning;
+    pub const opt = "enum-too-large";
+    pub const extra = .pow_2_as_string;
+};
+pub const enum_too_large = struct {
+    pub const msg = "enumeration values exceed range of largest integer";
+    pub const kind = .warning;
+    pub const opt = "enum-too-large";
+};
+pub const enum_fixed = struct {
+    pub const msg = "enumeration types with a fixed underlying type are a Clang extension";
+    pub const kind = .off;
+    pub const pedantic = true;
+    pub const opt = "fixed-enum-extension";
+};
+pub const enum_prev_nonfixed = struct {
+    pub const msg = "enumeration previously declared with nonfixed underlying type";
+    pub const kind = .@"error";
+};
+pub const enum_prev_fixed = struct {
+    pub const msg = "enumeration previously declared with fixed underlying type";
+    pub const kind = .@"error";
+};
+pub const enum_different_explicit_ty = struct {
+    // str will be like 'new' (was 'old'
+    pub const msg = "enumeration redeclared with different underlying type {s})";
+    pub const extra = .str;
+    pub const kind = .@"error";
+};
+pub const enum_not_representable_fixed = struct {
+    pub const msg = "enumerator value is not representable in the underlying type '{s}'";
+    pub const extra = .str;
+    pub const kind = .@"error";
+};

@@ -24,19 +24,43 @@ data: union {
 qual: Qualifiers = .{},
 specifier: Specifier,
 
+pub const Void = create(.Void);
+pub const Pointer = create(.Pointer);
+
+pub const Char = create(.Char);
+pub const UChar = create(.UChar);
+pub const SChar = create(.SChar);
+pub const Short = create(.Short);
+pub const UShort = create(.UShort);
+pub const Int = create(.Int);
+pub const UInt = create(.UInt);
+pub const ULong = create(.ULong);
+pub const Long = create(.Long);
+pub const LongLong = create(.LongLong);
+pub const ULongLong = create(.ULongLong);
+pub const Int128 = create(.Int128);
+pub const UInt128 = create(.Int128);
+
+pub const Float = create(.Float);
+pub const Double = create(.Double);
+pub const LongDouble = create(.LongDouble);
+pub const ComplexFloat = create(.ComplexFloat);
+pub const ComplexDouble = create(.ComplexDouble);
+
+pub inline fn create(specifier: Specifier) Type {
+    return .{ .specifier = specifier };
+}
+
 pub const Qualifiers = packed struct {
     @"const": bool = false,
     atomic: bool = false,
     @"volatile": bool = false,
-
     // for function parameters only, stored here since it fits in the padding
     register: bool = false,
     restrict: bool = false,
-
     pub fn any(quals: Qualifiers) bool {
         return quals.@"const" or quals.restrict or quals.@"volatile" or quals.atomic;
     }
-
     pub fn dump(quals: Qualifiers, w: anytype) !void {
         if (quals.@"const") try w.writeAll("const ");
         if (quals.atomic) try w.writeAll("_Atomic ");
@@ -153,6 +177,7 @@ pub const Enum = struct {
     name: []const u8,
     tagType: Type,
     fields: []Field,
+    fixed: bool,
 
     pub const Field = struct {
         name: []const u8,
@@ -165,10 +190,12 @@ pub const Enum = struct {
         return e.fields.len == std.math.maxInt(usize);
     }
 
-    pub fn create(allocator: std.mem.Allocator, name: []const u8) !*Enum {
+    pub fn create(allocator: std.mem.Allocator, name: []const u8, fixedTy: ?Type) !*Enum {
         var e = try allocator.create(Enum);
         e.name = name;
         e.fields.len = std.math.maxInt(usize);
+        if (fixedTy) |some| e.tagType = some;
+        e.fixed = (fixedTy != null);
         return e;
     }
 };
@@ -632,14 +659,14 @@ pub fn integerPromotion(ty: Type, comp: *Compilation) Type {
     if (specifier == .Enum) {
         // promote incomplete enums to int type
         if (ty.hasIncompleteSize())
-            return .{ .specifier = .Int };
+            return Type.Int;
         specifier = ty.data.@"enum".tagType.specifier;
     }
 
     return .{
         .specifier = switch (specifier) {
             .Bool, .Char, .SChar, .UChar, .Short => .Int,
-            .UShort => if (ty.sizeof(comp).? == sizeof(.{ .specifier = .Int }, comp)) Specifier.UInt else Specifier.Int,
+            .UShort => if (ty.sizeof(comp).? == sizeof(Type.Int, comp)) Specifier.UInt else Specifier.Int,
             .Int => .Int,
             .UInt => .UInt,
             .Long => .Long,
@@ -664,7 +691,7 @@ pub fn hasIncompleteSize(ty: Type) bool {
         .IncompleteArray,
         => true,
 
-        .Enum => ty.data.@"enum".isIncomplete(),
+        .Enum => ty.data.@"enum".isIncomplete() and !ty.data.@"enum".fixed,
         .Struct, .Union => ty.data.record.isIncomplete(),
 
         .Array, .StaticArray => ty.data.array.elem.hasIncompleteSize(),
@@ -717,6 +744,18 @@ pub fn maxInt(ty: Type, comp: *const Compilation) u64 {
         2 => if (ty.isUnsignedInt(comp)) @as(u64, std.math.maxInt(u16)) else std.math.maxInt(i16),
         4 => if (ty.isUnsignedInt(comp)) @as(u64, std.math.maxInt(u32)) else std.math.maxInt(i32),
         8 => if (ty.isUnsignedInt(comp)) @as(u64, std.math.maxInt(u64)) else std.math.maxInt(i64),
+        else => unreachable,
+    };
+}
+
+pub fn minInt(ty: Type, comp: *const Compilation) i64 {
+    std.debug.assert(ty.isInt());
+    if (ty.isUnsignedInt(comp)) return 0;
+    return switch (ty.sizeof(comp).?) {
+        1 => std.math.minInt(i8),
+        2 => std.math.minInt(i16),
+        4 => std.math.minInt(i32),
+        8 => std.math.minInt(i64),
         else => unreachable,
     };
 }
@@ -848,7 +887,7 @@ pub fn sizeof(ty: Type, comp: *const Compilation) ?u64 {
 
         .Array => if (ty.data.array.elem.sizeof(comp)) |size| size * ty.data.array.len else null,
         .Struct, .Union => if (ty.data.record.isIncomplete()) null else ty.data.record.size,
-        .Enum => if (ty.data.@"enum".isIncomplete()) null else ty.data.@"enum".tagType.sizeof(comp),
+        .Enum => if (ty.data.@"enum".isIncomplete() and !ty.data.@"enum".fixed) null else ty.data.@"enum".tagType.sizeof(comp),
 
         .TypeofType => ty.data.subType.sizeof(comp),
         .TypeofExpr => ty.data.expr.ty.sizeof(comp),
@@ -914,7 +953,7 @@ pub fn alignof(ty: Type, comp: *const Compilation) u29 {
         => comp.target.ptrBitWidth() >> 3,
 
         .Struct, .Union => if (ty.data.record.isIncomplete()) 0 else ty.data.record.alignment,
-        .Enum => if (ty.data.@"enum".isIncomplete()) 0 else ty.data.@"enum".tagType.alignof(comp),
+        .Enum => if (ty.data.@"enum".isIncomplete() and !ty.data.@"enum".fixed) 0 else ty.data.@"enum".tagType.alignof(comp),
 
         .TypeofType, .DecayedTypeofType => ty.data.subType.alignof(comp),
         .TypeofExpr, .DecayedTypeofExpr => ty.data.expr.ty.alignof(comp),
@@ -1160,6 +1199,13 @@ pub fn getAttributes(ty: Type) []const Attribute {
     };
 }
 
+pub fn hasAttribute(ty: Type, tag: Attribute.Tag) bool {
+    for (ty.getAttributes()) |attr| {
+        if (attr.tag == tag) return true;
+    }
+    return false;
+}
+
 /// Print type in C style
 pub fn print(ty: Type, w: anytype) @TypeOf(w).Error!void {
     _ = try ty.printPrologue(w);
@@ -1239,7 +1285,12 @@ fn printPrologue(ty: Type, w: anytype) @TypeOf(w).Error!bool {
     try ty.qual.dump(w);
 
     switch (ty.specifier) {
-        .Enum => try w.print("enum {s}", .{ty.data.@"enum".name}),
+        .Enum => if (ty.data.@"enum".fixed) {
+            try w.print("enum {s}: ", .{ty.data.@"enum".name});
+            try ty.data.@"enum".tagType.dump(w);
+        } else {
+            try w.print("enum {s}", .{ty.data.@"enum".name});
+        },
         .Struct => try w.print("struct {s}", .{ty.data.record.name}),
         .Union => try w.print("union {s}", .{ty.data.record.name}),
         else => try w.writeAll(TypeBuilder.fromType(ty).toString().?),
@@ -1361,9 +1412,16 @@ pub fn dump(ty: Type, w: anytype) @TypeOf(w).Error!void {
         },
 
         .Enum => {
-            try w.print("enum {s}", .{ty.data.@"enum".name});
+            const enumTy = ty.data.@"enum";
+            if (enumTy.isIncomplete() and !enumTy.fixed) {
+                try w.print("enum {s}", .{enumTy.name});
+            } else {
+                try w.print("enum {s}: ", .{enumTy.name});
+                try enumTy.tagType.dump(w);
+            }
+
             if (DumpDetailedContainers)
-                try dumpEnum(ty.data.@"enum", w);
+                try dumpEnum(enumTy, w);
         },
 
         .Struct => {
