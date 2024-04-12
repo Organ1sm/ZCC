@@ -152,7 +152,7 @@ pub const Specifier = union(enum) {
     }
 };
 
-pub fn finish(b: @This(), p: *Parser, attrBufferStart: usize) Parser.Error!Type {
+pub fn finish(b: @This(), p: *Parser) Parser.Error!Type {
     var ty = Type{ .specifier = undefined };
     if (b.typedef) |typedef| {
         ty = typedef.type;
@@ -182,11 +182,10 @@ pub fn finish(b: @This(), p: *Parser, attrBufferStart: usize) Parser.Error!Type 
                 .Attributed => {}, // TODO handle
                 else => unreachable,
             }
-
-            return p.withAttributes(ty, attrBufferStart);
+            return ty;
         }
         try b.qual.finish(p, &ty);
-        return p.withAttributes(ty, attrBufferStart);
+        return ty;
     }
     switch (b.specifier) {
         Specifier.None => {
@@ -352,14 +351,14 @@ pub fn finish(b: @This(), p: *Parser, attrBufferStart: usize) Parser.Error!Type 
 
     try b.qual.finish(p, &ty);
 
-    return p.withAttributes(ty, attrBufferStart);
+    return ty;
 }
 
 fn cannotCombine(b: @This(), p: *Parser, sourceToken: TokenIndex) !void {
     if (b.errorOnInvalid)
         return error.CannotCombine;
 
-    const tyString = b.specifier.toString() orelse try p.typeStr(try b.finish(p, p.attrBuffer.len));
+    const tyString = b.specifier.toString() orelse try p.typeStr(try b.finish(p));
     try p.errExtra(
         .cannot_combine_spec,
         sourceToken,

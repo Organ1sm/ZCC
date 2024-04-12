@@ -807,7 +807,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
 
     try p.parseAttrSpec();
 
-    var declSpec = if (try p.parseDeclSpec(false)) |some| some else blk: {
+    var declSpec = if (try p.parseDeclSpec()) |some| some else blk: {
         if (p.func.type != null) {
             p.tokenIdx = firstTokenIndex;
             return false;
@@ -822,7 +822,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
         }
 
         var spec: TypeBuilder = .{};
-        break :blk DeclSpec{ .type = try spec.finish(p, p.attrBuffer.len) };
+        break :blk DeclSpec{ .type = try spec.finish(p) };
     };
 
     if (declSpec.noreturn) |token| {
@@ -885,7 +885,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
             ID.d.type = try baseTy.withAttributes(p.arena, attrs);
 
             paramLoop: while (true) {
-                const paramDeclSpec = (try p.parseDeclSpec(true)) orelse break;
+                const paramDeclSpec = (try p.parseDeclSpec()) orelse break;
                 if (p.eat(.Semicolon)) |semi| {
                     try p.errToken(.missing_declaration, semi);
                     continue :paramLoop;
@@ -933,6 +933,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
                     }
 
                     d.type = try p.withAttributes(d.type, attrBufferTop);
+                    try p.validateAlignas(d.type, .alignas_on_param);
 
                     // bypass redefinition check to avoid duplicate errors
                     try p.symStack.appendSymbol(.{
@@ -1173,12 +1174,9 @@ fn typeof(p: *Parser) Error!?Type {
 ///  | `threadlocal`
 ///  | `auto`
 ///  | `register`
-fn parseDeclSpec(p: *Parser, isParam: bool) Error!?DeclSpec {
+fn parseDeclSpec(p: *Parser) Error!?DeclSpec {
     var d: DeclSpec = .{ .type = .{ .specifier = undefined } };
     var spec: TypeBuilder = .{};
-
-    const attrBufferTop = p.attrBuffer.len;
-    defer p.attrBuffer.len = attrBufferTop;
 
     const start = p.tokenIdx;
     while (true) {
@@ -1257,10 +1255,7 @@ fn parseDeclSpec(p: *Parser, isParam: bool) Error!?DeclSpec {
     if (p.tokenIdx == start)
         return null;
 
-    d.type = try spec.finish(p, attrBufferTop);
-    if (isParam)
-        try p.validateAlignas(d.type, .alignas_on_param);
-
+    d.type = try spec.finish(p);
     return d;
 }
 
@@ -1452,37 +1447,9 @@ fn gnuAttribute(p: *Parser) !bool {
     return true;
 }
 
-/// alignAs : keyword_alignas '(' (typeName | constExpr ) ')'
-fn alignAs(p: *Parser) !bool {
-    const alignToken = p.eat(.KeywordAlignas) orelse return false;
-    const lparen = try p.expectToken(.LParen);
-    if (try p.parseTypeName()) |innerTy| {
-        const alignment = Attribute.Alignment{ .requested = innerTy.alignof(p.comp), .alignas = true };
-        const attr = Attribute{ .tag = .aligned, .args = .{ .aligned = .{ .alignment = alignment, .__name_token = alignToken } } };
-        try p.attrBuffer.append(p.gpa, .{ .attr = attr, .tok = alignToken });
-    } else {
-        const arg_start = p.tokenIdx;
-        const res = try p.parseConstExpr(.NoConstDeclFolding);
-        if (!res.value.isZero()) {
-            var args = Attribute.initArguments(.aligned, alignToken);
-            if (p.diagnose(.aligned, &args, 0, res)) |msg| {
-                try p.errExtra(msg.tag, arg_start, msg.extra);
-                p.skipTo(.RParen);
-                return error.ParsingFailed;
-            }
-            args.aligned.alignment.?.node = res.node;
-            args.aligned.alignment.?.alignas = true;
-            try p.attrBuffer.append(p.gpa, .{ .attr = .{ .tag = .aligned, .args = args }, .tok = alignToken });
-        }
-    }
-    try p.expectClosing(lparen, .RParen);
-    return true;
-}
-
 /// attribute-specifier : (keyword_attrbute '( '(' attribute-list ')' ')')*
 fn parseAttrSpec(p: *Parser) Error!void {
     while (true) {
-        if (try p.alignAs()) continue;
         if (try p.gnuAttribute()) continue;
         if (try p.c23Attribute()) continue;
         if (try p.msvcAttribute()) continue;
@@ -1644,6 +1611,33 @@ fn parseTypeSpec(p: *Parser, ty: *TypeBuilder) Error!bool {
                 else
                     ty.qual.atomic = atomicToken;
 
+                continue;
+            },
+
+            .KeywordAlignas => {
+                const alignToken = p.tokenIdx;
+                p.tokenIdx += 1;
+                const lparen = try p.expectToken(.LParen);
+                if (try p.parseTypeName()) |innerTy| {
+                    const alignment = Attribute.Alignment{ .requested = innerTy.alignof(p.comp), .alignas = true };
+                    const attr = Attribute{ .tag = .aligned, .args = .{ .aligned = .{ .alignment = alignment, .__name_token = alignToken } } };
+                    try p.attrBuffer.append(p.gpa, .{ .attr = attr, .tok = alignToken });
+                } else {
+                    const argStart = p.tokenIdx;
+                    const res = try p.parseConstExpr(.NoConstDeclFolding);
+                    if (!res.value.isZero()) {
+                        var args = Attribute.initArguments(.aligned, alignToken);
+                        if (p.diagnose(.aligned, &args, 0, res)) |msg| {
+                            try p.errExtra(msg.tag, argStart, msg.extra);
+                            p.skipTo(.RParen);
+                            return error.ParsingFailed;
+                        }
+                        args.aligned.alignment.?.node = res.node;
+                        args.aligned.alignment.?.alignas = true;
+                        try p.attrBuffer.append(p.gpa, .{ .attr = .{ .tag = .aligned, .args = args }, .tok = alignToken });
+                    }
+                }
+                try p.expectClosing(lparen, .RParen);
                 continue;
             },
 
@@ -2038,7 +2032,8 @@ fn parseSpecQuals(p: *Parser) Error!?Type {
 
     var spec: TypeBuilder = .{};
     if (try p.parseTypeSpec(&spec)) {
-        const ty = try spec.finish(p, attrBufferTop);
+        var ty = try spec.finish(p);
+        ty = try p.withAttributes(ty, attrBufferTop);
         try p.validateAlignas(ty, .align_ignored);
         return ty;
     }
@@ -2795,13 +2790,16 @@ fn parseParamDecls(p: *Parser) Error!?[]Type.Function.Param {
     }
 
     while (true) {
-        const paramDeclSpec = if (try p.parseDeclSpec(true)) |some|
+        const attrBufferTop = p.attrBuffer.len;
+        defer p.attrBuffer.len = attrBufferTop;
+
+        const paramDeclSpec = if (try p.parseDeclSpec()) |some|
             some
         else if (p.paramBuffer.items.len == paramBufferTop)
             return null
         else blk: {
             var spec: TypeBuilder = .{};
-            break :blk DeclSpec{ .type = try spec.finish(p, p.attrBuffer.len) };
+            break :blk DeclSpec{ .type = try spec.finish(p) };
         };
 
         var nameToken: TokenIndex = 0;
@@ -2811,18 +2809,16 @@ fn parseParamDecls(p: *Parser) Error!?[]Type.Function.Param {
             if (some.oldTypeFunc) |tokenIdx|
                 try p.errToken(.invalid_old_style_params, tokenIdx);
 
-            // parse attributes at end of formal parameters
-            const attrBufferTop = p.attrBuffer.len;
-            defer p.attrBuffer.len = attrBufferTop;
-
             try p.parseAttrSpec();
 
             nameToken = some.name;
-            paramType = try p.withAttributes(some.type, attrBufferTop);
-
+            paramType = some.type;
             if (some.name != 0)
                 try p.symStack.defineParam(paramType, nameToken);
         }
+
+        paramType = try p.withAttributes(paramType, attrBufferTop);
+        try p.validateAlignas(paramType, .alignas_on_param);
 
         if (paramType.isFunc()) {
             // params declared as functions are converted to function pointers
