@@ -13,12 +13,28 @@ const TokenIndex = Tree.TokenIndex;
 const Attribute = @This();
 
 tag: Tag,
+syntax: Syntax,
 args: Arguments,
+
+pub const Syntax = enum {
+    c23,
+    declspec,
+    gnu,
+    keyword,
+};
 
 pub const Kind = enum {
     c23,
     declspec,
     gnu,
+
+    pub fn toSyntax(kind: Kind) Syntax {
+        return switch (kind) {
+            .c23 => .c23,
+            .declspec => .declspec,
+            .gnu => .gnu,
+        };
+    }
 };
 
 pub const ArgumentType = enum {
@@ -321,7 +337,6 @@ const EnumTypes = enum {
 pub const Alignment = struct {
     node: NodeIndex = .none,
     requested: u29,
-    alignas: bool = false,
 };
 pub const Identifier = struct {
     tok: TokenIndex = 0,

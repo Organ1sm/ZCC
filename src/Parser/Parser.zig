@@ -815,7 +815,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
     };
 
     if (declSpec.noreturn) |token| {
-        const attr = Attribute{ .tag = .noreturn, .args = .{ .noreturn = {} } };
+        const attr = Attribute{ .tag = .noreturn, .args = .{ .noreturn = {} }, .syntax = .keyword };
         try p.attrBuffer.append(p.gpa, .{ .attr = attr, .tok = token });
     }
 
@@ -1251,7 +1251,7 @@ fn validateAlignas(p: *Parser, ty: Type, tag: ?Diagnostics.Tag) !void {
     for (ty.getAttributes()) |attr| {
         if (attr.tag != .aligned) continue;
         if (attr.args.aligned.alignment) |alignment| {
-            if (!alignment.alignas) continue;
+            if (attr.syntax != .keyword) continue;
 
             const alignToken = attr.args.aligned.__name_token;
             if (tag) |t|
@@ -1342,7 +1342,7 @@ fn attribute(p: *Parser, kind: Attribute.Kind, namespace: ?[]const u8) Error!?Te
         );
         return error.ParsingFailed;
     }
-    return TentativeAttribute{ .attr = .{ .tag = attr, .args = arguments }, .tok = nameToken };
+    return TentativeAttribute{ .attr = .{ .tag = attr, .args = arguments, .syntax = kind.toSyntax() }, .tok = nameToken };
 }
 
 fn diagnose(p: *Parser, attr: Attribute.Tag, arguments: *Attribute.Arguments, argIdx: u32, res: Result) ?Diagnostics.Message {
@@ -1612,9 +1612,15 @@ fn parseTypeSpec(p: *Parser, ty: *TypeBuilder) Error!bool {
                 p.tokenIdx += 1;
                 const lparen = try p.expectToken(.LParen);
                 if (try p.parseTypeName()) |innerTy| {
-                    const alignment = Attribute.Alignment{ .requested = innerTy.alignof(p.comp), .alignas = true };
-                    const attr = Attribute{ .tag = .aligned, .args = .{ .aligned = .{ .alignment = alignment, .__name_token = alignToken } } };
-                    try p.attrBuffer.append(p.gpa, .{ .attr = attr, .tok = alignToken });
+                    const alignment = Attribute.Alignment{ .requested = innerTy.alignof(p.comp) };
+                    try p.attrBuffer.append(p.gpa, .{
+                        .attr = .{
+                            .tag = .aligned,
+                            .args = .{ .aligned = .{ .alignment = alignment, .__name_token = alignToken } },
+                            .syntax = .keyword,
+                        },
+                        .tok = alignToken,
+                    });
                 } else {
                     const argStart = p.tokenIdx;
                     const res = try p.parseConstExpr(.NoConstDeclFolding);
@@ -1626,8 +1632,10 @@ fn parseTypeSpec(p: *Parser, ty: *TypeBuilder) Error!bool {
                             return error.ParsingFailed;
                         }
                         args.aligned.alignment.?.node = res.node;
-                        args.aligned.alignment.?.alignas = true;
-                        try p.attrBuffer.append(p.gpa, .{ .attr = .{ .tag = .aligned, .args = args }, .tok = alignToken });
+                        try p.attrBuffer.append(p.gpa, .{
+                            .attr = .{ .tag = .aligned, .args = args, .syntax = .keyword },
+                            .tok = alignToken,
+                        });
                     }
                 }
                 try p.expectClosing(lparen, .RParen);
@@ -2004,18 +2012,6 @@ fn parseRecordDeclarator(p: *Parser) Error!bool {
     }
     _ = try p.expectToken(.Semicolon);
     return true;
-}
-
-fn checkAlignasUsage(p: *Parser, tag: Diagnostics.Tag, attrBufferStart: usize) !void {
-    var i = attrBufferStart;
-    while (i < p.attrBuffer.len) : (i += 1) {
-        const tentativeAttr = p.attrBuffer.get(i);
-        if (tentativeAttr.attr.tag != .aligned) continue;
-        if (tentativeAttr.attr.args.aligned.alignment) |alignment| {
-            if (alignment.alignas)
-                try p.errToken(tag, tentativeAttr.tok);
-        }
-    }
 }
 
 // specifier-qualifier-list : (type-specifier | type-qualifier | align-specifier)+
@@ -3504,7 +3500,7 @@ fn parseAssembly(p: *Parser, kind: enum { global, declLable, stmt }) Error!?Node
     switch (kind) {
         .declLable => {
             const str = (try p.parseAsmString()).value.data.bytes;
-            const attr = Attribute{ .tag = .asm_label, .args = .{ .asm_label = .{ .name = str[0 .. str.len - 1] } } };
+            const attr = Attribute{ .tag = .asm_label, .args = .{ .asm_label = .{ .name = str[0 .. str.len - 1] } }, .syntax = .keyword };
             try p.attrBuffer.append(p.gpa, .{ .attr = attr, .tok = asmToken });
         },
         .global => _ = try p.parseAsmString(),
