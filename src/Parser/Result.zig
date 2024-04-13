@@ -597,3 +597,112 @@ pub fn intFitsInType(res: Result, p: *Parser, ty: Type) bool {
     return res.value.compare(.lte, maxInt, res.ty, p.comp) and
         (res.ty.isUnsignedInt(p.comp) or res.value.compare(.gte, minInt, res.ty, p.comp));
 }
+
+const CoerceContext = union(enum) {
+    assign,
+    init,
+    ret,
+    arg: TokenIndex,
+
+    fn note(ctx: CoerceContext, p: *Parser) !void {
+        switch (ctx) {
+            .arg => |tok| try p.errToken(.parameter_here, tok),
+            else => {},
+        }
+    }
+
+    fn typePairStr(ctx: CoerceContext, p: *Parser, dest_ty: Type, src_ty: Type) ![]const u8 {
+        switch (ctx) {
+            .assign, .init => return p.typePairStrExtra(dest_ty, " from incompatible type ", src_ty),
+            .ret => return p.typePairStrExtra(src_ty, " from a function with incompatible result type ", dest_ty),
+            .arg => return p.typePairStrExtra(src_ty, " to parameter of incompatible type ", dest_ty),
+        }
+    }
+};
+
+/// Perform assignment-like coercion to `dest_ty`.
+pub fn coerce(res: *Result, p: *Parser, destTy: Type, tok: TokenIndex, ctx: CoerceContext) !void {
+    // Subject of the coercion does not need to be qualified.
+    var unqualTy = destTy.canonicalize(.standard);
+    unqualTy.qual = .{};
+    if (unqualTy.is(.Bool)) {
+        if (res.ty.isScalar()) {
+            // this is ridiculous but it's what clang does
+            try res.boolCast(p, unqualTy, tok);
+            return;
+        }
+    } else if (unqualTy.isInt()) {
+        if (res.ty.isInt() or res.ty.isFloat()) {
+            try res.intCast(p, unqualTy, tok);
+            return;
+        } else if (res.ty.isPointer()) {
+            try p.errStr(.implicit_ptr_to_int, tok, try p.typePairStrExtra(res.ty, " to ", destTy));
+            try ctx.note(p);
+            try res.intCast(p, unqualTy, tok);
+            return;
+        }
+    } else if (unqualTy.isFloat()) {
+        if (res.ty.isInt() or res.ty.isFloat()) {
+            try res.floatCast(p, unqualTy);
+            return;
+        }
+    } else if (unqualTy.isPointer()) {
+        if (res.value.isZero()) {
+            try res.nullCast(p, destTy);
+            return;
+        } else if (res.ty.isInt()) {
+            try p.errStr(.implicit_int_to_ptr, tok, try p.typePairStrExtra(res.ty, " to ", destTy));
+            try ctx.note(p);
+            try res.ptrCast(p, unqualTy);
+            return;
+        } else if (res.ty.isVoidStar() or unqualTy.isVoidStar() or unqualTy.eql(res.ty, p.comp, true)) {
+            return; // ok
+        } else if (unqualTy.eql(res.ty, p.comp, false)) {
+            if (!unqualTy.getElemType().qual.hasQuals(res.ty.getElemType().qual)) {
+                try p.errStr(switch (ctx) {
+                    .assign => .ptr_assign_discards_quals,
+                    .init => .ptr_init_discards_quals,
+                    .ret => .ptr_ret_discards_quals,
+                    .arg => .ptr_arg_discards_quals,
+                }, tok, try ctx.typePairStr(p, destTy, res.ty));
+            }
+            try res.ptrCast(p, unqualTy);
+            return;
+        } else if (res.ty.isPointer()) {
+            try p.errStr(switch (ctx) {
+                .assign => .incompatible_ptr_assign,
+                .init => .incompatible_ptr_init,
+                .ret => .incompatible_return,
+                .arg => .incompatible_arg,
+            }, tok, try ctx.typePairStr(p, destTy, res.ty));
+            try ctx.note(p);
+            try res.ptrCast(p, unqualTy);
+            return;
+        }
+    } else if (unqualTy.isRecord()) {
+        if (unqualTy.eql(res.ty, p.comp, false)) {
+            return; // ok
+        }
+
+        if (ctx == .arg) if (unqualTy.get(.Union)) |union_ty| {
+            // TODO handle transparent_union
+            _ = union_ty;
+        };
+    } else {
+        if (ctx == .assign and (unqualTy.isArray() or unqualTy.isFunc())) {
+            try p.errToken(.not_assignable, tok);
+            return;
+        }
+        // This case should not be possible and an error should have already been emitted but we
+        // might still have attempted to parse further so return error.ParsingFailed here to stop.
+        return error.ParsingFailed;
+    }
+
+    try p.errStr(switch (ctx) {
+        .assign => .incompatible_assign,
+        .init => .incompatible_init,
+        .ret => .incompatible_return,
+        .arg => .incompatible_arg,
+    }, tok, try ctx.typePairStr(p, destTy, res.ty));
+    try ctx.note(p);
+}

@@ -3309,60 +3309,8 @@ fn coerceInit(p: *Parser, item: *Result, token: TokenIndex, target: Type) !void 
     if (target.is(.Void))
         return;
 
-    // item does not need to be qualified
-    var unqualType = target.canonicalize(.standard);
-    unqualType.qual = .{};
-    const eMsg = " from incompatible type ";
     try item.lvalConversion(p);
-    if (unqualType.is(.Bool)) {
-        // this is ridiculous but it's what clang does
-        if (item.ty.isScalar()) {
-            try item.boolCast(p, unqualType, token);
-        } else {
-            try p.errStr(.incompatible_init, token, try p.typePairStrExtra(target, eMsg, item.ty));
-        }
-    } else if (unqualType.isInt()) {
-        if (item.ty.isInt() or item.ty.isFloat()) {
-            try item.intCast(p, unqualType, token);
-        } else if (item.ty.isPointer()) {
-            try p.errStr(.implicit_ptr_to_int, token, try p.typePairStrExtra(item.ty, " to ", target));
-            try item.intCast(p, unqualType, token);
-        } else {
-            try p.errStr(.incompatible_init, token, try p.typePairStrExtra(target, eMsg, item.ty));
-        }
-    } else if (unqualType.isFloat()) {
-        if (item.ty.isInt() or item.ty.isFloat()) {
-            try item.floatCast(p, unqualType);
-        } else {
-            try p.errStr(.incompatible_init, token, try p.typePairStrExtra(target, eMsg, item.ty));
-        }
-    } else if (unqualType.isPointer()) {
-        if (item.value.isZero()) {
-            try item.nullCast(p, target);
-        } else if (item.ty.isInt()) {
-            try p.errStr(.implicit_int_to_ptr, token, try p.typePairStrExtra(item.ty, " to ", target));
-            try item.ptrCast(p, unqualType);
-        } else if (item.ty.isPointer()) {
-            if (!item.ty.isVoidStar() and !unqualType.isVoidStar() and !unqualType.eql(item.ty, p.comp, false)) {
-                try p.errStr(.incompatible_ptr_init, token, try p.typePairStrExtra(target, eMsg, item.ty));
-                try item.ptrCast(p, unqualType);
-            } else if (!unqualType.eql(item.ty, p.comp, true)) {
-                if (!unqualType.getElemType().qual.hasQuals(item.ty.getElemType().qual))
-                    try p.errStr(.ptr_init_discards_quals, token, try p.typePairStrExtra(target, eMsg, item.ty));
-
-                try item.ptrCast(p, unqualType);
-            }
-        } else {
-            try p.errStr(.incompatible_init, token, try p.typePairStrExtra(target, eMsg, item.ty));
-        }
-    } else if (unqualType.isRecord()) {
-        if (!unqualType.eql(item.ty, p.comp, false))
-            try p.errStr(.incompatible_init, token, try p.typePairStrExtra(target, eMsg, item.ty));
-    } else if (unqualType.isArray() or unqualType.isFunc()) {
-        // we have already issued an error for this
-    } else {
-        try p.errStr(.incompatible_init, token, try p.typePairStrExtra(target, eMsg, item.ty));
-    }
+    try item.coerce(p, target, token, .init);
 }
 
 fn isStringInit(p: *Parser, ty: Type) bool {
@@ -3887,17 +3835,17 @@ fn parseGotoStmt(p: *Parser, gotoToken: TokenIndex) Error!NodeIndex {
         try e.lvalConversion(p);
         p.computedGotoTok = p.computedGotoTok orelse gotoToken;
         if (!e.ty.isPointer()) {
-            if (!e.ty.isInt()) {
-                try p.errStr(.incompatible_param, expr, try p.typeStr(e.ty));
-                return error.ParsingFailed;
-            }
-
             const elemType = try p.arena.create(Type);
             elemType.* = .{ .specifier = .Void, .qual = .{ .@"const" = true } };
             const resultType = Type{
                 .specifier = .Pointer,
                 .data = .{ .subType = elemType },
             };
+
+            if (!e.ty.isInt()) {
+                try p.errStr(.incompatible_arg, expr, try p.typePairStrExtra(e.ty, " to parameter of incompatible type ", resultType));
+                return error.ParsingFailed;
+            }
 
             if (e.value.isZero()) {
                 try e.nullCast(p, resultType);
@@ -4186,7 +4134,8 @@ fn parseCompoundStmt(p: *Parser, isFnBody: bool, stmtExprState: ?*StmtExprState)
             p.nodeIsNoreturn(p.declBuffer.items[p.declBuffer.items.len - 1]);
 
         if (lastNoreturn != .yes) {
-            if (lastNoreturn == .no and !p.func.type.?.getReturnType().is(.Void))
+            const retTy = p.func.type.?.getReturnType();
+            if (lastNoreturn == .no and !retTy.is(.Void) and !retTy.isArray() and !retTy.isFunc())
                 try p.errStr(.func_does_not_return, p.tokenIdx - 1, p.getTokenSlice(p.func.name));
 
             try p.declBuffer.append(try p.addNode(.{
@@ -4237,47 +4186,7 @@ fn parseReturnStmt(p: *Parser) Error!?NodeIndex {
     }
 
     try expr.lvalConversion(p);
-    // Return type conversion is done as if it was assignment
-    if (returnType.is(.Bool)) {
-        // this is ridiculous but it's what clang does
-        if (expr.ty.isScalar()) {
-            try expr.boolCast(p, returnType, eToken);
-        } else {
-            try p.errStr(.incompatible_return, eToken, try p.typeStr(expr.ty));
-        }
-    } else if (returnType.isInt()) {
-        if (expr.ty.isInt() or expr.ty.isFloat()) {
-            try expr.intCast(p, returnType, eToken);
-        } else if (expr.ty.isPointer()) {
-            try p.errStr(.implicit_ptr_to_int, eToken, try p.typePairStrExtra(expr.ty, " to ", returnType));
-            try expr.intCast(p, returnType, eToken);
-        } else {
-            try p.errStr(.incompatible_return, eToken, try p.typeStr(expr.ty));
-        }
-    } else if (returnType.isFloat()) {
-        if (expr.ty.isInt() or expr.ty.isFloat()) {
-            try expr.floatCast(p, returnType);
-        } else {
-            try p.errStr(.incompatible_return, eToken, try p.typeStr(expr.ty));
-        }
-    } else if (returnType.isPointer()) {
-        if (expr.value.isZero()) {
-            try expr.nullCast(p, returnType);
-        } else if (expr.ty.isInt()) {
-            try p.errStr(.implicit_int_to_ptr, eToken, try p.typePairStrExtra(expr.ty, " to ", returnType));
-            try expr.intCast(p, returnType, eToken);
-        } else if (!expr.ty.isVoidStar() and !returnType.isVoidStar() and !returnType.eql(expr.ty, p.comp, false)) {
-            try p.errStr(.incompatible_return, eToken, try p.typeStr(expr.ty));
-        }
-    } else if (returnType.isRecord()) { // enum.isInt() == true
-        if (!returnType.eql(expr.ty, p.comp, false)) {
-            try p.errStr(.incompatible_return, eToken, try p.typeStr(expr.ty));
-        }
-    } else if (returnType.isFunc()) {
-        // Syntax error reported earlier; just let this return as-is since it is a parse failure anyway
-    } else {
-        unreachable;
-    }
+    try expr.coerce(p, returnType, eToken, .ret);
 
     try expr.saveValue(p);
     return try p.addNode(.{ .tag = .ReturnStmt, .data = .{ .unExpr = expr.node } });
@@ -4558,57 +4467,7 @@ fn parseAssignExpr(p: *Parser) Error!Result {
         else => unreachable,
     }
 
-    // rhs does not need to be qualified
-    var unqualType = lhs.ty.canonicalize(.standard);
-    unqualType.qual = .{};
-
-    const eMsg = " from incompatible type ";
-    if (lhs.ty.is(.Bool)) {
-        // this is ridiculous but it's what clang does
-        if (rhs.ty.isScalar()) {
-            try rhs.boolCast(p, lhs.ty, token);
-        } else {
-            try p.errStr(.incompatible_assign, token, try p.typePairStrExtra(lhs.ty, eMsg, rhs.ty));
-        }
-    } else if (unqualType.isInt()) {
-        if (rhs.ty.isInt() or rhs.ty.isFloat()) {
-            try rhs.intCast(p, unqualType, token);
-        } else if (rhs.ty.isPointer()) {
-            try p.errStr(.implicit_ptr_to_int, token, try p.typePairStrExtra(rhs.ty, " to ", lhs.ty));
-            try rhs.intCast(p, unqualType, token);
-        } else {
-            try p.errStr(.incompatible_assign, token, try p.typePairStrExtra(lhs.ty, eMsg, rhs.ty));
-        }
-    } else if (unqualType.isFloat()) {
-        if (rhs.ty.isInt() or rhs.ty.isFloat())
-            try rhs.floatCast(p, unqualType)
-        else
-            try p.errStr(.incompatible_assign, token, try p.typePairStrExtra(lhs.ty, eMsg, rhs.ty));
-    } else if (lhs.ty.isPointer()) {
-        if (rhs.value.isZero()) {
-            try rhs.nullCast(p, lhs.ty);
-        } else if (rhs.ty.isInt()) {
-            try p.errStr(.implicit_int_to_ptr, token, try p.typePairStrExtra(rhs.ty, " to ", lhs.ty));
-            try rhs.ptrCast(p, unqualType);
-        } else if (rhs.ty.isPointer()) {
-            if (!unqualType.isVoidStar() and !rhs.ty.isVoidStar() and !unqualType.eql(rhs.ty, p.comp, false)) {
-                try p.errStr(.incompatible_ptr_assign, token, try p.typePairStrExtra(lhs.ty, eMsg, rhs.ty));
-            } else if (!unqualType.eql(rhs.ty, p.comp, true)) {
-                if (!unqualType.getElemType().qual.hasQuals(rhs.ty.getElemType().qual))
-                    try p.errStr(.ptr_assign_discards_quals, token, try p.typePairStrExtra(lhs.ty, eMsg, rhs.ty));
-                try rhs.ptrCast(p, unqualType);
-            }
-        } else {
-            try p.errStr(.incompatible_assign, token, try p.typePairStrExtra(lhs.ty, eMsg, rhs.ty));
-        }
-    } else if (lhs.ty.isRecord()) {
-        if (!unqualType.eql(rhs.ty, p.comp, false))
-            try p.errStr(.incompatible_assign, token, try p.typePairStrExtra(lhs.ty, eMsg, rhs.ty));
-    } else if (lhs.ty.isArray() or lhs.ty.isFunc()) {
-        try p.errToken(.not_assignable, token);
-    } else {
-        try p.errStr(.incompatible_assign, token, try p.typePairStrExtra(lhs.ty, eMsg, rhs.ty));
-    }
+    try rhs.coerce(p, lhs.ty, token, .assign);
 
     try lhs.bin(p, tag, rhs);
     return lhs;
@@ -5740,11 +5599,6 @@ fn fieldAccessExtra(
     unreachable;
 }
 
-fn reportParam(p: *Parser, paramToken: TokenIndex, arg: Result, argCount: u32, params: []Type.Function.Param) Error!void {
-    try p.errStr(.incompatible_param, paramToken, try p.typeStr(arg.ty));
-    try p.errToken(.parameter_here, params[argCount].nameToken);
-}
-
 fn parseCallExpr(p: *Parser, lhs: Result) Error!Result {
     const lParen = p.tokenIdx;
     p.tokenIdx += 1;
@@ -5812,52 +5666,8 @@ fn parseCallExpr(p: *Parser, lhs: Result) Error!Result {
             {
                 try p.errToken(.va_start_not_last_param, paramToken);
             }
-        } else if (paramType.is(.Bool)) {
-            // this is ridiculous but it's what clang does
-            if (arg.ty.isScalar())
-                try arg.boolCast(p, paramType, params[argCount].nameToken)
-            else
-                try p.reportParam(paramToken, arg, argCount, params);
-        } else if (paramType.isInt()) {
-            if (arg.ty.isInt() or arg.ty.isFloat()) {
-                try arg.intCast(p, paramType, paramToken);
-            } else if (arg.ty.isPointer()) {
-                try p.errStr(
-                    .implicit_ptr_to_int,
-                    paramToken,
-                    try p.typePairStrExtra(arg.ty, " to ", paramType),
-                );
-                try p.errToken(.parameter_here, params[argCount].nameToken);
-                try arg.intCast(p, paramType, paramToken);
-            } else {
-                try p.reportParam(paramToken, arg, argCount, params);
-            }
-        } else if (paramType.isFloat()) {
-            if (arg.ty.isInt() or arg.ty.isFloat())
-                try arg.floatCast(p, paramType)
-            else
-                try p.reportParam(paramToken, arg, argCount, params);
-        } else if (paramType.isPointer()) {
-            if (arg.value.isZero()) {
-                try arg.nullCast(p, paramType);
-            } else if (arg.ty.isInt()) {
-                try p.errStr(
-                    .implicit_int_to_ptr,
-                    paramToken,
-                    try p.typePairStrExtra(arg.ty, " to ", paramType),
-                );
-                try p.errToken(.parameter_here, params[argCount].nameToken);
-                try arg.intCast(p, paramType, paramToken);
-            } else if (!arg.ty.isVoidStar() and !paramType.isVoidStar() and !paramType.eql(arg.ty, p.comp, false)) {
-                try p.reportParam(paramToken, arg, argCount, params);
-            }
-        } else if (paramType.isRecord()) {
-            if (!paramType.eql(arg.ty, p.comp, false)) {
-                try p.reportParam(paramToken, arg, argCount, params);
-            }
         } else {
-            // should be unreachable
-            try p.reportParam(paramToken, arg, argCount, params);
+            try arg.coerce(p, paramType, paramToken, .{ .arg = params[argCount].nameToken });
         }
 
         try arg.saveValue(p);
@@ -6461,7 +6271,7 @@ fn parseCharLiteral(p: *Parser) Error!Result {
 
     const max: u32 = switch (p.getCurrToken()) {
         .CharLiteral => std.math.maxInt(u8),
-        .CharLiteralWide => std.math.maxInt(u32), // TODO correct
+        .CharLiteralWide => @intCast(p.comp.types.wchar.maxInt(p.comp)),
         .CharLiteralUTF_16 => std.math.maxInt(u16),
         .CharLiteralUTF_32 => std.math.maxInt(u32),
         else => unreachable,
