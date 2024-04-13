@@ -1725,3 +1725,33 @@ pub const enum_not_representable_fixed = struct {
     pub const extra = .str;
     pub const kind = .@"error";
 };
+pub const transparent_union_wrong_type = struct {
+    pub const msg = "'transparent_union' attribute only applies to unions";
+    pub const opt = "ignored-attributes";
+    pub const kind = .warning;
+};
+pub const transparent_union_one_field = struct {
+    pub const msg = "transparent union definition must contain at least one field; transparent_union attribute ignored";
+    pub const opt = "ignored-attributes";
+    pub const kind = .warning;
+};
+pub const transparent_union_size = struct {
+    pub const msg = "size of field {s} bits) does not match the size of the first field in transparent union; transparent_union attribute ignored";
+    pub const extra = .str;
+    pub const opt = "ignored-attributes";
+    pub const kind = .warning;
+};
+pub const transparent_union_size_note = struct {
+    pub const msg = "size of first field is {d}";
+    pub const extra = .unsigned;
+    pub const kind = .note;
+};
+pub const designated_init_invalid = struct {
+    pub const msg = "'designated_init' attribute is only valid on 'struct' type'";
+    pub const kind = .@"error";
+};
+pub const designated_init_needed = struct {
+    pub const msg = "positional initialization of field in 'struct' declared with 'designated_init' attribute";
+    pub const opt = "designated-init";
+    pub const kind = .warning;
+};

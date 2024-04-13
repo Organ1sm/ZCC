@@ -919,7 +919,6 @@ fn parseDeclaration(p: *Parser) Error!bool {
                     }
 
                     d.type = try Attribute.applyParameterAttributes(p, d.type, attrBufferTop);
-                    try p.validateAlignas(d.type, .alignas_on_param);
 
                     // bypass redefinition check to avoid duplicate errors
                     try p.symStack.appendSymbol(.{
@@ -1245,27 +1244,6 @@ fn parseDeclSpec(p: *Parser) Error!?DeclSpec {
     return d;
 }
 
-fn validateAlignas(p: *Parser, ty: Type, tag: ?Diagnostics.Tag) !void {
-    const base = ty.canonicalize(.standard);
-    const defaultAlign = base.alignof(p.comp);
-    for (ty.getAttributes()) |attr| {
-        if (attr.tag != .aligned) continue;
-        if (attr.args.aligned.alignment) |alignment| {
-            if (attr.syntax != .keyword) continue;
-
-            const alignToken = attr.args.aligned.__name_token;
-            if (tag) |t|
-                try p.errToken(t, alignToken);
-
-            if (ty.isFunc()) {
-                try p.errToken(.alignas_on_func, alignToken);
-            } else if (alignment.requested < defaultAlign) {
-                try p.errExtra(.minimum_alignment, alignToken, .{ .unsigned = defaultAlign });
-            }
-        }
-    }
-}
-
 /// attribute
 ///  : attrIdentifier
 ///  | attrIdentifier '(' identifier ')'
@@ -1446,7 +1424,7 @@ fn parseAttrSpec(p: *Parser) Error!void {
 const InitDeclarator = struct { d: Declarator, initializer: Result = .{} };
 
 /// init-declarator : declarator assembly? attribute-specifier? ('=' initializer)?
-fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec, attr_buf_top: usize) Error!?InitDeclarator {
+fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec, attrBufferTop: usize) Error!?InitDeclarator {
     const thisAttrBufferTop = p.attrBuffer.len;
     defer p.attrBuffer.len = thisAttrBufferTop;
 
@@ -1457,13 +1435,12 @@ fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec, attr_buf_top: usize) Err
     try p.parseAttrSpec();
 
     if (declSpec.storageClass == .typedef) {
-        ID.d.type = try Attribute.applyTypeAttributes(p, ID.d.type, attr_buf_top);
+        ID.d.type = try Attribute.applyTypeAttributes(p, ID.d.type, attrBufferTop, null);
     } else if (ID.d.type.isFunc()) {
-        ID.d.type = try Attribute.applyFunctionAttributes(p, ID.d.type, attr_buf_top);
+        ID.d.type = try Attribute.applyFunctionAttributes(p, ID.d.type, attrBufferTop);
     } else {
-        ID.d.type = try Attribute.applyVariableAttributes(p, ID.d.type, attr_buf_top);
+        ID.d.type = try Attribute.applyVariableAttributes(p, ID.d.type, attrBufferTop);
     }
-    try p.validateAlignas(ID.d.type, null);
 
     if (p.eat(.Equal)) |eq| init: {
         if (declSpec.storageClass == .typedef or ID.d.funcDeclarator != null)
@@ -1731,10 +1708,11 @@ fn parseRecordSpec(p: *Parser) Error!Type {
         } else {
             // this is a forward declaration, create a new record type.
             const recordType = try Type.Record.create(p.arena, p.getTokenSlice(ident));
-            const ty = try Attribute.applyTypeAttributes(p, .{
+            var ty = Type{
                 .specifier = if (isStruct) .Struct else .Union,
                 .data = .{ .record = recordType },
-            }, attrBufferTop);
+            };
+            ty = try Attribute.applyTypeAttributes(p, ty, attrBufferTop, null);
 
             try p.symStack.symbols.append(p.gpa, .{
                 .kind = if (isStruct) .@"struct" else .@"union",
@@ -1837,10 +1815,11 @@ fn parseRecordSpec(p: *Parser) Error!Type {
     done = true;
     try p.parseAttrSpec();
 
-    ty = try Attribute.applyTypeAttributes(p, .{
+    const t = Type{
         .specifier = if (isStruct) .Struct else .Union,
         .data = .{ .record = recordType },
-    }, attrBufferTop);
+    };
+    ty = try Attribute.applyTypeAttributes(p, t, attrBufferTop, null);
 
     if (ty.specifier == .Attributed and symbolIndex != null) {
         p.symStack.symbols.items(.type)[symbolIndex.?] = ty;
@@ -1951,7 +1930,7 @@ fn parseRecordDeclarator(p: *Parser) Error!bool {
         }
 
         try p.parseAttrSpec(); // .record
-        ty = try Attribute.applyFieldAttributes(p, ty, attrBuffTop);
+        ty = try Attribute.applyFieldAttributes(p, ty, attrBuffTop, null);
 
         if (nameToken == 0 and bitsNode == .none) unnamed: {
             // don't allow incompelete size fields in anonymous record.
@@ -2016,15 +1995,9 @@ fn parseRecordDeclarator(p: *Parser) Error!bool {
 
 // specifier-qualifier-list : (type-specifier | type-qualifier | align-specifier)+
 fn parseSpecQuals(p: *Parser) Error!?Type {
-    const attrBufferTop = p.attrBuffer.len;
-    defer p.attrBuffer.len = attrBufferTop;
-
     var spec: TypeBuilder = .{};
     if (try p.parseTypeSpec(&spec)) {
-        const ty = try spec.finish(p);
-        // ty = try p.withAttributes(ty, attrBufferTop);
-        // try p.validateAlignas(ty, .align_ignored);
-        return ty;
+        return try spec.finish(p);
     }
 
     return null;
@@ -2093,11 +2066,9 @@ fn parseEnumSpec(p: *Parser) Error!*Type.Enum {
         } else {
             // this is a forward declaration, create a new enum type
             const enumType = try Type.Enum.create(p.arena, p.getTokenSlice(ident), fixedTy);
-            const ty = try Attribute.applyTypeAttributes(
-                p,
-                .{ .specifier = .Enum, .data = .{ .@"enum" = enumType } },
-                attrBufferTop,
-            );
+            var ty = Type{ .specifier = .Enum, .data = .{ .@"enum" = enumType } };
+            ty = try Attribute.applyTypeAttributes(p, ty, attrBufferTop, null);
+
             try p.symStack.appendSymbol(.{
                 .kind = .@"enum",
                 .name = enumType.name,
@@ -2163,14 +2134,11 @@ fn parseEnumSpec(p: *Parser) Error!*Type.Enum {
     done = true;
     try p.parseAttrSpec();
 
-    const ty = try Attribute.applyTypeAttributes(
-        p,
-        .{
-            .specifier = .Enum,
-            .data = .{ .@"enum" = enumType },
-        },
-        attrBufferTop,
-    );
+    var ty = Type{
+        .specifier = .Enum,
+        .data = .{ .@"enum" = enumType },
+    };
+    ty = try Attribute.applyTypeAttributes(p, ty, attrBufferTop, null);
 
     const isPacked = ty.hasAttribute(.@"packed") or p.comp.langOpts.shortEnums;
     if (!enumType.fixed) {
@@ -2809,7 +2777,6 @@ fn parseParamDecls(p: *Parser) Error!?[]Type.Function.Param {
         }
 
         paramType = try Attribute.applyParameterAttributes(p, paramType, attrBufferTop);
-        try p.validateAlignas(paramType, .alignas_on_param);
 
         if (paramType.isFunc()) {
             // params declared as functions are converted to function pointers
@@ -2858,13 +2825,16 @@ fn parseParamDecls(p: *Parser) Error!?[]Type.Function.Param {
 
 /// type-name : specifier-qualifier-list+ abstract-declarator
 fn parseTypeName(p: *Parser) Error!?Type {
+    const attrBufferTop = p.attrBuffer.len;
+    defer p.attrBuffer.len = attrBufferTop;
+
     const ty = (try p.parseSpecQuals()) orelse return null;
     if (try p.declarator(ty, .abstract)) |some| {
         if (some.oldTypeFunc) |tokenIdx|
             try p.errToken(.invalid_old_style_params, tokenIdx);
-
-        return some.type;
-    } else return ty;
+        return try Attribute.applyTypeAttributes(p, some.type, attrBufferTop, .align_ignored);
+    }
+    return try Attribute.applyTypeAttributes(p, ty, attrBufferTop, .align_ignored);
 }
 
 /// initializer
@@ -3022,6 +2992,9 @@ pub fn initializerItem(p: *Parser, il: *InitList, initType: Type) Error!bool {
 
         if (designation)
             _ = try p.expectToken(.Equal);
+
+        if (!designation and curType.hasAttribute(.designated_init))
+            try p.err(.designated_init_needed);
 
         var saw = false;
 

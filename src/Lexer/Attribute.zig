@@ -1006,137 +1006,55 @@ pub const applyParameterAttributes = applyVariableAttributes;
 pub fn applyVariableAttributes(p: *Parser, ty: Type, attrBufferStart: usize) !Type {
     const attrs = p.attrBuffer.items(.attr)[attrBufferStart..];
     _ = attrs;
-    // return switch (tag) {
-    //     .alias,
-    //     .aligned,
-    //     .alloc_size,
-    //     .cleanup,
-    //     .common,
-    //     .copy,
-    //     .deprecated,
-    //     .mode,
-    //     .nocommon,
-    //     .noinit,
-    //     .nonstring,
-    //     .@"packed",
-    //     .persistent,
-    //     .retain,
-    //     .section,
-    //     .tls_model,
-    //     .unavailable,
-    //     .uninitialized,
-    //     .unused,
-    //     .used,
-    //     .vector_size,
-    //     .visibility,
-    //     .warn_if_not_aligned,
-    //     .weak,
-    //     => true,
-    //     else => false,
-    // };
     return ty;
 }
 
 pub const applyFieldAttributes = applyTypeAttributes;
-pub fn applyTypeAttributes(p: *Parser, ty: Type, attrBufferStart: usize) !Type {
+pub fn applyTypeAttributes(p: *Parser, ty: Type, attrBufferStart: usize, tag: ?Diagnostics.Tag) !Type {
     const attrs = p.attrBuffer.items(.attr)[attrBufferStart..];
-    _ = attrs;
-    // return switch (tag) {
-    //     .aligned,
-    //     .alloc_size,
-    //     .copy,
-    //     .deprecated,
-    //     .designated_init,
-    //     .may_alias,
-    //     .mode,
-    //     .@"packed",
-    //     .scalar_storage_order,
-    //     .transparent_union,
-    //     .unavailable,
-    //     .unused,
-    //     .vector_size,
-    //     .warn_if_not_aligned,
-    //     => true,
-    //     else => false,
-    // };
-    return ty;
+    const toks = p.attrBuffer.items(.tok)[attrBufferStart..];
+    p.attrApplicationBuffer.items.len = 0;
+
+    var baseTy = ty;
+    if (baseTy.specifier == .Attributed)
+        baseTy = baseTy.data.attributed.base;
+
+    for (attrs, 0..) |attr, i| switch (attr.tag) {
+        .@"packed",
+        .may_alias,
+        .deprecated,
+        .unavailable,
+        .unused,
+        .warn_if_not_aligned,
+        .mode,
+        => try p.attrApplicationBuffer.append(p.gpa, attr),
+
+        .transparent_union => try attr.applyTransparentUnion(p, toks[i], baseTy),
+        .vector_size => try attr.applyVectorSize(p, toks[i], &baseTy),
+        .aligned => try attr.applyAligned(p, baseTy, tag),
+
+        .designated_init => if (baseTy.is(.Struct)) {
+            try p.attrApplicationBuffer.append(p.gpa, attr);
+        } else {
+            try p.errToken(.designated_init_invalid, toks[i]);
+        },
+
+        .alloc_size,
+        .copy,
+        .scalar_storage_order,
+        .nonstring,
+        => std.debug.panic("apply type attribute {s}", .{@tagName(attr.tag)}),
+
+        else => try ignoredAttrErr(p, toks[i], attr.tag, "types"),
+    };
+    return ty.withAttributes(p.arena, p.attrApplicationBuffer.items);
 }
 
 pub fn applyFunctionAttributes(p: *Parser, ty: Type, attrBufferStart: usize) !Type {
     const attrs = p.attrBuffer.items(.attr)[attrBufferStart..];
+    const toks = p.attrBuffer.items(.tok)[attrBufferStart..];
     _ = attrs;
-    // return switch (tag) {
-    //     .access,
-    //     .alias,
-    //     .aligned,
-    //     .alloc_align,
-    //     .alloc_size,
-    //     .always_inline,
-    //     .artificial,
-    //     .assume_aligned,
-    //     .cold,
-    //     .@"const",
-    //     .constructor,
-    //     .copy,
-    //     .deprecated,
-    //     .destructor,
-    //     .@"error",
-    //     .externally_visible,
-    //     .flatten,
-    //     .format,
-    //     .format_arg,
-    //     .gnu_inline,
-    //     .hot,
-    //     .ifunc,
-    //     .interrupt,
-    //     .interrupt_handler,
-    //     .leaf,
-    //     .malloc,
-    //     .no_address_safety_analysis,
-    //     .no_icf,
-    //     .no_instrument_function,
-    //     .no_profile_instrument_function,
-    //     .no_reorder,
-    //     .no_sanitize,
-    //     .no_sanitize_address,
-    //     .no_sanitize_coverage,
-    //     .no_sanitize_thread,
-    //     .no_sanitize_undefined,
-    //     .no_split_stack,
-    //     .no_stack_limit,
-    //     .no_stack_protector,
-    //     .noclone,
-    //     .@"noinline",
-    //     .noipa,
-    //     .nonnull,
-    //     .noplt,
-    //     .noreturn,
-    //     .nothrow,
-    //     .optimize,
-    //     .patchable_function_entry,
-    //     .pure,
-    //     .retain,
-    //     .returns_nonnull,
-    //     .returns_twice,
-    //     .section,
-    //     .sentinel,
-    //     .simd,
-    //     .stack_protect,
-    //     .symver,
-    //     .target,
-    //     .target_clones,
-    //     .unavailable,
-    //     .unused,
-    //     .used,
-    //     .visibility,
-    //     .warn_unused_result,
-    //     .warning,
-    //     .weak,
-    //     .weakref,
-    //     .zero_call_used_regs,
-    //     => true,
-    //     else => false,
-    // };
+    _ = toks;
     return ty;
 }
 
@@ -1178,4 +1096,56 @@ pub fn applyEnumeratorAttributes(p: *Parser, ty: Type, attrBufferStart: usize) !
         else => try ignoredAttrErr(p, toks[i], attr.tag, "enums"),
     };
     return ty.withAttributes(p.arena, p.attrApplicationBuffer.items);
+}
+
+fn applyAligned(attr: Attribute, p: *Parser, ty: Type, tag: ?Diagnostics.Tag) !void {
+    const base = ty.canonicalize(.standard);
+    const defaultAlign = base.alignof(p.comp);
+    if (attr.args.aligned.alignment) |alignment| alignas: {
+        if (attr.syntax != .keyword)
+            break :alignas;
+
+        const alignToken = attr.args.aligned.__name_token;
+        if (tag) |t| try p.errToken(t, alignToken);
+        if (ty.isFunc()) {
+            try p.errToken(.alignas_on_func, alignToken);
+        } else if (alignment.requested < defaultAlign) {
+            try p.errExtra(.minimum_alignment, alignToken, .{ .unsigned = defaultAlign });
+        }
+    }
+    try p.attrApplicationBuffer.append(p.gpa, attr);
+}
+
+fn applyTransparentUnion(attr: Attribute, p: *Parser, token: TokenIndex, ty: Type) !void {
+    const unionTy = ty.get(.Union) orelse {
+        return p.errToken(.transparent_union_wrong_type, token);
+    };
+
+    // TODO validate union defined at end
+    if (unionTy.data.record.isIncomplete())
+        return;
+
+    const fields = unionTy.data.record.fields;
+    if (fields.len == 0)
+        return p.errToken(.transparent_union_one_field, token);
+
+    const firstFieldSize = fields[0].ty.bitSizeof(p.comp).?;
+    for (fields[1..]) |field| {
+        const fieldSize = field.ty.bitSizeof(p.comp).?;
+        if (fieldSize == firstFieldSize)
+            continue;
+
+        const str = try std.fmt.allocPrint(p.comp.diag.arena.allocator(), "'{s}' ({d}", .{ field.name, fieldSize });
+        try p.errStr(.transparent_union_size, field.nameToken, str);
+        return p.errExtra(.transparent_union_size_note, fields[0].nameToken, .{ .unsigned = firstFieldSize });
+    }
+
+    try p.attrApplicationBuffer.append(p.gpa, attr);
+}
+
+fn applyVectorSize(attr: Attribute, p: *Parser, tok: TokenIndex, ty: *Type) !void {
+    _ = attr;
+    _ = tok;
+    _ = ty;
+    return p.todo("apply vector_size attribute");
 }
