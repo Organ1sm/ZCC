@@ -761,7 +761,7 @@ pub const func_should_return = struct {
     pub const kind = .@"error";
 };
 pub const incompatible_return = struct {
-    pub const msg = "returning '{s}' from a function with incompatible result type";
+    pub const msg = "returning {s}";
     pub const extra = .str;
     pub const kind = .@"error";
 };
@@ -785,8 +785,8 @@ pub const void_func_returns_value = struct {
     pub const kind = .@"error";
     pub const all = true;
 };
-pub const incompatible_param = struct {
-    pub const msg = "passing '{s}' to parameter of incompatible type";
+pub const incompatible_arg = struct {
+    pub const msg = "passing {s}";
     pub const extra = .str;
     pub const kind = .@"error";
 };
@@ -1034,6 +1034,18 @@ pub const ptr_init_discards_quals = struct {
 };
 pub const ptr_assign_discards_quals = struct {
     pub const msg = "assigning to {s} discards qualifiers";
+    pub const extra = .str;
+    pub const opt = "incompatible-pointer-types-discards-qualifiers";
+    pub const kind = .warning;
+};
+pub const ptr_ret_discards_quals = struct {
+    pub const msg = "returning {s} discards qualifiers";
+    pub const extra = .str;
+    pub const opt = "incompatible-pointer-types-discards-qualifiers";
+    pub const kind = .warning;
+};
+pub const ptr_arg_discards_quals = struct {
+    pub const msg = "passing {s} discards qualifiers";
     pub const extra = .str;
     pub const opt = "incompatible-pointer-types-discards-qualifiers";
     pub const kind = .warning;
