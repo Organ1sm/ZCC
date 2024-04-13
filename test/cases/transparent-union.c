@@ -33,7 +33,7 @@ void f4(void) {
 }
 
 #define EXPECTED_ERRORS "transparent-union.c:4:18: warning: 'transparent_union' attribute only applies to unions [-Wignored-attributes]" \
-    "transparent-union.c:7:18: warning: transparent union definition must contain at least one field; transparent_union attribute ignored [-Wignored-attributes]" \
+    "transparent-union.c:6:28: warning: transparent union definition must contain at least one field; transparent_union attribute ignored [-Wignored-attributes]" \
     "transparent-union.c:10:12: warning: size of field 'b' (64 bits) does not match the size of the first field in transparent union; transparent_union attribute ignored [-Wignored-attributes]" \
     "transparent-union.c:9:9: note: size of first field is 32" \
     "transparent-union.c:31:8: error: passing 'int' to parameter of incompatible type 'union U4'" \

@@ -61,13 +61,27 @@ pub fn maybeWarnUnused(res: Result, p: *Parser, exprStart: TokenIndex, errStart:
             .BitAndAssignExpr,
             .BitXorAssignExpr,
             .BitOrAssignExpr,
-            .CallExpr,
-            .CallExprOne,
             .PreIncExpr,
             .PreDecExpr,
             .PostIncExpr,
             .PostDecExpr,
             => return,
+
+            .CallExprOne => {
+                const fnPtr = p.nodes.items(.data)[@intFromEnum(curNode)].binExpr.lhs;
+                const fnTy = p.nodes.items(.type)[@intFromEnum(fnPtr)].getElemType();
+                if (fnTy.hasAttribute(.nodiscard)) try p.errStr(.nodiscard_unused, exprStart, "TODO get name");
+                if (fnTy.hasAttribute(.warn_unused_result)) try p.errStr(.warn_unused_result, exprStart, "TODO get name");
+                return;
+            },
+
+            .CallExpr => {
+                const fnPtr = p.data.items[p.nodes.items(.data)[@intFromEnum(curNode)].range.start];
+                const fnTy = p.nodes.items(.type)[@intFromEnum(fnPtr)].getElemType();
+                if (fnTy.hasAttribute(.nodiscard)) try p.errStr(.nodiscard_unused, exprStart, "TODO get name");
+                if (fnTy.hasAttribute(.warn_unused_result)) try p.errStr(.warn_unused_result, exprStart, "TODO get name");
+                return;
+            },
 
             .StmtExpr => {
                 const body = p.nodes.items(.data)[@intFromEnum(curNode)].unExpr;

@@ -437,12 +437,33 @@ pub fn floatValueChangedStr(p: *Parser, res: *Result, oldValue: f64, intTy: Type
 /// @param declToken The token index where the type is declared.
 /// @return Returns error.ParsingFailed if the type is unavailable, otherwise void.
 fn checkDeprecatedUnavailable(p: *Parser, ty: Type, usageToken: TokenIndex, declToken: TokenIndex) !void {
+    if (ty.getAttribute(.@"error")) |@"error"| {
+        const stringsTop = p.strings.items.len;
+        defer p.strings.items.len = stringsTop;
+
+        const w = p.strings.writer();
+        try w.print("call to '{s}' declared with attribute error: {s}", .{ p.getTokenSlice(@"error".__name_token), @"error".msg });
+        const str = try p.comp.diag.arena.allocator().dupe(u8, p.strings.items[stringsTop..]);
+        try p.errStr(.error_attribute, usageToken, str);
+    }
+
+    if (ty.getAttribute(.warning)) |warning| {
+        const stringsTop = p.strings.items.len;
+        defer p.strings.items.len = stringsTop;
+
+        const w = p.strings.writer();
+        try w.print("call to '{s}' declared with attribute warning: {s}", .{ p.getTokenSlice(warning.__name_token), warning.msg });
+        const str = try p.comp.diag.arena.allocator().dupe(u8, p.strings.items[stringsTop..]);
+        try p.errStr(.warning_attribute, usageToken, str);
+    }
+
     // Check if the type has an 'unavailable' attribute and report it
     if (ty.getAttribute(.unavailable)) |unavailable| {
         try p.errDeprecated(.unavailable, usageToken, unavailable.msg);
         try p.errStr(.unavailable_note, unavailable.__name_token, p.getTokenSlice(declToken));
         return error.ParsingFailed; // Abort parsing due to 'unavailable' type
     }
+
     // Check if the type has a 'deprecated' attribute and report it
     else if (ty.getAttribute(.deprecated)) |deprecated| {
         try p.errDeprecated(.deprecated_declarations, usageToken, deprecated.msg);
@@ -4131,6 +4152,10 @@ fn parseReturnStmt(p: *Parser) Error!?NodeIndex {
     var expr = try p.parseExpr();
     _ = try p.expectToken(.Semicolon);
     const returnType = p.func.type.?.getReturnType();
+
+    if (p.func.type.?.hasAttribute(.noreturn)) {
+        try p.errStr(.invalid_noreturn, eToken, p.getTokenSlice(p.func.name));
+    }
 
     if (expr.node == .none) {
         if (!returnType.is(.Void))

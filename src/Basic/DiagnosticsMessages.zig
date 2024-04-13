@@ -1485,6 +1485,17 @@ pub const unavailable_note = struct {
     pub const extra = .str;
     pub const kind = .note;
 };
+pub const warning_attribute = struct {
+    pub const msg = "{s}";
+    pub const extra = .str;
+    pub const kind = .warning;
+    pub const opt = "attribute-warning";
+};
+pub const error_attribute = struct {
+    pub const msg = "{s}";
+    pub const extra = .str;
+    pub const kind = .@"error";
+};
 pub const ignored_record_attr = struct {
     pub const msg = "attribute '{s}' is ignored, place it after \"{s}\" to apply attribute to type declaration";
     pub const extra = .ignored_record_attr;
@@ -1775,4 +1786,42 @@ pub const local_variable_attribute = struct {
     pub const extra = .str;
     pub const opt = "ignored-attributes";
     pub const kind = .warning;
+};
+pub const ignore_cold = struct {
+    pub const msg = "ignoring attribute 'cold' because it conflicts with attribute 'hot'";
+    pub const opt = "ignored-attributes";
+    pub const kind = .warning;
+};
+pub const ignore_hot = struct {
+    pub const msg = "ignoring attribute 'hot' because it conflicts with attribute 'cold'";
+    pub const opt = "ignored-attributes";
+    pub const kind = .warning;
+};
+pub const ignore_noinline = struct {
+    pub const msg = "ignoring attribute 'noinline' because it conflicts with attribute 'always_inline'";
+    pub const opt = "ignored-attributes";
+    pub const kind = .warning;
+};
+pub const ignore_always_inline = struct {
+    pub const msg = "ignoring attribute 'always_inline' because it conflicts with attribute 'noinline'";
+    pub const opt = "ignored-attributes";
+    pub const kind = .warning;
+};
+pub const invalid_noreturn = struct {
+    pub const msg = "function '{s}' declared 'noreturn' should not return";
+    pub const extra = .str;
+    pub const kind = .warning;
+    pub const opt = "invalid-noreturn";
+};
+pub const nodiscard_unused = struct {
+    pub const msg = "ignoring return value of '{s}', declared with 'nodiscard' attribute";
+    pub const extra = .str;
+    pub const kind = .warning;
+    pub const op = "unused-result";
+};
+pub const warn_unused_result = struct {
+    pub const msg = "ignoring return value of '{s}', declared with 'warn_unused_result' attribute";
+    pub const extra = .str;
+    pub const kind = .warning;
+    pub const op = "unused-result";
 };

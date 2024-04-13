@@ -474,7 +474,8 @@ const attributes = struct {
     pub const @"error" = struct {
         const gnu = "error";
         const Args = struct {
-            message: []const u8,
+            msg: []const u8,
+            __name_token: TokenIndex = undefined,
         };
     };
     pub const externally_visible = struct {
@@ -660,13 +661,6 @@ const attributes = struct {
         const c23 = "noreturn";
         const declspec = "noreturn";
     };
-    pub const nothrow = struct {
-        const gnu = "nothrow";
-        const declspec = "nothrow";
-    };
-    pub const novtable = struct {
-        const declspec = "novtable";
-    };
     // TODO: union args ?
     //    const optimize = struct {
     //        const Args = struct {
@@ -851,7 +845,8 @@ const attributes = struct {
     pub const warning = struct {
         const gnu = "warning";
         const Args = struct {
-            message: []const u8,
+            msg: []const u8,
+            __name_token: TokenIndex = undefined,
         };
     };
     pub const weak = struct {
@@ -1110,9 +1105,99 @@ pub fn applyTypeAttributes(p: *Parser, ty: Type, attrBufferStart: usize, tag: ?D
 pub fn applyFunctionAttributes(p: *Parser, ty: Type, attrBufferStart: usize) !Type {
     const attrs = p.attrBuffer.items(.attr)[attrBufferStart..];
     const toks = p.attrBuffer.items(.tok)[attrBufferStart..];
-    _ = attrs;
-    _ = toks;
-    return ty;
+    p.attrApplicationBuffer.items.len = 0;
+
+    var baseTy = ty;
+    if (baseTy.specifier == .Attributed)
+        baseTy = baseTy.data.attributed.base;
+
+    var hot = false;
+    var cold = false;
+    var @"noinline" = false;
+    var alwaysInline = false;
+    for (attrs, 0..) |attr, i| switch (attr.tag) {
+        // zig fmt: off
+        .noreturn, .unused, .used, .warning, .deprecated, .unavailable, .weak, .pure, .leaf,
+        .@"const", .warn_unused_result, .section, .returns_nonnull, .returns_twice, .@"error",
+        .externally_visible, .retain, .flatten, .gnu_inline, .alias, .asm_label, .nodiscard,
+         => try p.attrApplicationBuffer.append(p.gpa, attr),
+        // zig fmt: on
+
+        .hot => if (cold) {
+            try p.errToken(.ignore_hot, toks[i]);
+        } else {
+            try p.attrApplicationBuffer.append(p.gpa, attr);
+            hot = true;
+        },
+
+        .cold => if (hot) {
+            try p.errToken(.ignore_cold, toks[i]);
+        } else {
+            try p.attrApplicationBuffer.append(p.gpa, attr);
+            cold = true;
+        },
+
+        .always_inline => if (@"noinline") {
+            try p.errToken(.ignore_always_inline, toks[i]);
+        } else {
+            try p.attrApplicationBuffer.append(p.gpa, attr);
+            alwaysInline = true;
+        },
+
+        .@"noinline" => if (alwaysInline) {
+            try p.errToken(.ignore_noinline, toks[i]);
+        } else {
+            try p.attrApplicationBuffer.append(p.gpa, attr);
+            @"noinline" = true;
+        },
+
+        .aligned => try attr.applyAligned(p, baseTy, null),
+        .format => try attr.applyFormat(p, baseTy),
+        .access,
+        .alloc_align,
+        .alloc_size,
+        .artificial,
+        .assume_aligned,
+        .constructor,
+        .copy,
+        .destructor,
+        .format_arg,
+        .ifunc,
+        .interrupt,
+        .interrupt_handler,
+        .malloc,
+        .no_address_safety_analysis,
+        .no_icf,
+        .no_instrument_function,
+        .no_profile_instrument_function,
+        .no_reorder,
+        .no_sanitize,
+        .no_sanitize_address,
+        .no_sanitize_coverage,
+        .no_sanitize_thread,
+        .no_sanitize_undefined,
+        .no_split_stack,
+        .no_stack_limit,
+        .no_stack_protector,
+        .noclone,
+        .noipa,
+        // .nonnull,
+        .noplt,
+        // .optimize,
+        .patchable_function_entry,
+        .sentinel,
+        .simd,
+        .stack_protect,
+        .symver,
+        .target,
+        .target_clones,
+        .visibility,
+        .weakref,
+        .zero_call_used_regs,
+        => std.debug.panic("apply type attribute {s}", .{@tagName(attr.tag)}),
+        else => try ignoredAttrErr(p, toks[i], attr.tag, "functions"),
+    };
+    return ty.withAttributes(p.arena, p.attrApplicationBuffer.items);
 }
 
 pub fn applyLabelAttributes(p: *Parser, ty: Type, attrBufferStart: usize) !Type {
@@ -1205,4 +1290,10 @@ fn applyVectorSize(attr: Attribute, p: *Parser, tok: TokenIndex, ty: *Type) !voi
     _ = tok;
     _ = ty;
     return p.todo("apply vector_size attribute");
+}
+
+fn applyFormat(attr: Attribute, p: *Parser, ty: Type) !void {
+    // TODO validate
+    _ = ty;
+    try p.attrApplicationBuffer.append(p.gpa, attr);
 }
