@@ -819,7 +819,6 @@ fn parseDeclaration(p: *Parser) Error!bool {
         try p.attrBuffer.append(p.gpa, .{ .attr = attr, .tok = token });
     }
 
-    try declSpec.warnIgnoredAttrs(p, attrBufferTop);
     var ID = (try p.parseInitDeclarator(&declSpec, attrBufferTop)) orelse {
         // eat ';'
         _ = try p.expectToken(.Semicolon);
@@ -918,7 +917,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
                         try p.errStr(.parameter_missing, d.name, name);
                     }
 
-                    d.type = try Attribute.applyParameterAttributes(p, d.type, attrBufferTop);
+                    d.type = try Attribute.applyParameterAttributes(p, d.type, attrBufferTop, .alignas_on_param);
 
                     // bypass redefinition check to avoid duplicate errors
                     try p.symStack.appendSymbol(.{
@@ -1439,7 +1438,7 @@ fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec, attrBufferTop: usize) Er
     } else if (ID.d.type.isFunc()) {
         ID.d.type = try Attribute.applyFunctionAttributes(p, ID.d.type, attrBufferTop);
     } else {
-        ID.d.type = try Attribute.applyVariableAttributes(p, ID.d.type, attrBufferTop);
+        ID.d.type = try Attribute.applyVariableAttributes(p, ID.d.type, attrBufferTop, null);
     }
 
     if (p.eat(.Equal)) |eq| init: {
@@ -2776,7 +2775,7 @@ fn parseParamDecls(p: *Parser) Error!?[]Type.Function.Param {
                 try p.symStack.defineParam(paramType, nameToken);
         }
 
-        paramType = try Attribute.applyParameterAttributes(p, paramType, attrBufferTop);
+        paramType = try Attribute.applyParameterAttributes(p, paramType, attrBufferTop, .alignas_on_param);
 
         if (paramType.isFunc()) {
             // params declared as functions are converted to function pointers

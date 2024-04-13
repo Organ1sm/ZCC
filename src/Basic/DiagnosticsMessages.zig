@@ -1755,3 +1755,24 @@ pub const designated_init_needed = struct {
     pub const opt = "designated-init";
     pub const kind = .warning;
 };
+pub const ignore_common = struct {
+    pub const msg = "ignoring attribute 'common' because it conflicts with attribute 'nocommon'";
+    pub const opt = "ignored-attributes";
+    pub const kind = .warning;
+};
+pub const ignore_nocommon = struct {
+    pub const msg = "ignoring attribute 'nocommon' because it conflicts with attribute 'common'";
+    pub const opt = "ignored-attributes";
+    pub const kind = .warning;
+};
+pub const non_string_ignored = struct {
+    pub const msg = "'nonstring' attribute ignored on objects of type '{s}'";
+    pub const opt = "ignored-attributes";
+    pub const kind = .warning;
+};
+pub const local_variable_attribute = struct {
+    pub const msg = "'{s}' attribute only applies to local variables";
+    pub const extra = .str;
+    pub const opt = "ignored-attributes";
+    pub const kind = .warning;
+};

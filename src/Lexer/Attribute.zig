@@ -1003,10 +1003,67 @@ fn ignoredAttrErr(p: *Parser, token: TokenIndex, attr: Attribute.Tag, context: [
 }
 
 pub const applyParameterAttributes = applyVariableAttributes;
-pub fn applyVariableAttributes(p: *Parser, ty: Type, attrBufferStart: usize) !Type {
+pub fn applyVariableAttributes(p: *Parser, ty: Type, attrBufferStart: usize, tag: ?Diagnostics.Tag) !Type {
     const attrs = p.attrBuffer.items(.attr)[attrBufferStart..];
-    _ = attrs;
-    return ty;
+    const toks = p.attrBuffer.items(.tok)[attrBufferStart..];
+    p.attrApplicationBuffer.items.len = 0;
+
+    var baseTy = ty;
+    if (baseTy.specifier == .Attributed)
+        baseTy = baseTy.data.attributed.base;
+
+    var common = false;
+    var nocommon = false;
+    for (attrs, 0..) |attr, i| switch (attr.tag) {
+        // zig fmt: off
+        .alias, .may_alias, .deprecated, .unavailable, .unused, .warn_if_not_aligned, .weak, .used,
+        .noinit, .retain, .persistent, .section, .mode, .asm_label,
+         => try p.attrApplicationBuffer.append(p.gpa, attr),
+        // zig fmt: on
+
+        .common => if (nocommon) {
+            try p.errToken(.ignore_common, toks[i]);
+        } else {
+            try p.attrApplicationBuffer.append(p.gpa, attr);
+            common = true;
+        },
+
+        .nocommon => if (common) {
+            try p.errToken(.ignore_nocommon, toks[i]);
+        } else {
+            try p.attrApplicationBuffer.append(p.gpa, attr);
+            nocommon = true;
+        },
+
+        .vector_size => try attr.applyVectorSize(p, toks[i], &baseTy),
+        .aligned => try attr.applyAligned(p, baseTy, tag),
+
+        .nonstring => if (!baseTy.isArray() or !baseTy.isChar()) {
+            try p.errStr(.non_string_ignored, toks[i], try p.typeStr(ty));
+        } else {
+            try p.attrApplicationBuffer.append(p.gpa, attr);
+        },
+
+        .uninitialized => if (p.func.type == null) {
+            try p.errStr(.local_variable_attribute, toks[i], "uninitialized");
+        } else {
+            try p.attrApplicationBuffer.append(p.gpa, attr);
+        },
+
+        .cleanup => if (p.func.type == null) {
+            try p.errStr(.local_variable_attribute, toks[i], "cleanup");
+        } else {
+            try p.attrApplicationBuffer.append(p.gpa, attr);
+        },
+
+        .alloc_size,
+        .copy,
+        .tls_model,
+        .visibility,
+        => std.debug.panic("apply variable attribute {s}", .{@tagName(attr.tag)}),
+        else => try ignoredAttrErr(p, toks[i], attr.tag, "variables"),
+    };
+    return ty.withAttributes(p.arena, p.attrApplicationBuffer.items);
 }
 
 pub const applyFieldAttributes = applyTypeAttributes;
