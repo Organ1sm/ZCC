@@ -841,10 +841,32 @@ fn parseDeclaration(p: *Parser) Error!bool {
     }
 
     var ID = (try p.parseInitDeclarator(&declSpec, attrBufferTop)) orelse {
-        // eat ';'
-        _ = try p.expectToken(.Semicolon);
-        if (declSpec.type.is(.Enum) or (declSpec.type.isRecord() and !declSpec.type.isAnonymousRecord() and !declSpec.type.isTypeof()))
+        _ = try p.expectToken(.Semicolon); // eat ';'
+        if (declSpec.type.is(.Enum) or
+            (declSpec.type.isRecord() and !declSpec.type.isAnonymousRecord() and !declSpec.type.isTypeof()))
+        {
+            const specifier = declSpec.type.canonicalize(.standard).specifier;
+            const attrs = p.attrBuffer.items(.attr)[attrBufferTop..];
+            const toks = p.attrBuffer.items(.tok)[attrBufferTop..];
+            for (attrs, 0..) |attr, i| {
+                try p.errExtra(
+                    .ignored_record_attr,
+                    toks[i],
+                    .{
+                        .ignoredRecordAttr = .{
+                            .tag = attr.tag,
+                            .specifier = switch (specifier) {
+                                .Enum => .@"enum",
+                                .Struct => .@"struct",
+                                .Union => .@"union",
+                                else => unreachable,
+                            },
+                        },
+                    },
+                );
+            }
             return true;
+        }
 
         try p.errToken(.missing_declaration, firstTokenIndex);
         return true;

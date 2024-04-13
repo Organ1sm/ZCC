@@ -999,8 +999,7 @@ fn ignoredAttrErr(p: *Parser, token: TokenIndex, attr: Attribute.Tag, context: [
 
 pub const applyParameterAttributes = applyVariableAttributes;
 pub fn applyVariableAttributes(p: *Parser, ty: Type, attrBufferStart: usize, tag: ?Diagnostics.Tag) !Type {
-    const attrs = p.attrBuffer.items(.attr)[attrBufferStart..];
-    const toks = p.attrBuffer.items(.tok)[attrBufferStart..];
+    const attrs, const toks = p.getAttrsAndToks(attrBufferStart);
     p.attrApplicationBuffer.items.len = 0;
 
     var baseTy = ty;
@@ -1153,6 +1152,7 @@ pub fn applyFunctionAttributes(p: *Parser, ty: Type, attrBufferStart: usize) !Ty
 
         .aligned => try attr.applyAligned(p, baseTy, null),
         .format => try attr.applyFormat(p, baseTy),
+
         .access,
         .alloc_align,
         .alloc_size,
@@ -1204,6 +1204,7 @@ pub fn applyLabelAttributes(p: *Parser, ty: Type, attrBufferStart: usize) !Type 
     const attrs = p.attrBuffer.items(.attr)[attrBufferStart..];
     const toks = p.attrBuffer.items(.tok)[attrBufferStart..];
     p.attrApplicationBuffer.items.len = 0;
+
     for (attrs, 0..) |attr, i| switch (attr.tag) {
         .cold, .hot, .unused => try p.attrApplicationBuffer.append(p.gpa, attr),
         else => try ignoredAttrErr(p, toks[i], attr.tag, "labels"),
@@ -1215,6 +1216,7 @@ pub fn applyStatementAttributes(p: *Parser, ty: Type, expr_start: TokenIndex, at
     const attrs = p.attrBuffer.items(.attr)[attrBufferStart..];
     const toks = p.attrBuffer.items(.tok)[attrBufferStart..];
     p.attrApplicationBuffer.items.len = 0;
+
     for (attrs, 0..) |attr, i| switch (attr.tag) {
         .fallthrough => if (p.getCurrToken() != .KeywordCase and p.getCurrToken() != .KeywordDefault) {
             // TODO: this condition is not completely correct; the last statement of a compound
@@ -1233,6 +1235,7 @@ pub fn applyEnumeratorAttributes(p: *Parser, ty: Type, attrBufferStart: usize) !
     const attrs = p.attrBuffer.items(.attr)[attrBufferStart..];
     const toks = p.attrBuffer.items(.tok)[attrBufferStart..];
     p.attrApplicationBuffer.items.len = 0;
+
     for (attrs, 0..) |attr, i| switch (attr.tag) {
         .deprecated, .unavailable => try p.attrApplicationBuffer.append(p.gpa, attr),
         else => try ignoredAttrErr(p, toks[i], attr.tag, "enums"),
