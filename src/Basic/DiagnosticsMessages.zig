@@ -1067,7 +1067,8 @@ pub const invalid_fallthrough = struct {
     pub const kind = .@"error";
 };
 pub const cannot_apply_attribute_to_statement = struct {
-    pub const msg = "attribute cannot be applied to a statement";
+    pub const msg = "'{s}' attribute cannot be applied to a statement";
+    pub const extra = .str;
     pub const kind = .@"error";
 };
 pub const builtin_macro_redefined = struct {
