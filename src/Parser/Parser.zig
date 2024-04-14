@@ -1987,16 +1987,14 @@ fn parseRecordDeclarator(p: *Parser) Error!bool {
         }
 
         try p.parseAttrSpec(); // .record
-        const fieldAttrs = p.attrBuffer.items(.attr)[attrBufferTop..];
-        const fieldHasAttrs = fieldAttrs.len > 0;
+        const toAppend = try Attribute.applyFieldAttributes(p, &ty, attrBufferTop);
         const anyFieldsHaveAttrs = p.fieldAttrBuffer.items.len > p.record.fieldAttrStart;
-        const toAppend: []const Attribute = if (fieldHasAttrs) try p.arena.dupe(Attribute, fieldAttrs) else &.{};
         errdefer p.arena.free(toAppend);
 
         if (anyFieldsHaveAttrs) {
             try p.fieldAttrBuffer.append(toAppend);
         } else {
-            if (fieldHasAttrs) {
+            if (toAppend.len > 0) {
                 const preceding = p.recordMembers.items.len - p.record.start;
                 if (preceding > 0) {
                     try p.fieldAttrBuffer.appendNTimes(&.{}, preceding);
