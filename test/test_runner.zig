@@ -165,7 +165,6 @@ pub fn main() !void {
             comp.includeDirs = @TypeOf(comp.includeDirs).init(gpa);
             comp.systemIncludeDirs = @TypeOf(comp.systemIncludeDirs).init(gpa);
             comp.pragmaHandlers = .{};
-            comp.builtinHeaderPath = null;
 
             // reset everything else
             comp.deinit();
