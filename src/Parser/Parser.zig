@@ -71,6 +71,7 @@ enumBuffer: std.ArrayList(Type.Enum.Field),
 recordBuffer: std.ArrayList(Type.Record.Field),
 attrBuffer: std.MultiArrayList(TentativeAttribute) = .{},
 attrApplicationBuffer: std.ArrayListUnmanaged(Attribute) = .{},
+fieldAttrBuffer: std.ArrayList([]const Attribute),
 
 // configuration
 noEval: bool = false,
@@ -99,6 +100,7 @@ record: struct {
     kind: TokenType = .Invalid,
     flexibleField: ?TokenIndex = null,
     start: usize = 0,
+    fieldAttrStart: usize = 0,
 
     fn addField(r: @This(), p: *Parser, token: TokenIndex) Error!void {
         const name = p.getTokenSlice(token);
@@ -594,6 +596,7 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
         .paramBuffer = std.ArrayList(Type.Function.Param).init(pp.comp.gpa),
         .enumBuffer = std.ArrayList(Type.Enum.Field).init(pp.comp.gpa),
         .recordBuffer = std.ArrayList(Type.Record.Field).init(pp.comp.gpa),
+        .fieldAttrBuffer = std.ArrayList([]const Attribute).init(pp.comp.gpa),
     };
 
     //bind p to the symbol stack for simplify symbol stack api
@@ -611,6 +614,8 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
         p.recordMembers.deinit(pp.comp.gpa);
         p.attrBuffer.deinit(pp.comp.gpa);
         p.attrApplicationBuffer.deinit(pp.comp.gpa);
+        std.debug.assert(p.fieldAttrBuffer.items.len == 0);
+        p.fieldAttrBuffer.deinit();
     }
 
     errdefer {
@@ -1819,6 +1824,7 @@ fn parseRecordSpec(p: *Parser) Error!Type {
 
     const oldRecord = p.record;
     const oldMembers = p.recordMembers.items.len;
+    const oldFieldAttrStart = p.fieldAttrBuffer.items.len;
 
     errdefer p.declBuffer.items.len = declBufferTop - 1;
 
@@ -1827,11 +1833,13 @@ fn parseRecordSpec(p: *Parser) Error!Type {
         p.recordBuffer.items.len = recordBufferTop;
         p.record = oldRecord;
         p.recordMembers.items.len = oldMembers;
+        p.fieldAttrBuffer.items.len = oldFieldAttrStart;
     }
 
     p.record = .{
         .kind = p.tokenIds[kindToken],
         .start = p.recordMembers.items.len,
+        .fieldAttrStart = p.fieldAttrBuffer.items.len,
     };
 
     try p.parseRecordDecls();
@@ -1846,6 +1854,12 @@ fn parseRecordSpec(p: *Parser) Error!Type {
         recordType.fields = try p.arena.dupe(Type.Record.Field, p.recordBuffer.items[recordBufferTop..]);
         recordType.size = 1;
         recordType.alignment = 1;
+    }
+
+    if (oldFieldAttrStart < p.fieldAttrBuffer.items.len) {
+        const fieldAttrSlice = p.fieldAttrBuffer.items[oldFieldAttrStart..];
+        const duped = try p.arena.dupe([]const Attribute, fieldAttrSlice);
+        recordType.fieldAttributes = duped.ptr;
     }
 
     if (p.recordBuffer.items.len == recordBufferTop) {
@@ -1919,10 +1933,11 @@ fn parseRecordDecls(p: *Parser) Error!void {
 
 /// record-declarator : declarator (':' constant-expression)?
 fn parseRecordDeclarator(p: *Parser) Error!bool {
-    const attrBuffTop = p.attrBuffer.len;
-    defer p.attrBuffer.len = attrBuffTop;
+    const attrBufferTop = p.attrBuffer.len;
+    defer p.attrBuffer.len = attrBufferTop;
     const baseType = (try p.parseSpecQuals()) orelse return false;
 
+    try p.parseAttrSpec(); // .record
     while (true) {
         const thisDeclTop = p.attrBuffer.len;
         defer p.attrBuffer.len = thisDeclTop;
@@ -1972,7 +1987,21 @@ fn parseRecordDeclarator(p: *Parser) Error!bool {
         }
 
         try p.parseAttrSpec(); // .record
-        ty = try Attribute.applyFieldAttributes(p, ty, attrBuffTop, null);
+        const toAppend = try Attribute.applyFieldAttributes(p, &ty, attrBufferTop);
+        const anyFieldsHaveAttrs = p.fieldAttrBuffer.items.len > p.record.fieldAttrStart;
+        errdefer p.arena.free(toAppend);
+
+        if (anyFieldsHaveAttrs) {
+            try p.fieldAttrBuffer.append(toAppend);
+        } else {
+            if (toAppend.len > 0) {
+                const preceding = p.recordMembers.items.len - p.record.start;
+                if (preceding > 0) {
+                    try p.fieldAttrBuffer.appendNTimes(&.{}, preceding);
+                }
+                try p.fieldAttrBuffer.append(toAppend);
+            }
+        }
 
         if (nameToken == 0 and bitsNode == .none) unnamed: {
             // don't allow incompelete size fields in anonymous record.

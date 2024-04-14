@@ -205,6 +205,10 @@ pub const Record = struct {
     fields: []Field,
     size: u64,
     alignment: u29,
+    /// If this is null, none of the fields have attributes
+    /// Otherwise, it's a pointer to N items (where N == number of fields)
+    /// and the item at index i is the attributes for the field at index i
+    fieldAttributes: ?[*][]const Attribute,
 
     pub const Field = struct {
         name: []const u8,
@@ -226,6 +230,7 @@ pub const Record = struct {
         var r = try allocator.create(Record);
         r.name = name;
         r.fields.len = std.math.maxInt(usize);
+        r.fieldAttributes = null;
         return r;
     }
 };
@@ -1206,6 +1211,16 @@ pub fn getAttributes(ty: Type) []const Attribute {
         .TypeofType, .DecayedTypeofType => ty.data.subType.getAttributes(),
         .TypeofExpr, .DecayedTypeofExpr => ty.data.expr.ty.getAttributes(),
         else => &.{},
+    };
+}
+
+pub fn getRecord(ty: Type) ?*const Type.Record {
+    return switch (ty.specifier) {
+        .Attributed => ty.data.attributed.base.getRecord(),
+        .TypeofType, .DecayedTypeofType => ty.data.subType.getRecord(),
+        .TypeofExpr, .DecayedTypeofExpr => ty.data.expr.ty.getRecord(),
+        .Struct, .Union => ty.data.record,
+        else => null,
     };
 }
 

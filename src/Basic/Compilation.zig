@@ -424,6 +424,7 @@ fn generateVaListType(comp: *Compilation) !Type {
                 .fields = try arena.alloc(Type.Record.Field, 5),
                 .size = 32,
                 .alignment = 8,
+                .fieldAttributes = null,
             };
             const voidType = try arena.create(Type);
             voidType.* = Type.Void;
@@ -442,6 +443,7 @@ fn generateVaListType(comp: *Compilation) !Type {
                 .fields = try arena.alloc(Type.Record.Field, 4),
                 .size = 24,
                 .alignment = 8,
+                .fieldAttributes = null,
             };
             const voidType = try arena.create(Type);
             voidType.* = Type.Void;
