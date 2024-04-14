@@ -278,12 +278,6 @@ pub fn parseArgs(
 }
 
 fn mainExtra(comp: *Compilation, args: [][]const u8) !void {
-    comp.defineSystemIncludes() catch |er| switch (er) {
-        error.OutOfMemory => return error.OutOfMemory,
-        error.SelfExeNotFound => return comp.diag.fatalNoSrc("could not find ZCC executable path", .{}),
-        error.ZccIncludeNotFound => return comp.diag.fatalNoSrc("could not find ZCC builtin headers", .{}),
-    };
-
     var sourceFiles = std.ArrayList(Source).init(comp.gpa);
     var macroBuffer = std.ArrayList(u8).init(comp.gpa);
 
@@ -301,6 +295,12 @@ fn mainExtra(comp: *Compilation, args: [][]const u8) !void {
     } else if (sourceFiles.items.len != 1 and comp.outputName != null) {
         return fatal(comp, "cannot specify -o when generating multiple output files", .{});
     }
+
+    comp.defineSystemIncludes() catch |er| switch (er) {
+        error.OutOfMemory => return error.OutOfMemory,
+        error.SelfExeNotFound => return fatal(comp, "could not find ZCC executable path", .{}),
+        error.ZccIncludeNotFound => return fatal(comp, "could not find ZCC builtin headers", .{}),
+    };
 
     const builtinMacros = try comp.generateBuiltinMacros();
     const userDefinedMacros = try comp.addSourceFromBuffer("<command line>", macroBuffer.items);
