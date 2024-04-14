@@ -263,11 +263,14 @@ pub const Specifier = enum {
     Float,
     Double,
     LongDouble,
+    Float80,
+    Float128,
+    ComplexFP16,
     ComplexFloat,
     ComplexDouble,
     ComplexLongDouble,
-    Float80,
-    Float128,
+    ComplexFloat80,
+    ComplexFloat128,
 
     // data.SubType
     Pointer,
@@ -437,6 +440,9 @@ pub fn isFloat(ty: Type) bool {
         .FP16,
         .Float80,
         .Float128,
+        .ComplexFP16,
+        .ComplexFloat80,
+        .ComplexFloat128,
         => true,
 
         .TypeofType => ty.data.subType.isFloat(),
@@ -449,7 +455,13 @@ pub fn isFloat(ty: Type) bool {
 
 pub fn isReal(ty: Type) bool {
     return switch (ty.specifier) {
-        .ComplexFloat, .ComplexDouble, .ComplexLongDouble => false,
+        .ComplexFloat,
+        .ComplexDouble,
+        .ComplexLongDouble,
+        .ComplexFP16,
+        .ComplexFloat80,
+        .ComplexFloat128,
+        => false,
 
         .TypeofType => ty.data.subType.isReal(),
         .TypeofExpr => ty.data.expr.ty.isReal(),
@@ -889,11 +901,14 @@ pub fn sizeof(ty: Type, comp: *const Compilation) ?u64 {
         .Float => 4,
         .Double => 8,
         .LongDouble => 16,
+        .Float80 => 16,
+        .Float128 => 16,
+        .ComplexFP16 => 4,
         .ComplexFloat => 8,
         .ComplexDouble => 16,
         .ComplexLongDouble => 32,
-        .Float80 => 16,
-        .Float128 => 16,
+        .ComplexFloat80 => 32,
+        .ComplexFloat128 => 32,
 
         .Pointer,
         .StaticArray,
@@ -961,9 +976,17 @@ pub fn alignof(ty: Type, comp: *const Compilation) u29 {
         },
 
         .LongLong, .ULongLong => 8,
+        .Int128, .UInt128 => 16,
+        .FP16, .ComplexFP16 => 2,
         .Float, .ComplexFloat => 4,
         .Double, .ComplexDouble => 8,
         .LongDouble, .ComplexLongDouble => 16,
+
+        .Float80,
+        .Float128,
+        .ComplexFloat80,
+        .ComplexFloat128,
+        => 16,
 
         .Pointer,
         .StaticArray,
@@ -1097,7 +1120,13 @@ pub fn makeReal(ty: Type) Type {
     // TODO discards attributed/typeof
     var base = ty.canonicalize(.standard);
     switch (base.specifier) {
-        .ComplexFloat, .ComplexDouble, .ComplexLongDouble => {
+        .ComplexFP16,
+        .ComplexFloat,
+        .ComplexDouble,
+        .ComplexLongDouble,
+        .ComplexFloat80,
+        .ComplexFloat128,
+        => {
             base.specifier = @enumFromInt(@intFromEnum(base.specifier) - 3);
             return base;
         },
@@ -1109,7 +1138,13 @@ pub fn makeComplex(ty: Type) Type {
     // TODO discards attributed/typeof
     var base = ty.canonicalize(.standard);
     switch (base.specifier) {
-        .Float, .Double, .LongDouble => {
+        .ComplexFP16,
+        .ComplexFloat,
+        .ComplexDouble,
+        .ComplexLongDouble,
+        .ComplexFloat80,
+        .ComplexFloat128,
+        => {
             base.specifier = @enumFromInt(@intFromEnum(base.specifier) + 3);
             return base;
         },

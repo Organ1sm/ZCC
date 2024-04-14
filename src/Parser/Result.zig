@@ -515,24 +515,42 @@ pub fn nullCast(res: *Result, p: *Parser, ptrType: Type) Error!void {
 
 fn usualArithmeticConversion(lhs: *Result, rhs: *Result, p: *Parser, tok: TokenIndex) Error!void {
     // if either is a float cast to that type
-    const floatTypes = [3][2]Type.Specifier{
-        .{ .ComplexLongDouble, .LongDouble },
-        .{ .ComplexDouble, .Double },
-        .{ .ComplexFloat, .Float },
-    };
-    const lhsSpec = lhs.ty.canonicalize(.standard).specifier;
-    const rhsSpec = rhs.ty.canonicalize(.standard).specifier;
-    for (floatTypes) |pair| {
-        if (lhsSpec == pair[0] or lhsSpec == pair[1] or
-            rhsSpec == pair[0] or rhsSpec == pair[1])
-        {
-            const bothReal = lhs.ty.isReal() and rhs.ty.isReal();
-            const resSpec = pair[@intFromBool(bothReal)];
-            const ty = Type{ .specifier = resSpec };
-            try lhs.floatCast(p, ty);
-            try rhs.floatCast(p, ty);
-            return;
+    if (lhs.ty.isFloat() or rhs.ty.isFloat()) {
+        const floatTypes = [6][2]Type.Specifier{
+            .{ .ComplexLongDouble, .LongDouble },
+            .{ .ComplexFloat128, .Float128 },
+            .{ .ComplexFloat80, .Float80 },
+            .{ .ComplexDouble, .Double },
+            .{ .ComplexFloat, .Float },
+            .{ .ComplexFP16, .FP16 },
+        };
+
+        const lhsSpec = lhs.ty.canonicalize(.standard).specifier;
+        const rhsSpec = rhs.ty.canonicalize(.standard).specifier;
+
+        if (p.comp.target.c_type_bit_size(.longdouble) == 128) {
+            if (try lhs.floatConversion(rhs, lhsSpec, rhsSpec, p, floatTypes[0]))
+                return;
         }
+
+        if (try lhs.floatConversion(rhs, lhsSpec, rhsSpec, p, floatTypes[1]))
+            return;
+
+        if (p.comp.target.c_type_bit_size(.longdouble) == 80) {
+            if (try lhs.floatConversion(rhs, lhsSpec, rhsSpec, p, floatTypes[0]))
+                return;
+        }
+
+        if (try lhs.floatConversion(rhs, lhsSpec, rhsSpec, p, floatTypes[2]))
+            return;
+
+        if (p.comp.target.c_type_bit_size(.longdouble) == 64) {
+            if (try lhs.floatConversion(rhs, lhsSpec, rhsSpec, p, floatTypes[0])) return;
+        }
+
+        if (try lhs.floatConversion(rhs, lhsSpec, rhsSpec, p, floatTypes[3])) return;
+        if (try lhs.floatConversion(rhs, lhsSpec, rhsSpec, p, floatTypes[4])) return;
+        if (try lhs.floatConversion(rhs, lhsSpec, rhsSpec, p, floatTypes[5])) return;
     }
 
     // Do integer promotion on both operands
@@ -570,6 +588,26 @@ fn usualArithmeticConversion(lhs: *Result, rhs: *Result, p: *Parser, tok: TokenI
         try lhs.intCast(p, target, tok);
         try rhs.intCast(p, target, tok);
     }
+}
+fn floatConversion(
+    lhs: *Result,
+    rhs: *Result,
+    lhsSpec: Type.Specifier,
+    rhsSpec: Type.Specifier,
+    p: *Parser,
+    pair: [2]Type.Specifier,
+) !bool {
+    if (lhsSpec == pair[0] or lhsSpec == pair[1] or
+        rhsSpec == pair[0] or rhsSpec == pair[1])
+    {
+        const bothReal = lhs.ty.isReal() and rhs.ty.isReal();
+        const resSpec = pair[@intFromBool(bothReal)];
+        const ty = Type{ .specifier = resSpec };
+        try lhs.floatCast(p, ty);
+        try rhs.floatCast(p, ty);
+        return true;
+    }
+    return false;
 }
 
 fn invalidBinTy(a: *Result, tok: TokenIndex, b: *Result, p: *Parser) Error!bool {
