@@ -689,6 +689,7 @@ fn expr(pp: *Preprocessor, lexer: *Lexer) MacroError!bool {
         .enumBuffer = undefined,
         .recordBuffer = undefined,
         .attrBuffer = undefined,
+        .fieldAttrBuffer = undefined,
     };
 
     return parser.macroExpr();
