@@ -999,7 +999,8 @@ fn ignoredAttrErr(p: *Parser, token: TokenIndex, attr: Attribute.Tag, context: [
 
 pub const applyParameterAttributes = applyVariableAttributes;
 pub fn applyVariableAttributes(p: *Parser, ty: Type, attrBufferStart: usize, tag: ?Diagnostics.Tag) !Type {
-    const attrs, const toks = p.getAttrsAndToks(attrBufferStart);
+    const attrs = p.attrBuffer.items(.attr)[attrBufferStart..];
+    const toks = p.attrBuffer.items(.tok)[attrBufferStart..];
     p.attrApplicationBuffer.items.len = 0;
 
     var baseTy = ty;
