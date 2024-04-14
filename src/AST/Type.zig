@@ -1214,6 +1214,16 @@ pub fn getAttributes(ty: Type) []const Attribute {
     };
 }
 
+pub fn getRecord(ty: Type) ?*const Type.Record {
+    return switch (ty.specifier) {
+        .Attributed => ty.data.attributed.base.getRecord(),
+        .TypeofType, .DecayedTypeofType => ty.data.subType.getRecord(),
+        .TypeofExpr, .DecayedTypeofExpr => ty.data.expr.ty.getRecord(),
+        .Struct, .Union => ty.data.record,
+        else => null,
+    };
+}
+
 pub fn hasAttribute(ty: Type, tag: Attribute.Tag) bool {
     for (ty.getAttributes()) |attr| {
         if (attr.tag == tag) return true;

@@ -336,6 +336,14 @@ pub fn dump(tree: AST, writer: anytype) @TypeOf(writer).Error!void {
     }
 }
 
+fn dumpFieldAttributes(attributes: []const Attribute, level: u32, writer: anytype) !void {
+    for (attributes) |attr| {
+        try writer.writeByteNTimes(' ', level);
+        try writer.print("field attr: {s}", .{@tagName(attr.tag)});
+        try dumpAttribute(attr, writer);
+    }
+}
+
 fn dumpAttribute(attr: Attribute, writer: anytype) !void {
     switch (attr.tag) {
         inline else => |tag| {
@@ -490,10 +498,18 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
         .UnionDecl,
         .AttrParams,
         => {
+            const maybeFieldAttrs = if (ty.getRecord()) |record| record.fieldAttributes else null;
             for (tree.data[data.range.start..data.range.end], 0..) |stmt, i| {
                 if (i != 0)
                     try w.writeByte('\n');
                 try tree.dumpNode(stmt, level + delta, w);
+                if (maybeFieldAttrs) |fieldAttrs| {
+                    if (fieldAttrs[i].len == 0) continue;
+
+                    if (tree.comp.diag.color) util.setColor(ATTRIBUTE, w);
+                    try dumpFieldAttributes(fieldAttrs[i], level + delta + half, w);
+                    if (tree.comp.diag.color) util.setColor(.reset, w);
+                }
             }
         },
 
@@ -507,8 +523,28 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
         .UnionDeclTwo,
         .AttrParamsTwo,
         => {
-            if (data.binExpr.lhs != .none) try tree.dumpNode(data.binExpr.lhs, level + delta, w);
-            if (data.binExpr.rhs != .none) try tree.dumpNode(data.binExpr.rhs, level + delta, w);
+            var attrArray = [2][]const Attribute{ &.{}, &.{} };
+            const empty: [][]const Attribute = &attrArray;
+            const fieldAttrs = if (ty.getRecord()) |record|
+                (record.fieldAttributes orelse empty.ptr)
+            else
+                empty.ptr;
+            if (data.binExpr.lhs != .none) {
+                try tree.dumpNode(data.binExpr.lhs, level + delta, w);
+                if (fieldAttrs[0].len > 0) {
+                    if (tree.comp.diag.color) util.setColor(ATTRIBUTE, w);
+                    try dumpFieldAttributes(fieldAttrs[0], level + delta + half, w);
+                    if (tree.comp.diag.color) util.setColor(.reset, w);
+                }
+            }
+            if (data.binExpr.rhs != .none) {
+                try tree.dumpNode(data.binExpr.rhs, level + delta, w);
+                if (fieldAttrs[1].len > 0) {
+                    if (tree.comp.diag.color) util.setColor(ATTRIBUTE, w);
+                    try dumpFieldAttributes(fieldAttrs[1], level + delta + half, w);
+                    if (tree.comp.diag.color) util.setColor(.reset, w);
+                }
+            }
         },
 
         .UnionInitExpr => {
