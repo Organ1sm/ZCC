@@ -4266,14 +4266,11 @@ fn nodeIsNoreturn(p: *Parser, node: NodeIndex) NoreturnKind {
         .BreakStmt, .ContinueStmt, .ReturnStmt => return .yes,
         .IfThenElseStmt => {
             const data = p.data.items[p.nodes.items(.data)[@intFromEnum(node)].if3.body..];
-            switch (p.nodeIsNoreturn(data[0])) {
-                .yes, .complex => |kind| return kind,
-                .no => {},
-            }
-            switch (p.nodeIsNoreturn(data[1])) {
-                .yes, .complex => |kind| return kind,
-                .no => return .no,
-            }
+            const thenType = p.nodeIsNoreturn(data[0]);
+            const elseType = p.nodeIsNoreturn(data[1]);
+            if (thenType == .complex or elseType == .complex) return .complex;
+            if (thenType == .yes and elseType == .yes) return .yes;
+            return .no;
         },
 
         .CompoundStmtTwo => {
