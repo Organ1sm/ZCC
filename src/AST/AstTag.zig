@@ -210,6 +210,10 @@ pub const Tag = enum(u8) {
     PreIncExpr,
     /// --lhs
     PreDecExpr,
+    /// __imag un
+    ImagExpr,
+    /// __real un
+    RealExpr,
     /// lhs[rhs]  lhs is pointer/array type, rhs is integer type
     ArrayAccessExpr,
     /// first(second) second may be 0
@@ -285,13 +289,6 @@ pub const Tag = enum(u8) {
     ArrayFillerExpr,
     /// Inserted in record and scalar initilizers for represent unspecified fields.
     DefaultInitExpr,
-
-    /// Attribute argument identifier
-    AttrArgIdentifier,
-    /// rhs can be none
-    AttrParamsTwo,
-    /// range
-    AttrParams,
 
     pub fn isImplicit(tag: Tag) bool {
         return switch (tag) {

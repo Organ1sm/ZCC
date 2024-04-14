@@ -156,11 +156,15 @@ pub const Attributed = struct {
     attributes: []Attribute,
     base: Type, // base type
 
-    fn create(allocator: std.mem.Allocator, base: Type, attributes: []const Attribute) !*Attributed {
+    pub fn create(
+        allocator: std.mem.Allocator,
+        base: Type,
+        existingAttrs: []const Attribute,
+        attributes: []const Attribute,
+    ) !*Attributed {
         const attrType = try allocator.create(Attributed);
         errdefer allocator.destroy(attrType);
 
-        const existingAttrs = base.getAttributes();
         var allAttrs = try allocator.alloc(Attribute, existingAttrs.len + attributes.len);
         @memcpy(allAttrs[0..existingAttrs.len], existingAttrs);
         @memcpy(allAttrs[existingAttrs.len..], attributes);
@@ -259,11 +263,14 @@ pub const Specifier = enum {
     Float,
     Double,
     LongDouble,
+    Float80,
+    Float128,
+    ComplexFP16,
     ComplexFloat,
     ComplexDouble,
     ComplexLongDouble,
-    Float80,
-    Float128,
+    ComplexFloat80,
+    ComplexFloat128,
 
     // data.SubType
     Pointer,
@@ -288,6 +295,7 @@ pub const Specifier = enum {
     DecayedStaticArray,
     IncompleteArray,
     DecayedIncompleteArray,
+    Vector,
     // data.expr
     VariableLenArray,
     DecayedVariableLenArray,
@@ -325,7 +333,7 @@ pub fn withAttributes(self: Type, allocator: std.mem.Allocator, attributes: []co
     if (attributes.len == 0)
         return self;
 
-    const attributedType = try Type.Attributed.create(allocator, self, attributes);
+    const attributedType = try Type.Attributed.create(allocator, self, self.getAttributes(), attributes);
     return Type{ .specifier = .Attributed, .data = .{ .attributed = attributedType } };
 }
 
@@ -432,6 +440,9 @@ pub fn isFloat(ty: Type) bool {
         .FP16,
         .Float80,
         .Float128,
+        .ComplexFP16,
+        .ComplexFloat80,
+        .ComplexFloat128,
         => true,
 
         .TypeofType => ty.data.subType.isFloat(),
@@ -444,7 +455,13 @@ pub fn isFloat(ty: Type) bool {
 
 pub fn isReal(ty: Type) bool {
     return switch (ty.specifier) {
-        .ComplexFloat, .ComplexDouble, .ComplexLongDouble => false,
+        .ComplexFloat,
+        .ComplexDouble,
+        .ComplexLongDouble,
+        .ComplexFP16,
+        .ComplexFloat80,
+        .ComplexFloat128,
+        => false,
 
         .TypeofType => ty.data.subType.isReal(),
         .TypeofExpr => ty.data.expr.ty.isReal(),
@@ -597,6 +614,7 @@ pub fn getElemType(ty: Type) Type {
         .DecayedArray,
         .DecayedStaticArray,
         .DecayedIncompleteArray,
+        .Vector,
         => ty.data.array.elem,
 
         .VariableLenArray,
@@ -883,11 +901,14 @@ pub fn sizeof(ty: Type, comp: *const Compilation) ?u64 {
         .Float => 4,
         .Double => 8,
         .LongDouble => 16,
+        .Float80 => 16,
+        .Float128 => 16,
+        .ComplexFP16 => 4,
         .ComplexFloat => 8,
         .ComplexDouble => 16,
         .ComplexLongDouble => 32,
-        .Float80 => 16,
-        .Float128 => 16,
+        .ComplexFloat80 => 32,
+        .ComplexFloat128 => 32,
 
         .Pointer,
         .StaticArray,
@@ -900,7 +921,7 @@ pub fn sizeof(ty: Type, comp: *const Compilation) ?u64 {
         .DecayedTypeofExpr,
         => comp.target.ptrBitWidth() >> 3,
 
-        .Array => if (ty.data.array.elem.sizeof(comp)) |size| size * ty.data.array.len else null,
+        .Array, .Vector => if (ty.data.array.elem.sizeof(comp)) |size| size * ty.data.array.len else null,
         .Struct, .Union => if (ty.data.record.isIncomplete()) null else ty.data.record.size,
         .Enum => if (ty.data.@"enum".isIncomplete() and !ty.data.@"enum".fixed) null else ty.data.@"enum".tagType.sizeof(comp),
 
@@ -933,6 +954,7 @@ pub fn alignof(ty: Type, comp: *const Compilation) u29 {
         .VariableLenArray,
         .IncompleteArray,
         .Array,
+        .Vector,
         => ty.getElemType().alignof(comp),
 
         .Func, .VarArgsFunc, .OldStyleFunc => 4, // TODO check target
@@ -954,9 +976,17 @@ pub fn alignof(ty: Type, comp: *const Compilation) u29 {
         },
 
         .LongLong, .ULongLong => 8,
+        .Int128, .UInt128 => 16,
+        .FP16, .ComplexFP16 => 2,
         .Float, .ComplexFloat => 4,
         .Double, .ComplexDouble => 8,
         .LongDouble, .ComplexLongDouble => 16,
+
+        .Float80,
+        .Float128,
+        .ComplexFloat80,
+        .ComplexFloat128,
+        => 16,
 
         .Pointer,
         .StaticArray,
@@ -1063,6 +1093,7 @@ pub fn eql(aParam: Type, bParam: Type, comp: *const Compilation, checkQualifiers
         .Array,
         .StaticArray,
         .IncompleteArray,
+        .Vector,
         => {
             if (!std.meta.eql(a.arrayLen(), b.arrayLen()))
                 return false;
@@ -1083,6 +1114,42 @@ pub fn eql(aParam: Type, bParam: Type, comp: *const Compilation, checkQualifiers
 
 pub fn decayArray(ty: *Type) void {
     ty.specifier = @as(Type.Specifier, @enumFromInt(@intFromEnum(ty.specifier) + 1));
+}
+
+pub fn makeReal(ty: Type) Type {
+    // TODO discards attributed/typeof
+    var base = ty.canonicalize(.standard);
+    switch (base.specifier) {
+        .ComplexFP16,
+        .ComplexFloat,
+        .ComplexDouble,
+        .ComplexLongDouble,
+        .ComplexFloat80,
+        .ComplexFloat128,
+        => {
+            base.specifier = @enumFromInt(@intFromEnum(base.specifier) - 3);
+            return base;
+        },
+        else => return ty,
+    }
+}
+
+pub fn makeComplex(ty: Type) Type {
+    // TODO discards attributed/typeof
+    var base = ty.canonicalize(.standard);
+    switch (base.specifier) {
+        .ComplexFP16,
+        .ComplexFloat,
+        .ComplexDouble,
+        .ComplexLongDouble,
+        .ComplexFloat80,
+        .ComplexFloat128,
+        => {
+            base.specifier = @enumFromInt(@intFromEnum(base.specifier) + 3);
+            return base;
+        },
+        else => return ty,
+    }
 }
 
 /// Combines types recursively in the order they were parsed, uses `.void` specifier as a sentinel value.
@@ -1318,6 +1385,17 @@ fn printPrologue(ty: Type, w: anytype) @TypeOf(w).Error!bool {
         },
         .Struct => try w.print("struct {s}", .{ty.data.record.name}),
         .Union => try w.print("union {s}", .{ty.data.record.name}),
+        .Vector => {
+            const len = ty.data.array.len;
+            const elem_ty = ty.data.array.elem;
+            try w.print("__attribute__((__vector_size__({d} * sizeof(", .{len});
+            _ = try elem_ty.printPrologue(w);
+            try w.writeAll(")))) ");
+            _ = try elem_ty.printPrologue(w);
+            try w.print(" (vector of {d} '", .{len});
+            _ = try elem_ty.printPrologue(w);
+            try w.writeAll("' values)");
+        },
         else => try w.writeAll(TypeBuilder.fromType(ty).toString().?),
     }
 
@@ -1387,6 +1465,16 @@ fn printEpilogue(ty: Type, w: anytype) @TypeOf(w).Error!void {
             try ty.data.expr.ty.printEpilogue(w);
         },
 
+        .TypeofType, .TypeofExpr => {
+            const actual = ty.canonicalize(.standard);
+            try actual.printEpilogue(w);
+        },
+
+        .Attributed => {
+            const actual = ty.canonicalize(.standard);
+            try actual.printEpilogue(w);
+        },
+
         else => {},
     }
 }
@@ -1428,6 +1516,12 @@ pub fn dump(ty: Type, w: anytype) @TypeOf(w).Error!void {
             if (ty.is(.StaticArray) or ty.is(.DecayedStaticArray)) try w.writeAll("static ");
             try w.print("{d}]", .{ty.data.array.len});
             try ty.data.array.elem.dump(w);
+        },
+
+        .Vector => {
+            try w.print("vector(({d}, ", .{ty.data.array.len});
+            try ty.data.array.elem.dump(w);
+            try w.writeAll(")");
         },
 
         .IncompleteArray, .DecayedIncompleteArray => {

@@ -2986,7 +2986,7 @@ pub fn initializerItem(p: *Parser, il: *InitList, initType: Type) Error!bool {
     while (true) : (count += 1) {
         errdefer p.skipTo(.RBrace);
 
-        const firstToken = p.tokenIdx;
+        var firstToken = p.tokenIdx;
         var curType = initType;
         var curIL = il;
         var designation = false;
@@ -3097,21 +3097,32 @@ pub fn initializerItem(p: *Parser, il: *InitList, initType: Type) Error!bool {
                     try p.errToken(if (initType.isArray()) .excess_array_init else .excess_struct_init, firstToken);
                 warnedExcess = true;
             }
-        } else if (indexHint != null and try p.findScalarInitializerAt(&curIL, &curType, &indexHint.?)) {
-            saw = try p.initializerItem(curIL, curType);
-        } else if (try p.findScalarInitializer(&curIL, &curType)) {
-            saw = try p.initializerItem(curIL, curType);
-        } else if (designation) {
-            // designation overrides previous value, let existing mechanism handle it
-            saw = try p.initializerItem(curIL, curType);
-        } else {
-            // discard further values
-            var tempIL = InitList{};
-            defer tempIL.deinit(p.gpa);
-            saw = try p.initializerItem(&tempIL, Type.Void);
-            if (!warnedExcess and saw)
-                try p.errToken(if (initType.isArray()) .excess_array_init else .excess_struct_init, firstToken);
-            warnedExcess = true;
+        } else sigleItems: {
+            firstToken = p.tokenIdx;
+            var res = try p.parseAssignExpr();
+            saw = !res.empty(p);
+            if (!saw) break :sigleItems;
+
+            excess: {
+                if (indexHint) |*hint| {
+                    if (try p.findScalarInitializerAt(&curIL, &curType, res.ty, firstToken, hint)) break :excess;
+                } else if (try p.findScalarInitializer(&curIL, &curType, res.ty, firstToken)) break :excess;
+
+                if (designation) break :excess;
+                if (!warnedExcess) try p.errToken(if (initType.isArray()) .excess_array_init else .excess_struct_init, firstToken);
+                warnedExcess = true;
+
+                break :sigleItems;
+            }
+
+            const arr = try p.coerceArrayInit(&res, firstToken, curType);
+            if (!arr) try p.coerceInit(&res, firstToken, curType);
+            if (curIL.tok != 0) {
+                try p.errToken(.initializer_overrides, firstToken);
+                try p.errToken(.previous_initializer, curIL.tok);
+            }
+            curIL.node = res.node;
+            curIL.tok = firstToken;
         }
 
         if (!saw) {
@@ -3142,18 +3153,24 @@ pub fn initializerItem(p: *Parser, il: *InitList, initType: Type) Error!bool {
 }
 
 /// returns true if the value is unused
-fn findScalarInitializerAt(p: *Parser, il: **InitList, ty: *Type, startIdx: *usize) Error!bool {
+fn findScalarInitializerAt(
+    p: *Parser,
+    il: **InitList,
+    ty: *Type,
+    actualTy: Type,
+    firstToken: TokenIndex,
+    startIdx: *usize,
+) Error!bool {
     if (ty.isArray()) {
+        if (il.*.node != .none)
+            return false;
         startIdx.* += 1;
 
         const arrType = ty.*;
         const elemCount = arrType.arrayLen() orelse std.math.maxInt(usize);
         if (elemCount == 0) {
-            if (p.getCurrToken() != .LBrace) {
-                try p.err(.empty_aggregate_init_braces);
-                return error.ParsingFailed;
-            }
-            return false;
+            try p.errToken(.empty_aggregate_init_braces, firstToken);
+            return error.ParsingFailed;
         }
 
         const elemType = arrType.getElemType();
@@ -3161,27 +3178,26 @@ fn findScalarInitializerAt(p: *Parser, il: **InitList, ty: *Type, startIdx: *usi
         if (startIdx.* < elemCount) {
             ty.* = elemType;
             il.* = try arrIL.find(p.gpa, startIdx.*);
-            _ = try p.findScalarInitializer(il, ty);
+            _ = try p.findScalarInitializer(il, ty, actualTy, firstToken);
             return true;
         }
         return false;
     } else if (ty.get(.Struct)) |structType| {
-        startIdx.* += 1;
-        const fieldCount = structType.data.record.fields.len;
-        if (fieldCount == 0) {
-            if (p.getCurrToken() != .LBrace) {
-                try p.err(.empty_aggregate_init_braces);
-                return error.ParsingFailed;
-            }
+        if (il.*.node != .none)
             return false;
+        startIdx.* += 1;
+        const fields = structType.data.record.fields;
+        if (fields.len == 0) {
+            try p.errToken(.empty_aggregate_init_braces, firstToken);
+            return error.ParsingFailed;
         }
 
         const structIL = il.*;
-        if (startIdx.* < fieldCount) {
-            const field = structType.data.record.fields[startIdx.*];
+        if (startIdx.* < fields.len) {
+            const field = fields[startIdx.*];
             ty.* = field.ty;
             il.* = try structIL.find(p.gpa, startIdx.*);
-            _ = try p.findScalarInitializer(il, ty);
+            _ = try p.findScalarInitializer(il, ty, actualTy, firstToken);
             return true;
         }
         return false;
@@ -3192,61 +3208,71 @@ fn findScalarInitializerAt(p: *Parser, il: **InitList, ty: *Type, startIdx: *usi
 }
 
 /// Returns true if the value is unused.
-fn findScalarInitializer(p: *Parser, il: **InitList, ty: *Type) Error!bool {
+fn findScalarInitializer(
+    p: *Parser,
+    il: **InitList,
+    ty: *Type,
+    actualTy: Type,
+    firstToken: TokenIndex,
+) Error!bool {
     if (ty.isArray()) {
+        if (il.*.node != .none) return false;
         var index = il.*.list.items.len;
         if (index != 0) index = il.*.list.items[index - 1].index;
 
         const arrayType = ty.*;
         const elemCount = arrayType.arrayLen() orelse std.math.maxInt(usize);
         if (elemCount == 0) {
-            if (p.getCurrToken() != .LBrace) {
-                try p.err(.empty_aggregate_init_braces);
-                return error.ParsingFailed;
-            }
-            return false;
+            try p.errToken(.empty_aggregate_init_braces, firstToken);
+            return error.ParsingFailed;
         }
-        const elemType = arrayType.getElemType();
+
+        const elemTy = arrayType.getElemType();
         const arrayIL = il.*;
         while (index < elemCount) : (index += 1) {
-            ty.* = elemType;
+            ty.* = elemTy;
             il.* = try arrayIL.find(p.gpa, index);
-            if (try p.findScalarInitializer(il, ty))
+            if (il.*.node == .none and actualTy.eql(elemTy, p.comp, false))
+                return true;
+            if (try p.findScalarInitializer(il, ty, actualTy, firstToken))
                 return true;
         }
         return false;
     } else if (ty.get(.Struct)) |structType| {
+        if (il.*.node != .none) return false;
+        if (actualTy.eql(ty.*, p.pp.comp, false)) return true;
+
         var index = il.*.list.items.len;
         if (index != 0) index = il.*.list.items[index - 1].index + 1;
 
-        const fieldCount = structType.data.record.fields.len;
-        if (fieldCount == 0) {
-            if (p.getCurrToken() == .LBrace) {
-                try p.err(.empty_aggregate_init_braces);
-                return error.ParsingFailed;
-            }
-            return false;
+        const fields = structType.data.record.fields;
+        if (fields.len == 0) {
+            try p.errToken(.empty_aggregate_init_braces, firstToken);
+            return error.ParsingFailed;
         }
         const structIL = il.*;
-        while (index < fieldCount) : (index += 1) {
-            const field = structType.data.record.fields[index];
+        while (index < fields.len) : (index += 1) {
+            const field = fields[index];
             ty.* = field.ty;
             il.* = try structIL.find(p.gpa, index);
-            if (try p.findScalarInitializer(il, ty))
+            if (il.*.node == .none and actualTy.eql(field.ty, p.comp, false))
+                return true;
+            if (try p.findScalarInitializer(il, ty, actualTy, firstToken))
                 return true;
         }
         return false;
     } else if (ty.get(.Union)) |unionType| {
-        if (unionType.data.record.fields.len == 0) {
-            if (p.getCurrToken() == .LBrace) {
-                try p.err(.empty_aggregate_init_braces);
-                return error.ParsingFailed;
-            }
+        if (il.*.node != .none)
             return false;
+        if (actualTy.eql(ty.*, p.pp.comp, false))
+            return true;
+        if (unionType.data.record.fields.len == 0) {
+            try p.errToken(.empty_aggregate_init_braces, firstToken);
+            return error.ParsingFailed;
         }
         ty.* = unionType.data.record.fields[0].ty;
         il.* = try il.*.find(p.gpa, 0);
-        if (try p.findScalarInitializer(il, ty))
+        if (try p.findScalarInitializer(il, ty, actualTy, firstToken))
             return true;
         return false;
     }
@@ -3255,6 +3281,8 @@ fn findScalarInitializer(p: *Parser, il: **InitList, ty: *Type) Error!bool {
 
 fn findAggregateInitializer(p: *Parser, il: **InitList, ty: *Type, startIdx: *?usize) Error!bool {
     if (ty.isArray()) {
+        if (il.*.node != .none)
+            return false;
         var index = il.*.list.items.len;
         if (index != 0) index = il.*.list.items[index - 1].index + 1;
         if (startIdx.*) |*some| {
@@ -3272,6 +3300,8 @@ fn findAggregateInitializer(p: *Parser, il: **InitList, ty: *Type, startIdx: *?u
         }
         return false;
     } else if (ty.get(.Struct)) |structType| {
+        if (il.*.node != .none)
+            return false;
         var index = il.*.list.items.len;
         if (index != 0) index = il.*.list.items[index - 1].index + 1;
         if (startIdx.*) |*some| {
@@ -3287,6 +3317,8 @@ fn findAggregateInitializer(p: *Parser, il: **InitList, ty: *Type, startIdx: *?u
         }
         return false;
     } else if (ty.get(.Union)) |unionType| {
+        if (il.*.node != .none)
+            return false;
         if (startIdx.*) |_| return false; // overrides
         if (unionType.data.record.fields.len == 0)
             return false;
@@ -3450,6 +3482,9 @@ fn convertInitList(p: *Parser, il: InitList, initType: Type) Error!NodeIndex {
         return try p.addNode(arrInitNode);
     } else if (initType.get(.Struct)) |structType| {
         std.debug.assert(!structType.hasIncompleteSize());
+
+        if (il.node != .none)
+            return il.node;
 
         const listBuffTop = p.listBuffer.items.len;
         defer p.listBuffer.items.len = listBuffTop;
@@ -5132,7 +5167,7 @@ fn offsetofMemberDesignator(p: *Parser, baseType: Type) Error!Result {
 /// unaryExpr
 ///  : primary-expression suffix-expression*
 ///  | '&&' identifier
-///  | ('&' | '*' | '+' | '-' | '~' | '!' | '++' | '--' | `__extension__`) cast-expression
+///  | ('&' | '*' | '+' | '-' | '~' | '!' | '++' | '--' | `__extension__` | `__imag__` | `__real__`) cast-expression
 ///  | `sizeof` unary-expression
 ///  | `sizeof` '(' type-name ')'
 ///  | alignof '(' type-name ')'
@@ -5417,6 +5452,47 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
             var child = try p.parseCastExpr();
             try child.expect(p);
             return child;
+        },
+
+        .KeywordImag1, .KeywordImag2 => {
+            const imagToken = p.tokenIdx;
+            p.tokenIdx += 1;
+
+            var operand = try p.parseCastExpr();
+            try operand.expect(p);
+            try operand.lvalConversion(p);
+            if (!operand.ty.isInt() and !operand.ty.isFloat()) {
+                try p.errStr(.invalid_imag, imagToken, try p.typeStr(operand.ty));
+            } else if (!operand.ty.isReal()) {
+                // convert _Complex F to F
+                // TODO handle _Complex integers when added
+                var newTy = operand.ty.canonicalize(.standard);
+                newTy.specifier = @enumFromInt(@intFromEnum(newTy.specifier) - 3);
+                operand.ty = newTy;
+            }
+            try operand.un(p, .ImagExpr);
+            return operand;
+        },
+
+        .KeywordReal1, .KeywordReal2 => {
+            const realToken = p.tokenIdx;
+            p.tokenIdx += 1;
+
+            var operand = try p.parseCastExpr();
+            try operand.expect(p);
+            try operand.lvalConversion(p);
+            if (!operand.ty.isInt() and !operand.ty.isFloat()) {
+                try p.errStr(.invalid_real, realToken, try p.typeStr(operand.ty));
+            } else if (!operand.ty.isReal()) {
+                // convert _Complex F to F
+                // TODO handle _Complex integers when added
+                var newTy = operand.ty.canonicalize(.standard);
+                newTy.specifier = @enumFromInt(@intFromEnum(newTy.specifier) - 3);
+                operand.ty = newTy;
+            }
+
+            try operand.un(p, .RealExpr);
+            return operand;
         },
 
         else => {

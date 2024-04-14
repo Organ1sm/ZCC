@@ -189,6 +189,32 @@ pub fn adjustTypes(a: *Result, token: TokenIndex, b: *Result, p: *Parser, kind: 
     try a.lvalConversion(p);
     try b.lvalConversion(p);
 
+    const aVec = a.ty.is(.Vector);
+    const bVec = b.ty.is(.Vector);
+    if (aVec and bVec) {
+        if (a.ty.eql(b.ty, p.comp, false))
+            return a.shouldEval(b, p);
+        return a.invalidBinTy(token, b, p);
+    } else if (aVec) {
+        if (b.coerceExtra(p, a.ty.getElemType(), token, .testCoerce)) {
+            try b.saveValue(p);
+            try b.implicitCast(p, .VectorSplat);
+            return a.shouldEval(b, p);
+        } else |err| switch (err) {
+            error.CoercionFailed => return a.invalidBinTy(token, b, p),
+            else => |e| return e,
+        }
+    } else if (bVec) {
+        if (a.coerceExtra(p, b.ty.getElemType(), token, .testCoerce)) {
+            try a.saveValue(p);
+            try a.implicitCast(p, .VectorSplat);
+            return a.shouldEval(b, p);
+        } else |err| switch (err) {
+            error.CoercionFailed => return a.invalidBinTy(token, b, p),
+            else => |e| return e,
+        }
+    }
+
     const aIsInt = a.ty.isInt();
     const bIsInt = b.ty.isInt();
 
@@ -357,6 +383,10 @@ pub fn boolCast(res: *Result, p: *Parser, boolType: Type, tok: TokenIndex) Error
         const oldValue = res.value;
         const valueChangeKind = res.value.floatToInt(res.ty, boolType, p.comp);
         try res.floatToIntWarning(p, boolType, oldValue, valueChangeKind, tok);
+        if (!res.ty.isReal()) {
+            res.ty = res.ty.makeReal();
+            try res.implicitCast(p, .ComplexFloatToReal);
+        }
         res.ty = boolType;
         try res.implicitCast(p, .FloatToBool);
     }
@@ -394,6 +424,10 @@ pub fn intCast(res: *Result, p: *Parser, intType: Type, tok: TokenIndex) Error!v
         const valueChangeKind = res.value.floatToInt(res.ty, intType, p.comp);
         // Warn if there are issues with the float to int conversion.
         try res.floatToIntWarning(p, intType, oldValue, valueChangeKind, tok);
+        if (!res.ty.isReal()) {
+            res.ty = res.ty.makeReal();
+            try res.implicitCast(p, .ComplexFloatToReal);
+        }
         res.ty = intType;
         try res.implicitCast(p, .FloatToInt);
     }
@@ -419,16 +453,39 @@ fn floatToIntWarning(res: *Result, p: *Parser, intTy: Type, oldValue: Value, cha
 pub fn floatCast(res: *Result, p: *Parser, floatType: Type) Error!void {
     if (res.ty.is(.Bool)) {
         res.value.intToFloat(res.ty, floatType, p.comp);
-        res.ty = floatType;
+        res.ty = floatType.makeReal();
         try res.implicitCast(p, .BoolToFloat);
+        if (!floatType.isReal()) {
+            try res.implicitCast(p, .RealToComplexFloat);
+        }
     } else if (res.ty.isInt()) {
         res.value.intToFloat(res.ty, floatType, p.comp);
-        res.ty = floatType;
+        res.ty = floatType.makeReal();
         try res.implicitCast(p, .IntToFloat);
+        if (!floatType.isReal()) {
+            try res.implicitCast(p, .RealToComplexFloat);
+        }
     } else if (!res.ty.eql(floatType, p.comp, true)) {
         res.value.floatCast(res.ty, floatType, p.comp);
-        res.ty = floatType;
-        try res.implicitCast(p, .FloatCast);
+        const oldReal = res.ty.isReal();
+        const newReal = floatType.isReal();
+        if (oldReal and newReal) {
+            res.ty = floatType;
+            try res.implicitCast(p, .FloatCast);
+        } else if (oldReal) {
+            res.ty = floatType.makeReal();
+            try res.implicitCast(p, .FloatCast);
+            res.ty = floatType;
+            try res.implicitCast(p, .RealToComplexFloat);
+        } else if (newReal) {
+            res.ty = res.ty.makeReal();
+            try res.implicitCast(p, .ComplexFloatToReal);
+            res.ty = floatType;
+            try res.implicitCast(p, .FloatCast);
+        } else {
+            res.ty = floatType;
+            try res.implicitCast(p, .ComplexFloatCast);
+        }
     }
 }
 
@@ -458,24 +515,42 @@ pub fn nullCast(res: *Result, p: *Parser, ptrType: Type) Error!void {
 
 fn usualArithmeticConversion(lhs: *Result, rhs: *Result, p: *Parser, tok: TokenIndex) Error!void {
     // if either is a float cast to that type
-    const floatTypes = [3][2]Type.Specifier{
-        .{ .ComplexLongDouble, .LongDouble },
-        .{ .ComplexDouble, .Double },
-        .{ .ComplexFloat, .Float },
-    };
-    const lhsSpec = lhs.ty.canonicalize(.standard).specifier;
-    const rhsSpec = rhs.ty.canonicalize(.standard).specifier;
-    for (floatTypes) |pair| {
-        if (lhsSpec == pair[0] or lhsSpec == pair[1] or
-            rhsSpec == pair[0] or rhsSpec == pair[1])
-        {
-            const bothReal = lhs.ty.isReal() and rhs.ty.isReal();
-            const resSpec = pair[@intFromBool(bothReal)];
-            const ty = Type{ .specifier = resSpec };
-            try lhs.floatCast(p, ty);
-            try rhs.floatCast(p, ty);
-            return;
+    if (lhs.ty.isFloat() or rhs.ty.isFloat()) {
+        const floatTypes = [6][2]Type.Specifier{
+            .{ .ComplexLongDouble, .LongDouble },
+            .{ .ComplexFloat128, .Float128 },
+            .{ .ComplexFloat80, .Float80 },
+            .{ .ComplexDouble, .Double },
+            .{ .ComplexFloat, .Float },
+            .{ .ComplexFP16, .FP16 },
+        };
+
+        const lhsSpec = lhs.ty.canonicalize(.standard).specifier;
+        const rhsSpec = rhs.ty.canonicalize(.standard).specifier;
+
+        if (p.comp.target.c_type_bit_size(.longdouble) == 128) {
+            if (try lhs.floatConversion(rhs, lhsSpec, rhsSpec, p, floatTypes[0]))
+                return;
         }
+
+        if (try lhs.floatConversion(rhs, lhsSpec, rhsSpec, p, floatTypes[1]))
+            return;
+
+        if (p.comp.target.c_type_bit_size(.longdouble) == 80) {
+            if (try lhs.floatConversion(rhs, lhsSpec, rhsSpec, p, floatTypes[0]))
+                return;
+        }
+
+        if (try lhs.floatConversion(rhs, lhsSpec, rhsSpec, p, floatTypes[2]))
+            return;
+
+        if (p.comp.target.c_type_bit_size(.longdouble) == 64) {
+            if (try lhs.floatConversion(rhs, lhsSpec, rhsSpec, p, floatTypes[0])) return;
+        }
+
+        if (try lhs.floatConversion(rhs, lhsSpec, rhsSpec, p, floatTypes[3])) return;
+        if (try lhs.floatConversion(rhs, lhsSpec, rhsSpec, p, floatTypes[4])) return;
+        if (try lhs.floatConversion(rhs, lhsSpec, rhsSpec, p, floatTypes[5])) return;
     }
 
     // Do integer promotion on both operands
@@ -513,6 +588,26 @@ fn usualArithmeticConversion(lhs: *Result, rhs: *Result, p: *Parser, tok: TokenI
         try lhs.intCast(p, target, tok);
         try rhs.intCast(p, target, tok);
     }
+}
+fn floatConversion(
+    lhs: *Result,
+    rhs: *Result,
+    lhsSpec: Type.Specifier,
+    rhsSpec: Type.Specifier,
+    p: *Parser,
+    pair: [2]Type.Specifier,
+) !bool {
+    if (lhsSpec == pair[0] or lhsSpec == pair[1] or
+        rhsSpec == pair[0] or rhsSpec == pair[1])
+    {
+        const bothReal = lhs.ty.isReal() and rhs.ty.isReal();
+        const resSpec = pair[@intFromBool(bothReal)];
+        const ty = Type{ .specifier = resSpec };
+        try lhs.floatCast(p, ty);
+        try rhs.floatCast(p, ty);
+        return true;
+    }
+    return false;
 }
 
 fn invalidBinTy(a: *Result, tok: TokenIndex, b: *Result, p: *Parser) Error!bool {
@@ -561,7 +656,78 @@ pub fn castType(res: *Result, p: *Parser, to: Type, tok: TokenIndex) !void {
             try p.errStr(.invalid_cast_to_pointer, tok, try p.typeStr(res.ty));
             return error.ParsingFailed;
         }
-        castKind = AST.CastKind.fromExplicitCast(to, res.ty, p.comp);
+        const oldReal = res.ty.isReal();
+        const newReal = to.isReal();
+
+        if (to.eql(res.ty, p.comp, false)) {
+            castKind = .NoOP;
+        } else if (to.is(.Bool)) {
+            if (res.ty.isPointer()) {
+                castKind = .PointerToBool;
+            } else if (res.ty.isInt()) {
+                castKind = .IntToBool;
+            } else if (oldFloat) {
+                if (!oldReal) {
+                    res.ty = res.ty.makeReal();
+                    try res.implicitCast(p, .ComplexFloatToReal);
+                }
+                castKind = .FloatToBool;
+            }
+        } else if (to.isInt()) {
+            if (res.ty.is(.Bool)) {
+                castKind = .BoolToInt;
+            } else if (res.ty.isInt()) {
+                castKind = .IntCast;
+            } else if (res.ty.isPointer()) {
+                castKind = .PointerToInt;
+            } else if (oldFloat) {
+                if (!oldReal) {
+                    res.ty = res.ty.makeReal();
+                    try res.implicitCast(p, .ComplexFloatToReal);
+                }
+                castKind = .FloatToInt;
+            }
+        } else if (to.isPointer()) {
+            if (res.ty.isArray())
+                castKind = .ArrayToPointer
+            else if (res.ty.isPointer())
+                castKind = .Bitcast
+            else if (res.ty.isFunc())
+                castKind = .FunctionToPointer
+            else if (res.ty.is(.Bool))
+                castKind = .BoolToPointer
+            else if (res.ty.isInt()) castKind = .IntToPointer;
+        } else if (newFloat) {
+            if (res.ty.is(.Bool)) {
+                if (!newReal) {
+                    res.ty = to.makeReal();
+                    try res.implicitCast(p, .BoolToFloat);
+                    castKind = .RealToComplexFloat;
+                } else {
+                    castKind = .BoolToFloat;
+                }
+            } else if (res.ty.isInt()) {
+                if (!newReal) {
+                    res.ty = to.makeReal();
+                    try res.implicitCast(p, .IntToFloat);
+                    castKind = .RealToComplexFloat;
+                } else {
+                    castKind = .IntToFloat;
+                }
+            } else if (oldReal and newReal) {
+                castKind = .FloatCast;
+            } else if (oldReal) {
+                res.ty = to.makeReal();
+                try res.implicitCast(p, .FloatCast);
+                castKind = .RealToComplexFloat;
+            } else if (newReal) {
+                res.ty = res.ty.makeReal();
+                try res.implicitCast(p, .ComplexFloatToReal);
+                castKind = .FloatCast;
+            } else {
+                castKind = .ComplexFloatCast;
+            }
+        }
         if (res.value.tag == .unavailable) break :cast;
 
         const oldInt = res.ty.isInt() or res.ty.isPointer();
@@ -579,7 +745,7 @@ pub fn castType(res: *Result, p: *Parser, to: Type, tok: TokenIndex) !void {
             res.value.intCast(res.ty, to, p.comp);
         }
     } else {
-        try p.errStr(.invalid_cast_type, tok, try p.typeStr(res.ty));
+        try p.errStr(.invalid_cast_type, tok, try p.typeStr(to));
         return error.ParsingFailed;
     }
 
@@ -617,11 +783,12 @@ const CoerceContext = union(enum) {
     init,
     ret,
     arg: TokenIndex,
-    transparentUnion,
+    testCoerce,
 
     fn note(ctx: CoerceContext, p: *Parser) !void {
         switch (ctx) {
             .arg => |tok| try p.errToken(.parameter_here, tok),
+            .testCoerce => unreachable,
             else => {},
         }
     }
@@ -631,7 +798,7 @@ const CoerceContext = union(enum) {
             .assign, .init => return p.typePairStrExtra(dest_ty, " from incompatible type ", src_ty),
             .ret => return p.typePairStrExtra(src_ty, " from a function with incompatible result type ", dest_ty),
             .arg => return p.typePairStrExtra(src_ty, " to parameter of incompatible type ", dest_ty),
-            .transparentUnion => unreachable,
+            .testCoerce => unreachable,
         }
     }
 };
@@ -639,12 +806,12 @@ const CoerceContext = union(enum) {
 /// Perform assignment-like coercion to `dest_ty`.
 pub fn coerce(res: *Result, p: *Parser, destTy: Type, tok: TokenIndex, ctx: CoerceContext) !void {
     return res.coerceExtra(p, destTy, tok, ctx) catch |er| switch (er) {
-        error.TransparentUnionFailed => unreachable,
+        error.CoercionFailed => unreachable,
         else => |e| return e,
     };
 }
 
-const Stage1Limitation = Error || error{TransparentUnionFailed};
+const Stage1Limitation = Error || error{CoercionFailed};
 
 fn coerceExtra(res: *Result, p: *Parser, destTy: Type, tok: TokenIndex, ctx: CoerceContext) Stage1Limitation!void {
     // Subject of the coercion does not need to be qualified.
@@ -661,8 +828,8 @@ fn coerceExtra(res: *Result, p: *Parser, destTy: Type, tok: TokenIndex, ctx: Coe
             try res.intCast(p, unqualTy, tok);
             return;
         } else if (res.ty.isPointer()) {
-            if (ctx == .transparentUnion)
-                return error.TransparentUnionFailed;
+            if (ctx == .testCoerce)
+                return error.CoercionFailed;
             try p.errStr(.implicit_ptr_to_int, tok, try p.typePairStrExtra(res.ty, " to ", destTy));
             try ctx.note(p);
             try res.intCast(p, unqualTy, tok);
@@ -678,8 +845,8 @@ fn coerceExtra(res: *Result, p: *Parser, destTy: Type, tok: TokenIndex, ctx: Coe
             try res.nullCast(p, destTy);
             return;
         } else if (res.ty.isInt()) {
-            if (ctx == .transparentUnion)
-                return error.TransparentUnionFailed;
+            if (ctx == .testCoerce)
+                return error.CoercionFailed;
             try p.errStr(.implicit_int_to_ptr, tok, try p.typePairStrExtra(res.ty, " to ", destTy));
             try ctx.note(p);
             try res.ptrCast(p, unqualTy);
@@ -693,7 +860,7 @@ fn coerceExtra(res: *Result, p: *Parser, destTy: Type, tok: TokenIndex, ctx: Coe
                     .init => .ptr_init_discards_quals,
                     .ret => .ptr_ret_discards_quals,
                     .arg => .ptr_arg_discards_quals,
-                    .transparentUnion => return error.TransparentUnionFailed,
+                    .testCoerce => return error.CoercionFailed,
                 }, tok, try ctx.typePairStr(p, destTy, res.ty));
             }
             try res.ptrCast(p, unqualTy);
@@ -704,7 +871,7 @@ fn coerceExtra(res: *Result, p: *Parser, destTy: Type, tok: TokenIndex, ctx: Coe
                 .init => .incompatible_ptr_init,
                 .ret => .incompatible_return,
                 .arg => .incompatible_arg,
-                .transparentUnion => return error.TransparentUnionFailed,
+                .testCoerce => return error.CoercionFailed,
             }, tok, try ctx.typePairStr(p, destTy, res.ty));
             try ctx.note(p);
             try res.ptrCast(p, unqualTy);
@@ -718,8 +885,8 @@ fn coerceExtra(res: *Result, p: *Parser, destTy: Type, tok: TokenIndex, ctx: Coe
         if (ctx == .arg) {
             if (unqualTy.get(.Union)) |unionTy| {
                 if (destTy.hasAttribute(.transparent_union)) transparent_union: {
-                    res.coerceExtra(p, unionTy.data.record.fields[0].ty, tok, .transparentUnion) catch |err| switch (err) {
-                        error.TransparentUnionFailed => break :transparent_union,
+                    res.coerceExtra(p, unionTy.data.record.fields[0].ty, tok, .testCoerce) catch |err| switch (err) {
+                        error.CoercionFailed => break :transparent_union,
                         else => |e| return e,
                     };
                     res.node = try p.addNode(.{
@@ -731,13 +898,16 @@ fn coerceExtra(res: *Result, p: *Parser, destTy: Type, tok: TokenIndex, ctx: Coe
                     return;
                 }
             }
+        } else if (unqualTy.is(.Vector)) {
+            if (unqualTy.eql(res.ty, p.comp, false))
+                return; //ok
         }
     } else {
         if (ctx == .assign and (unqualTy.isArray() or unqualTy.isFunc())) {
             try p.errToken(.not_assignable, tok);
             return;
-        } else if (ctx == .transparentUnion) {
-            return error.TransparentUnionFailed;
+        } else if (ctx == .testCoerce) {
+            return error.CoercionFailed;
         }
         // This case should not be possible and an error should have already been emitted but we
         // might still have attempted to parse further so return error.ParsingFailed here to stop.
@@ -749,7 +919,7 @@ fn coerceExtra(res: *Result, p: *Parser, destTy: Type, tok: TokenIndex, ctx: Coe
         .init => .incompatible_init,
         .ret => .incompatible_return,
         .arg => .incompatible_arg,
-        .transparentUnion => return error.TransparentUnionFailed,
+        .testCoerce => return error.CoercionFailed,
     }, tok, try ctx.typePairStr(p, destTy, res.ty));
     try ctx.note(p);
 }

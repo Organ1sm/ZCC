@@ -61,10 +61,13 @@ pub const Specifier = union(enum) {
     Float80,
     Float128,
     Complex,
+    ComplexFP16,
     ComplexLong,
     ComplexFloat,
     ComplexDouble,
     ComplexLongDouble,
+    ComplexFloat80,
+    ComplexFloat128,
 
     Pointer: *Type,
     UnspecifiedVariableLenArray: *Type,
@@ -78,6 +81,8 @@ pub const Specifier = union(enum) {
     DecayedStaticArray: *Type.Array,
     IncompleteArray: *Type.Array,
     DecayedIncompleteArray: *Type.Array,
+    Vector: *Type.Array,
+
     VariableLenArray: *Type.Expr,
     DecayedVariableLenArray: *Type.Expr,
 
@@ -140,10 +145,13 @@ pub const Specifier = union(enum) {
             Specifier.Float80 => "__float80",
             Specifier.Float128 => "__float128",
             Specifier.Complex => "_Complex",
+            Specifier.ComplexFP16 => "__Complex __fp16",
             Specifier.ComplexFloat => "_Complex float",
             Specifier.ComplexLong => "_Complex long",
             Specifier.ComplexDouble => "_Complex double",
             Specifier.ComplexLongDouble => "_Complex long double",
+            Specifier.ComplexFloat80 => "_Complex __float80",
+            Specifier.ComplexFloat128 => "_Complex __float128",
 
             Specifier.Attributed => |attr| TypeBuilder.fromType(attr.base).toString(),
 
@@ -224,11 +232,14 @@ pub fn finish(b: @This(), p: *Parser) Parser.Error!Type {
         Specifier.Float => ty.specifier = .Float,
         Specifier.Double => ty.specifier = .Double,
         Specifier.LongDouble => ty.specifier = .LongDouble,
+        Specifier.ComplexFP16 => ty.specifier = .ComplexFP16,
         Specifier.Float80 => ty.specifier = .Float80,
         Specifier.Float128 => ty.specifier = .Float128,
         Specifier.ComplexFloat => ty.specifier = .ComplexFloat,
         Specifier.ComplexDouble => ty.specifier = .ComplexDouble,
         Specifier.ComplexLongDouble => ty.specifier = .ComplexLongDouble,
+        Specifier.ComplexFloat80 => ty.specifier = .ComplexFloat80,
+        Specifier.ComplexFloat128 => ty.specifier = .ComplexFloat128,
         Specifier.Complex => {
             try p.errToken(.plain_complex, p.tokenIdx - 1);
             ty.specifier = .ComplexDouble;
@@ -290,6 +301,11 @@ pub fn finish(b: @This(), p: *Parser) Parser.Error!Type {
 
         Specifier.IncompleteArray => |data| {
             ty.specifier = .IncompleteArray;
+            ty.data = .{ .array = data };
+        },
+
+        Specifier.Vector => |data| {
+            ty.specifier = .Vector;
             ty.data = .{ .array = data };
         },
 
@@ -424,131 +440,155 @@ fn combineExtra(b: *@This(), p: *Parser, new: Specifier, sourceToken: TokenIndex
     }
 
     switch (new) {
-        Specifier.Signed => b.specifier = switch (b.specifier) {
-            Specifier.None => Specifier.Signed,
-            Specifier.Char => Specifier.SChar,
-            Specifier.Short => Specifier.SShort,
-            Specifier.ShortInt => Specifier.SShortInt,
-            Specifier.Int => Specifier.SInt,
-            Specifier.Long => Specifier.SLong,
-            Specifier.LongInt => Specifier.SLongInt,
-            Specifier.LongLong => Specifier.SLongLong,
-            Specifier.LongLongInt => Specifier.SLongLongInt,
-            Specifier.Int128 => Specifier.SInt128,
+        .Signed => b.specifier = switch (b.specifier) {
+            .None => .Signed,
+            .Char => .SChar,
+            .Short => .SShort,
+            .ShortInt => .SShortInt,
+            .Int => .SInt,
+            .Long => .SLong,
+            .LongInt => .SLongInt,
+            .LongLong => .SLongLong,
+            .LongLongInt => .SLongLongInt,
+            .Int128 => .SInt128,
 
-            Specifier.Signed,
-            Specifier.SShort,
-            Specifier.SShortInt,
-            Specifier.SInt,
-            Specifier.SLong,
-            Specifier.SLongInt,
-            Specifier.SLongLong,
-            Specifier.SLongLongInt,
-            Specifier.SInt128,
+            .Signed,
+            .SShort,
+            .SShortInt,
+            .SInt,
+            .SLong,
+            .SLongInt,
+            .SLongLong,
+            .SLongLongInt,
+            .SInt128,
             => return b.duplicateSpec(p, sourceToken, "signed"),
             else => return b.cannotCombine(p, sourceToken),
         },
 
-        Specifier.Unsigned => b.specifier = switch (b.specifier) {
-            Specifier.None => Specifier.Unsigned,
-            Specifier.Char => Specifier.UChar,
-            Specifier.Short => Specifier.UShort,
-            Specifier.ShortInt => Specifier.UShortInt,
-            Specifier.Int => Specifier.UInt,
-            Specifier.Long => Specifier.ULong,
-            Specifier.LongInt => Specifier.ULongInt,
-            Specifier.LongLong => Specifier.ULongLong,
-            Specifier.LongLongInt => Specifier.ULongLongInt,
-            Specifier.Int128 => Specifier.UInt128,
-            Specifier.Unsigned,
-            Specifier.UShort,
-            Specifier.UShortInt,
-            Specifier.UInt,
-            Specifier.ULong,
-            Specifier.ULongInt,
-            Specifier.ULongLong, //
-            Specifier.ULongLongInt,
-            Specifier.UInt128,
+        .Unsigned => b.specifier = switch (b.specifier) {
+            .None => .Unsigned,
+            .Char => .UChar,
+            .Short => .UShort,
+            .ShortInt => .UShortInt,
+            .Int => .UInt,
+            .Long => .ULong,
+            .LongInt => .ULongInt,
+            .LongLong => .ULongLong,
+            .LongLongInt => .ULongLongInt,
+            .Int128 => .UInt128,
+            .Unsigned,
+            .UShort,
+            .UShortInt,
+            .UInt,
+            .ULong,
+            .ULongInt,
+            .ULongLong, //
+            .ULongLongInt,
+            .UInt128,
             => return b.duplicateSpec(p, sourceToken, "unsigned"),
             else => return b.cannotCombine(p, sourceToken),
         },
 
-        Specifier.Char => b.specifier = switch (b.specifier) {
-            Specifier.None => Specifier.Char,
-            Specifier.Unsigned => Specifier.UChar,
-            Specifier.Signed => Specifier.SChar,
+        .Char => b.specifier = switch (b.specifier) {
+            .None => .Char,
+            .Unsigned => .UChar,
+            .Signed => .SChar,
             else => return b.cannotCombine(p, sourceToken),
         },
 
-        Specifier.Short => b.specifier = switch (b.specifier) {
-            Specifier.None => Specifier.Short,
-            Specifier.Unsigned => Specifier.UShort,
-            Specifier.Signed => Specifier.SShort,
+        .Short => b.specifier = switch (b.specifier) {
+            .None => .Short,
+            .Unsigned => .UShort,
+            .Signed => .SShort,
             else => return b.cannotCombine(p, sourceToken),
         },
 
-        Specifier.Int => b.specifier = switch (b.specifier) {
-            Specifier.None => Specifier.Int,
-            Specifier.Signed => Specifier.SInt,
-            Specifier.Unsigned => Specifier.UInt,
-            Specifier.Short => Specifier.ShortInt,
-            Specifier.SShort => Specifier.SShortInt,
-            Specifier.UShort => Specifier.UShortInt,
-            Specifier.Long => Specifier.LongInt,
-            Specifier.SLong => Specifier.SLongInt,
-            Specifier.ULong => Specifier.ULongInt,
-            Specifier.LongLong => Specifier.LongLongInt,
-            Specifier.SLongLong => Specifier.SLongLongInt,
-            Specifier.ULongLong => Specifier.ULongLongInt,
+        .Int => b.specifier = switch (b.specifier) {
+            .None => .Int,
+            .Signed => .SInt,
+            .Unsigned => .UInt,
+            .Short => .ShortInt,
+            .SShort => .SShortInt,
+            .UShort => .UShortInt,
+            .Long => .LongInt,
+            .SLong => .SLongInt,
+            .ULong => .ULongInt,
+            .LongLong => .LongLongInt,
+            .SLongLong => .SLongLongInt,
+            .ULongLong => .ULongLongInt,
             else => return b.cannotCombine(p, sourceToken),
         },
 
-        Specifier.Long => b.specifier = switch (b.specifier) {
-            Specifier.None => Specifier.Long,
-            Specifier.Long => Specifier.LongLong,
-            Specifier.Unsigned => Specifier.ULong,
-            Specifier.Signed => Specifier.Long,
-            Specifier.Int => Specifier.LongInt,
-            Specifier.SInt => Specifier.SLongInt,
-            Specifier.ULong => Specifier.ULongLong,
-            Specifier.Complex => .ComplexLong,
+        .Long => b.specifier = switch (b.specifier) {
+            .None => .Long,
+            .Long => .LongLong,
+            .Unsigned => .ULong,
+            .Signed => .Long,
+            .Int => .LongInt,
+            .SInt => .SLongInt,
+            .ULong => .ULongLong,
+            .Complex => .ComplexLong,
             else => return b.cannotCombine(p, sourceToken),
         },
 
-        Specifier.Int128 => b.specifier = switch (b.specifier) {
-            Specifier.None => Specifier.Int128,
-            Specifier.Unsigned => Specifier.UInt128,
-            Specifier.Signed => Specifier.SInt128,
+        .Int128 => b.specifier = switch (b.specifier) {
+            .None => .Int128,
+            .Unsigned => .UInt128,
+            .Signed => .SInt128,
             else => return b.cannotCombine(p, sourceToken),
         },
 
-        Specifier.Float => b.specifier = switch (b.specifier) {
-            Specifier.None => Specifier.Float,
-            Specifier.Complex => Specifier.ComplexFloat,
+        .FP16 => b.specifier = switch (b.specifier) {
+            .None => .FP16,
+            .Complex => .ComplexFP16,
             else => return b.cannotCombine(p, sourceToken),
         },
 
-        Specifier.Double => b.specifier = switch (b.specifier) {
-            Specifier.None => Specifier.Double,
-            Specifier.Long => Specifier.LongDouble,
-            Specifier.Complex => Specifier.ComplexDouble,
-            Specifier.ComplexLong => Specifier.ComplexLongDouble,
+        .Float => b.specifier = switch (b.specifier) {
+            .None => .Float,
+            .Complex => .ComplexFloat,
+            else => return b.cannotCombine(p, sourceToken),
+        },
+
+        .Double => b.specifier = switch (b.specifier) {
+            .None => .Double,
+            .Long => .LongDouble,
+            .Complex => .ComplexDouble,
+            .ComplexLong => .ComplexLongDouble,
 
             else => return b.cannotCombine(p, sourceToken),
         },
 
-        Specifier.Complex => b.specifier = switch (b.specifier) {
-            Specifier.None => Specifier.Complex,
-            Specifier.Long => Specifier.ComplexLong,
-            Specifier.Float => Specifier.ComplexFloat,
-            Specifier.Double => Specifier.ComplexDouble,
-            Specifier.LongDouble => Specifier.ComplexLongDouble,
+        .Float80 => b.specifier = switch (b.specifier) {
+            .None => .Float80,
+            .Complex => .ComplexFloat80,
+            else => return b.cannotCombine(p, sourceToken),
+        },
 
-            Specifier.Complex,
-            Specifier.ComplexLong,
-            Specifier.ComplexFloat,
-            Specifier.ComplexDouble, //
-            Specifier.ComplexLongDouble,
+        .Float128 => b.specifier = switch (b.specifier) {
+            .None => .Float128,
+            .Complex => .ComplexFloat128,
+            else => return b.cannotCombine(p, sourceToken),
+        },
+
+        .Complex => b.specifier = switch (b.specifier) {
+            .None => .Complex,
+            .Long => .ComplexLong,
+            .FP16 => .ComplexFP16,
+            .Float => .ComplexFloat,
+            .Double => .ComplexDouble,
+            .LongDouble => .ComplexLongDouble,
+            .Float80 => .ComplexFloat80,
+            .Float128 => .ComplexFloat128,
+
+            .Complex,
+            .ComplexFP16,
+            .ComplexLong,
+            .ComplexFloat,
+            .ComplexDouble,
+            .ComplexLongDouble,
+            .ComplexFloat80,
+            .ComplexFloat128,
             => return b.duplicateSpec(p, sourceToken, "_Complex"),
             else => return b.cannotCombine(p, sourceToken),
         },
@@ -583,9 +623,13 @@ pub fn fromType(ty: Type) Specifier {
         .LongDouble => Specifier.LongDouble,
         .Float80 => Specifier.Float80,
         .Float128 => Specifier.Float128,
+
+        .ComplexFP16 => Specifier.ComplexFP16,
         .ComplexFloat => Specifier.ComplexFloat,
         .ComplexDouble => Specifier.ComplexDouble,
         .ComplexLongDouble => Specifier.ComplexLongDouble,
+        .ComplexFloat80 => Specifier.ComplexFloat80,
+        .ComplexFloat128 => Specifier.ComplexFloat128,
 
         .Pointer => .{ .Pointer = ty.data.subType },
         .UnspecifiedVariableLenArray => .{ .UnspecifiedVariableLenArray = ty.data.subType },
@@ -599,6 +643,7 @@ pub fn fromType(ty: Type) Specifier {
         .DecayedStaticArray => .{ .DecayedStaticArray = ty.data.array },
         .IncompleteArray => .{ .IncompleteArray = ty.data.array },
         .DecayedIncompleteArray => .{ .DecayedIncompleteArray = ty.data.array },
+        .Vector => .{ .Vector = ty.data.array },
         .VariableLenArray => .{ .VariableLenArray = ty.data.expr },
         .DecayedVariableLenArray => .{ .DecayedVariableLenArray = ty.data.expr },
         .Struct => .{ .Struct = ty.data.record },

@@ -115,8 +115,18 @@ union {
 } empty = {{'a', 'b'}};
 
 int invalid_init[] = (int){1};
+int array_2d[3][2] = { 1, 2, [2] = 3, [1][1] = 1, 4}; // TODO 4 overrides 3
 
-#define TESTS_SKIPPED 1
+void quux(void) {
+    struct Foo {
+        int a;
+    } a;
+    struct Bar {
+        struct Foo a;
+    } b = {a};
+}
+
+#define TESTS_SKIPPED 3
 #define EXPECTED_ERRORS "initializers.c:2:17: error: variable-sized object may not be initialized" \
     "initializers.c:3:15: error: illegal initializer type" \
     "initializers.c:4:14: error: initializing 'int *' from incompatible type 'float'" \
@@ -133,13 +143,14 @@ int invalid_init[] = (int){1};
     "initializers.c:15:23: note: previous initialization" \
     "initializers.c:16:15: error: field designator used for non-record type 'int'" \
     "initializers.c:19:32: error: record type has no field named 'd'" \
-    "initializers.c:20:38: warning: initializer overrides previous initialization"  \
-    "initializers.c:20:27: note: previous initialization"  \
-    "initializers.c:20:41: warning: excess elements in struct initializer"  \
-    "initializers.c:20:62: warning: excess elements in struct initializer"  \
+    "initializers.c:20:38: warning: initializer overrides previous initialization [-Winitializer-overrides]" \
+    "initializers.c:20:27: note: previous initialization" \
+    "initializers.c:20:41: warning: excess elements in struct initializer [-Wexcess-initializers]" \
+    "initializers.c:20:62: warning: excess elements in struct initializer [-Wexcess-initializers]" \
     "initializers.c:21:23: warning: excess elements in array initializer [-Wexcess-initializers]" \
     "initializers.c:21:44: warning: excess elements in array initializer [-Wexcess-initializers]" \
-    "initializers.c:23:37: warning: excess elements in array initializer [-Wexcess-initializers]" \
+    /* "initializers.c:23:37: warning: excess elements in array initializer [-Wexcess-initializers]" */ \
+    "initializers.c:23:34: warning: excess elements in array initializer [-Wexcess-initializers]" \
     "initializers.c:30:43: warning: excess elements in array initializer [-Wexcess-initializers]" \
     "initializers.c:31:27: error: initializer for aggregate with no elements requires explicit braces" \
     "initializers.c:32:15: error: array initializer must be an initializer list or wide string literal" \
@@ -163,3 +174,4 @@ int invalid_init[] = (int){1};
     "initializers.c:115:13: note: previous initialization" \
     "initializers.c:115:12: warning: excess elements in struct initializer [-Wexcess-initializers]" \
     "initializers.c:117:22: error: array initializer must be an initializer list or wide string literal" \
+

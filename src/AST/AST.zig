@@ -194,37 +194,20 @@ pub const CastKind = enum(u8) {
     IntCast,
     /// Convert one floating type to another
     FloatCast,
+    /// Convert one complex floating type to another
+    ComplexFloatCast,
+    /// Convert real part of complex float to a complex float
+    ComplexFloatToReal,
+    /// Create a complex floating type using operand as the real part
+    RealToComplexFloat,
     /// Convert type to void
     ToVoid,
     /// Convert a literal 0 to a null pointer
     NullToPointer,
     /// GNU cast-to-union extension
     UnionCast,
-
-    pub fn fromExplicitCast(to: Type, from: Type, comp: *Compilation) CastKind {
-        if (to.eql(from, comp, false)) return .NoOP;
-        if (to.is(.Bool)) {
-            if (from.isPointer()) return .PointerToBool;
-            if (from.isInt()) return .IntToBool;
-            if (from.isFloat()) return .FloatToBool;
-        } else if (to.isInt()) {
-            if (from.is(.Bool)) return .BoolToInt;
-            if (from.isInt()) return .IntCast;
-            if (from.isPointer()) return .PointerToInt;
-            if (from.isFloat()) return .FloatToInt;
-        } else if (to.isPointer()) {
-            if (from.isArray()) return .ArrayToPointer;
-            if (from.isPointer()) return .Bitcast;
-            if (from.isFunc()) return .FunctionToPointer;
-            if (from.is(.Bool)) return .BoolToPointer;
-            if (from.isInt()) return .IntToPointer;
-        } else if (to.isFloat()) {
-            if (from.is(.Bool)) return .BoolToFloat;
-            if (from.isInt()) return .IntToFloat;
-            if (from.isFloat()) return .FloatCast;
-        }
-        unreachable;
-    }
+    ///Create vector where each value is same as the input scalar
+    VectorSplat,
 };
 
 pub fn isLValue(nodes: Node.List.Slice, extra: []const NodeIndex, valueMap: ValueMap, node: NodeIndex) bool {
@@ -496,7 +479,6 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
         .EnumDecl,
         .StructDecl,
         .UnionDecl,
-        .AttrParams,
         => {
             const maybeFieldAttrs = if (ty.getRecord()) |record| record.fieldAttributes else null;
             for (tree.data[data.range.start..data.range.end], 0..) |stmt, i| {
@@ -521,7 +503,6 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
         .EnumDeclTwo,
         .StructDeclTwo,
         .UnionDeclTwo,
-        .AttrParamsTwo,
         => {
             var attrArray = [2][]const Attribute{ &.{}, &.{} };
             const empty: [][]const Attribute = &attrArray;
@@ -823,15 +804,6 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
             }
         },
 
-        .AttrArgIdentifier => {
-            try w.writeByteNTimes(' ', level + half);
-            if (tree.comp.diag.color)
-                util.setColor(ATTRIBUTE, w);
-            try w.print("name: {s}\n", .{tree.getTokenSlice(data.declRef)});
-            if (tree.comp.diag.color)
-                util.setColor(.reset, w);
-        },
-
         .CallExpr => {
             try w.writeByteNTimes(' ', level + half);
             try w.writeAll("lhs:\n");
@@ -937,6 +909,8 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
         .BoolNotExpr,
         .PreIncExpr,
         .PreDecExpr,
+        .ImagExpr,
+        .RealExpr,
         .PostIncExpr,
         .PostDecExpr,
         .ParenExpr,

@@ -223,6 +223,10 @@ pub const TokenType = enum(u8) {
     KeywordFloat80,
     KeywordFloat128,
     KeywordInt128,
+    KeywordImag1,
+    KeywordImag2,
+    KeywordReal1,
+    KeywordReal2,
 
     // clang keywords
     KeywordFp16,
@@ -586,6 +590,10 @@ pub const TokenType = enum(u8) {
             .KeywordFloat80 => "__float80",
             .KeywordFloat128 => "__float128",
             .KeywordInt128 => "__int128",
+            .KeywordImag1 => "__imag",
+            .KeywordImag2 => "__imag__",
+            .KeywordReal1 => "__real",
+            .KeywordReal2 => "__real__",
             .KeywordFp16 => "__fp16",
             .KeywordMSInt64_ => "_int64",
             .KeywordMSInt64__ => "__int64",
