@@ -194,6 +194,12 @@ pub const CastKind = enum(u8) {
     IntCast,
     /// Convert one floating type to another
     FloatCast,
+    /// Convert one complex floating type to another
+    ComplexFloatCast,
+    /// Convert real part of complex float to a complex float
+    ComplexFloatToReal,
+    /// Create a complex floating type using operand as the real part
+    RealToComplexFloat,
     /// Convert type to void
     ToVoid,
     /// Convert a literal 0 to a null pointer
@@ -202,31 +208,6 @@ pub const CastKind = enum(u8) {
     UnionCast,
     ///Create vector where each value is same as the input scalar
     VectorSplat,
-
-    pub fn fromExplicitCast(to: Type, from: Type, comp: *Compilation) CastKind {
-        if (to.eql(from, comp, false)) return .NoOP;
-        if (to.is(.Bool)) {
-            if (from.isPointer()) return .PointerToBool;
-            if (from.isInt()) return .IntToBool;
-            if (from.isFloat()) return .FloatToBool;
-        } else if (to.isInt()) {
-            if (from.is(.Bool)) return .BoolToInt;
-            if (from.isInt()) return .IntCast;
-            if (from.isPointer()) return .PointerToInt;
-            if (from.isFloat()) return .FloatToInt;
-        } else if (to.isPointer()) {
-            if (from.isArray()) return .ArrayToPointer;
-            if (from.isPointer()) return .Bitcast;
-            if (from.isFunc()) return .FunctionToPointer;
-            if (from.is(.Bool)) return .BoolToPointer;
-            if (from.isInt()) return .IntToPointer;
-        } else if (to.isFloat()) {
-            if (from.is(.Bool)) return .BoolToFloat;
-            if (from.isInt()) return .IntToFloat;
-            if (from.isFloat()) return .FloatCast;
-        }
-        unreachable;
-    }
 };
 
 pub fn isLValue(nodes: Node.List.Slice, extra: []const NodeIndex, valueMap: ValueMap, node: NodeIndex) bool {
