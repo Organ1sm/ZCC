@@ -543,6 +543,18 @@ pub fn defineSystemIncludes(comp: *Compilation) !void {
         break;
     } else return error.ZccIncludeNotFound;
 
+    if (comp.target.os.tag == .linux) {
+        var fib = std.heap.FixedBufferAllocator.init(&buf);
+        const tripleStr = try comp.target.linuxTriple(fib.allocator());
+        const multiarchPath = try std.fs.path.join(fib.allocator(), &.{ "/usr/include", tripleStr });
+
+        if (!std.meta.isError(std.fs.accessAbsolute(multiarchPath, .{}))) {
+            const duped = try comp.gpa.dupe(u8, multiarchPath);
+            errdefer comp.gpa.free(duped);
+            try comp.systemIncludeDirs.append(duped);
+        }
+    }
+
     try comp.systemIncludeDirs.append("/usr/include");
 }
 
