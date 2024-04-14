@@ -5167,7 +5167,7 @@ fn offsetofMemberDesignator(p: *Parser, baseType: Type) Error!Result {
 /// unaryExpr
 ///  : primary-expression suffix-expression*
 ///  | '&&' identifier
-///  | ('&' | '*' | '+' | '-' | '~' | '!' | '++' | '--' | `__extension__`) cast-expression
+///  | ('&' | '*' | '+' | '-' | '~' | '!' | '++' | '--' | `__extension__` | `__imag__` | `__real__`) cast-expression
 ///  | `sizeof` unary-expression
 ///  | `sizeof` '(' type-name ')'
 ///  | alignof '(' type-name ')'
@@ -5452,6 +5452,47 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
             var child = try p.parseCastExpr();
             try child.expect(p);
             return child;
+        },
+
+        .KeywordImag1, .KeywordImag2 => {
+            const imagToken = p.tokenIdx;
+            p.tokenIdx += 1;
+
+            var operand = try p.parseCastExpr();
+            try operand.expect(p);
+            try operand.lvalConversion(p);
+            if (!operand.ty.isInt() and !operand.ty.isFloat()) {
+                try p.errStr(.invalid_imag, imagToken, try p.typeStr(operand.ty));
+            } else if (!operand.ty.isReal()) {
+                // convert _Complex F to F
+                // TODO handle _Complex integers when added
+                var newTy = operand.ty.canonicalize(.standard);
+                newTy.specifier = @enumFromInt(@intFromEnum(newTy.specifier) - 3);
+                operand.ty = newTy;
+            }
+            try operand.un(p, .ImagExpr);
+            return operand;
+        },
+
+        .KeywordReal1, .KeywordReal2 => {
+            const realToken = p.tokenIdx;
+            p.tokenIdx += 1;
+
+            var operand = try p.parseCastExpr();
+            try operand.expect(p);
+            try operand.lvalConversion(p);
+            if (!operand.ty.isInt() and !operand.ty.isFloat()) {
+                try p.errStr(.invalid_real, realToken, try p.typeStr(operand.ty));
+            } else if (!operand.ty.isReal()) {
+                // convert _Complex F to F
+                // TODO handle _Complex integers when added
+                var newTy = operand.ty.canonicalize(.standard);
+                newTy.specifier = @enumFromInt(@intFromEnum(newTy.specifier) - 3);
+                operand.ty = newTy;
+            }
+
+            try operand.un(p, .RealExpr);
+            return operand;
         },
 
         else => {

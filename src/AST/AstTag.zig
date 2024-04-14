@@ -210,6 +210,10 @@ pub const Tag = enum(u8) {
     PreIncExpr,
     /// --lhs
     PreDecExpr,
+    /// __imag un
+    ImagExpr,
+    /// __real un
+    RealExpr,
     /// lhs[rhs]  lhs is pointer/array type, rhs is integer type
     ArrayAccessExpr,
     /// first(second) second may be 0
