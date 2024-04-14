@@ -25,7 +25,6 @@ diag: Diagnostics,
 includeDirs: std.ArrayList([]const u8),
 systemIncludeDirs: std.ArrayList([]const u8),
 outputName: ?[]const u8 = null,
-builtinHeaderPath: ?[]u8 = null,
 target: std.Target = builtin.target,
 pragmaHandlers: std.StringArrayHashMapUnmanaged(*Pragma) = .{},
 onlyPreprocess: bool = false,
@@ -66,10 +65,10 @@ pub fn deinit(comp: *Compilation) void {
     comp.sources.deinit();
     comp.diag.deinit();
     comp.includeDirs.deinit();
+    for (comp.systemIncludeDirs.items) |path|
+        comp.gpa.free(path);
     comp.systemIncludeDirs.deinit();
     comp.pragmaHandlers.deinit(comp.gpa);
-    if (comp.builtinHeaderPath) |some|
-        comp.gpa.free(some);
     comp.generatedBuffer.deinit();
     comp.builtins.deinit(comp.gpa);
 }
@@ -537,7 +536,7 @@ pub fn defineSystemIncludes(comp: *Compilation) !void {
         baseDir.access("include/stddef.h", .{}) catch continue;
 
         const path = try std.fs.path.join(comp.gpa, &.{ dirname, "include" });
-        comp.builtinHeaderPath = path;
+        errdefer comp.gpa.free(path);
         try comp.systemIncludeDirs.append(path);
 
         break;
@@ -555,7 +554,9 @@ pub fn defineSystemIncludes(comp: *Compilation) !void {
         }
     }
 
-    try comp.systemIncludeDirs.append("/usr/include");
+    const usrInclude = try comp.gpa.dupe(u8, "/usr/include");
+    errdefer comp.gpa.free(usrInclude);
+    try comp.systemIncludeDirs.append(usrInclude);
 }
 
 pub fn getSource(comp: *const Compilation, id: Source.ID) Source {
