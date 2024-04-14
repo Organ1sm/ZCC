@@ -379,6 +379,16 @@ pub fn isScalar(ty: Type) bool {
     return ty.isInt() or ty.isFloat() or ty.isPointer();
 }
 
+pub fn isChar(ty: Type) bool {
+    return switch (ty.specifier) {
+        .Char, .SChar, .UChar => true,
+        .TypeofType => ty.data.subType.isChar(),
+        .TypeofExpr => ty.data.expr.ty.isChar(),
+        .Attributed => ty.data.attributed.base.isChar(),
+        else => false,
+    };
+}
+
 pub fn isInt(ty: Type) bool {
     return switch (ty.specifier) {
         .Enum,

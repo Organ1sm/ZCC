@@ -140,6 +140,9 @@ pub const Options = packed struct {
     @"ignored-pragmas": Kind = .default,
     @"enum-too-large": Kind = .default,
     @"fixed-enum-extension": Kind = .default,
+    @"designated-init": Kind = .default,
+    @"attribute-warning": Kind = .default,
+    @"invalid-noreturn": Kind = .default,
 };
 
 list: std.ArrayListUnmanaged(Message) = .{},

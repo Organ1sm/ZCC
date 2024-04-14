@@ -70,6 +70,7 @@ paramBuffer: std.ArrayList(Type.Function.Param),
 enumBuffer: std.ArrayList(Type.Enum.Field),
 recordBuffer: std.ArrayList(Type.Record.Field),
 attrBuffer: std.MultiArrayList(TentativeAttribute) = .{},
+attrApplicationBuffer: std.ArrayListUnmanaged(Attribute) = .{},
 
 // configuration
 noEval: bool = false,
@@ -377,14 +378,6 @@ pub fn todo(p: *Parser, msg: []const u8) Error {
     return error.ParsingFailed;
 }
 
-pub fn ignoredAttrString(p: *Parser, attr: Attribute.Tag, context: Attribute.ParseContext) ![]const u8 {
-    const stringTop = p.strings.items.len;
-    defer p.strings.items.len = stringTop;
-
-    try p.strings.writer().print("Attribute '{s}' ignored in {s} context", .{ @tagName(attr), @tagName(context) });
-    return try p.comp.diag.arena.allocator().dupe(u8, p.strings.items[stringTop..]);
-}
-
 pub fn typeStr(p: *Parser, ty: Type) ![]const u8 {
     if (TypeBuilder.fromType(ty).toString()) |str| return str;
     const stringsTop = p.strings.items.len;
@@ -444,12 +437,33 @@ pub fn floatValueChangedStr(p: *Parser, res: *Result, oldValue: f64, intTy: Type
 /// @param declToken The token index where the type is declared.
 /// @return Returns error.ParsingFailed if the type is unavailable, otherwise void.
 fn checkDeprecatedUnavailable(p: *Parser, ty: Type, usageToken: TokenIndex, declToken: TokenIndex) !void {
+    if (ty.getAttribute(.@"error")) |@"error"| {
+        const stringsTop = p.strings.items.len;
+        defer p.strings.items.len = stringsTop;
+
+        const w = p.strings.writer();
+        try w.print("call to '{s}' declared with attribute error: {s}", .{ p.getTokenSlice(@"error".__name_token), @"error".msg });
+        const str = try p.comp.diag.arena.allocator().dupe(u8, p.strings.items[stringsTop..]);
+        try p.errStr(.error_attribute, usageToken, str);
+    }
+
+    if (ty.getAttribute(.warning)) |warning| {
+        const stringsTop = p.strings.items.len;
+        defer p.strings.items.len = stringsTop;
+
+        const w = p.strings.writer();
+        try w.print("call to '{s}' declared with attribute warning: {s}", .{ p.getTokenSlice(warning.__name_token), warning.msg });
+        const str = try p.comp.diag.arena.allocator().dupe(u8, p.strings.items[stringsTop..]);
+        try p.errStr(.warning_attribute, usageToken, str);
+    }
+
     // Check if the type has an 'unavailable' attribute and report it
     if (ty.getAttribute(.unavailable)) |unavailable| {
         try p.errDeprecated(.unavailable, usageToken, unavailable.msg);
         try p.errStr(.unavailable_note, unavailable.__name_token, p.getTokenSlice(declToken));
         return error.ParsingFailed; // Abort parsing due to 'unavailable' type
     }
+
     // Check if the type has a 'deprecated' attribute and report it
     else if (ty.getAttribute(.deprecated)) |deprecated| {
         try p.errDeprecated(.deprecated_declarations, usageToken, deprecated.msg);
@@ -596,6 +610,7 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
         p.recordBuffer.deinit();
         p.recordMembers.deinit(pp.comp.gpa);
         p.attrBuffer.deinit(pp.comp.gpa);
+        p.attrApplicationBuffer.deinit(pp.comp.gpa);
     }
 
     errdefer {
@@ -786,11 +801,6 @@ fn skipTo(p: *Parser, id: TokenType) void {
     }
 }
 
-pub fn withAttributes(p: *Parser, ty: Type, start: usize) !Type {
-    const attrs = p.attrBuffer.items(.attr)[start..];
-    return ty.withAttributes(p.arena, attrs);
-}
-
 /// declaration
 ///  : declaration-specifiers init-declarator-list? ';'
 ///  | attribute-specifier declaration-specifiers init-declarator-list? ';'
@@ -826,23 +836,41 @@ fn parseDeclaration(p: *Parser) Error!bool {
     };
 
     if (declSpec.noreturn) |token| {
-        const attr = Attribute{ .tag = .noreturn, .args = .{ .noreturn = {} } };
+        const attr = Attribute{ .tag = .noreturn, .args = .{ .noreturn = {} }, .syntax = .keyword };
         try p.attrBuffer.append(p.gpa, .{ .attr = attr, .tok = token });
     }
 
-    try declSpec.warnIgnoredAttrs(p, attrBufferTop);
-    var ID = (try p.parseInitDeclarator(&declSpec)) orelse {
-        // eat ';'
-        _ = try p.expectToken(.Semicolon);
-        if (declSpec.type.is(.Enum) or (declSpec.type.isRecord() and !declSpec.type.isAnonymousRecord() and !declSpec.type.isTypeof()))
+    var ID = (try p.parseInitDeclarator(&declSpec, attrBufferTop)) orelse {
+        _ = try p.expectToken(.Semicolon); // eat ';'
+        if (declSpec.type.is(.Enum) or
+            (declSpec.type.isRecord() and !declSpec.type.isAnonymousRecord() and !declSpec.type.isTypeof()))
+        {
+            const specifier = declSpec.type.canonicalize(.standard).specifier;
+            const attrs = p.attrBuffer.items(.attr)[attrBufferTop..];
+            const toks = p.attrBuffer.items(.tok)[attrBufferTop..];
+            for (attrs, 0..) |attr, i| {
+                try p.errExtra(
+                    .ignored_record_attr,
+                    toks[i],
+                    .{
+                        .ignoredRecordAttr = .{
+                            .tag = attr.tag,
+                            .specifier = switch (specifier) {
+                                .Enum => .@"enum",
+                                .Struct => .@"struct",
+                                .Union => .@"union",
+                                else => unreachable,
+                            },
+                        },
+                    },
+                );
+            }
             return true;
+        }
 
         try p.errToken(.missing_declaration, firstTokenIndex);
         return true;
     };
-
-    ID.d.type = try p.withAttributes(ID.d.type, attrBufferTop);
-    try p.validateAlignas(ID.d.type, null);
 
     // check for funtion definition
     if (ID.d.funcDeclarator != null and
@@ -932,8 +960,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
                         try p.errStr(.parameter_missing, d.name, name);
                     }
 
-                    d.type = try p.withAttributes(d.type, attrBufferTop);
-                    try p.validateAlignas(d.type, .alignas_on_param);
+                    d.type = try Attribute.applyParameterAttributes(p, d.type, attrBufferTop, .alignas_on_param);
 
                     // bypass redefinition check to avoid duplicate errors
                     try p.symStack.appendSymbol(.{
@@ -1034,7 +1061,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
         if (p.eat(.Comma) == null)
             break;
 
-        ID = (try p.parseInitDeclarator(&declSpec)) orelse {
+        ID = (try p.parseInitDeclarator(&declSpec, attrBufferTop)) orelse {
             try p.err(.expected_ident_or_l_paren);
             continue;
         };
@@ -1259,27 +1286,6 @@ fn parseDeclSpec(p: *Parser) Error!?DeclSpec {
     return d;
 }
 
-fn validateAlignas(p: *Parser, ty: Type, tag: ?Diagnostics.Tag) !void {
-    const base = ty.canonicalize(.standard);
-    const defaultAlign = base.alignof(p.comp);
-    for (ty.getAttributes()) |attr| {
-        if (attr.tag != .aligned) continue;
-        if (attr.args.aligned.alignment) |alignment| {
-            if (!alignment.alignas) continue;
-
-            const alignToken = attr.args.aligned.__name_token;
-            if (tag) |t|
-                try p.errToken(t, alignToken);
-
-            if (ty.isFunc()) {
-                try p.errToken(.alignas_on_func, alignToken);
-            } else if (alignment.requested < defaultAlign) {
-                try p.errExtra(.minimum_alignment, alignToken, .{ .unsigned = defaultAlign });
-            }
-        }
-    }
-}
-
 /// attribute
 ///  : attrIdentifier
 ///  | attrIdentifier '(' identifier ')'
@@ -1356,7 +1362,7 @@ fn attribute(p: *Parser, kind: Attribute.Kind, namespace: ?[]const u8) Error!?Te
         );
         return error.ParsingFailed;
     }
-    return TentativeAttribute{ .attr = .{ .tag = attr, .args = arguments }, .tok = nameToken };
+    return TentativeAttribute{ .attr = .{ .tag = attr, .args = arguments, .syntax = kind.toSyntax() }, .tok = nameToken };
 }
 
 fn diagnose(p: *Parser, attr: Attribute.Tag, arguments: *Attribute.Arguments, argIdx: u32, res: Result) ?Diagnostics.Message {
@@ -1460,17 +1466,23 @@ fn parseAttrSpec(p: *Parser) Error!void {
 const InitDeclarator = struct { d: Declarator, initializer: Result = .{} };
 
 /// init-declarator : declarator assembly? attribute-specifier? ('=' initializer)?
-fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec) Error!?InitDeclarator {
-    const attrBufferTop = p.attrBuffer.len;
-    defer p.attrBuffer.len = attrBufferTop;
+fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec, attrBufferTop: usize) Error!?InitDeclarator {
+    const thisAttrBufferTop = p.attrBuffer.len;
+    defer p.attrBuffer.len = thisAttrBufferTop;
 
     var ID = InitDeclarator{ .d = (try p.declarator(declSpec.type, .normal)) orelse return null };
 
-    try p.parseAttrSpec(); //if (ID.d.type.isFunc()) .function else .variable
+    try p.parseAttrSpec();
     _ = try p.parseAssembly(.declLable);
-    try p.parseAttrSpec(); //if (ID.d.type.isFunc()) .function else .variable
+    try p.parseAttrSpec();
 
-    ID.d.type = try p.withAttributes(ID.d.type, attrBufferTop);
+    if (declSpec.storageClass == .typedef) {
+        ID.d.type = try Attribute.applyTypeAttributes(p, ID.d.type, attrBufferTop, null);
+    } else if (ID.d.type.isFunc()) {
+        ID.d.type = try Attribute.applyFunctionAttributes(p, ID.d.type, attrBufferTop);
+    } else {
+        ID.d.type = try Attribute.applyVariableAttributes(p, ID.d.type, attrBufferTop, null);
+    }
 
     if (p.eat(.Equal)) |eq| init: {
         if (declSpec.storageClass == .typedef or ID.d.funcDeclarator != null)
@@ -1561,7 +1573,7 @@ fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec) Error!?InitDeclarator {
 fn parseTypeSpec(p: *Parser, ty: *TypeBuilder) Error!bool {
     const start = p.tokenIdx;
     while (true) {
-        try p.parseAttrSpec(); // .typedef
+        try p.parseAttrSpec();
         if (try p.typeof()) |innerType| {
             try ty.combineFromTypeof(p, innerType, start);
             continue;
@@ -1619,9 +1631,15 @@ fn parseTypeSpec(p: *Parser, ty: *TypeBuilder) Error!bool {
                 p.tokenIdx += 1;
                 const lparen = try p.expectToken(.LParen);
                 if (try p.parseTypeName()) |innerTy| {
-                    const alignment = Attribute.Alignment{ .requested = innerTy.alignof(p.comp), .alignas = true };
-                    const attr = Attribute{ .tag = .aligned, .args = .{ .aligned = .{ .alignment = alignment, .__name_token = alignToken } } };
-                    try p.attrBuffer.append(p.gpa, .{ .attr = attr, .tok = alignToken });
+                    const alignment = Attribute.Alignment{ .requested = innerTy.alignof(p.comp) };
+                    try p.attrBuffer.append(p.gpa, .{
+                        .attr = .{
+                            .tag = .aligned,
+                            .args = .{ .aligned = .{ .alignment = alignment, .__name_token = alignToken } },
+                            .syntax = .keyword,
+                        },
+                        .tok = alignToken,
+                    });
                 } else {
                     const argStart = p.tokenIdx;
                     const res = try p.parseConstExpr(.NoConstDeclFolding);
@@ -1633,8 +1651,10 @@ fn parseTypeSpec(p: *Parser, ty: *TypeBuilder) Error!bool {
                             return error.ParsingFailed;
                         }
                         args.aligned.alignment.?.node = res.node;
-                        args.aligned.alignment.?.alignas = true;
-                        try p.attrBuffer.append(p.gpa, .{ .attr = .{ .tag = .aligned, .args = args }, .tok = alignToken });
+                        try p.attrBuffer.append(p.gpa, .{
+                            .attr = .{ .tag = .aligned, .args = args, .syntax = .keyword },
+                            .tok = alignToken,
+                        });
                     }
                 }
                 try p.expectClosing(lparen, .RParen);
@@ -1715,7 +1735,7 @@ fn parseRecordSpec(p: *Parser) Error!Type {
     const attrBufferTop = p.attrBuffer.len;
     defer p.attrBuffer.len = attrBufferTop;
 
-    try p.parseAttrSpec(); // .record
+    try p.parseAttrSpec();
 
     const maybeIdent = try p.eatIdentifier();
     const lb = p.eat(.LBrace) orelse {
@@ -1730,10 +1750,11 @@ fn parseRecordSpec(p: *Parser) Error!Type {
         } else {
             // this is a forward declaration, create a new record type.
             const recordType = try Type.Record.create(p.arena, p.getTokenSlice(ident));
-            const ty = try p.withAttributes(.{
+            var ty = Type{
                 .specifier = if (isStruct) .Struct else .Union,
                 .data = .{ .record = recordType },
-            }, attrBufferTop);
+            };
+            ty = try Attribute.applyTypeAttributes(p, ty, attrBufferTop, null);
 
             try p.symStack.symbols.append(p.gpa, .{
                 .kind = if (isStruct) .@"struct" else .@"union",
@@ -1834,12 +1855,13 @@ fn parseRecordSpec(p: *Parser) Error!Type {
 
     try p.expectClosing(lb, .RBrace);
     done = true;
-    try p.parseAttrSpec(); // .record
+    try p.parseAttrSpec();
 
-    ty = try p.withAttributes(.{
+    const t = Type{
         .specifier = if (isStruct) .Struct else .Union,
         .data = .{ .record = recordType },
-    }, attrBufferTop);
+    };
+    ty = try Attribute.applyTypeAttributes(p, t, attrBufferTop, null);
 
     if (ty.specifier == .Attributed and symbolIndex != null) {
         p.symStack.symbols.items(.type)[symbolIndex.?] = ty;
@@ -1905,7 +1927,7 @@ fn parseRecordDeclarator(p: *Parser) Error!bool {
         const thisDeclTop = p.attrBuffer.len;
         defer p.attrBuffer.len = thisDeclTop;
 
-        try p.parseAttrSpec(); //.record
+        try p.parseAttrSpec();
         // 0 means unnamed
         var nameToken: TokenIndex = 0;
         var ty = baseType;
@@ -1950,7 +1972,7 @@ fn parseRecordDeclarator(p: *Parser) Error!bool {
         }
 
         try p.parseAttrSpec(); // .record
-        ty = try p.withAttributes(ty, attrBuffTop);
+        ty = try Attribute.applyFieldAttributes(p, ty, attrBuffTop, null);
 
         if (nameToken == 0 and bitsNode == .none) unnamed: {
             // don't allow incompelete size fields in anonymous record.
@@ -2013,29 +2035,11 @@ fn parseRecordDeclarator(p: *Parser) Error!bool {
     return true;
 }
 
-fn checkAlignasUsage(p: *Parser, tag: Diagnostics.Tag, attrBufferStart: usize) !void {
-    var i = attrBufferStart;
-    while (i < p.attrBuffer.len) : (i += 1) {
-        const tentativeAttr = p.attrBuffer.get(i);
-        if (tentativeAttr.attr.tag != .aligned) continue;
-        if (tentativeAttr.attr.args.aligned.alignment) |alignment| {
-            if (alignment.alignas)
-                try p.errToken(tag, tentativeAttr.tok);
-        }
-    }
-}
-
 // specifier-qualifier-list : (type-specifier | type-qualifier | align-specifier)+
 fn parseSpecQuals(p: *Parser) Error!?Type {
-    const attrBufferTop = p.attrBuffer.len;
-    defer p.attrBuffer.len = attrBufferTop;
-
     var spec: TypeBuilder = .{};
     if (try p.parseTypeSpec(&spec)) {
-        var ty = try spec.finish(p);
-        ty = try p.withAttributes(ty, attrBufferTop);
-        try p.validateAlignas(ty, .align_ignored);
-        return ty;
+        return try spec.finish(p);
     }
 
     return null;
@@ -2104,10 +2108,9 @@ fn parseEnumSpec(p: *Parser) Error!*Type.Enum {
         } else {
             // this is a forward declaration, create a new enum type
             const enumType = try Type.Enum.create(p.arena, p.getTokenSlice(ident), fixedTy);
-            const ty = try p.withAttributes(
-                .{ .specifier = .Enum, .data = .{ .@"enum" = enumType } },
-                attrBufferTop,
-            );
+            var ty = Type{ .specifier = .Enum, .data = .{ .@"enum" = enumType } };
+            ty = try Attribute.applyTypeAttributes(p, ty, attrBufferTop, null);
+
             try p.symStack.appendSymbol(.{
                 .kind = .@"enum",
                 .name = enumType.name,
@@ -2171,15 +2174,13 @@ fn parseEnumSpec(p: *Parser) Error!*Type.Enum {
 
     try p.expectClosing(lb, .RBrace);
     done = true;
-    try p.parseAttrSpec(); //.record
+    try p.parseAttrSpec();
 
-    const ty = try p.withAttributes(
-        .{
-            .specifier = .Enum,
-            .data = .{ .@"enum" = enumType },
-        },
-        attrBufferTop,
-    );
+    var ty = Type{
+        .specifier = .Enum,
+        .data = .{ .@"enum" = enumType },
+    };
+    ty = try Attribute.applyTypeAttributes(p, ty, attrBufferTop, null);
 
     const isPacked = ty.hasAttribute(.@"packed") or p.comp.langOpts.shortEnums;
     if (!enumType.fixed) {
@@ -2389,7 +2390,7 @@ fn enumerator(p: *Parser, e: *Enumerator) Error!?EnumFieldAndNode {
     }
 
     var res = e.res;
-    res.ty = try p.withAttributes(res.ty, attrBufferTop);
+    res.ty = try Attribute.applyEnumeratorAttributes(p, res.ty, attrBufferTop);
 
     if (res.ty.isUnsignedInt(p.comp) or res.value.compare(.gte, Value.int(0), res.ty, p.comp)) {
         e.numPositiveBits = @max(e.numPositiveBits, res.value.minUnsignedBits(res.ty, p.comp));
@@ -2817,8 +2818,7 @@ fn parseParamDecls(p: *Parser) Error!?[]Type.Function.Param {
                 try p.symStack.defineParam(paramType, nameToken);
         }
 
-        paramType = try p.withAttributes(paramType, attrBufferTop);
-        try p.validateAlignas(paramType, .alignas_on_param);
+        paramType = try Attribute.applyParameterAttributes(p, paramType, attrBufferTop, .alignas_on_param);
 
         if (paramType.isFunc()) {
             // params declared as functions are converted to function pointers
@@ -2867,13 +2867,16 @@ fn parseParamDecls(p: *Parser) Error!?[]Type.Function.Param {
 
 /// type-name : specifier-qualifier-list+ abstract-declarator
 fn parseTypeName(p: *Parser) Error!?Type {
+    const attrBufferTop = p.attrBuffer.len;
+    defer p.attrBuffer.len = attrBufferTop;
+
     const ty = (try p.parseSpecQuals()) orelse return null;
     if (try p.declarator(ty, .abstract)) |some| {
         if (some.oldTypeFunc) |tokenIdx|
             try p.errToken(.invalid_old_style_params, tokenIdx);
-
-        return some.type;
-    } else return ty;
+        return try Attribute.applyTypeAttributes(p, some.type, attrBufferTop, .align_ignored);
+    }
+    return try Attribute.applyTypeAttributes(p, ty, attrBufferTop, .align_ignored);
 }
 
 /// initializer
@@ -3031,6 +3034,9 @@ pub fn initializerItem(p: *Parser, il: *InitList, initType: Type) Error!bool {
 
         if (designation)
             _ = try p.expectToken(.Equal);
+
+        if (!designation and curType.hasAttribute(.designated_init))
+            try p.err(.designated_init_needed);
 
         var saw = false;
 
@@ -3509,7 +3515,7 @@ fn parseAssembly(p: *Parser, kind: enum { global, declLable, stmt }) Error!?Node
     switch (kind) {
         .declLable => {
             const str = (try p.parseAsmString()).value.data.bytes;
-            const attr = Attribute{ .tag = .asm_label, .args = .{ .asm_label = .{ .name = str[0 .. str.len - 1] } } };
+            const attr = Attribute{ .tag = .asm_label, .args = .{ .asm_label = .{ .name = str[0 .. str.len - 1] } }, .syntax = .keyword };
             try p.attrBuffer.append(p.gpa, .{ .attr = attr, .tok = asmToken });
         },
         .global => _ = try p.parseAsmString(),
@@ -3628,16 +3634,7 @@ fn parseStmt(p: *Parser) Error!NodeIndex {
 
     if (p.eat(.Semicolon)) |_| {
         var nullNode: AST.Node = .{ .tag = .NullStmt, .data = undefined };
-        nullNode.type = try p.withAttributes(nullNode.type, attrBufferTop);
-
-        if (nullNode.type.getAttribute(.fallthrough) != null) {
-            // TODO: this condition is not completely correct; the last statement of a compound
-            // statement is also valid if it precedes a switch label (so intervening '}' are ok,
-            // but only if they close a compound statement)
-            if (p.getCurrToken() != .KeywordCase and p.getCurrToken() != .KeywordDefault)
-                try p.errToken(.invalid_fallthrough, exprStart);
-        }
-
+        nullNode.type = try Attribute.applyStatementAttributes(p, nullNode.type, exprStart, attrBufferTop);
         return p.addNode(nullNode);
     }
 
@@ -4031,12 +4028,14 @@ fn parseLabeledStmt(p: *Parser) Error!?NodeIndex {
         const attrBufferTop = p.attrBuffer.len;
         defer p.attrBuffer.len = attrBufferTop;
 
-        try p.parseAttrSpec(); // .label
+        try p.parseAttrSpec();
 
-        return try p.addNode(.{
+        var labeledStmt = AST.Node{
             .tag = .LabeledStmt,
             .data = .{ .decl = .{ .name = nameToken, .node = try p.parseStmt() } },
-        });
+        };
+        labeledStmt.type = try Attribute.applyLabelAttributes(p, labeledStmt.type, attrBufferTop);
+        return try p.addNode(labeledStmt);
     } else if (p.eat(.KeywordCase)) |case| {
         return p.parseCaseStmt(case);
     } else if (p.eat(.KeywordDefault)) |default| {
@@ -4175,6 +4174,10 @@ fn parseReturnStmt(p: *Parser) Error!?NodeIndex {
     var expr = try p.parseExpr();
     _ = try p.expectToken(.Semicolon);
     const returnType = p.func.type.?.getReturnType();
+
+    if (p.func.type.?.hasAttribute(.noreturn)) {
+        try p.errStr(.invalid_noreturn, eToken, p.getTokenSlice(p.func.name));
+    }
 
     if (expr.node == .none) {
         if (!returnType.is(.Void))
