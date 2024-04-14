@@ -496,7 +496,6 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
         .EnumDecl,
         .StructDecl,
         .UnionDecl,
-        .AttrParams,
         => {
             const maybeFieldAttrs = if (ty.getRecord()) |record| record.fieldAttributes else null;
             for (tree.data[data.range.start..data.range.end], 0..) |stmt, i| {
@@ -521,7 +520,6 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
         .EnumDeclTwo,
         .StructDeclTwo,
         .UnionDeclTwo,
-        .AttrParamsTwo,
         => {
             var attrArray = [2][]const Attribute{ &.{}, &.{} };
             const empty: [][]const Attribute = &attrArray;
@@ -821,15 +819,6 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Error
                 try w.writeAll("bits:\n");
                 try tree.dumpNode(data.decl.node, level + delta, w);
             }
-        },
-
-        .AttrArgIdentifier => {
-            try w.writeByteNTimes(' ', level + half);
-            if (tree.comp.diag.color)
-                util.setColor(ATTRIBUTE, w);
-            try w.print("name: {s}\n", .{tree.getTokenSlice(data.declRef)});
-            if (tree.comp.diag.color)
-                util.setColor(.reset, w);
         },
 
         .CallExpr => {

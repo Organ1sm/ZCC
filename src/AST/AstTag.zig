@@ -286,13 +286,6 @@ pub const Tag = enum(u8) {
     /// Inserted in record and scalar initilizers for represent unspecified fields.
     DefaultInitExpr,
 
-    /// Attribute argument identifier
-    AttrArgIdentifier,
-    /// rhs can be none
-    AttrParamsTwo,
-    /// range
-    AttrParams,
-
     pub fn isImplicit(tag: Tag) bool {
         return switch (tag) {
             .ImplicitCast,
