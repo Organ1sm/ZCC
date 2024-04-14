@@ -200,6 +200,8 @@ pub const CastKind = enum(u8) {
     NullToPointer,
     /// GNU cast-to-union extension
     UnionCast,
+    ///Create vector where each value is same as the input scalar
+    VectorSplat,
 
     pub fn fromExplicitCast(to: Type, from: Type, comp: *Compilation) CastKind {
         if (to.eql(from, comp, false)) return .NoOP;

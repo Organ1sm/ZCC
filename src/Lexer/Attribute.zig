@@ -1058,7 +1058,15 @@ pub fn applyVariableAttributes(p: *Parser, ty: Type, attrBufferStart: usize, tag
         => std.debug.panic("apply variable attribute {s}", .{@tagName(attr.tag)}),
         else => try ignoredAttrErr(p, toks[i], attr.tag, "variables"),
     };
-    return ty.withAttributes(p.arena, p.attrApplicationBuffer.items);
+
+    const existing = ty.getAttributes();
+    if (existing.len == 0 and p.attrApplicationBuffer.items.len == 0)
+        return baseTy;
+    if (existing.len == 0)
+        return baseTy.withAttributes(p.arena, p.attrApplicationBuffer.items);
+
+    const attributedTy = try Type.Attributed.create(p.arena, baseTy, existing, p.attrApplicationBuffer.items);
+    return Type{ .specifier = .Attributed, .data = .{ .attributed = attributedTy } };
 }
 
 pub fn applyFieldAttributes(p: *Parser, field_ty: *Type, attrBufferStart: usize) ![]const Attribute {
@@ -1117,7 +1125,15 @@ pub fn applyTypeAttributes(p: *Parser, ty: Type, attrBufferStart: usize, tag: ?D
 
         else => try ignoredAttrErr(p, toks[i], attr.tag, "types"),
     };
-    return ty.withAttributes(p.arena, p.attrApplicationBuffer.items);
+
+    const existing = ty.getAttributes();
+    if (existing.len == 0 and p.attrApplicationBuffer.items.len == 0)
+        return baseTy;
+    if (existing.len == 0)
+        return baseTy.withAttributes(p.arena, p.attrApplicationBuffer.items);
+
+    const attributedTy = try Type.Attributed.create(p.arena, baseTy, existing, p.attrApplicationBuffer.items);
+    return Type{ .specifier = .Attributed, .data = .{ .attributed = attributedTy } };
 }
 
 pub fn applyFunctionAttributes(p: *Parser, ty: Type, attrBufferStart: usize) !Type {
@@ -1308,10 +1324,22 @@ fn applyTransparentUnion(attr: Attribute, p: *Parser, token: TokenIndex, ty: Typ
 }
 
 fn applyVectorSize(attr: Attribute, p: *Parser, tok: TokenIndex, ty: *Type) !void {
-    _ = attr;
-    _ = tok;
-    _ = ty;
-    return p.todo("apply vector_size attribute");
+    if (!ty.isInt() and (!ty.isFloat() or !ty.isReal()))
+        return p.errStr(.invalid_vec_elem_ty, tok, try p.typeStr(ty.*));
+
+    const vecBytes = attr.args.vector_size.bytes;
+    const tySize = ty.sizeof(p.comp).?;
+    if (vecBytes % tySize != 0)
+        return p.errToken(.vec_size_not_multiple, tok);
+
+    const vec_size = vecBytes / tySize;
+
+    const arrTy = try p.arena.create(Type.Array);
+    arrTy.* = .{ .elem = ty.*, .len = vec_size };
+    ty.* = Type{
+        .specifier = .Vector,
+        .data = .{ .array = arrTy },
+    };
 }
 
 fn applyFormat(attr: Attribute, p: *Parser, ty: Type) !void {

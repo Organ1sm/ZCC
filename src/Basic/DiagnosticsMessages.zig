@@ -1825,3 +1825,12 @@ pub const warn_unused_result = struct {
     pub const kind = .warning;
     pub const op = "unused-result";
 };
+pub const invalid_vec_elem_ty = struct {
+    pub const msg = "invalid vector element type '{s}'";
+    pub const extra = .str;
+    pub const kind = .@"error";
+};
+pub const vec_size_not_multiple = struct {
+    pub const msg = "vector size not an integral multiple of component size";
+    pub const kind = .@"error";
+};

@@ -189,6 +189,32 @@ pub fn adjustTypes(a: *Result, token: TokenIndex, b: *Result, p: *Parser, kind: 
     try a.lvalConversion(p);
     try b.lvalConversion(p);
 
+    const aVec = a.ty.is(.Vector);
+    const bVec = b.ty.is(.Vector);
+    if (aVec and bVec) {
+        if (a.ty.eql(b.ty, p.comp, false))
+            return a.shouldEval(b, p);
+        return a.invalidBinTy(token, b, p);
+    } else if (aVec) {
+        if (b.coerceExtra(p, a.ty.getElemType(), token, .testCoerce)) {
+            try b.saveValue(p);
+            try b.implicitCast(p, .VectorSplat);
+            return a.shouldEval(b, p);
+        } else |err| switch (err) {
+            error.CoercionFailed => return a.invalidBinTy(token, b, p),
+            else => |e| return e,
+        }
+    } else if (bVec) {
+        if (a.coerceExtra(p, b.ty.getElemType(), token, .testCoerce)) {
+            try a.saveValue(p);
+            try a.implicitCast(p, .VectorSplat);
+            return a.shouldEval(b, p);
+        } else |err| switch (err) {
+            error.CoercionFailed => return a.invalidBinTy(token, b, p),
+            else => |e| return e,
+        }
+    }
+
     const aIsInt = a.ty.isInt();
     const bIsInt = b.ty.isInt();
 
@@ -579,7 +605,7 @@ pub fn castType(res: *Result, p: *Parser, to: Type, tok: TokenIndex) !void {
             res.value.intCast(res.ty, to, p.comp);
         }
     } else {
-        try p.errStr(.invalid_cast_type, tok, try p.typeStr(res.ty));
+        try p.errStr(.invalid_cast_type, tok, try p.typeStr(to));
         return error.ParsingFailed;
     }
 
@@ -617,11 +643,12 @@ const CoerceContext = union(enum) {
     init,
     ret,
     arg: TokenIndex,
-    transparentUnion,
+    testCoerce,
 
     fn note(ctx: CoerceContext, p: *Parser) !void {
         switch (ctx) {
             .arg => |tok| try p.errToken(.parameter_here, tok),
+            .testCoerce => unreachable,
             else => {},
         }
     }
@@ -631,7 +658,7 @@ const CoerceContext = union(enum) {
             .assign, .init => return p.typePairStrExtra(dest_ty, " from incompatible type ", src_ty),
             .ret => return p.typePairStrExtra(src_ty, " from a function with incompatible result type ", dest_ty),
             .arg => return p.typePairStrExtra(src_ty, " to parameter of incompatible type ", dest_ty),
-            .transparentUnion => unreachable,
+            .testCoerce => unreachable,
         }
     }
 };
@@ -639,12 +666,12 @@ const CoerceContext = union(enum) {
 /// Perform assignment-like coercion to `dest_ty`.
 pub fn coerce(res: *Result, p: *Parser, destTy: Type, tok: TokenIndex, ctx: CoerceContext) !void {
     return res.coerceExtra(p, destTy, tok, ctx) catch |er| switch (er) {
-        error.TransparentUnionFailed => unreachable,
+        error.CoercionFailed => unreachable,
         else => |e| return e,
     };
 }
 
-const Stage1Limitation = Error || error{TransparentUnionFailed};
+const Stage1Limitation = Error || error{CoercionFailed};
 
 fn coerceExtra(res: *Result, p: *Parser, destTy: Type, tok: TokenIndex, ctx: CoerceContext) Stage1Limitation!void {
     // Subject of the coercion does not need to be qualified.
@@ -661,8 +688,8 @@ fn coerceExtra(res: *Result, p: *Parser, destTy: Type, tok: TokenIndex, ctx: Coe
             try res.intCast(p, unqualTy, tok);
             return;
         } else if (res.ty.isPointer()) {
-            if (ctx == .transparentUnion)
-                return error.TransparentUnionFailed;
+            if (ctx == .testCoerce)
+                return error.CoercionFailed;
             try p.errStr(.implicit_ptr_to_int, tok, try p.typePairStrExtra(res.ty, " to ", destTy));
             try ctx.note(p);
             try res.intCast(p, unqualTy, tok);
@@ -678,8 +705,8 @@ fn coerceExtra(res: *Result, p: *Parser, destTy: Type, tok: TokenIndex, ctx: Coe
             try res.nullCast(p, destTy);
             return;
         } else if (res.ty.isInt()) {
-            if (ctx == .transparentUnion)
-                return error.TransparentUnionFailed;
+            if (ctx == .testCoerce)
+                return error.CoercionFailed;
             try p.errStr(.implicit_int_to_ptr, tok, try p.typePairStrExtra(res.ty, " to ", destTy));
             try ctx.note(p);
             try res.ptrCast(p, unqualTy);
@@ -693,7 +720,7 @@ fn coerceExtra(res: *Result, p: *Parser, destTy: Type, tok: TokenIndex, ctx: Coe
                     .init => .ptr_init_discards_quals,
                     .ret => .ptr_ret_discards_quals,
                     .arg => .ptr_arg_discards_quals,
-                    .transparentUnion => return error.TransparentUnionFailed,
+                    .testCoerce => return error.CoercionFailed,
                 }, tok, try ctx.typePairStr(p, destTy, res.ty));
             }
             try res.ptrCast(p, unqualTy);
@@ -704,7 +731,7 @@ fn coerceExtra(res: *Result, p: *Parser, destTy: Type, tok: TokenIndex, ctx: Coe
                 .init => .incompatible_ptr_init,
                 .ret => .incompatible_return,
                 .arg => .incompatible_arg,
-                .transparentUnion => return error.TransparentUnionFailed,
+                .testCoerce => return error.CoercionFailed,
             }, tok, try ctx.typePairStr(p, destTy, res.ty));
             try ctx.note(p);
             try res.ptrCast(p, unqualTy);
@@ -718,8 +745,8 @@ fn coerceExtra(res: *Result, p: *Parser, destTy: Type, tok: TokenIndex, ctx: Coe
         if (ctx == .arg) {
             if (unqualTy.get(.Union)) |unionTy| {
                 if (destTy.hasAttribute(.transparent_union)) transparent_union: {
-                    res.coerceExtra(p, unionTy.data.record.fields[0].ty, tok, .transparentUnion) catch |err| switch (err) {
-                        error.TransparentUnionFailed => break :transparent_union,
+                    res.coerceExtra(p, unionTy.data.record.fields[0].ty, tok, .testCoerce) catch |err| switch (err) {
+                        error.CoercionFailed => break :transparent_union,
                         else => |e| return e,
                     };
                     res.node = try p.addNode(.{
@@ -731,13 +758,16 @@ fn coerceExtra(res: *Result, p: *Parser, destTy: Type, tok: TokenIndex, ctx: Coe
                     return;
                 }
             }
+        } else if (unqualTy.is(.Vector)) {
+            if (unqualTy.eql(res.ty, p.comp, false))
+                return; //ok
         }
     } else {
         if (ctx == .assign and (unqualTy.isArray() or unqualTy.isFunc())) {
             try p.errToken(.not_assignable, tok);
             return;
-        } else if (ctx == .transparentUnion) {
-            return error.TransparentUnionFailed;
+        } else if (ctx == .testCoerce) {
+            return error.CoercionFailed;
         }
         // This case should not be possible and an error should have already been emitted but we
         // might still have attempted to parse further so return error.ParsingFailed here to stop.
@@ -749,7 +779,7 @@ fn coerceExtra(res: *Result, p: *Parser, destTy: Type, tok: TokenIndex, ctx: Coe
         .init => .incompatible_init,
         .ret => .incompatible_return,
         .arg => .incompatible_arg,
-        .transparentUnion => return error.TransparentUnionFailed,
+        .testCoerce => return error.CoercionFailed,
     }, tok, try ctx.typePairStr(p, destTy, res.ty));
     try ctx.note(p);
 }

@@ -78,6 +78,8 @@ pub const Specifier = union(enum) {
     DecayedStaticArray: *Type.Array,
     IncompleteArray: *Type.Array,
     DecayedIncompleteArray: *Type.Array,
+    Vector: *Type.Array,
+
     VariableLenArray: *Type.Expr,
     DecayedVariableLenArray: *Type.Expr,
 
@@ -290,6 +292,11 @@ pub fn finish(b: @This(), p: *Parser) Parser.Error!Type {
 
         Specifier.IncompleteArray => |data| {
             ty.specifier = .IncompleteArray;
+            ty.data = .{ .array = data };
+        },
+
+        Specifier.Vector => |data| {
+            ty.specifier = .Vector;
             ty.data = .{ .array = data };
         },
 
@@ -599,6 +606,7 @@ pub fn fromType(ty: Type) Specifier {
         .DecayedStaticArray => .{ .DecayedStaticArray = ty.data.array },
         .IncompleteArray => .{ .IncompleteArray = ty.data.array },
         .DecayedIncompleteArray => .{ .DecayedIncompleteArray = ty.data.array },
+        .Vector => .{ .Vector = ty.data.array },
         .VariableLenArray => .{ .VariableLenArray = ty.data.expr },
         .DecayedVariableLenArray => .{ .DecayedVariableLenArray = ty.data.expr },
         .Struct => .{ .Struct = ty.data.record },
