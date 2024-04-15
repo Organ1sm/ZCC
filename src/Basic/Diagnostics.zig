@@ -116,6 +116,7 @@ pub const Options = packed struct {
     uninitialized: Kind = .default,
     @"gnu-statement-expression": Kind = .default,
     @"gnu-imaginary-constant": Kind = .default,
+    @"gnu-complex-integer": Kind = .default,
     @"ignored-qualifiers": Kind = .default,
     @"integer-overflow": Kind = .default,
     @"extra-semi": Kind = .default,

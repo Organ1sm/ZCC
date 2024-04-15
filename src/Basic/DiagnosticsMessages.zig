@@ -251,11 +251,6 @@ pub const spec_from_typedef = struct {
     pub const extra = .str;
     pub const kind = .note;
 };
-pub const type_is_invalid = struct {
-    pub const msg = "'{s}' is invalid";
-    pub const extra = .str;
-    pub const kind = .@"error";
-};
 pub const param_before_var_args = struct {
     pub const msg = "ISO C requires a named parameter before '...'";
     pub const kind = .@"error";
@@ -1329,6 +1324,12 @@ pub const gnu_imaginary_constant = struct {
 pub const plain_complex = struct {
     pub const msg = "plain '_Complex' requires a type specifier; assuming '_Complex double'";
     pub const kind = .warning;
+};
+pub const complex_int = struct {
+    pub const msg = "complex integer types are a GNU extension";
+    pub const opt = "gnu-complex-integer";
+    pub const suppress_gnu = true;
+    pub const kind = .off;
 };
 pub const qual_on_ret_type = struct {
     pub const msg = "'{s}' type qualifier on return type has no effect";
