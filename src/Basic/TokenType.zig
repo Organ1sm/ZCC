@@ -40,6 +40,14 @@ pub const TokenType = enum(u8) {
     IntegerLiteral_LL,
     IntegerLiteral_LLU,
 
+    // imaginary integer literals with suffixes
+    ImaginaryIntegerLiteral,
+    ImaginaryIntegerLiteral_U,
+    ImaginaryIntegerLiteral_L,
+    ImaginaryIntegerLiteral_LU,
+    ImaginaryIntegerLiteral_LL,
+    ImaginaryIntegerLiteral_LLU,
+
     /// "! !=  = =="
     Bang,
     BangEqual,
@@ -438,6 +446,12 @@ pub const TokenType = enum(u8) {
             .IntegerLiteral_LU,
             .IntegerLiteral_LL,
             .IntegerLiteral_LLU,
+            .ImaginaryIntegerLiteral,
+            .ImaginaryIntegerLiteral_U,
+            .ImaginaryIntegerLiteral_L,
+            .ImaginaryIntegerLiteral_LU,
+            .ImaginaryIntegerLiteral_LL,
+            .ImaginaryIntegerLiteral_LLU,
             .MacroString,
             .WhiteSpace,
             => null,
@@ -672,6 +686,14 @@ pub const TokenType = enum(u8) {
             .IntegerLiteral_LLU,
             => "an integer literal",
 
+            .ImaginaryIntegerLiteral,
+            .ImaginaryIntegerLiteral_U,
+            .ImaginaryIntegerLiteral_L,
+            .ImaginaryIntegerLiteral_LU,
+            .ImaginaryIntegerLiteral_LL,
+            .ImaginaryIntegerLiteral_LLU,
+            => "an imaginary integer literal",
+
             else => id.getTokenText().?, // handled in getTokenText();
         };
     }
@@ -702,6 +724,12 @@ pub const TokenType = enum(u8) {
             .ImaginaryLiteral,
             .ImaginaryLiteral_F,
             .ImaginaryLiteral_L,
+            .ImaginaryIntegerLiteral,
+            .ImaginaryIntegerLiteral_U,
+            .ImaginaryIntegerLiteral_L,
+            .ImaginaryIntegerLiteral_LU,
+            .ImaginaryIntegerLiteral_LL,
+            .ImaginaryIntegerLiteral_LLU,
             .CharLiteral,
             .CharLiteralUTF_16,
             .CharLiteralUTF_32,

@@ -6101,6 +6101,21 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
         .IntegerLiteral_LLU,
         => return p.parseIntegerLiteral(),
 
+        .ImaginaryIntegerLiteral,
+        .ImaginaryIntegerLiteral_U,
+        .ImaginaryIntegerLiteral_L,
+        .ImaginaryIntegerLiteral_LU,
+        .ImaginaryIntegerLiteral_LL,
+        .ImaginaryIntegerLiteral_LLU,
+        => {
+            try p.err(.gnu_imaginary_constant);
+            var res = try p.parseIntegerLiteral();
+            res.ty = res.ty.makeComplex();
+            res.value.tag = .unavailable;
+            try res.un(p, .ImaginaryLiteral);
+            return res;
+        },
+
         .KeywordGeneric => return p.parseGenericSelection(),
 
         else => return Result{},
@@ -6290,12 +6305,17 @@ fn parseIntegerLiteral(p: *Parser) Error!Result {
         base = 8;
     }
 
-    switch (curToken) {
-        .IntegerLiteral_U, .IntegerLiteral_L => slice = slice[0 .. slice.len - 1],
-        .IntegerLiteral_LU, .IntegerLiteral_LL => slice = slice[0 .. slice.len - 2],
-        .IntegerLiteral_LLU => slice = slice[0 .. slice.len - 3],
-        else => {},
-    }
+    const end: u32 = switch (curToken) {
+        .IntegerLiteral_U, .IntegerLiteral_L => 1,
+        .IntegerLiteral_LU, .IntegerLiteral_LL => 2,
+        .IntegerLiteral_LLU => 3,
+        .ImaginaryLiteral => 1,
+        .ImaginaryIntegerLiteral_U, .ImaginaryIntegerLiteral_L => 2,
+        .ImaginaryIntegerLiteral_LU, .ImaginaryIntegerLiteral_LL => 3,
+        .ImaginaryIntegerLiteral_LLU => 4,
+        else => 0,
+    };
+    slice = slice[0 .. slice.len - end];
 
     var value: u64 = 0;
     var overflow = false;
@@ -6343,22 +6363,22 @@ fn parseIntegerLiteral(p: *Parser) Error!Result {
 
     if (base == 10) {
         switch (curToken) {
-            .IntegerLiteral => return p.castInt(value, &.{ .Int, .Long, .LongLong }),
-            .IntegerLiteral_U => return p.castInt(value, &.{ .UInt, .ULong, .ULongLong }),
-            .IntegerLiteral_L => return p.castInt(value, &.{ .Long, .LongLong }),
-            .IntegerLiteral_LU => return p.castInt(value, &.{ .ULong, .ULongLong }),
-            .IntegerLiteral_LL => return p.castInt(value, &.{.LongLong}),
-            .IntegerLiteral_LLU => return p.castInt(value, &.{.ULongLong}),
+            .IntegerLiteral, .ImaginaryIntegerLiteral => return p.castInt(value, &.{ .Int, .Long, .LongLong }),
+            .IntegerLiteral_U, .ImaginaryIntegerLiteral_U => return p.castInt(value, &.{ .UInt, .ULong, .ULongLong }),
+            .IntegerLiteral_L, .ImaginaryIntegerLiteral_L => return p.castInt(value, &.{ .Long, .LongLong }),
+            .IntegerLiteral_LU, .ImaginaryIntegerLiteral_LU => return p.castInt(value, &.{ .ULong, .ULongLong }),
+            .IntegerLiteral_LL, .ImaginaryIntegerLiteral_LL => return p.castInt(value, &.{.LongLong}),
+            .IntegerLiteral_LLU, .ImaginaryIntegerLiteral_LLU => return p.castInt(value, &.{.ULongLong}),
             else => unreachable,
         }
     } else {
         switch (curToken) {
-            .IntegerLiteral => return p.castInt(value, &.{ .Int, .UInt, .Long, .ULong, .LongLong, .ULongLong }),
-            .IntegerLiteral_U => return p.castInt(value, &.{ .UInt, .ULong, .ULongLong }),
-            .IntegerLiteral_L => return p.castInt(value, &.{ .Long, .ULong, .LongLong, .ULongLong }),
-            .IntegerLiteral_LU => return p.castInt(value, &.{ .ULong, .ULongLong }),
-            .IntegerLiteral_LL => return p.castInt(value, &.{ .LongLong, .ULongLong }),
-            .IntegerLiteral_LLU => return p.castInt(value, &.{.ULongLong}),
+            .IntegerLiteral, .ImaginaryIntegerLiteral => return p.castInt(value, &.{ .Int, .UInt, .Long, .ULong, .LongLong, .ULongLong }),
+            .IntegerLiteral_U, .ImaginaryIntegerLiteral_U => return p.castInt(value, &.{ .UInt, .ULong, .ULongLong }),
+            .IntegerLiteral_L, .ImaginaryIntegerLiteral_L => return p.castInt(value, &.{ .Long, .ULong, .LongLong, .ULongLong }),
+            .IntegerLiteral_LU, .ImaginaryIntegerLiteral_LU => return p.castInt(value, &.{ .ULong, .ULongLong }),
+            .IntegerLiteral_LL, .ImaginaryIntegerLiteral_LL => return p.castInt(value, &.{ .LongLong, .ULongLong }),
+            .IntegerLiteral_LLU, .ImaginaryIntegerLiteral_LLU => return p.castInt(value, &.{.ULongLong}),
             else => unreachable,
         }
     }
