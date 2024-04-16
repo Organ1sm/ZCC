@@ -1278,7 +1278,7 @@ pub const unknown_gcc_pragma = struct {
 pub const unknown_gcc_pragma_directive = struct {
     pub const msg = "pragma GCC diagnostic expected 'error', 'warning', 'ignored', 'fatal', 'push', or 'pop'";
     pub const opt = "unknown-pragmas";
-    pub const kind = .off;
+    pub const kind = .warning;
     pub const all = true;
 };
 pub const predefined_top_level = struct {
