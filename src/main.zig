@@ -7,6 +7,7 @@ const Preprocessor = @import("Lexer/Preprocessor.zig");
 const Lexer = @import("Lexer/Lexer.zig");
 const Parser = @import("Parser/Parser.zig");
 const LangOpts = @import("Basic/LangOpts.zig");
+const Util = @import("Basic/Util.zig");
 
 var GeneralPurposeAllocator = std.heap.GeneralPurposeAllocator(.{}){};
 
@@ -115,12 +116,12 @@ pub fn parseArgs(
         if (std.mem.startsWith(u8, arg, "-") and arg.len > 1) {
             if (std.mem.eql(u8, arg, "-h") or std.mem.eql(u8, arg, "--help")) {
                 stdOut.print(usage, .{args[0]}) catch |er| {
-                    return fatal(comp, "{s} when trying to print usage", .{@errorName(er)});
+                    return fatal(comp, "unable to print usage: {s}", .{Util.errorDescription(er)});
                 };
                 return true;
             } else if (std.mem.eql(u8, arg, "-v") or std.mem.eql(u8, arg, "--version")) {
                 stdOut.writeAll(@import("zcc.zig").VersionStr ++ "\n") catch |er| {
-                    return fatal(comp, "{s} when trying to print version", .{@errorName(er)});
+                    return fatal(comp, "unable to print version: {s}", .{Util.errorDescription(er)});
                 };
                 return true;
             } else if (std.mem.startsWith(u8, arg, "-D")) {
@@ -268,7 +269,7 @@ pub fn parseArgs(
             }
         } else {
             const file = addSource(comp, arg) catch |er| {
-                return fatal(comp, "{s}", .{@errorName(er)});
+                return fatal(comp, "unable to add source file '{s}': {s}", .{ arg, Util.errorDescription(er) });
             };
             try sources.append(file);
         }
@@ -298,8 +299,8 @@ fn mainExtra(comp: *Compilation, args: [][]const u8) !void {
 
     comp.defineSystemIncludes() catch |er| switch (er) {
         error.OutOfMemory => return error.OutOfMemory,
-        error.SelfExeNotFound => return fatal(comp, "could not find ZCC executable path", .{}),
-        error.ZccIncludeNotFound => return fatal(comp, "could not find ZCC builtin headers", .{}),
+        error.SelfExeNotFound => return fatal(comp, "unable to find ZCC executable path", .{}),
+        error.ZccIncludeNotFound => return fatal(comp, "unable to find ZCC builtin headers", .{}),
     };
 
     const builtinMacros = try comp.generateBuiltinMacros();
@@ -358,17 +359,17 @@ fn processSource(comp: *Compilation, source: Source, builtinMacro: Source, userD
 
         const file = if (comp.outputName) |some|
             std.fs.cwd().createFile(some, .{}) catch |er|
-                return fatal(comp, "{s} when trying to create output file", .{@errorName(er)})
+                return fatal(comp, "unable to create output file '{s}': {s}", .{ some, Util.errorDescription(er) })
         else
             std.io.getStdOut();
         defer if (comp.outputName != null) file.close();
 
         var bufWriter = std.io.bufferedWriter(file.writer());
-        pp.prettyPrintTokens(file.writer()) catch |er|
-            return fatal(comp, "{s} when trying to print tokens", .{@errorName(er)});
+        pp.prettyPrintTokens(bufWriter.writer()) catch |er|
+            return fatal(comp, "unable to write result: {s}", .{Util.errorDescription(er)});
 
         return bufWriter.flush() catch |er|
-            fatal(comp, "{s} when trying to print tokens", .{@errorName(er)});
+            fatal(comp, "unable to write result: {s}", .{Util.errorDescription(er)});
     }
 
     if (comp.dumpTokens or comp.dumpRawTokens) {
@@ -431,11 +432,11 @@ fn processSource(comp: *Compilation, source: Source, builtinMacro: Source, userD
     defer if (comp.outputName == null) comp.gpa.free(outFileName);
 
     const outFile = std.fs.cwd().createFile(outFileName, .{}) catch |er|
-        return fatal(comp, "could not create output file '{s}': {s}", .{ outFileName, @errorName(er) });
+        return fatal(comp, "unable to create output file '{s}': {s}", .{ outFileName, Util.errorDescription(er) });
     defer outFile.close();
 
     obj.finish(outFile) catch |er|
-        return fatal(comp, "could output to object file '{s}': {s}", .{ outFileName, @errorName(er) });
+        return fatal(comp, "could output to object file '{s}': {s}", .{ outFileName, Util.errorDescription(er) });
 
     if (comp.onlyCompile) return;
 
