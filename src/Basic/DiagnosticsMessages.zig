@@ -818,6 +818,10 @@ pub const parameter_incomplete_ty = struct {
     pub const extra = .str;
     pub const kind = .@"error";
 };
+pub const tentative_array = struct {
+    pub const msg = "tentative array definition assumed to have one element";
+    pub const kind = .warning;
+};
 pub const deref_incomplete_ty_ptr = struct {
     pub const msg = "dereferencing pointer to incomplete type '{s}'";
     pub const extra = .str;
