@@ -5,6 +5,7 @@ pub fn build(b: *std.Build) !void {
     const mode = b.standardOptimizeOption(.{});
 
     const TestAllAllocationFailures = b.option(bool, "test-all-allocation-failures", "Test all allocation failures") orelse false;
+    const LinkLibc = b.option(bool, "link-libc", "Force self-hosted compile to link libc") orelse (mode != .Debug);
 
     const depsModule = b.createModule(.{ .root_source_file = .{ .path = "deps/lib.zig" } });
     const zccModule = b.addModule("zcc", .{
@@ -23,6 +24,9 @@ pub fn build(b: *std.Build) !void {
     });
     exe.root_module.addImport("zcc", zccModule);
     exe.root_module.addImport("deps", depsModule);
+
+    if (LinkLibc)
+        exe.linkLibC();
 
     // This declares intent for the executable to be installed into the
     // standard location when the user invokes the "install" step (the default
