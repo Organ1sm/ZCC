@@ -1211,7 +1211,24 @@ pub fn makeReal(ty: Type) Type {
         .ComplexFloat80,
         .ComplexFloat128,
         => {
-            base.specifier = @enumFromInt(@intFromEnum(base.specifier) - 3);
+            base.specifier = @enumFromInt(@intFromEnum(base.specifier) - 6);
+            return base;
+        },
+        .ComplexChar,
+        .ComplexSChar,
+        .ComplexUChar,
+        .ComplexShort,
+        .ComplexUShort,
+        .ComplexInt,
+        .ComplexUInt,
+        .ComplexLong,
+        .ComplexULong,
+        .ComplexLongLong,
+        .ComplexULongLong,
+        .ComplexInt128,
+        .ComplexUInt128,
+        => {
+            base.specifier = @enumFromInt(@intFromEnum(base.specifier) - 13);
             return base;
         },
         else => return ty,
@@ -1222,16 +1239,35 @@ pub fn makeComplex(ty: Type) Type {
     // TODO discards attributed/typeof
     var base = ty.canonicalize(.standard);
     switch (base.specifier) {
-        .ComplexFP16,
-        .ComplexFloat,
-        .ComplexDouble,
-        .ComplexLongDouble,
-        .ComplexFloat80,
-        .ComplexFloat128,
+        .FP16,
+        .Float,
+        .Double,
+        .LongDouble,
+        .Float80,
+        .Float128,
         => {
-            base.specifier = @enumFromInt(@intFromEnum(base.specifier) + 3);
+            base.specifier = @enumFromInt(@intFromEnum(base.specifier) + 6);
             return base;
         },
+
+        .Char,
+        .SChar,
+        .UChar,
+        .Short,
+        .UShort,
+        .Int,
+        .UInt,
+        .Long,
+        .ULong,
+        .LongLong,
+        .ULongLong,
+        .Int128,
+        .UInt128,
+        => {
+            base.specifier = @enumFromInt(@intFromEnum(base.specifier) + 13);
+            return base;
+        },
+
         else => return ty,
     }
 }

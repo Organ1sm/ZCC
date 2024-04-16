@@ -182,21 +182,31 @@ pub const CastKind = enum(u8) {
     BoolToPointer,
     /// Convert an integer type to _Bool
     IntToBool,
-    /// Convert an integer to a floating
+    /// Convert an integer to a floating type
     IntToFloat,
+    /// Convert a complex integer to a complex floating type
+    ComplexIntToComplexFloat,
     /// Convert an integer type to a pointer type
     IntToPointer,
     /// Convert a floating type to a _Bool
     FloatToBool,
     /// Convert a floating type to an integer
     FloatToInt,
+    /// Convert a complex floating type to a complex integer
+    ComplexFloatToComplexInt,
     /// Convert one integer type to another
     IntCast,
+    /// Convert one complex integer type to another
+    ComplexIntCast,
+    /// Convert real part of complex integer to a integer
+    ComplexIntToReal,
+    /// Create a complex integer type using operand as the real part
+    RealToComplexInt,
     /// Convert one floating type to another
     FloatCast,
     /// Convert one complex floating type to another
     ComplexFloatCast,
-    /// Convert real part of complex float to a complex float
+    /// Convert real part of complex float to a float
     ComplexFloatToReal,
     /// Create a complex floating type using operand as the real part
     RealToComplexFloat,

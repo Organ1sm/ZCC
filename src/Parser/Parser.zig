@@ -5460,13 +5460,10 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
             try operand.lvalConversion(p);
             if (!operand.ty.isInt() and !operand.ty.isFloat()) {
                 try p.errStr(.invalid_imag, imagToken, try p.typeStr(operand.ty));
-            } else if (!operand.ty.isReal()) {
-                // convert _Complex F to F
-                // TODO handle _Complex integers when added
-                var newTy = operand.ty.canonicalize(.standard);
-                newTy.specifier = @enumFromInt(@intFromEnum(newTy.specifier) - 3);
-                operand.ty = newTy;
             }
+            // convert _Complex F to F
+            operand.ty = operand.ty.makeReal();
+
             try operand.un(p, .ImagExpr);
             return operand;
         },
@@ -5480,13 +5477,9 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
             try operand.lvalConversion(p);
             if (!operand.ty.isInt() and !operand.ty.isFloat()) {
                 try p.errStr(.invalid_real, realToken, try p.typeStr(operand.ty));
-            } else if (!operand.ty.isReal()) {
-                // convert _Complex F to F
-                // TODO handle _Complex integers when added
-                var newTy = operand.ty.canonicalize(.standard);
-                newTy.specifier = @enumFromInt(@intFromEnum(newTy.specifier) - 3);
-                operand.ty = newTy;
             }
+
+            operand.ty = operand.ty.makeReal();
 
             try operand.un(p, .RealExpr);
             return operand;
