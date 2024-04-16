@@ -1005,7 +1005,12 @@ pub fn sizeof(ty: Type, comp: *const Compilation) ?u64 {
         .DecayedTypeofExpr,
         => comp.target.ptrBitWidth() >> 3,
 
-        .Array, .Vector => if (ty.data.array.elem.sizeof(comp)) |size| size * ty.data.array.len else null,
+        .Array, .Vector => {
+            const size = ty.data.array.elem.sizeof(comp) orelse return null;
+            const arraySize = size * ty.data.array.len;
+            return std.mem.alignForward(u64, arraySize, ty.alignof(comp));
+        },
+
         .Struct, .Union => if (ty.data.record.isIncomplete()) null else ty.data.record.size,
         .Enum => if (ty.data.@"enum".isIncomplete() and !ty.data.@"enum".fixed) null else ty.data.@"enum".tagType.sizeof(comp),
 

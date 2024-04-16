@@ -2665,7 +2665,7 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: Declarator
         if (maxBits > 61) maxBits = 61;
 
         // `outer` is validated later so it may be invalid here
-        const outerSize = if (outer.hasIncompleteSize()) 1 else outer.sizeof(p.comp);
+        const outerSize = outer.sizeof(p.comp);
         const maxBytes = (@as(u64, 1) << @as(u6, @truncate(maxBits))) - 1;
         const maxElems = maxBytes / @max(1, outerSize orelse 1);
 
@@ -2704,8 +2704,10 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: Declarator
             var sizeValue = size.value;
             const size_t = p.comp.types.size;
 
-            if (sizeValue.compare(.lt, Value.int(0), size_t, p.comp))
+            if (sizeValue.compare(.lt, Value.int(0), size_t, p.comp)) {
                 try p.errToken(.negative_array_size, lb);
+                return error.ParsingFailed;
+            }
 
             const arrayType = try p.arena.create(Type.Array);
             arrayType.elem = Type.Void;
