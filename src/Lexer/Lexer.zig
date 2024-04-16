@@ -67,6 +67,11 @@ const State = enum {
     integer_suffix_l,
     integer_suffix_ll,
     integer_suffix_ul,
+    integer_suffix_i,
+    integer_suffix_ui,
+    integer_suffix_li,
+    integer_suffix_lli,
+    integer_suffix_uli,
     float_fraction,
     float_fraction_hex,
     float_exponent,
@@ -762,6 +767,7 @@ pub fn next(self: *Lexer) Token {
             .integer_suffix => switch (c) {
                 'u', 'U' => state = .integer_suffix_u,
                 'l', 'L' => state = .integer_suffix_l,
+                'i', 'I' => state = .integer_suffix_i,
                 else => {
                     id = .IntegerLiteral;
                     break;
@@ -769,24 +775,46 @@ pub fn next(self: *Lexer) Token {
             },
             .integer_suffix_u => switch (c) {
                 'l', 'L' => state = .integer_suffix_ul,
+                'i', 'I' => state = .integer_suffix_ui,
                 else => {
                     id = .IntegerLiteral_U;
                     break;
                 },
             },
-            .integer_suffix_l => switch (c) {
-                'l', 'L' => state = .integer_suffix_ll,
-                'u', 'U' => {
-                    id = .IntegerLiteral_LU;
-                    self.index += 1;
+            .integer_suffix_i => switch (c) {
+                'l', 'L' => state = .integer_suffix_li,
+                'u', 'U' => state = .integer_suffix_ui,
+                else => {
+                    id = .ImaginaryIntegerLiteral;
                     break;
                 },
+            },
+            .integer_suffix_ui => switch (c) {
+                'l', 'L' => state = .integer_suffix_uli,
+                else => {
+                    id = .ImaginaryIntegerLiteral_U;
+                    break;
+                },
+            },
+            .integer_suffix_l => switch (c) {
+                'l', 'L' => state = .integer_suffix_ll,
+                'i', 'I' => state = .integer_suffix_li,
+                'u', 'U' => state = .integer_suffix_ul,
                 else => {
                     id = .IntegerLiteral_L;
                     break;
                 },
             },
+            .integer_suffix_li => switch (c) {
+                'l', 'L' => state = .integer_suffix_lli,
+                'u', 'U' => state = .integer_suffix_uli,
+                else => {
+                    id = .ImaginaryIntegerLiteral_L;
+                    break;
+                },
+            },
             .integer_suffix_ll => switch (c) {
+                'i', 'I' => state = .integer_suffix_lli,
                 'u', 'U' => {
                     id = .IntegerLiteral_LLU;
                     self.index += 1;
@@ -797,7 +825,19 @@ pub fn next(self: *Lexer) Token {
                     break;
                 },
             },
+            .integer_suffix_lli => switch (c) {
+                'u', 'U' => {
+                    id = .ImaginaryIntegerLiteral_LLU;
+                    self.index += 1;
+                    break;
+                },
+                else => {
+                    id = .ImaginaryIntegerLiteral_LL;
+                    break;
+                },
+            },
             .integer_suffix_ul => switch (c) {
+                'i', 'I' => state = .integer_suffix_uli,
                 'l', 'L' => {
                     id = .IntegerLiteral_LLU;
                     self.index += 1;
@@ -805,6 +845,17 @@ pub fn next(self: *Lexer) Token {
                 },
                 else => {
                     id = .IntegerLiteral_LU;
+                    break;
+                },
+            },
+            .integer_suffix_uli => switch (c) {
+                'l', 'L' => {
+                    id = .ImaginaryIntegerLiteral_LLU;
+                    self.index += 1;
+                    break;
+                },
+                else => {
+                    id = .ImaginaryIntegerLiteral_LU;
                     break;
                 },
             },
@@ -942,6 +993,12 @@ pub fn next(self: *Lexer) Token {
             .integer_suffix_l => id = TokenType.IntegerLiteral_L,
             .integer_suffix_ll => id = TokenType.IntegerLiteral_LL,
             .integer_suffix_ul => id = TokenType.IntegerLiteral_LU,
+
+            .integer_suffix_i => id = TokenType.ImaginaryIntegerLiteral,
+            .integer_suffix_ui => id = TokenType.ImaginaryIntegerLiteral_U,
+            .integer_suffix_li => id = TokenType.ImaginaryIntegerLiteral_L,
+            .integer_suffix_lli => id = TokenType.ImaginaryIntegerLiteral_LL,
+            .integer_suffix_uli => id = TokenType.ImaginaryIntegerLiteral_LLU,
 
             .float_suffix => id = TokenType.FloatLiteral,
             .float_suffix_f => id = TokenType.FloatLiteral_F,
