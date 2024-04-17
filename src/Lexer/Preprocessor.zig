@@ -1468,6 +1468,19 @@ fn collectMacroFuncArguments(
     return args;
 }
 
+fn removeExpandedTokens(
+    pp: *Preprocessor,
+    buf: *ExpandBuffer,
+    start: usize,
+    len: usize,
+    movingEndIdx: *usize,
+) !void {
+    for (buf.items[start .. start + len]) |tok|
+        Token.free(tok.expansionLocs, pp.gpa);
+    try buf.replaceRange(start, len, &.{});
+    movingEndIdx.* -|= len;
+}
+
 fn expandMacroExhaustive(
     pp: *Preprocessor,
     lexer: *Lexer,
@@ -1512,11 +1525,7 @@ fn expandMacroExhaustive(
                         error.Unterminated => {
                             if (pp.comp.langOpts.emulate == .gcc)
                                 idx += 1;
-                            const tokensRemoved = macroScanIdx - idx;
-                            for (buf.items[idx..][0..tokensRemoved]) |tok|
-                                Token.free(tok.expansionLocs, pp.gpa);
-                            try buf.replaceRange(idx, tokensRemoved, &.{});
-                            movingEndIdx -|= tokensRemoved;
+                            try pp.removeExpandedTokens(buf, idx, macroScanIdx - idx, &movingEndIdx);
                             break :macroHandler;
                         },
                         else => |e| return e,
@@ -1551,6 +1560,7 @@ fn expandMacroExhaustive(
                             buf.items[idx].expansionSlice(),
                         );
                         idx += 1;
+                        try pp.removeExpandedTokens(buf, idx, macroScanIdx - idx + 1, &movingEndIdx);
                         continue;
                     }
 
@@ -1560,6 +1570,7 @@ fn expandMacroExhaustive(
                             buf.items[idx].expansionSlice(),
                         );
                         idx += 1;
+                        try pp.removeExpandedTokens(buf, idx, macroScanIdx - idx + 1, &movingEndIdx);
                         continue;
                     }
 
