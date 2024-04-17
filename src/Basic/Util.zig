@@ -12,6 +12,10 @@ pub const Color = enum {
     white,
 };
 
+pub fn fileSupportsColor(file: std.fs.File) bool {
+    return file.supportsAnsiEscapeCodes() or (isWindows and file.isTty());
+}
+
 pub fn setColor(color: Color, w: anytype) void {
     if (isWindows) {
         const stderr_file = std.io.getStdErr();

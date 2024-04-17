@@ -110,6 +110,8 @@ pub fn parseArgs(
     macroBuffer: anytype,
     args: [][]const u8,
 ) !bool {
+    var colorSetting: enum { on, off, unset } = .unset;
+
     var i: usize = 1;
     while (i < args.len) : (i += 1) {
         const arg = args[i];
@@ -156,9 +158,9 @@ pub fn parseArgs(
             } else if (std.mem.eql(u8, arg, "-E")) {
                 comp.onlyPreprocess = true;
             } else if (std.mem.eql(u8, arg, "-fcolor-diagnostics")) {
-                comp.diag.color = true;
+                colorSetting = .on;
             } else if (std.mem.eql(u8, arg, "-fno-color-diagnostics")) {
-                comp.diag.color = false;
+                colorSetting = .off;
             } else if (std.mem.eql(u8, arg, "-fshort-enums")) {
                 comp.langOpts.shortEnums = true;
             } else if (std.mem.eql(u8, arg, "-fno-short-enums")) {
@@ -274,6 +276,12 @@ pub fn parseArgs(
             try sources.append(file);
         }
     }
+
+    comp.diag.color = switch (colorSetting) {
+        .on => true,
+        .off => false,
+        .unset => Util.fileSupportsColor(std.io.getStdOut()) and !std.process.hasEnvVarConstant("NO_COLOR"),
+    };
 
     return false;
 }
@@ -401,8 +409,11 @@ fn processSource(comp: *Compilation, source: Source, builtinMacro: Source, userD
     defer tree.deinit();
 
     if (comp.dumpAst) {
-        var buffWriter = std.io.bufferedWriter(std.io.getStdOut().writer());
-        tree.dump(buffWriter.writer()) catch {};
+        const stdout = std.io.getStdOut();
+        const color = comp.diag.color and Util.fileSupportsColor(stdout);
+
+        var buffWriter = std.io.bufferedWriter(stdout.writer());
+        tree.dump(color, buffWriter.writer()) catch {};
         buffWriter.flush() catch {};
     }
 

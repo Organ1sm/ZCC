@@ -184,7 +184,6 @@ pub fn setAll(diag: *Diagnostics, to: Kind) void {
 
 pub fn init(gpa: Allocator) Diagnostics {
     return .{
-        .color = std.io.getStdErr().supportsAnsiEscapeCodes() or (IsWindows and std.io.getStdErr().isTty()),
         .arena = std.heap.ArenaAllocator.init(gpa),
     };
 }
