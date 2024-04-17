@@ -145,6 +145,7 @@ pub const Options = packed struct {
     @"attribute-warning": Kind = .default,
     @"invalid-noreturn": Kind = .default,
     @"zero-length-array": Kind = .default,
+    @"old-style-flexible-struct": Kind = .default,
 };
 
 list: std.ArrayListUnmanaged(Message) = .{},
