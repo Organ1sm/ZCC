@@ -2706,16 +2706,18 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: Declarator
             }
         } else {
             var sizeValue = size.value;
-            const size_t = p.comp.types.size;
+            const sizeTy = p.comp.types.size;
 
-            if (sizeValue.compare(.lt, Value.int(0), size_t, p.comp)) {
+            if (sizeValue.isZero()) {
+                try p.errToken(.zero_length_array, lb);
+            } else if (sizeValue.compare(.lt, Value.int(0), sizeTy, p.comp)) {
                 try p.errToken(.negative_array_size, lb);
                 return error.ParsingFailed;
             }
 
             const arrayType = try p.arena.create(Type.Array);
             arrayType.elem = Type.Void;
-            if (sizeValue.compare(.gt, Value.int(maxElems), size_t, p.comp)) {
+            if (sizeValue.compare(.gt, Value.int(maxElems), sizeTy, p.comp)) {
                 try p.errToken(.array_too_large, lb);
                 arrayType.len = maxElems;
             } else {

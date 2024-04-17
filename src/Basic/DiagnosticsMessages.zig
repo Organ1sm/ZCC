@@ -1849,3 +1849,9 @@ pub const invalid_real = struct {
     pub const extra = .str;
     pub const kind = .@"error";
 };
+pub const zero_length_array = struct {
+    pub const msg = "zero size arrays are an extension";
+    pub const kind = .off;
+    pub const pedantic = true;
+    pub const opt = "zero-length-array";
+};
