@@ -5155,7 +5155,7 @@ fn offsetofMemberDesignator(p: *Parser, baseType: Type) Error!Result {
 
             if (!index.ty.isInt())
                 try p.errToken(.invalid_index, lbracketToken);
-            try p.checkArrayBounds(index, lhs.ty, lbracketToken);
+            try p.checkArrayBounds(index, lhs, lbracketToken);
 
             try index.saveValue(p);
             try ptr.bin(p, .ArrayAccessExpr, index);
@@ -5522,19 +5522,19 @@ fn parseSuffixExpr(p: *Parser, lhs: Result) Error!Result {
             try index.expect(p);
             try p.expectClosing(lb, .RBracket);
 
-            const lhsType = lhs.ty;
-            const rhsType = index.ty;
+            const arrayBeforeConversion = lhs;
+            const indexBeforeConversion = index;
             var ptr = lhs;
             try ptr.lvalConversion(p);
             try index.lvalConversion(p);
             if (ptr.ty.isPointer()) {
                 ptr.ty = ptr.ty.getElemType();
                 if (!index.ty.isInt()) try p.errToken(.invalid_index, lb);
-                try p.checkArrayBounds(index, lhsType, lb);
+                try p.checkArrayBounds(indexBeforeConversion, arrayBeforeConversion, lb);
             } else if (index.ty.isPointer()) {
                 index.ty = index.ty.getElemType();
                 if (!ptr.ty.isInt()) try p.errToken(.invalid_index, lb);
-                try p.checkArrayBounds(ptr, rhsType, lb);
+                try p.checkArrayBounds(arrayBeforeConversion, indexBeforeConversion, lb);
                 std.mem.swap(Result, &ptr, &index);
             } else {
                 try p.errToken(.invalid_subscript, lb);
@@ -5834,10 +5834,26 @@ fn parseCallExpr(p: *Parser, lhs: Result) Error!Result {
     return Result{ .node = try p.addNode(callNode), .ty = callNode.type };
 }
 
-fn checkArrayBounds(p: *Parser, index: Result, arrayType: Type, token: TokenIndex) !void {
+fn checkArrayBounds(p: *Parser, index: Result, array: Result, token: TokenIndex) !void {
     if (index.value.tag == .unavailable) return;
-    const len = Value.int(arrayType.arrayLen() orelse return);
+    const arrayLen = array.ty.arrayLen() orelse return;
+    if (arrayLen == 0) return;
 
+    if (arrayLen == 1) {
+        if (p.getNode(array.node, .MemberAccessExpr) orelse p.getNode(array.node, .MemberAccessPtrExpr)) |node| {
+            const data = p.nodes.items(.data)[@intFromEnum(node)];
+            var lhs = p.nodes.items(.type)[@intFromEnum(data.member.lhs)];
+            if (lhs.get(.Pointer)) |ptr| {
+                lhs = ptr.data.subType.*;
+            }
+            if (lhs.is(.Struct)) {
+                const record = lhs.getRecord().?;
+                if (data.member.index + 1 == record.fields.len) return;
+            }
+        }
+    }
+
+    const len = Value.int(arrayLen);
     if (index.ty.isUnsignedInt(p.comp)) {
         if (index.value.compare(.gte, len, p.comp.types.size, p.comp))
             try p.errExtra(.array_after, token, .{ .unsigned = index.value.data.int });
