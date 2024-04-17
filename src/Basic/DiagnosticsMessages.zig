@@ -1855,3 +1855,10 @@ pub const zero_length_array = struct {
     pub const pedantic = true;
     pub const opt = "zero-length-array";
 };
+pub const old_style_flexible_struct = struct {
+    pub const msg = "array index {d} is past the end of the array";
+    pub const extra = .unsigned;
+    pub const kind = .off;
+    pub const pedantic = true;
+    pub const opt = "old-style-flexible-struct";
+};

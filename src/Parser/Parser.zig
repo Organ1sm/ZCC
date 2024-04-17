@@ -5850,7 +5850,14 @@ fn checkArrayBounds(p: *Parser, index: Result, array: Result, token: TokenIndex)
             }
             if (lhs.is(.Struct)) {
                 const record = lhs.getRecord().?;
-                if (data.member.index + 1 == record.fields.len) return;
+                if (data.member.index + 1 == record.fields.len) {
+                    if (!index.value.isZero()) {
+                        try p.errExtra(.old_style_flexible_struct, token, .{
+                            .unsigned = index.value.data.int,
+                        });
+                    }
+                    return;
+                }
             }
         }
     }
