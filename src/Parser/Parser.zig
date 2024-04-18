@@ -131,7 +131,7 @@ recordMembers: std.ArrayListUnmanaged(struct { token: TokenIndex, name: StringId
 @"switch": ?*Switch = null,
 inLoop: bool = false,
 /// #pragma pack value
-pragmaPack: u8 = 8,
+pragmaPack: ?u8 = null,
 declSpecId: StringId,
 
 const Label = union(enum) {
