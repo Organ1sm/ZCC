@@ -341,7 +341,6 @@ pub fn main() !void {
 
         if (try checkExpectedErrors(&pp, &progress, &buffer)) |some| {
             if (some) passCount += 1 else failCount += 1;
-            progress.log("passed\n", .{});
             continue;
         }
 
