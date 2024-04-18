@@ -5165,7 +5165,8 @@ fn offsetofMemberDesignator(p: *Parser, baseType: Type) Error!Result {
 
     const baseNode = try p.addNode(.{ .tag = .DefaultInitExpr, .type = baseType, .data = undefined });
     const bitOffset = Value.int(0);
-    var lhs = try p.fieldAccessExtra(baseNode, baseType, baseFieldName, false);
+    const baseRecordTy = baseType.canonicalize(.standard);
+    var lhs = try p.fieldAccessExtra(baseNode, baseRecordTy, baseFieldName, false);
 
     while (true) switch (p.getCurrToken()) {
         .Period => {
