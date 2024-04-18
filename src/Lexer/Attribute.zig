@@ -1315,7 +1315,8 @@ fn applyTransparentUnion(attr: Attribute, p: *Parser, token: TokenIndex, ty: Typ
         if (fieldSize == firstFieldSize)
             continue;
 
-        const str = try std.fmt.allocPrint(p.comp.diag.arena.allocator(), "'{s}' ({d}", .{ field.name, fieldSize });
+        const mapper = p.comp.stringInterner.getSlowTypeMapper();
+        const str = try std.fmt.allocPrint(p.comp.diag.arena.allocator(), "'{s}' ({d}", .{ mapper.lookup(field.name), fieldSize });
         try p.errStr(.transparent_union_size, field.nameToken, str);
         return p.errExtra(.transparent_union_size_note, fields[0].nameToken, .{ .unsigned = firstFieldSize });
     }

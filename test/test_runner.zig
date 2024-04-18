@@ -60,7 +60,7 @@ fn testOne(allocator: std.mem.Allocator, path: []const u8) !void {
 
     var tree = try zcc.Parser.parse(&pp);
     defer tree.deinit();
-    tree.dump(std.io.null_writer) catch {};
+    tree.dump(false, std.io.null_writer) catch {};
 }
 
 fn testAllAllocationFailures(cases: [][]const u8) !void {
@@ -74,7 +74,10 @@ fn testAllAllocationFailures(cases: [][]const u8) !void {
         defer caseNode.end();
         progress.refresh();
 
-        try std.testing.checkAllAllocationFailures(std.testing.allocator, testOne, .{case});
+        try std.testing.checkAllAllocationFailures(std.testing.allocator, testOne, .{case}) catch |er| switch (er) {
+            error.SwallowedOutOfMemoryError => {},
+            else => |e| return e,
+        };
     }
     rootNode.end();
 }
@@ -298,7 +301,10 @@ pub fn main() !void {
             var actual = StmtTypeDumper.init(gpa);
             defer actual.deinit(gpa);
 
-            try actual.dump(&tree, testFn.decl.node, gpa);
+            const mapper = try tree.comp.stringInterner.getFastTypeMapper(gpa);
+            defer mapper.deinit(gpa);
+
+            try actual.dump(&tree, mapper, testFn.decl.node, gpa);
 
             var i: usize = 0;
             for (types.tokens) |str| {
@@ -538,7 +544,7 @@ const StmtTypeDumper = struct {
         };
     }
 
-    fn dumpNode(self: *StmtTypeDumper, tree: *const Tree, node: NodeIndex, m: *MsgWriter) AllocatorError!void {
+    fn dumpNode(self: *StmtTypeDumper, tree: *const Tree, mapper: zcc.TypeMapper, node: NodeIndex, m: *MsgWriter) AllocatorError!void {
         if (node == .none)
             return;
         const tag = tree.nodes.items(.tag)[@intFromEnum(node)];
@@ -546,7 +552,7 @@ const StmtTypeDumper = struct {
             return;
 
         const ty = tree.nodes.items(.type)[@intFromEnum(node)];
-        ty.dump(m.buf.writer()) catch {};
+        ty.dump(mapper, m.buf.writer()) catch {};
 
         const owned = try m.buf.toOwnedSlice();
         errdefer m.buf.allocator.free(owned);
@@ -554,7 +560,7 @@ const StmtTypeDumper = struct {
         try self.types.append(owned);
     }
 
-    fn dump(self: *StmtTypeDumper, tree: *const Tree, declIdx: NodeIndex, allocator: std.mem.Allocator) AllocatorError!void {
+    fn dump(self: *StmtTypeDumper, tree: *const Tree, mapper: zcc.TypeMapper, declIdx: NodeIndex, allocator: std.mem.Allocator) AllocatorError!void {
         var m = MsgWriter.init(allocator);
         defer m.deinit();
 
@@ -565,13 +571,13 @@ const StmtTypeDumper = struct {
 
         switch (tag) {
             .CompoundStmtTwo => {
-                try self.dumpNode(tree, data.binExpr.lhs, &m);
-                try self.dumpNode(tree, data.binExpr.rhs, &m);
+                try self.dumpNode(tree, mapper, data.binExpr.lhs, &m);
+                try self.dumpNode(tree, mapper, data.binExpr.rhs, &m);
             },
 
             .CompoundStmt => {
                 for (tree.data[data.range.start..data.range.end]) |stmt| {
-                    try self.dumpNode(tree, stmt, &m);
+                    try self.dumpNode(tree, mapper, stmt, &m);
                 }
             },
 

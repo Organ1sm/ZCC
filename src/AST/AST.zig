@@ -7,6 +7,7 @@ const TokenType = @import("../Basic/TokenType.zig").TokenType;
 const AstTag = @import("AstTag.zig").Tag;
 const Attribute = @import("../Lexer/Attribute.zig");
 const Value = @import("Value.zig");
+const StringInterner = @import("../Basic/StringInterner.zig");
 
 const AST = @This();
 
@@ -323,8 +324,11 @@ pub fn getTokenSlice(tree: AST, index: TokenIndex) []const u8 {
 }
 
 pub fn dump(tree: AST, color: bool, writer: anytype) @TypeOf(writer).Error!void {
+    const mapper = tree.comp.stringInterner.getFastTypeMapper(tree.comp.gpa) catch tree.comp.stringInterner.getSlowTypeMapper();
+    defer mapper.deinit(tree.comp.gpa);
+
     for (tree.rootDecls) |i| {
-        try tree.dumpNode(i, 0, color, writer);
+        try tree.dumpNode(i, 0, mapper, color, writer);
         try writer.writeByte('\n');
     }
 }
@@ -368,7 +372,14 @@ fn dumpAttribute(attr: Attribute, writer: anytype) !void {
     }
 }
 
-fn dumpNode(tree: AST, node: NodeIndex, level: u32, color: bool, w: anytype) @TypeOf(w).Error!void {
+fn dumpNode(
+    tree: AST,
+    node: NodeIndex,
+    level: u32,
+    mapper: StringInterner.TypeMapper,
+    color: bool,
+    w: anytype,
+) @TypeOf(w).Error!void {
     const delta = 2;
     const half = delta / 2;
     const util = @import("../Basic/Util.zig");
@@ -399,7 +410,7 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, color: bool, w: anytype) @Ty
     if (color)
         util.setColor(TYPE, w);
     try w.writeByte('\'');
-    try ty.dump(w);
+    try ty.dump(mapper, w);
     try w.writeByte('\'');
 
     if (isLValue(tree.nodes, tree.data, tree.valueMap, node)) {
@@ -438,12 +449,12 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, color: bool, w: anytype) @Ty
         .StaticAssert => {
             try w.writeByteNTimes(' ', level + 1);
             try w.writeAll("condition:\n");
-            try tree.dumpNode(data.binExpr.lhs, level + delta, color, w);
+            try tree.dumpNode(data.binExpr.lhs, level + delta, mapper, color, w);
 
             if (data.binExpr.rhs != .none) {
                 try w.writeByteNTimes(' ', level + 1);
                 try w.writeAll("diagnostic:\n");
-                try tree.dumpNode(data.binExpr.rhs, level + delta, color, w);
+                try tree.dumpNode(data.binExpr.rhs, level + delta, mapper, color, w);
             }
         },
 
@@ -480,7 +491,7 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, color: bool, w: anytype) @Ty
 
             try w.writeByteNTimes(' ', level + half);
             try w.writeAll("body:\n");
-            try tree.dumpNode(data.decl.node, level + delta, color, w);
+            try tree.dumpNode(data.decl.node, level + delta, mapper, color, w);
         },
 
         .CompoundStmt,
@@ -494,7 +505,7 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, color: bool, w: anytype) @Ty
             for (tree.data[data.range.start..data.range.end], 0..) |stmt, i| {
                 if (i != 0)
                     try w.writeByte('\n');
-                try tree.dumpNode(stmt, level + delta, color, w);
+                try tree.dumpNode(stmt, level + delta, mapper, color, w);
                 if (maybeFieldAttrs) |fieldAttrs| {
                     if (fieldAttrs[i].len == 0) continue;
 
@@ -521,7 +532,7 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, color: bool, w: anytype) @Ty
             else
                 empty.ptr;
             if (data.binExpr.lhs != .none) {
-                try tree.dumpNode(data.binExpr.lhs, level + delta, color, w);
+                try tree.dumpNode(data.binExpr.lhs, level + delta, mapper, color, w);
                 if (fieldAttrs[0].len > 0) {
                     if (color) util.setColor(ATTRIBUTE, w);
                     try dumpFieldAttributes(fieldAttrs[0], level + delta + half, w);
@@ -529,7 +540,7 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, color: bool, w: anytype) @Ty
                 }
             }
             if (data.binExpr.rhs != .none) {
-                try tree.dumpNode(data.binExpr.rhs, level + delta, color, w);
+                try tree.dumpNode(data.binExpr.rhs, level + delta, mapper, color, w);
                 if (fieldAttrs[1].len > 0) {
                     if (color) util.setColor(ATTRIBUTE, w);
                     try dumpFieldAttributes(fieldAttrs[1], level + delta + half, w);
@@ -551,12 +562,12 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, color: bool, w: anytype) @Ty
                 util.setColor(.reset, w);
 
             if (data.unionInit.node != .none) {
-                try tree.dumpNode(data.unionInit.node, level + delta, color, w);
+                try tree.dumpNode(data.unionInit.node, level + delta, mapper, color, w);
             }
         },
 
         .CompoundLiteralExpr => {
-            try tree.dumpNode(data.unExpr, level + half, color, w);
+            try tree.dumpNode(data.unExpr, level + half, mapper, color, w);
         },
 
         .LabeledStmt => {
@@ -573,7 +584,7 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, color: bool, w: anytype) @Ty
             if (data.decl.node != .none) {
                 try w.writeByteNTimes(' ', level + half);
                 try w.writeAll("stmt:\n");
-                try tree.dumpNode(data.decl.node, level + delta, color, w);
+                try tree.dumpNode(data.decl.node, level + delta, mapper, color, w);
             }
         },
 
@@ -584,36 +595,36 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, color: bool, w: anytype) @Ty
         => {
             try w.writeByteNTimes(' ', level + half);
             try w.writeAll("cond:\n");
-            try tree.dumpNode(data.if3.cond, level + delta, color, w);
+            try tree.dumpNode(data.if3.cond, level + delta, mapper, color, w);
 
             try w.writeByteNTimes(' ', level + half);
             try w.writeAll("then:\n");
-            try tree.dumpNode(tree.data[data.if3.body], level + delta, color, w);
+            try tree.dumpNode(tree.data[data.if3.body], level + delta, mapper, color, w);
 
             try w.writeByteNTimes(' ', level + half);
             try w.writeAll("else:\n");
-            try tree.dumpNode(tree.data[data.if3.body + 1], level + delta, color, w);
+            try tree.dumpNode(tree.data[data.if3.body + 1], level + delta, mapper, color, w);
         },
 
         .IfElseStmt => {
             try w.writeByteNTimes(' ', level + half);
             try w.writeAll("cond:\n");
-            try tree.dumpNode(data.binExpr.lhs, level + delta, color, w);
+            try tree.dumpNode(data.binExpr.lhs, level + delta, mapper, color, w);
 
             try w.writeByteNTimes(' ', level + half);
             try w.writeAll("else:\n");
-            try tree.dumpNode(data.binExpr.rhs, level + delta, color, w);
+            try tree.dumpNode(data.binExpr.rhs, level + delta, mapper, color, w);
         },
 
         .IfThenStmt => {
             try w.writeByteNTimes(' ', level + half);
             try w.writeAll("cond:\n");
-            try tree.dumpNode(data.binExpr.lhs, level + delta, color, w);
+            try tree.dumpNode(data.binExpr.lhs, level + delta, mapper, color, w);
 
             if (data.binExpr.rhs != .none) {
                 try w.writeByteNTimes(' ', level + half);
                 try w.writeAll("then:\n");
-                try tree.dumpNode(data.binExpr.rhs, level + delta, color, w);
+                try tree.dumpNode(data.binExpr.rhs, level + delta, mapper, color, w);
             }
         },
 
@@ -640,7 +651,7 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, color: bool, w: anytype) @Ty
             if (data.unExpr != .none) {
                 try w.writeByteNTimes(' ', level + half);
                 try w.writeAll("expr:\n");
-                try tree.dumpNode(data.unExpr, level + delta, color, w);
+                try tree.dumpNode(data.unExpr, level + delta, mapper, color, w);
             }
         },
 
@@ -650,26 +661,26 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, color: bool, w: anytype) @Ty
             try w.writeByteNTimes(' ', level + half);
             try w.writeAll("decl:\n");
             for (forDecl.decls) |decl| {
-                try tree.dumpNode(decl, level + delta, color, w);
+                try tree.dumpNode(decl, level + delta, mapper, color, w);
                 try w.writeByte('\n');
             }
 
             if (forDecl.cond != .none) {
                 try w.writeByteNTimes(' ', level + half);
                 try w.writeAll("cond:\n");
-                try tree.dumpNode(forDecl.cond, level + delta, color, w);
+                try tree.dumpNode(forDecl.cond, level + delta, mapper, color, w);
             }
 
             if (forDecl.incr != .none) {
                 try w.writeByteNTimes(' ', level + half);
                 try w.writeAll("incr:\n");
-                try tree.dumpNode(forDecl.incr, level + delta, color, w);
+                try tree.dumpNode(forDecl.incr, level + delta, mapper, color, w);
             }
 
             if (forDecl.body != .none) {
                 try w.writeByteNTimes(' ', level + half);
                 try w.writeAll("body:\n");
-                try tree.dumpNode(forDecl.body, level + delta, color, w);
+                try tree.dumpNode(forDecl.body, level + delta, mapper, color, w);
             }
         },
 
@@ -677,7 +688,7 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, color: bool, w: anytype) @Ty
             if (data.unExpr != .none) {
                 try w.writeByteNTimes(' ', level + half);
                 try w.writeAll("body:\n");
-                try tree.dumpNode(data.unExpr, level + delta, color, w);
+                try tree.dumpNode(data.unExpr, level + delta, mapper, color, w);
             }
         },
 
@@ -687,65 +698,65 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, color: bool, w: anytype) @Ty
             if (forStmt.init != .none) {
                 try w.writeByteNTimes(' ', level + half);
                 try w.writeAll("init:\n");
-                try tree.dumpNode(forStmt.init, level + delta, color, w);
+                try tree.dumpNode(forStmt.init, level + delta, mapper, color, w);
             }
 
             if (forStmt.cond != .none) {
                 try w.writeByteNTimes(' ', level + half);
                 try w.writeAll("cond:\n");
-                try tree.dumpNode(forStmt.cond, level + delta, color, w);
+                try tree.dumpNode(forStmt.cond, level + delta, mapper, color, w);
             }
 
             if (forStmt.incr != .none) {
                 try w.writeByteNTimes(' ', level + half);
                 try w.writeAll("incr:\n");
-                try tree.dumpNode(forStmt.incr, level + delta, color, w);
+                try tree.dumpNode(forStmt.incr, level + delta, mapper, color, w);
             }
 
             if (forStmt.body != .none) {
                 try w.writeByteNTimes(' ', level + half);
                 try w.writeAll("body:\n");
-                try tree.dumpNode(forStmt.body, level + delta, color, w);
+                try tree.dumpNode(forStmt.body, level + delta, mapper, color, w);
             }
         },
 
         .SwitchStmt, .WhileStmt, .DoWhileStmt => {
             try w.writeByteNTimes(' ', level + half);
             try w.writeAll("cond:\n");
-            try tree.dumpNode(data.binExpr.lhs, level + delta, color, w);
+            try tree.dumpNode(data.binExpr.lhs, level + delta, mapper, color, w);
 
             if (data.binExpr.rhs != .none) {
                 try w.writeByteNTimes(' ', level + half);
                 try w.writeAll("body:\n");
-                try tree.dumpNode(data.binExpr.rhs, level + delta, color, w);
+                try tree.dumpNode(data.binExpr.rhs, level + delta, mapper, color, w);
             }
         },
 
         .CaseStmt => {
             try w.writeByteNTimes(' ', level + half);
             try w.writeAll("value:\n");
-            try tree.dumpNode(data.binExpr.lhs, level + delta, color, w);
+            try tree.dumpNode(data.binExpr.lhs, level + delta, mapper, color, w);
 
             if (data.binExpr.rhs != .none) {
                 try w.writeByteNTimes(' ', level + half);
                 try w.writeAll("stmt:\n");
-                try tree.dumpNode(data.binExpr.rhs, level + delta, color, w);
+                try tree.dumpNode(data.binExpr.rhs, level + delta, mapper, color, w);
             }
         },
 
         .CaseRangeStmt => {
             try w.writeByteNTimes(' ', level + half);
             try w.writeAll("range start:\n");
-            try tree.dumpNode(tree.data[data.if3.body], level + delta, color, w);
+            try tree.dumpNode(tree.data[data.if3.body], level + delta, mapper, color, w);
 
             try w.writeByteNTimes(' ', level + half);
             try w.writeAll("range end:\n");
-            try tree.dumpNode(tree.data[data.if3.body + 1], level + delta, color, w);
+            try tree.dumpNode(tree.data[data.if3.body + 1], level + delta, mapper, color, w);
 
             if (data.if3.cond != .none) {
                 try w.writeByteNTimes(' ', level + half);
                 try w.writeAll("stmt:\n");
-                try tree.dumpNode(data.if3.cond, level + delta, color, w);
+                try tree.dumpNode(data.if3.cond, level + delta, mapper, color, w);
             }
         },
 
@@ -753,7 +764,7 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, color: bool, w: anytype) @Ty
             if (data.unExpr != .none) {
                 try w.writeByteNTimes(' ', level + half);
                 try w.writeAll("stmt:\n");
-                try tree.dumpNode(data.unExpr, level + delta, color, w);
+                try tree.dumpNode(data.unExpr, level + delta, mapper, color, w);
             }
         },
 
@@ -777,7 +788,7 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, color: bool, w: anytype) @Ty
             if (data.decl.node != .none) {
                 try w.writeByteNTimes(' ', level + half);
                 try w.writeAll("init:\n");
-                try tree.dumpNode(data.decl.node, level + delta, color, w);
+                try tree.dumpNode(data.decl.node, level + delta, mapper, color, w);
             }
         },
 
@@ -792,7 +803,7 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, color: bool, w: anytype) @Ty
             if (data.decl.node != .none) {
                 try w.writeByteNTimes(' ', level + half);
                 try w.writeAll("value:\n");
-                try tree.dumpNode(data.decl.node, level + delta, color, w);
+                try tree.dumpNode(data.decl.node, level + delta, mapper, color, w);
             }
         },
 
@@ -810,30 +821,30 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, color: bool, w: anytype) @Ty
             if (data.decl.node != .none) {
                 try w.writeByteNTimes(' ', level + half);
                 try w.writeAll("bits:\n");
-                try tree.dumpNode(data.decl.node, level + delta, color, w);
+                try tree.dumpNode(data.decl.node, level + delta, mapper, color, w);
             }
         },
 
         .CallExpr => {
             try w.writeByteNTimes(' ', level + half);
             try w.writeAll("lhs:\n");
-            try tree.dumpNode(tree.data[data.range.start], level + delta, color, w);
+            try tree.dumpNode(tree.data[data.range.start], level + delta, mapper, color, w);
 
             try w.writeByteNTimes(' ', level + half);
             try w.writeAll("args:\n");
-            for (tree.data[data.range.start + 1 .. data.range.end]) |arg| try tree.dumpNode(arg, level + delta, color, w);
+            for (tree.data[data.range.start + 1 .. data.range.end]) |arg| try tree.dumpNode(arg, level + delta, mapper, color, w);
         },
 
         .CallExprOne => {
             try w.writeByteNTimes(' ', level + half);
             try w.writeAll("lhs:\n");
-            try tree.dumpNode(data.binExpr.lhs, level + delta, color, w);
+            try tree.dumpNode(data.binExpr.lhs, level + delta, mapper, color, w);
 
             const arg = data.binExpr.rhs;
             if (arg != .none) {
                 try w.writeByteNTimes(' ', level + half);
                 try w.writeAll("arg:\n");
-                try tree.dumpNode(arg, level + delta, color, w);
+                try tree.dumpNode(arg, level + delta, mapper, color, w);
             }
         },
 
@@ -849,7 +860,7 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, color: bool, w: anytype) @Ty
             try w.writeByteNTimes(' ', level + half);
             try w.writeAll("args:\n");
             for (tree.data[data.range.start + 1 .. data.range.end]) |arg|
-                try tree.dumpNode(arg, level + delta, color, w);
+                try tree.dumpNode(arg, level + delta, mapper, color, w);
         },
 
         .BuiltinCallExprOne => {
@@ -863,7 +874,7 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, color: bool, w: anytype) @Ty
             if (data.decl.node != .none) {
                 try w.writeByteNTimes(' ', level + half);
                 try w.writeAll("arg:\n");
-                try tree.dumpNode(data.decl.node, level + delta, color, w);
+                try tree.dumpNode(data.decl.node, level + delta, mapper, color, w);
             }
         },
 
@@ -900,15 +911,15 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, color: bool, w: anytype) @Ty
         => {
             try w.writeByteNTimes(' ', level + 1);
             try w.writeAll("lhs:\n");
-            try tree.dumpNode(data.binExpr.lhs, level + delta, color, w);
+            try tree.dumpNode(data.binExpr.lhs, level + delta, mapper, color, w);
             try w.writeByteNTimes(' ', level + 1);
             try w.writeAll("rhs:\n");
-            try tree.dumpNode(data.binExpr.rhs, level + delta, color, w);
+            try tree.dumpNode(data.binExpr.rhs, level + delta, mapper, color, w);
         },
 
         .ExplicitCast,
         .ImplicitCast,
-        => try tree.dumpNode(data.cast.operand, level + delta, color, w),
+        => try tree.dumpNode(data.cast.operand, level + delta, mapper, color, w),
 
         .AddrOfExpr,
         .ComputedGotoStmt,
@@ -927,7 +938,7 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, color: bool, w: anytype) @Ty
         => {
             try w.writeByteNTimes(' ', level + 1);
             try w.writeAll("operand:\n");
-            try tree.dumpNode(data.unExpr, level + delta, color, w);
+            try tree.dumpNode(data.unExpr, level + delta, mapper, color, w);
         },
 
         .DeclRefExpr => {
@@ -960,7 +971,7 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, color: bool, w: anytype) @Ty
         .MemberAccessExpr, .MemberAccessPtrExpr => {
             try w.writeByteNTimes(' ', level + 1);
             try w.writeAll("lhs:\n");
-            try tree.dumpNode(data.member.lhs, level + delta, color, w);
+            try tree.dumpNode(data.member.lhs, level + delta, mapper, color, w);
 
             var lhsType = tree.nodes.items(.type)[@intFromEnum(data.member.lhs)];
             if (lhsType.isPointer()) lhsType = lhsType.getElemType();
@@ -970,7 +981,7 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, color: bool, w: anytype) @Ty
             try w.writeAll("name: ");
             if (color)
                 util.setColor(NAME, w);
-            try w.print("{s}\n", .{lhsType.data.record.fields[data.member.index].name});
+            try w.print("{s}\n", .{mapper.lookup(lhsType.data.record.fields[data.member.index].name)});
             if (color)
                 util.setColor(.reset, w);
         },
@@ -979,11 +990,11 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, color: bool, w: anytype) @Ty
             if (data.binExpr.lhs != .none) {
                 try w.writeByteNTimes(' ', level + 1);
                 try w.writeAll("lhs:\n");
-                try tree.dumpNode(data.binExpr.lhs, level + delta, color, w);
+                try tree.dumpNode(data.binExpr.lhs, level + delta, mapper, color, w);
             }
             try w.writeByteNTimes(' ', level + 1);
             try w.writeAll("index:\n");
-            try tree.dumpNode(data.binExpr.rhs, level + delta, color, w);
+            try tree.dumpNode(data.binExpr.rhs, level + delta, mapper, color, w);
         },
 
         .SizeOfExpr,
@@ -992,31 +1003,31 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, color: bool, w: anytype) @Ty
             if (data.unExpr != .none) {
                 try w.writeByteNTimes(' ', level + 1);
                 try w.writeAll("expr:\n");
-                try tree.dumpNode(data.unExpr, level + delta, color, w);
+                try tree.dumpNode(data.unExpr, level + delta, mapper, color, w);
             }
         },
 
         .GenericExprOne => {
             try w.writeByteNTimes(' ', level + 1);
             try w.writeAll("controlling:\n");
-            try tree.dumpNode(data.binExpr.lhs, level + delta, color, w);
+            try tree.dumpNode(data.binExpr.lhs, level + delta, mapper, color, w);
             try w.writeByteNTimes(' ', level + 1);
             try w.writeAll("chosen:\n");
-            try tree.dumpNode(data.binExpr.rhs, level + delta, color, w);
+            try tree.dumpNode(data.binExpr.rhs, level + delta, mapper, color, w);
         },
 
         .GenericExpr => {
             const nodes = tree.data[data.range.start..data.range.end];
             try w.writeByteNTimes(' ', level + 1);
             try w.writeAll("controlling:\n");
-            try tree.dumpNode(nodes[0], level + delta, color, w);
+            try tree.dumpNode(nodes[0], level + delta, mapper, color, w);
             try w.writeByteNTimes(' ', level + 1);
             try w.writeAll("chosen:\n");
-            try tree.dumpNode(nodes[1], level + delta, color, w);
+            try tree.dumpNode(nodes[1], level + delta, mapper, color, w);
             try w.writeByteNTimes(' ', level + 1);
             try w.writeAll("rest:\n");
             for (nodes[2..]) |expr| {
-                try tree.dumpNode(expr, level + delta, color, w);
+                try tree.dumpNode(expr, level + delta, mapper, color, w);
             }
         },
 
@@ -1024,7 +1035,7 @@ fn dumpNode(tree: AST, node: NodeIndex, level: u32, color: bool, w: anytype) @Ty
         .GenericDefaultExpr,
         .StmtExpr,
         .ImaginaryLiteral,
-        => try tree.dumpNode(data.unExpr, level + delta, color, w),
+        => try tree.dumpNode(data.unExpr, level + delta, mapper, color, w),
 
         .ArrayFillerExpr => {
             try w.writeByteNTimes(' ', level + 1);

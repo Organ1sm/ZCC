@@ -5,6 +5,7 @@ const Type = @import("../AST/Type.zig");
 const Parser = @import("../Parser/Parser.zig");
 const Value = @import("../AST/Value.zig");
 const TokenType = @import("../Basic/TokenType.zig").TokenType;
+const StringId = @import("../Basic/StringInterner.zig").StringId;
 
 const mem = std.mem;
 const Allocator = mem.Allocator;
@@ -16,7 +17,7 @@ const SymbolStack = @This();
 
 pub const Symbol = struct {
     /// The name of the symbol.
-    name: []const u8,
+    name: StringId,
     /// The type of the symbol.
     type: Type,
     /// The token index that represents this symbol.
@@ -79,8 +80,7 @@ pub fn appendSymbol(self: *SymbolStack, symbol: Symbol) !void {
 /// @param nameToken   The index of the token representing the symbol's name.
 /// @param noTypeYet   A boolean indicating whether the type should not have been defined yet.
 /// @return            A nullable Symbol if found, or null if not found or if it is a definition or declaration.
-pub fn findTypedef(self: *SymbolStack, nameToken: TokenIndex, noTypeYet: bool) !?Symbol {
-    const name = self.p.getTokenSlice(nameToken);
+pub fn findTypedef(self: *SymbolStack, name: StringId, nameToken: TokenIndex, noTypeYet: bool) !?Symbol {
     const kinds = self.symbols.items(.kind);
     const names = self.symbols.items(.name);
     var i = self.symbols.len;
@@ -88,23 +88,23 @@ pub fn findTypedef(self: *SymbolStack, nameToken: TokenIndex, noTypeYet: bool) !
         i -= 1;
         switch (kinds[i]) {
             // If it's a typedef and names match, return the symbol.
-            .typedef => if (mem.eql(u8, names[i], name)) return self.symbols.get(i),
+            .typedef => if (names[i] == name) return self.symbols.get(i),
 
             // For struct, union, and enum, check if the type should not be defined yet.
             // If it should, report an error. Otherwise, return null or the symbol.
-            .@"struct", .@"union", .@"enum" => if (mem.eql(u8, names[i], name)) {
+            .@"struct", .@"union", .@"enum" => if (names[i] == name) {
                 if (noTypeYet) return null;
                 try self.p.errStr(switch (kinds[i]) {
                     .@"struct" => .must_use_struct,
                     .@"union" => .must_use_union,
                     .@"enum" => .must_use_enum,
                     else => unreachable,
-                }, nameToken, name);
+                }, nameToken, self.p.getTokenSlice(nameToken));
                 return self.symbols.get(i);
             },
 
             // If it's a definition or declaration, return null.
-            .definition, .declaration => if (mem.eql(u8, names[i], name)) return null,
+            .definition, .declaration => if (names[i] == name) return null,
             else => {},
         }
     }
@@ -115,8 +115,7 @@ pub fn findTypedef(self: *SymbolStack, nameToken: TokenIndex, noTypeYet: bool) !
 /// @param  self       The SymbolStack instance.
 /// @param  nameToken  The token index used to identify the symbol's name.
 /// @return            A nullable Symbol if found, or null if not found.
-pub fn findSymbol(self: *SymbolStack, nameToken: TokenIndex) ?Symbol {
-    const name = self.p.getTokenSlice(nameToken);
+pub fn findSymbol(self: *SymbolStack, name: StringId) ?Symbol {
     const kinds = self.symbols.items(.kind);
     const names = self.symbols.items(.name);
 
@@ -125,7 +124,7 @@ pub fn findSymbol(self: *SymbolStack, nameToken: TokenIndex) ?Symbol {
         i -= 1;
 
         switch (kinds[i]) {
-            .definition, .declaration, .enumeration => if (mem.eql(u8, names[i], name)) return self.symbols.get(i),
+            .definition, .declaration, .enumeration => if (names[i] == name) return self.symbols.get(i),
             else => {},
         }
     }
@@ -140,11 +139,11 @@ pub fn findSymbol(self: *SymbolStack, nameToken: TokenIndex) ?Symbol {
 /// @return           A nullable Symbol if a matching tag is found, or null otherwise.
 pub fn findTag(
     self: *SymbolStack,
+    name: StringId,
     kind: TokenType,
     nameToken: TokenIndex,
     nextTokenID: TokenType,
 ) !?Symbol {
-    const name = self.p.getTokenSlice(nameToken);
     const kinds = self.symbols.items(.kind);
     const names = self.symbols.items(.name);
 
@@ -155,15 +154,15 @@ pub fn findTag(
     while (i > end) {
         i -= 1;
         switch (kinds[i]) {
-            .@"enum" => if (mem.eql(u8, names[i], name)) {
+            .@"enum" => if (names[i] == name) {
                 if (kind == .KeywordEnum) return self.symbols.get(i);
                 break;
             },
-            .@"struct" => if (mem.eql(u8, names[i], name)) {
+            .@"struct" => if (names[i] == name) {
                 if (kind == .KeywordStruct) return self.symbols.get(i);
                 break;
             },
-            .@"union" => if (mem.eql(u8, names[i], name)) {
+            .@"union" => if (names[i] == name) {
                 if (kind == .KeywordUnion) return self.symbols.get(i);
                 break;
             },
@@ -175,7 +174,7 @@ pub fn findTag(
     if (i < self.scopeEnd()) return null;
 
     // If we've reached this point, the symbol was found but did not match the kind. Report an error.
-    try self.p.errStr(.wrong_tag, nameToken, name);
+    try self.p.errStr(.wrong_tag, nameToken, self.p.getTokenSlice(nameToken));
     try self.p.errToken(.previous_definition, self.symbols.items(.token)[i]);
 
     // Return null as no matching symbol was found.
@@ -184,7 +183,7 @@ pub fn findTag(
 
 pub fn defineTypedef(
     self: *SymbolStack,
-    name: []const u8,
+    name: StringId,
     ty: Type,
     token: TokenIndex,
     node: NodeIndex,
@@ -196,7 +195,7 @@ pub fn defineTypedef(
     while (i > end) {
         i -= 1;
         switch (kinds[i]) {
-            .typedef => if (mem.eql(u8, names[i], name)) {
+            .typedef => if (names[i] == name) {
                 const prevTy = self.symbols.items(.type)[i];
                 if (ty.eql(prevTy, self.p.comp, true))
                     break;
@@ -221,12 +220,12 @@ pub fn defineTypedef(
 
 pub fn defineSymbol(
     self: *SymbolStack,
+    name: StringId,
     ty: Type,
     token: TokenIndex,
     node: NodeIndex,
     val: Value,
 ) !void {
-    const name = self.p.getTokenSlice(token);
     const kinds = self.symbols.items(.kind);
     const names = self.symbols.items(.name);
     const end = self.scopeEnd();
@@ -234,21 +233,21 @@ pub fn defineSymbol(
     while (i > end) {
         i -= 1;
         switch (kinds[i]) {
-            .enumeration => if (mem.eql(u8, names[i], name)) {
-                try self.p.errStr(.redefinition_different_sym, token, name);
+            .enumeration => if (names[i] == name) {
+                try self.p.errStr(.redefinition_different_sym, token, self.p.getTokenSlice(token));
                 try self.p.errToken(.previous_definition, self.symbols.items(.token)[i]);
                 break;
             },
-            .declaration => if (mem.eql(u8, names[i], name)) {
+            .declaration => if (names[i] == name) {
                 const prevTy = self.symbols.items(.type)[i];
                 if (!ty.eql(prevTy, self.p.comp, true)) { // TODO adjusted equality check
-                    try self.p.errStr(.redefinition_incompatible, token, name);
+                    try self.p.errStr(.redefinition_incompatible, token, self.p.getTokenSlice(token));
                     try self.p.errToken(.previous_definition, self.symbols.items(.token)[i]);
                 }
                 break;
             },
-            .definition => if (mem.eql(u8, names[i], name)) {
-                try self.p.errStr(.redefinition, token, name);
+            .definition => if (names[i] == name) {
+                try self.p.errStr(.redefinition, token, self.p.getTokenSlice(token));
                 try self.p.errToken(.previous_definition, self.symbols.items(.token)[i]);
                 break;
             },
@@ -267,11 +266,11 @@ pub fn defineSymbol(
 
 pub fn declareSymbol(
     self: *SymbolStack,
+    name: StringId,
     ty: Type,
     token: TokenIndex,
     node: NodeIndex,
 ) !void {
-    const name = self.p.getTokenSlice(token);
     const kinds = self.symbols.items(.kind);
     const names = self.symbols.items(.name);
     const end = self.scopeEnd();
@@ -279,23 +278,23 @@ pub fn declareSymbol(
     while (i > end) {
         i -= 1;
         switch (kinds[i]) {
-            .enumeration => if (mem.eql(u8, names[i], name)) {
-                try self.p.errStr(.redefinition_different_sym, token, name);
+            .enumeration => if (names[i] == name) {
+                try self.p.errStr(.redefinition_different_sym, token, self.p.getTokenSlice(token));
                 try self.p.errToken(.previous_definition, self.symbols.items(.token)[i]);
                 break;
             },
-            .declaration => if (mem.eql(u8, names[i], name)) {
+            .declaration => if (names[i] == name) {
                 const prevTy = self.symbols.items(.type)[i];
                 if (!ty.eql(prevTy, self.p.comp, true)) { // TODO adjusted equality check
-                    try self.p.errStr(.redefinition_incompatible, token, name);
+                    try self.p.errStr(.redefinition_incompatible, token, self.p.getTokenSlice(token));
                     try self.p.errToken(.previous_definition, self.symbols.items(.token)[i]);
                 }
                 break;
             },
-            .definition => if (mem.eql(u8, names[i], name)) {
+            .definition => if (names[i] == name) {
                 const prevTy = self.symbols.items(.type)[i];
                 if (!ty.eql(prevTy, self.p.comp, true)) { // TODO adjusted equality check
-                    try self.p.errStr(.redefinition_incompatible, token, name);
+                    try self.p.errStr(.redefinition_incompatible, token, self.p.getTokenSlice(token));
                     try self.p.errToken(.previous_definition, self.symbols.items(.token)[i]);
                     break;
                 }
@@ -314,8 +313,7 @@ pub fn declareSymbol(
     });
 }
 
-pub fn defineParam(self: *SymbolStack, ty: Type, token: TokenIndex) !void {
-    const name = self.p.getTokenSlice(token);
+pub fn defineParam(self: *SymbolStack, name: StringId, ty: Type, token: TokenIndex) !void {
     const kinds = self.symbols.items(.kind);
     const names = self.symbols.items(.name);
     const end = self.scopeEnd();
@@ -323,8 +321,8 @@ pub fn defineParam(self: *SymbolStack, ty: Type, token: TokenIndex) !void {
     while (i > end) {
         i -= 1;
         switch (kinds[i]) {
-            .enumeration, .declaration, .definition => if (mem.eql(u8, names[i], name)) {
-                try self.p.errStr(.redefinition_of_parameter, token, name);
+            .enumeration, .declaration, .definition => if (names[i] == name) {
+                try self.p.errStr(.redefinition_of_parameter, token, self.p.getTokenSlice(token));
                 try self.p.errToken(.previous_definition, self.symbols.items(.token)[i]);
                 break;
             },
@@ -342,10 +340,10 @@ pub fn defineParam(self: *SymbolStack, ty: Type, token: TokenIndex) !void {
 
 pub fn defineTag(
     self: *SymbolStack,
+    name: StringId,
     kind: TokenType,
     token: TokenIndex,
 ) !?Symbol {
-    const name = self.p.getTokenSlice(token);
     const kinds = self.symbols.items(.kind);
     const names = self.symbols.items(.name);
     const end = self.scopeEnd();
@@ -353,21 +351,21 @@ pub fn defineTag(
     while (i > end) {
         i -= 1;
         switch (kinds[i]) {
-            .@"enum" => if (mem.eql(u8, names[i], name)) {
+            .@"enum" => if (names[i] == name) {
                 if (kind == .KeywordEnum) return self.symbols.get(i);
-                try self.p.errStr(.wrong_tag, token, name);
+                try self.p.errStr(.wrong_tag, token, self.p.getTokenSlice(token));
                 try self.p.errToken(.previous_definition, self.symbols.items(.token)[i]);
                 return null;
             },
-            .@"struct" => if (mem.eql(u8, names[i], name)) {
+            .@"struct" => if (names[i] == name) {
                 if (kind == .KeywordStruct) return self.symbols.get(i);
-                try self.p.errStr(.wrong_tag, token, name);
+                try self.p.errStr(.wrong_tag, token, self.p.getTokenSlice(token));
                 try self.p.errToken(.previous_definition, self.symbols.items(.token)[i]);
                 return null;
             },
-            .@"union" => if (mem.eql(u8, names[i], name)) {
+            .@"union" => if (names[i] == name) {
                 if (kind == .KeywordUnion) return self.symbols.get(i);
-                try self.p.errStr(.wrong_tag, token, name);
+                try self.p.errStr(.wrong_tag, token, self.p.getTokenSlice(token));
                 try self.p.errToken(.previous_definition, self.symbols.items(.token)[i]);
                 return null;
             },
@@ -379,11 +377,11 @@ pub fn defineTag(
 
 pub fn defineEnumeration(
     self: *SymbolStack,
+    name: StringId,
     ty: Type,
     token: TokenIndex,
     value: Value,
 ) !void {
-    const name = self.p.getTokenSlice(token);
     const kinds = self.symbols.items(.kind);
     const names = self.symbols.items(.name);
     const end = self.scopeEnd();
@@ -391,13 +389,13 @@ pub fn defineEnumeration(
     while (i > end) {
         i -= 1;
         switch (kinds[i]) {
-            .enumeration => if (mem.eql(u8, names[i], name)) {
-                try self.p.errStr(.redefinition, token, name);
+            .enumeration => if (names[i] == name) {
+                try self.p.errStr(.redefinition, token, self.p.getTokenSlice(token));
                 try self.p.errToken(.previous_definition, self.symbols.items(.token)[i]);
                 return;
             },
-            .declaration, .definition => if (mem.eql(u8, names[i], name)) {
-                try self.p.errStr(.redefinition_different_sym, token, name);
+            .declaration, .definition => if (names[i] == name) {
+                try self.p.errStr(.redefinition_different_sym, token, self.p.getTokenSlice(token));
                 try self.p.errToken(.previous_definition, self.symbols.items(.token)[i]);
                 return;
             },

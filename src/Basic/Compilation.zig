@@ -9,6 +9,7 @@ const Token = @import("../Lexer/Token.zig").Token;
 const LangOpts = @import("LangOpts.zig");
 const Type = @import("../AST/Type.zig");
 const Pragma = @import("../Lexer/Pragma.zig");
+const StringInterner = @import("../Basic/StringInterner.zig");
 
 const Allocator = std.mem.Allocator;
 const EpochSeconds = std.time.epoch.EpochSeconds;
@@ -42,6 +43,8 @@ types: struct {
     vaList: Type,
 } = undefined,
 
+stringInterner: StringInterner = .{},
+
 pub fn init(gpa: Allocator) Compilation {
     return .{
         .gpa = gpa,
@@ -71,6 +74,11 @@ pub fn deinit(comp: *Compilation) void {
     comp.pragmaHandlers.deinit(comp.gpa);
     comp.generatedBuffer.deinit();
     comp.builtins.deinit(comp.gpa);
+    comp.stringInterner.deinit(comp.gpa);
+}
+
+pub fn intern(comp: *Compilation, str: []const u8) !StringInterner.StringId {
+    return comp.stringInterner.intern(comp.gpa, str);
 }
 
 /// Dec 31 9999 23:59:59
@@ -339,16 +347,17 @@ pub fn generateBuiltinMacros(comp: *Compilation) !Source {
     // try comp.generateSizeofType(w, "__SIZEOF_WINT_T__", Type.Pointer);
 
     // various int types
-    try generateTypeMacro(w, "__PTRDIFF_TYPE__", comp.types.ptrdiff);
-    try generateTypeMacro(w, "__SIZE_TYPE__", comp.types.size);
-    try generateTypeMacro(w, "__WCHAR_TYPE__", comp.types.wchar);
+    const mapper = comp.stringInterner.getSlowTypeMapper();
+    try generateTypeMacro(w, mapper, "__PTRDIFF_TYPE__", comp.types.ptrdiff);
+    try generateTypeMacro(w, mapper, "__SIZE_TYPE__", comp.types.size);
+    try generateTypeMacro(w, mapper, "__WCHAR_TYPE__", comp.types.wchar);
 
     return comp.addSourceFromBuffer("<builtin>", buf.items);
 }
 
-fn generateTypeMacro(w: anytype, name: []const u8, ty: Type) !void {
+fn generateTypeMacro(w: anytype, mapper: StringInterner.TypeMapper, name: []const u8, ty: Type) !void {
     try w.print("#define {s} ", .{name});
-    try ty.print(w);
+    try ty.print(mapper, w);
     try w.writeByte('\n');
 }
 
@@ -419,7 +428,7 @@ fn generateVaListType(comp: *Compilation) !Type {
         .aarch64_va_list => {
             const recordType = try arena.create(Type.Record);
             recordType.* = .{
-                .name = "__va_list_tag",
+                .name = try comp.intern("__va_list_tag"),
                 .fields = try arena.alloc(Type.Record.Field, 5),
                 .size = 32,
                 .alignment = 8,
@@ -428,17 +437,17 @@ fn generateVaListType(comp: *Compilation) !Type {
             const voidType = try arena.create(Type);
             voidType.* = Type.Void;
             const voidPtr = Type{ .specifier = .Pointer, .data = .{ .subType = voidType } };
-            recordType.fields[0] = .{ .name = "__stack", .ty = voidPtr };
-            recordType.fields[1] = .{ .name = "__gr_top", .ty = voidPtr };
-            recordType.fields[2] = .{ .name = "__vr_top", .ty = voidPtr };
-            recordType.fields[3] = .{ .name = "__gr_offs", .ty = Type.Int };
-            recordType.fields[4] = .{ .name = "__vr_offs", .ty = Type.Int };
+            recordType.fields[0] = .{ .name = try comp.intern("__stack"), .ty = voidPtr };
+            recordType.fields[1] = .{ .name = try comp.intern("__gr_top"), .ty = voidPtr };
+            recordType.fields[2] = .{ .name = try comp.intern("__vr_top"), .ty = voidPtr };
+            recordType.fields[3] = .{ .name = try comp.intern("__gr_offs"), .ty = Type.Int };
+            recordType.fields[4] = .{ .name = try comp.intern("__vr_offs"), .ty = Type.Int };
             ty = .{ .specifier = .Struct, .data = .{ .record = recordType } };
         },
         .x86_64_va_list => {
             const recordType = try arena.create(Type.Record);
             recordType.* = .{
-                .name = "__va_list_tag",
+                .name = try comp.intern("__va_list_tag"),
                 .fields = try arena.alloc(Type.Record.Field, 4),
                 .size = 24,
                 .alignment = 8,
@@ -447,10 +456,10 @@ fn generateVaListType(comp: *Compilation) !Type {
             const voidType = try arena.create(Type);
             voidType.* = Type.Void;
             const voidPtr = Type{ .specifier = .Pointer, .data = .{ .subType = voidType } };
-            recordType.fields[0] = .{ .name = "gp_offset", .ty = Type.UInt };
-            recordType.fields[1] = .{ .name = "fp_offset", .ty = Type.UInt };
-            recordType.fields[2] = .{ .name = "overflow_arg_area", .ty = voidPtr };
-            recordType.fields[3] = .{ .name = "reg_save_area", .ty = voidPtr };
+            recordType.fields[0] = .{ .name = try comp.intern("gp_offset"), .ty = Type.UInt };
+            recordType.fields[1] = .{ .name = try comp.intern("fp_offset"), .ty = Type.UInt };
+            recordType.fields[2] = .{ .name = try comp.intern("overflow_arg_area"), .ty = voidPtr };
+            recordType.fields[3] = .{ .name = try comp.intern("reg_save_area"), .ty = voidPtr };
             ty = .{ .specifier = .Struct, .data = .{ .record = recordType } };
         },
     }
