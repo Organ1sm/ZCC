@@ -63,7 +63,7 @@ fn parserHandler(pragma: *Pragma, p: *Parser, startIdx: TokenIndex) Compilation.
                     try p.comp.diag.add(.{
                         .tag = .pragma_pack_show,
                         .loc = arg.loc,
-                        .extra = .{ .unsigned = p.pragmaPack },
+                        .extra = .{ .unsigned = p.pragmaPack orelse 8 },
                     }, arg.expansionSlice());
                 },
                 .push, .pop => {
@@ -96,7 +96,7 @@ fn parserHandler(pragma: *Pragma, p: *Parser, startIdx: TokenIndex) Compilation.
                         }
                     }
                     if (action == .push) {
-                        try pack.stack.append(p.comp.gpa, .{ .label = label orelse "", .val = p.pragmaPack });
+                        try pack.stack.append(p.comp.gpa, .{ .label = label orelse "", .val = p.pragmaPack orelse 8 });
                     } else {
                         pack.pop(p, label);
                         if (newVal != null) {
@@ -121,7 +121,7 @@ fn parserHandler(pragma: *Pragma, p: *Parser, startIdx: TokenIndex) Compilation.
         .RParen => if (appleOrXL) {
             pack.pop(p, null);
         } else {
-            p.pragmaPack = 8;
+            p.pragmaPack = null;
         },
 
         .IntegerLiteral => {
