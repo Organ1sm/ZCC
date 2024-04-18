@@ -138,8 +138,8 @@ pub const Function = struct {
     params: []Param,
 
     pub const Param = struct {
-        name: StringId,
         ty: Type,
+        name: StringId,
         nameToken: TokenIndex,
     };
 };
@@ -180,14 +180,14 @@ pub const Attributed = struct {
 };
 
 pub const Enum = struct {
-    name: StringId,
-    tagType: Type,
     fields: []Field,
+    tagType: Type,
+    name: StringId,
     fixed: bool,
 
     pub const Field = struct {
-        name: StringId,
         ty: Type,
+        name: StringId,
         nameToken: TokenIndex,
         node: NodeIndex,
     };
@@ -207,18 +207,18 @@ pub const Enum = struct {
 };
 
 pub const Record = struct {
-    name: StringId,
     fields: []Field,
     size: u64,
-    alignment: u29,
     /// If this is null, none of the fields have attributes
     /// Otherwise, it's a pointer to N items (where N == number of fields)
     /// and the item at index i is the attributes for the field at index i
     fieldAttributes: ?[*][]const Attribute,
+    name: StringId,
+    alignment: u29,
 
     pub const Field = struct {
-        name: StringId,
         ty: Type,
+        name: StringId,
         /// zero for anonymous fields
         nameToken: TokenIndex = 0,
         bitWidth: u32 = 0,
