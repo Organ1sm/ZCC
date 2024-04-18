@@ -132,6 +132,7 @@ recordMembers: std.ArrayListUnmanaged(struct { token: TokenIndex, name: StringId
 inLoop: bool = false,
 /// #pragma pack value
 pragmaPack: u8 = 8,
+declSpecId: StringId,
 
 const Label = union(enum) {
     unresolvedGoto: TokenIndex,
@@ -604,6 +605,7 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
         .enumBuffer = std.ArrayList(Type.Enum.Field).init(pp.comp.gpa),
         .recordBuffer = std.ArrayList(Type.Record.Field).init(pp.comp.gpa),
         .fieldAttrBuffer = std.ArrayList([]const Attribute).init(pp.comp.gpa),
+        .declSpecId = try pp.comp.intern("__declspec"),
     };
 
     //bind p to the symbol stack for simplify symbol stack api
@@ -1698,7 +1700,9 @@ fn parseTypeSpec(p: *Parser, ty: *TypeBuilder) Error!bool {
             },
 
             .Identifier, .ExtendedIdentifier => {
-                if (std.mem.eql(u8, p.getTokenSlice(p.tokenIdx), "__declspec")) {
+                var internedName = try p.getInternString(p.tokenIdx);
+                var declspecFound = false;
+                if (internedName == p.declSpecId) {
                     try p.errToken(.declspec_not_enabled, p.tokenIdx);
                     p.tokenIdx += 1;
 
@@ -1706,12 +1710,15 @@ fn parseTypeSpec(p: *Parser, ty: *TypeBuilder) Error!bool {
                         p.skipTo(.RParen);
                         continue;
                     }
+                    declspecFound = true;
                 }
 
                 if (ty.typedef != null)
                     break;
 
-                const internedName = try p.getInternString(p.tokenIdx);
+                if (declspecFound)
+                    internedName = try p.getInternString(p.tokenIdx);
+
                 const typedef = (try p.symStack.findTypedef(internedName, p.tokenIdx, ty.specifier != .None)) orelse break;
                 if (!ty.combineTypedef(p, typedef.type, typedef.token))
                     break;
