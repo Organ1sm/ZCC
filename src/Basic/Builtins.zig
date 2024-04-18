@@ -66,7 +66,7 @@ fn add(
 ) void {
     var params = a.alloc(Type.Function.Param, paramTypes.len) catch unreachable;
     for (paramTypes, 0..) |paramTy, i| {
-        params[i] = .{ .nameToken = 0, .ty = paramTy, .name = "" };
+        params[i] = .{ .nameToken = 0, .ty = paramTy, .name = .empty };
     }
     b.putAssumeCapacity(name, .{
         .spec = spec,
