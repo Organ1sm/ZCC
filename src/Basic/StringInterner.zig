@@ -25,7 +25,7 @@ pub const TypeMapper = struct {
     /// If the StringId is empty, it returns an empty string.
     /// For fast lookups, it directly indexes into the array.
     /// For slow lookups, it iterates over the map to find the associated string.
-    pub fn lookup(self: *const TypeMapper, stringId: StringInterner.StringId) []const u8 {
+    pub fn lookup(self: TypeMapper, stringId: StringInterner.StringId) []const u8 {
         if (stringId == .empty) return "";
         switch (self.data) {
             .fast => |arr| return arr[@intFromEnum(stringId)], // Direct index access for fast lookup.
@@ -40,7 +40,7 @@ pub const TypeMapper = struct {
         }
     }
 
-    pub fn deinit(self: *const TypeMapper, allocator: mem.Allocator) void {
+    pub fn deinit(self: TypeMapper, allocator: mem.Allocator) void {
         switch (self.data) {
             .slow => {},
             .fast => |arr| allocator.free(arr),
