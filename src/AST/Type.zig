@@ -206,22 +206,62 @@ pub const Enum = struct {
     }
 };
 
+pub const TypeLayout = struct {
+    /// The size of the type in bits.
+    ///
+    /// This is the value returned by `sizeof` in C
+    /// (but in bits instead of bytes). This is a multiple of `pointer_alignment_bits`.
+    sizeBits: u64,
+    /// The alignment of the type, in bits, when used as a field in a record.
+    ///
+    /// This is usually the value returned by `_Alignof` in C, but there are some edge
+    /// cases in GCC where `_Alignof` returns a smaller value.
+    fieldAlignmentBits: u32,
+    /// The alignment, in bits, of valid pointers to this type.
+    /// `size_bits` is a multiple of this value.
+    pointerAlignmentBits: u32,
+    /// The required alignment of the type in bits.
+    ///
+    /// This value is only used by MSVC targets. It is 8 on all other
+    /// targets. On MSVC targets, this value restricts the effects of `#pragma pack` except
+    /// in some cases involving bit-fields.
+    requiredAlignmentBits: u32,
+
+    pub fn init(sizeBytes: u64, alignmentBytes: u64) TypeLayout {
+        return TypeLayout{
+            .sizeBits = sizeBytes * 8,
+            .fieldAlignmentBits = @intCast(alignmentBytes * 8),
+            .pointerAlignmentBits = @intCast(alignmentBytes * 8),
+            .requiredAlignmentBits = 8,
+        };
+    }
+};
+
+pub const FieldLayout = struct {
+    /// The offset of the struct, in bits, from the start of the struct.
+    offsetBits: u64,
+    /// The size, in bits, of the field.
+    ///
+    /// For bit-fields, this is the width of the field.
+    sizeBits: u64,
+};
+
 pub const Record = struct {
     fields: []Field,
-    size: u64,
+    typeLayout: TypeLayout,
     /// If this is null, none of the fields have attributes
     /// Otherwise, it's a pointer to N items (where N == number of fields)
     /// and the item at index i is the attributes for the field at index i
     fieldAttributes: ?[*][]const Attribute,
     name: StringId,
-    alignment: u29,
 
     pub const Field = struct {
         ty: Type,
         name: StringId,
         /// zero for anonymous fields
         nameToken: TokenIndex = 0,
-        bitWidth: u32 = 0,
+        bitWidth: ?u32 = null,
+        layout: FieldLayout = .{ .offsetBits = 0, .sizeBits = 0 },
 
         pub fn isAnonymousRecord(f: Field) bool {
             return f.nameToken == 0 and f.ty.isRecord();
@@ -237,6 +277,7 @@ pub const Record = struct {
         r.name = name;
         r.fields.len = std.math.maxInt(usize);
         r.fieldAttributes = null;
+        r.typeLayout = undefined;
         return r;
     }
 };
@@ -1016,7 +1057,7 @@ pub fn sizeof(ty: Type, comp: *const Compilation) ?u64 {
             return std.mem.alignForward(u64, arraySize, ty.alignof(comp));
         },
 
-        .Struct, .Union => if (ty.data.record.isIncomplete()) null else ty.data.record.size,
+        .Struct, .Union => if (ty.data.record.isIncomplete()) null else @as(u64, ty.data.record.typeLayout.sizeBits / 8),
         .Enum => if (ty.data.@"enum".isIncomplete() and !ty.data.@"enum".fixed) null else ty.data.@"enum".tagType.sizeof(comp),
 
         .TypeofType => ty.data.subType.sizeof(comp),
@@ -1091,7 +1132,7 @@ pub fn alignof(ty: Type, comp: *const Compilation) u29 {
         .DecayedUnspecifiedVariableLenArray,
         => comp.target.ptrBitWidth() >> 3,
 
-        .Struct, .Union => if (ty.data.record.isIncomplete()) 0 else ty.data.record.alignment,
+        .Struct, .Union => if (ty.data.record.isIncomplete()) 0 else @intCast(ty.data.record.typeLayout.fieldAlignmentBits / 8),
         .Enum => if (ty.data.@"enum".isIncomplete() and !ty.data.@"enum".fixed) 0 else ty.data.@"enum".tagType.alignof(comp),
 
         .TypeofType, .DecayedTypeofType => ty.data.subType.alignof(comp),

@@ -1884,8 +1884,7 @@ fn parseRecordSpec(p: *Parser) Error!Type {
         if (field.ty.hasIncompleteSize()) break;
     } else {
         recordType.fields = try p.arena.dupe(Type.Record.Field, p.recordBuffer.items[recordBufferTop..]);
-        recordType.size = 1;
-        recordType.alignment = 1;
+        recordType.typeLayout = Type.TypeLayout.init(1, 1);
     }
 
     if (oldFieldAttrStart < p.fieldAttrBuffer.items.len) {
@@ -1979,7 +1978,7 @@ fn parseRecordDeclarator(p: *Parser) Error!bool {
         var nameToken: TokenIndex = 0;
         var ty = baseType;
         var bitsNode: NodeIndex = .none;
-        var bits: u32 = 0;
+        var bits: ?u32 = null;
         const firstToken = p.tokenIdx;
         if (try p.declarator(ty, .record)) |d| {
             nameToken = d.name;
@@ -2043,7 +2042,6 @@ fn parseRecordDeclarator(p: *Parser) Error!bool {
                 try p.recordBuffer.append(.{
                     .name = try p.getAnonymousName(firstToken),
                     .ty = ty,
-                    .bitWidth = 0,
                 });
                 const node = try p.addNode(.{
                     .tag = .IndirectRecordFieldDecl,
