@@ -1068,7 +1068,7 @@ pub fn sizeof(ty: Type, comp: *const Compilation) ?u64 {
     };
 }
 
-pub fn bitSizeof(ty: Type, comp: *Compilation) ?u64 {
+pub fn bitSizeof(ty: Type, comp: * const Compilation) ?u64 {
     return switch (ty.specifier) {
         .Bool => 1,
         .TypeofType, .DecayedTypeofType => ty.data.subType.bitSizeof(comp),
@@ -1080,8 +1080,19 @@ pub fn bitSizeof(ty: Type, comp: *Compilation) ?u64 {
 
 /// Get the alignment of a type
 pub fn alignof(ty: Type, comp: *const Compilation) u29 {
-    if (ty.requestedAlignment(comp)) |requested|
-        return requested;
+    // don't return the attribute for records
+    // layout has already accounted for requested alignment
+    if (!ty.isRecord()) {
+        if (ty.requestedAlignment(comp)) |requested| {
+            // gcc does not respect alignment on enums
+            if (ty.get(.Enum)) |ty_enum| {
+                if (comp.langOpts.emulate == .gcc) {
+                    return ty_enum.alignof(comp);
+                }
+            }
+            return requested;
+        }
+    }
 
     // TODO get target from compilation
     return switch (ty.specifier) {
@@ -1144,7 +1155,7 @@ pub fn alignof(ty: Type, comp: *const Compilation) u29 {
     };
 }
 
-fn requestedAlignment(ty: Type, comp: *const Compilation) ?u29 {
+pub fn requestedAlignment(ty: Type, comp: *const Compilation) ?u29 {
     return switch (ty.specifier) {
         .TypeofType, .DecayedTypeofType => ty.data.subType.requestedAlignment(comp),
         .TypeofExpr, .DecayedTypeofExpr => ty.data.expr.ty.requestedAlignment(comp),
