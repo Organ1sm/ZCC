@@ -723,7 +723,7 @@ pub fn getParams(ty: Type) []Function.Param {
     };
 }
 
-pub fn arrayLen(ty: Type) ?usize {
+pub fn arrayLen(ty: Type) ?u64 {
     return switch (ty.specifier) {
         .Array,
         .StaticArray,

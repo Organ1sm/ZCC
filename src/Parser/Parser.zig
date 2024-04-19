@@ -3026,7 +3026,7 @@ pub fn initializerItem(p: *Parser, il: *InitList, initType: Type) Error!bool {
     var count: u64 = 0;
     var warnedExcess = false;
     const isStrInit = false;
-    var indexHint: ?usize = null;
+    var indexHint: ?u64 = null;
     while (true) : (count += 1) {
         errdefer p.skipTo(.RBrace);
 
@@ -3034,7 +3034,7 @@ pub fn initializerItem(p: *Parser, il: *InitList, initType: Type) Error!bool {
         var curType = initType;
         var curIL = il;
         var designation = false;
-        var curIndexHint: ?usize = null;
+        var curIndexHint: ?u64 = null;
         while (true) {
             if (p.eat(.LBracket)) |lbr| {
                 if (!curType.isArray()) {
@@ -3208,7 +3208,7 @@ fn findScalarInitializerAt(
     ty: *Type,
     actualTy: Type,
     firstToken: TokenIndex,
-    startIdx: *usize,
+    startIdx: *u64,
 ) Error!bool {
     if (ty.isArray()) {
         if (il.*.node != .none)
@@ -3216,7 +3216,7 @@ fn findScalarInitializerAt(
         startIdx.* += 1;
 
         const arrType = ty.*;
-        const elemCount = arrType.arrayLen() orelse std.math.maxInt(usize);
+        const elemCount = arrType.arrayLen() orelse std.math.maxInt(u64);
         if (elemCount == 0) {
             try p.errToken(.empty_aggregate_init_braces, firstToken);
             return error.ParsingFailed;
@@ -3243,7 +3243,7 @@ fn findScalarInitializerAt(
 
         const structIL = il.*;
         if (startIdx.* < fields.len) {
-            const field = fields[startIdx.*];
+            const field = fields[@intCast(startIdx.*)];
             ty.* = field.ty;
             il.* = try structIL.find(p.gpa, startIdx.*);
             _ = try p.findScalarInitializer(il, ty, actualTy, firstToken);
@@ -3266,11 +3266,11 @@ fn findScalarInitializer(
 ) Error!bool {
     if (ty.isArray()) {
         if (il.*.node != .none) return false;
-        var index = il.*.list.items.len;
-        if (index != 0) index = il.*.list.items[index - 1].index;
+        const startIdx = il.*.list.items.len;
+        var index = if (startIdx != 0) il.*.list.items[startIdx - 1].index else startIdx;
 
         const arrayType = ty.*;
-        const elemCount = arrayType.arrayLen() orelse std.math.maxInt(usize);
+        const elemCount = arrayType.arrayLen() orelse std.math.maxInt(u64);
         if (elemCount == 0) {
             try p.errToken(.empty_aggregate_init_braces, firstToken);
             return error.ParsingFailed;
@@ -3291,8 +3291,8 @@ fn findScalarInitializer(
         if (il.*.node != .none) return false;
         if (actualTy.eql(ty.*, p.pp.comp, false)) return true;
 
-        var index = il.*.list.items.len;
-        if (index != 0) index = il.*.list.items[index - 1].index + 1;
+        const startIdx = il.*.list.items.len;
+        var index = if (startIdx != 0) il.*.list.items[startIdx - 1].index + 1 else startIdx;
 
         const fields = structType.data.record.fields;
         if (fields.len == 0) {
@@ -3301,7 +3301,7 @@ fn findScalarInitializer(
         }
         const structIL = il.*;
         while (index < fields.len) : (index += 1) {
-            const field = fields[index];
+            const field = fields[@intCast(index)];
             ty.* = field.ty;
             il.* = try structIL.find(p.gpa, index);
             if (il.*.node == .none and actualTy.eql(field.ty, p.comp, false))
@@ -3328,19 +3328,21 @@ fn findScalarInitializer(
     return il.*.node == .none;
 }
 
-fn findAggregateInitializer(p: *Parser, il: **InitList, ty: *Type, startIdx: *?usize) Error!bool {
+fn findAggregateInitializer(p: *Parser, il: **InitList, ty: *Type, startIdx: *?u64) Error!bool {
     if (ty.isArray()) {
         if (il.*.node != .none)
             return false;
-        var index = il.*.list.items.len;
-        if (index != 0) index = il.*.list.items[index - 1].index + 1;
-        if (startIdx.*) |*some| {
+        const listIdx = il.*.list.items.len;
+        const index = if (startIdx.*) |*some| blk: {
             some.* += 1;
-            index = some.*;
-        }
+            break :blk some.*;
+        } else if (listIdx != 0)
+            il.*.list.items[listIdx - 1].index + 1
+        else
+            listIdx;
 
         const arrType = ty.*;
-        const elemCount = arrType.arrayLen() orelse std.math.maxInt(usize);
+        const elemCount = arrType.arrayLen() orelse std.math.maxInt(u64);
         const elemType = arrType.getElemType();
         if (index < elemCount) {
             ty.* = elemType;
@@ -3351,16 +3353,18 @@ fn findAggregateInitializer(p: *Parser, il: **InitList, ty: *Type, startIdx: *?u
     } else if (ty.get(.Struct)) |structType| {
         if (il.*.node != .none)
             return false;
-        var index = il.*.list.items.len;
-        if (index != 0) index = il.*.list.items[index - 1].index + 1;
-        if (startIdx.*) |*some| {
+        const listIdx = il.*.list.items.len;
+        const index = if (startIdx.*) |*some| blk: {
             some.* += 1;
-            index = some.*;
-        }
+            break :blk some.*;
+        } else if (listIdx != 0)
+            il.*.list.items[listIdx - 1].index + 1
+        else
+            listIdx;
 
         const fieldCount = structType.data.record.fields.len;
         if (index < fieldCount) {
-            ty.* = structType.data.record.fields[index].ty;
+            ty.* = structType.data.record.fields[@intCast(index)].ty;
             il.* = try il.*.find(p.gpa, index);
             return true;
         }
@@ -3582,9 +3586,10 @@ fn convertInitList(p: *Parser, il: InitList, initType: Type) Error!NodeIndex {
             });
         } else {
             const init = il.list.items[0];
-            const fieldType = unionType.data.record.fields[init.index].ty;
+            const index: u32 = @truncate(init.index);
+            const fieldType = unionType.data.record.fields[index].ty;
             unionInitNode.data.unionInit = .{
-                .fieldIndex = @truncate(init.index),
+                .fieldIndex = index,
                 .node = try p.convertInitList(init.list, fieldType),
             };
         }
