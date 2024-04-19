@@ -5458,7 +5458,8 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
                 res.value = .{ .tag = .int, .data = .{ .int = size } };
             } else {
                 res.value.tag = .unavailable;
-                try p.errStr(.invalid_sizeof, expectedParen - 1, try p.typeStr(res.ty));
+                if (res.ty.hasIncompleteSize())
+                    try p.errStr(.invalid_sizeof, expectedParen - 1, try p.typeStr(res.ty));
             }
 
             res.ty = p.comp.types.size;
