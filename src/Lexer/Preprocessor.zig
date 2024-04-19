@@ -85,6 +85,8 @@ expansionSourceLoc: Source.Location = undefined,
 preprocessCount: u32 = 0,
 /// Memory is retained to avoid allocation on every single token.
 topExpansionBuffer: ExpandBuffer,
+/// Map from Source.ID to macro name in the `#ifndef` condition which guards the source, if any
+includeGuards: std.AutoHashMapUnmanaged(Source.ID, []const u8) = .{},
 
 const BuiltinMacros = struct {
     const args = [1][]const u8{"X"};
@@ -162,6 +164,29 @@ pub fn deinit(pp: *Preprocessor) void {
     pp.charBuffer.deinit();
     pp.poisonedIdentifiers.deinit();
     pp.topExpansionBuffer.deinit();
+    pp.includeGuards.deinit(pp.gpa);
+}
+
+/// Return the name of the #ifndef guard macro that starts a source, if any.
+fn findIncludeGuard(pp: *Preprocessor, source: Source) ?[]const u8 {
+    var lexer = Lexer{
+        .buffer = source.buffer,
+        .comp = pp.comp,
+        .source = source.id,
+    };
+
+    var hash = lexer.nextNoWhiteSpace();
+    while (hash.id == .NewLine)
+        hash = lexer.nextNoWhiteSpace();
+    if (hash.id != .Hash) return null;
+
+    const ifndef = lexer.nextNoWhiteSpace();
+    if (ifndef.id != .KeywordIfndef) return null;
+
+    const guard = lexer.nextNoWhiteSpace();
+    if (guard.id != .Identifier) return null;
+
+    return pp.getTokenSlice(guard);
 }
 
 /// Preprocess a source file, returns eof token.
@@ -174,6 +199,7 @@ pub fn preprocess(pp: *Preprocessor, source: Source) Error!Token {
 }
 
 fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!Token {
+    var guardName = pp.findIncludeGuard(source);
     pp.preprocessCount += 1;
     var lexer = Lexer{
         .buffer = source.buffer,
@@ -284,6 +310,8 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!Token {
                             try pp.addError(directive, .elif_without_if);
                             ifLevel += 1;
                             ifKind.set(ifLevel, untilElse);
+                        } else if (ifLevel == 1) {
+                            guardName = null;
                         }
 
                         switch (ifKind.get(ifLevel)) {
@@ -308,6 +336,8 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!Token {
                         if (ifLevel == 0) {
                             try pp.addError(directive, .else_without_if);
                             continue;
+                        } else if (ifLevel == 1) {
+                            guardName = null;
                         }
 
                         switch (ifKind.get(ifLevel)) {
@@ -324,8 +354,16 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!Token {
                     .KeywordEndIf => {
                         try pp.expectNewLine(&lexer);
                         if (ifLevel == 0) {
+                            guardName = null;
                             try pp.addError(directive, .else_without_if);
                             continue;
+                        } else if (ifLevel == 1) {
+                            const savedLexer = lexer;
+                            defer lexer = savedLexer;
+
+                            var next = lexer.nextNoWhiteSpace();
+                            while (next.id == .NewLine) : (next = lexer.nextNoWhiteSpace()) {}
+                            if (next.id != .Eof) guardName = null;
                         }
                         ifLevel -= 1;
                     },
@@ -407,7 +445,11 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!Token {
                     try pp.addError(token, .unterminated_conditional_directive);
                 if (source.buffer.len > 0 and source.buffer[source.buffer.len - 1] != '\n')
                     try pp.addError(token, .newline_eof);
-
+                if (guardName) |name| {
+                    if (try pp.includeGuards.fetchPut(pp.gpa, source.id, name)) |prev| {
+                        assert(std.mem.eql(u8, name, prev.value));
+                    }
+                }
                 return tokenFromRaw(token);
             },
 
@@ -2047,6 +2089,11 @@ fn include(pp: *Preprocessor, lexer: *Lexer, which: Compilation.WhichInclude) Ma
         return error.StopPreprocessing;
     }
 
+    if (pp.includeGuards.get(newSource.id)) |guard| {
+        if (pp.defines.contains(guard))
+            return;
+    }
+
     _ = pp.preprocessExtra(newSource) catch |err| switch (err) {
         error.StopPreprocessing => {},
         else => |e| return e,
@@ -2371,4 +2418,98 @@ test "destringify" {
         \\ \t\n
         \\
     );
+}
+
+test "Include guards" {
+    const Test = struct {
+        /// This is here so that when #elifdef / #elifndef are added we don't forget
+        /// to test that they don't accidentally break include guard detection
+        fn pairsWithIfndef(tokenID: TokenType) bool {
+            return switch (tokenID) {
+                .KeywordElIf,
+                .KeywordElse,
+                => true,
+
+                .KeywordInclude,
+                .KeywordIncludeNext,
+                .KeywordDefine,
+                .KeywordDefined,
+                .KeywordUndef,
+                .KeywordIfdef,
+                .KeywordIfndef,
+                .KeywordError,
+                .KeywordWarning,
+                .KeywordPragma,
+                .KeywordLine,
+                .KeywordEndIf,
+                => false,
+                else => unreachable,
+            };
+        }
+
+        fn skippable(tokenID: TokenType) bool {
+            return switch (tokenID) {
+                .KeywordDefined, .KeywordVarArgs, .KeywordEndIf => true,
+                else => false,
+            };
+        }
+
+        fn testIncludeGuard(
+            allocator: std.mem.Allocator,
+            comptime template: []const u8,
+            tokenID: TokenType,
+            expectedGuards: u32,
+        ) !void {
+            var comp = Compilation.init(allocator);
+            defer comp.deinit();
+            var pp = Preprocessor.init(&comp);
+            defer pp.deinit();
+
+            const path = try std.fs.path.join(allocator, &.{ ".", "bar.h" });
+            defer allocator.free(path);
+
+            _ = try comp.addSourceFromBuffer(path, "int bar = 5;\n");
+
+            var buf = std.ArrayList(u8).init(allocator);
+            defer buf.deinit();
+
+            var writer = buf.writer();
+            switch (tokenID) {
+                .KeywordInclude, .KeywordIncludeNext => try writer.print(template, .{ tokenID.getTokenText().?, " \"bar.h\"" }),
+                .KeywordDefine, .KeywordUndef => try writer.print(template, .{ tokenID.getTokenText().?, " BAR" }),
+                .KeywordIfndef, .KeywordIfdef => try writer.print(template, .{ tokenID.getTokenText().?, " BAR\n#endif" }),
+                else => try writer.print(template, .{ tokenID.getTokenText().?, "" }),
+            }
+
+            const source = try comp.addSourceFromBuffer("test.h", buf.items);
+            _ = try pp.preprocess(source);
+
+            try std.testing.expectEqual(expectedGuards, pp.includeGuards.count());
+        }
+    };
+
+    const tags = std.meta.tags(TokenType);
+    for (tags) |tag| {
+        if (Test.skippable(tag)) continue;
+        var copy = tag;
+        copy.simplifyMacroKeyword();
+        if (copy != tag or tag == .KeywordElse) {
+            const insideIfndefTemplate =
+                \\//Leading comment (should be ignored)
+                \\
+                \\#ifndef FOO
+                \\#{s}{s}
+                \\#endif
+            ;
+            const expectedGuards: u32 = if (Test.pairsWithIfndef(tag)) 0 else 1;
+            try Test.testIncludeGuard(std.testing.allocator, insideIfndefTemplate, tag, expectedGuards);
+
+            const outsideIfndefTemplate =
+                \\#ifndef FOO
+                \\#endif
+                \\#{s}{s}
+            ;
+            try Test.testIncludeGuard(std.testing.allocator, outsideIfndefTemplate, tag, 0);
+        }
+    }
 }
