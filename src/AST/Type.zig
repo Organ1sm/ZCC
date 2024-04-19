@@ -990,33 +990,21 @@ pub fn sizeof(ty: Type, comp: *const Compilation) ?u64 {
         => 1,
 
         .Char, .SChar, .UChar => 1,
-        .Short, .UShort => 2,
-        .Int, .UInt => 4,
+        .Short => comp.target.c_type_byte_size(.short),
+        .UShort => comp.target.c_type_byte_size(.ushort),
+        .Int => comp.target.c_type_byte_size(.int),
+        .UInt => comp.target.c_type_byte_size(.uint),
+        .Long => comp.target.c_type_byte_size(.long),
+        .ULong => comp.target.c_type_byte_size(.ulong),
+        .LongLong => comp.target.c_type_byte_size(.longlong),
+        .ULongLong => comp.target.c_type_byte_size(.ulonglong),
+        .LongDouble => comp.target.c_type_byte_size(.longdouble),
 
-        .Long,
-        .ULong,
-        => switch (comp.target.os.tag) {
-            .linux,
-            .macos,
-            .freebsd,
-            .netbsd,
-            .dragonfly,
-            .openbsd,
-            .wasi,
-            .emscripten,
-            => comp.target.ptrBitWidth() >> 3,
-
-            .windows, .uefi => 4,
-            else => 4,
-        },
-
-        .LongLong, .ULongLong => 8,
         .Int128, .UInt128 => 16,
 
         .FP16 => 2,
         .Float => 4,
         .Double => 8,
-        .LongDouble => 16,
         .Float80 => 16,
         .Float128 => 16,
 
@@ -1069,7 +1057,7 @@ pub fn sizeof(ty: Type, comp: *const Compilation) ?u64 {
     };
 }
 
-pub fn bitSizeof(ty: Type, comp: * const Compilation) ?u64 {
+pub fn bitSizeof(ty: Type, comp: *const Compilation) ?u64 {
     return switch (ty.specifier) {
         .Bool => 1,
         .TypeofType, .DecayedTypeofType => ty.data.subType.bitSizeof(comp),
@@ -1107,7 +1095,12 @@ pub fn alignof(ty: Type, comp: *const Compilation) u29 {
         .Func, .VarArgsFunc, .OldStyleFunc => 4, // TODO check target
         .Char, .SChar, .UChar, .Void, .Bool, .ComplexChar, .ComplexSChar, .ComplexUChar => 1,
         .Short, .UShort, .ComplexShort, .ComplexUShort => 2,
-        .Int, .UInt, .ComplexInt, .ComplexUInt => 4,
+
+        .Int, .UInt, .ComplexInt, .ComplexUInt => switch (comp.target.cpu.arch) {
+            .msp430 => @as(u29, 2),
+            else => 4,
+        },
+
         .Long, .ULong, .ComplexLong, .ComplexULong => switch (comp.target.os.tag) {
             .linux,
             .macos,
@@ -1118,16 +1111,18 @@ pub fn alignof(ty: Type, comp: *const Compilation) u29 {
             .wasi,
             .emscripten,
             => comp.target.ptrBitWidth() >> 3,
+
             .windows, .uefi => 4,
-            else => 4,
+
+            else => if (comp.target.cpu.arch == .msp430) @as(u29, 2) else 4,
         },
 
-        .LongLong, .ULongLong, .ComplexLongLong, .ComplexULongLong => 8,
+        .LongLong, .ULongLong, .ComplexLongLong, .ComplexULongLong => if (comp.target.cpu.arch == .msp430) @as(u29, 2) else 8,
         .Int128, .UInt128, .ComplexInt128, .ComplexUInt128 => 16,
         .FP16, .ComplexFP16 => 2,
-        .Float, .ComplexFloat => 4,
-        .Double, .ComplexDouble => 8,
-        .LongDouble, .ComplexLongDouble => 16,
+        .Float, .ComplexFloat => if (comp.target.cpu.arch == .msp430) @as(u29, 2) else 4,
+        .Double, .ComplexDouble => if (comp.target.cpu.arch == .msp430) @as(u29, 2) else 8,
+        .LongDouble, .ComplexLongDouble => if (comp.target.cpu.arch == .msp430) @as(u29, 2) else 16,
 
         .Float80,
         .Float128,
