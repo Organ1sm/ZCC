@@ -276,6 +276,12 @@ pub fn generateBuiltinMacros(comp: *Compilation) !Source {
         ),
 
         .aarch64, .aarch64_be => try w.writeAll("#define __aarch64__ 1\n"),
+
+        .msp430 => try w.writeAll(
+            \\#define MSP430 1
+            \\#define __MSP430__ 1
+            \\
+        ),
         else => {},
     }
 
@@ -365,7 +371,7 @@ fn generateBuiltinTypes(comp: *Compilation) !void {
     const os = comp.target.os.tag;
     const wchar = switch (comp.target.cpu.arch) {
         .xcore => Type.UChar,
-        .ve => Type.UInt,
+        .ve, .msp430 => Type.UInt,
         .arm, .armeb, .thumb, .thumbeb => if (os != .windows and os != .netbsd and os != .openbsd) Type.UInt else Type.Int,
         .aarch64, .aarch64_be, .aarch64_32 => if (!os.isDarwin() and os != .netbsd) Type.UInt else Type.Int,
         .x86_64, .x86 => if (os == .windows) Type.UShort else Type.Int,
@@ -375,6 +381,7 @@ fn generateBuiltinTypes(comp: *Compilation) !void {
     const ptrdiff = if (os == .windows and comp.target.ptrBitWidth() == 64)
         Type.LongLong
     else switch (comp.target.ptrBitWidth()) {
+        16 => Type.Int,
         32 => Type.Int,
         64 => Type.Long,
         else => unreachable,
@@ -383,6 +390,7 @@ fn generateBuiltinTypes(comp: *Compilation) !void {
     const size = if (os == .windows and comp.target.ptrBitWidth() == 64)
         Type.ULongLong
     else switch (comp.target.ptrBitWidth()) {
+        16 => Type.UInt,
         32 => Type.UInt,
         64 => Type.ULong,
         else => unreachable,
@@ -410,7 +418,7 @@ fn generateVaListType(comp: *Compilation) !Type {
             .ios, .macos, .tvos, .watchos, .aix => @as(Kind, .char_ptr),
             else => return Type.Void, // unknown
         },
-        .x86 => .char_ptr,
+        .x86, .msp430 => .char_ptr,
         .x86_64 => switch (comp.target.os.tag) {
             .windows => @as(Kind, .char_ptr),
             else => .x86_64_va_list,
