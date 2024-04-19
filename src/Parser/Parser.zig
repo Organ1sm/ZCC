@@ -4978,8 +4978,9 @@ fn removeUnusedWarningForTok(p: *Parser, lastExprToken: TokenIndex) void {
 ///  | '(' typeName ')' cast-expression
 ///  | '(' typeName ')' '{' initializerItems '}'
 ///  | __builtin_choose_expr '(' const-expression ',' assign-expression ',' assign-expression ')'
-///  | __builtin_va_arg '('  assign-expression ',' typeName ')'
-///  | __builtin_offsetof '('  Type Name ',' offsetofMemberDesignator ')'
+///  | __builtin_va_arg '(' assign-expression ',' typeName ')'
+///  | __builtin_offsetof '(' type-name ',' offsetofMemberDesignator ')'
+///  | __builtin_bitoffsetof '(' type-name ',' offsetofMemberDesignator ')'
 ///  | unary-expression
 fn parseCastExpr(p: *Parser) Error!Result {
     if (p.eat(.LParen)) |lp| castExpr: {
@@ -5038,7 +5039,8 @@ fn parseCastExpr(p: *Parser) Error!Result {
     switch (p.getCurrToken()) {
         .BuiltinChooseExpr => return p.parseBuiltinChooseExpr(),
         .BuiltinVaArg => return p.builtinVaArg(),
-        .BuiltinOffsetof => return p.builtinOffsetof(),
+        .BuiltinOffsetof => return p.builtinOffsetof(false),
+        .BuiltinBitOffsetof => return p.builtinOffsetof(true),
         // TODO: other special-cased builtins
         else => {},
     }
@@ -5114,7 +5116,7 @@ fn builtinVaArg(p: *Parser) Error!Result {
     }) };
 }
 
-fn builtinOffsetof(p: *Parser) Error!Result {
+fn builtinOffsetof(p: *Parser, wantsBits: bool) Error!Result {
     const builtinToken = p.tokenIdx;
     p.tokenIdx += 1;
 
@@ -5145,7 +5147,7 @@ fn builtinOffsetof(p: *Parser) Error!Result {
 
     return Result{
         .ty = p.comp.types.size,
-        .value = if (offsetofExpr.value.tag == .int)
+        .value = if (offsetofExpr.value.tag == .int and !wantsBits)
             Value.int(offsetofExpr.value.data.int / 8)
         else
             offsetofExpr.value,
@@ -5167,9 +5169,11 @@ fn offsetofMemberDesignator(p: *Parser, baseType: Type) Error!Result {
     try p.validateFieldAccess(baseType, baseType, baseFieldNameToken, baseFieldName);
 
     const baseNode = try p.addNode(.{ .tag = .DefaultInitExpr, .type = baseType, .data = undefined });
-    const bitOffset = Value.int(0);
+
+    var offsetNum: u64 = 0;
     const baseRecordTy = baseType.canonicalize(.standard);
-    var lhs = try p.fieldAccessExtra(baseNode, baseRecordTy, baseFieldName, false);
+    var lhs = try p.fieldAccessExtra(baseNode, baseRecordTy, baseFieldName, false, &offsetNum);
+    var bitOffset = Value.int(offsetNum);
 
     while (true) switch (p.getCurrToken()) {
         .Period => {
@@ -5182,7 +5186,9 @@ fn offsetofMemberDesignator(p: *Parser, baseType: Type) Error!Result {
                 return error.ParsingFailed;
             }
             try p.validateFieldAccess(lhs.ty, lhs.ty, fieldNameToken, fieldName);
-            lhs = try p.fieldAccessExtra(lhs.node, lhs.ty, fieldName, false);
+            lhs = try p.fieldAccessExtra(lhs.node, lhs.ty, fieldName, false, &offsetNum);
+            if (bitOffset.tag != .unavailable)
+                bitOffset = Value.int(offsetNum + bitOffset.getInt(u64));
         },
         .LBracket => {
             const lbracketToken = p.tokenIdx;
@@ -5685,7 +5691,8 @@ fn fieldAccess(
 
     const fieldName = try p.getInternString(fieldNameToken);
     try p.validateFieldAccess(recordType, exprType, fieldNameToken, fieldName);
-    return p.fieldAccessExtra(lhs.node, recordType, fieldName, isArrow);
+    var discard: u64 = 0;
+    return p.fieldAccessExtra(lhs.node, recordType, fieldName, isArrow, &discard);
 }
 
 fn validateFieldAccess(
@@ -5727,6 +5734,7 @@ fn fieldAccessExtra(
     recordType: Type,
     fieldName: StringId,
     isArrow: bool, // is arrow operator
+    offsetBits: *u64,
 ) Error!Result {
     for (recordType.data.record.fields, 0..) |f, i| {
         if (f.isAnonymousRecord()) {
@@ -5736,9 +5744,12 @@ fn fieldAccessExtra(
                 .type = f.ty,
                 .data = .{ .member = .{ .lhs = lhs, .index = @intCast(i) } },
             });
-            return p.fieldAccessExtra(inner, f.ty, fieldName, false);
+            const res = p.fieldAccessExtra(inner, f.ty, fieldName, false, offsetBits);
+            offsetBits.* += f.layout.offsetBits;
+            return res;
         }
-        if (fieldName == f.name)
+        if (fieldName == f.name) {
+            offsetBits.* = f.layout.offsetBits;
             return Result{
                 .ty = f.ty,
                 .node = try p.addNode(.{
@@ -5747,6 +5758,7 @@ fn fieldAccessExtra(
                     .data = .{ .member = .{ .lhs = lhs, .index = @intCast(i) } },
                 }),
             };
+        }
     }
     // We already checked that this container has a field by the name.
     unreachable;
