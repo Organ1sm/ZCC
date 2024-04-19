@@ -949,6 +949,7 @@ pub fn getCharSignedness(comp: *const Compilation) std.builtin.Signedness {
         .s390x,
         .xcore,
         .arc,
+        .msp430,
         => return .unsigned,
 
         else => return .signed,
