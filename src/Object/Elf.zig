@@ -230,7 +230,7 @@ pub fn finish(elf: *Elf, file: std.fs.File) !void {
     }
 
     // pad to 8 bytes
-    try w.writeByteNTimes(0, symTabOffsetAligned - symTabOffset);
+    try w.writeByteNTimes(0, @intCast(symTabOffsetAligned - symTabOffset));
 
     var nameOffset: u32 = DefaultStringTable.len;
     // write symbols
@@ -306,7 +306,7 @@ pub fn finish(elf: *Elf, file: std.fs.File) !void {
     }
 
     // pad to 16 bytes
-    try w.writeByteNTimes(0, shOffsetAligned - shOffset);
+    try w.writeByteNTimes(0, @intCast(shOffsetAligned - shOffset));
     // mandatory null header
     try w.writeStruct(std.mem.zeroes(std.elf.Elf64_Shdr));
 

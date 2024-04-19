@@ -109,7 +109,7 @@ fn generateDateAndTime(w: anytype) !void {
 
     const day_names = [_][]const u8{ "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun" };
     // days since Thu Oct 1 1970
-    const day_name = day_names[(epochDay.day + 3) % 7];
+    const day_name = day_names[@intCast((epochDay.day + 3) % 7)];
     try w.print("#define __TIMESTAMP__ \"{s} {s} {d: >2} {d:0>2}:{d:0>2}:{d:0>2} {d}\"\n", .{
         day_name,
         monthName,
