@@ -36,9 +36,7 @@ pub fn main() u8 {
         },
     };
 
-    if (comp.target.abi == .msvc or comp.target.os.tag == .windows) {
-        comp.langOpts.setEmulatedCompiler(.msvc);
-    }
+    comp.langOpts.setEmulatedCompiler(comp.systemCompiler());
 
     mainExtra(&comp, args) catch |er| switch (er) {
         error.OutOfMemory => {
@@ -257,9 +255,7 @@ pub fn parseArgs(
                     return comp.diag.fatalNoSrc("unable to resolve target: {s}", .{@errorName(e)});
                 };
                 comp.target = target;
-                if (comp.target.abi == .msvc or comp.target.os.tag == .windows) {
-                    comp.langOpts.setEmulatedCompiler(.msvc);
-                }
+                comp.langOpts.setEmulatedCompiler(comp.systemCompiler());
             } else if (std.mem.eql(u8, arg, "-dump-ast")) {
                 comp.dumpAst = true;
             } else if (std.mem.eql(u8, arg, "-dump-tokens")) {
