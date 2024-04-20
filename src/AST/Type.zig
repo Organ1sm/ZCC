@@ -1059,7 +1059,7 @@ pub fn sizeof(ty: Type, comp: *const Compilation) ?u64 {
 
 pub fn bitSizeof(ty: Type, comp: *const Compilation) ?u64 {
     return switch (ty.specifier) {
-        .Bool => 1,
+        .Bool => if (comp.langOpts.emulate == .msvc) @as(u64, 8) else 1,
         .TypeofType, .DecayedTypeofType => ty.data.subType.bitSizeof(comp),
         .TypeofExpr, .DecayedTypeofExpr => ty.data.expr.ty.bitSizeof(comp),
         .Attributed => ty.data.attributed.base.bitSizeof(comp),
