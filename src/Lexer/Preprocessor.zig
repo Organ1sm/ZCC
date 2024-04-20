@@ -723,7 +723,7 @@ fn expr(pp: *Preprocessor, lexer: *Lexer) MacroError!bool {
         .recordBuffer = undefined,
         .attrBuffer = undefined,
         .fieldAttrBuffer = undefined,
-        .declSpecId = undefined,
+        .stringsIds = undefined,
     };
 
     return parser.macroExpr();

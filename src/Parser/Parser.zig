@@ -132,7 +132,10 @@ recordMembers: std.ArrayListUnmanaged(struct { token: TokenIndex, name: StringId
 inLoop: bool = false,
 /// #pragma pack value
 pragmaPack: ?u8 = null,
-declSpecId: StringId,
+stringsIds: struct {
+    declSpecId: StringId,
+    mainId: StringId,
+},
 
 const Label = union(enum) {
     unresolvedGoto: TokenIndex,
@@ -605,7 +608,10 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
         .enumBuffer = std.ArrayList(Type.Enum.Field).init(pp.comp.gpa),
         .recordBuffer = std.ArrayList(Type.Record.Field).init(pp.comp.gpa),
         .fieldAttrBuffer = std.ArrayList([]const Attribute).init(pp.comp.gpa),
-        .declSpecId = try pp.comp.intern("__declspec"),
+        .stringsIds = .{
+            .declSpecId = try pp.comp.intern("__declspec"),
+            .mainId = try pp.comp.intern("main"),
+        },
     };
 
     //bind p to the symbol stack for simplify symbol stack api
@@ -914,6 +920,9 @@ fn parseDeclaration(p: *Parser) Error!bool {
         const func = p.func;
         defer p.func = func;
         p.func = .{ .type = ID.d.type, .name = ID.d.name };
+        if (internedDeclaratorName == p.stringsIds.mainId and !ID.d.type.getReturnType().is(.Int)) {
+            try p.errToken(.main_return_type, ID.d.name);
+        }
 
         try p.symStack.pushScope();
         defer p.symStack.popScope();
@@ -1702,7 +1711,7 @@ fn parseTypeSpec(p: *Parser, ty: *TypeBuilder) Error!bool {
             .Identifier, .ExtendedIdentifier => {
                 var internedName = try p.getInternString(p.tokenIdx);
                 var declspecFound = false;
-                if (internedName == p.declSpecId) {
+                if (internedName == p.stringsIds.declSpecId) {
                     try p.errToken(.declspec_not_enabled, p.tokenIdx);
                     p.tokenIdx += 1;
 
@@ -4250,13 +4259,20 @@ fn parseCompoundStmt(p: *Parser, isFnBody: bool, stmtExprState: ?*StmtExprState)
 
         if (lastNoreturn != .yes) {
             const retTy = p.func.type.?.getReturnType();
-            if (lastNoreturn == .no and !retTy.is(.Void) and !retTy.isArray() and !retTy.isFunc())
-                try p.errStr(.func_does_not_return, p.tokenIdx - 1, p.getTokenSlice(p.func.name));
+            var returnZero = false;
+            if (lastNoreturn == .no and !retTy.is(.Void) and !retTy.isArray() and !retTy.isFunc()) {
+                const funcName = p.getTokenSlice(p.func.name);
+                const internerName = try p.comp.intern(funcName);
+                if (internerName == p.stringsIds.mainId and retTy.is(.Int))
+                    returnZero = true
+                else
+                    try p.errStr(.func_does_not_return, p.tokenIdx - 1, funcName);
+            }
 
             try p.declBuffer.append(try p.addNode(.{
                 .tag = .ImplicitReturn,
                 .type = p.func.type.?.getReturnType(),
-                .data = undefined,
+                .data = .{ .returnZero = returnZero },
             }));
         }
 

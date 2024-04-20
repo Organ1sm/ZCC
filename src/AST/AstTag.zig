@@ -278,6 +278,7 @@ pub const Tag = enum(u8) {
 
     /// Inserted at the end of a function body if no return stmt is found.
     /// ty is the functions return type
+    /// data is return zero which is true if the function is called "main"
     ImplicitReturn,
 
     /// Inserted in array init expr to represent unspecified elements.
