@@ -1440,6 +1440,8 @@ fn shouldExpand(tok: Token, macro: *Macro) bool {
             loc.byteOffset <= macro.loc.line)
             return false;
     }
+    if (tok.flags.expansionDisabled)
+        return false;
     return true;
 }
 
@@ -1527,7 +1529,8 @@ fn collectMacroFuncArguments(
     defer curArgument.deinit();
 
     while (true) {
-        const tok = try nextBufToken(pp, lexer, buf, startIdx, endIdx, extendBuffer);
+        var tok = try nextBufToken(pp, lexer, buf, startIdx, endIdx, extendBuffer);
+        tok.flags.isMacroArg = true;
         switch (tok.id) {
             .Comma => {
                 if (parens == 0) {
@@ -1692,6 +1695,8 @@ fn expandMacroExhaustive(
                         macro.isBuiltin,
                     ) catch |err| switch (err) {
                         error.MissLParen => {
+                            if (!buf.items[idx].flags.isMacroArg)
+                                buf.items[idx].flags.expansionDisabled = true;
                             idx += 1;
                             break :macroHandler;
                         },
@@ -1723,10 +1728,12 @@ fn expandMacroExhaustive(
                     }
 
                     // Validate argument count.
-                    const extra = Diagnostics.Message.Extra{ .arguments = .{
-                        .expected = @intCast(macro.params.len),
-                        .actual = argsCount,
-                    } };
+                    const extra = Diagnostics.Message.Extra{
+                        .arguments = .{
+                            .expected = @intCast(macro.params.len),
+                            .actual = argsCount,
+                        },
+                    };
                     if (macro.varArgs and argsCount < macro.params.len) {
                         try pp.comp.diag.add(
                             .{ .tag = .expected_at_least_arguments, .loc = buf.items[idx].loc, .extra = extra },
@@ -1787,6 +1794,7 @@ fn expandMacroExhaustive(
                     const macroExpansionLocs = macroToken.expansionSlice();
                     var incrementIdxBy = res.items.len;
                     for (res.items, 0..) |*tok, i| {
+                        tok.flags.isMacroArg = macroToken.flags.isMacroArg;
                         try tok.addExpansionLocation(pp.gpa, &.{macroToken.loc});
                         try tok.addExpansionLocation(pp.gpa, macroExpansionLocs);
                         if (tok.id == .KeywordDefined and evalCtx == .Expr) {

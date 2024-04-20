@@ -36,7 +36,10 @@ pub fn deinit(tree: *AST) void {
 
 pub const Token = struct {
     id: TokenType,
-
+    flags: packed struct {
+        expansionDisabled: bool = false,
+        isMacroArg: bool = false,
+    } = .{},
     /// This location contains the actual token slice which might be generated.
     /// If it is generated then there is guaranteed to be at least one expansion location.
     loc: Source.Location,
