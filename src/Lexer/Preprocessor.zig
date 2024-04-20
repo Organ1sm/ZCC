@@ -605,17 +605,19 @@ fn expr(pp: *Preprocessor, lexer: *Lexer) MacroError!bool {
         try pp.expandMacroExhaustive(lexer, &pp.topExpansionBuffer, 0, pp.topExpansionBuffer.items.len, false);
     }
 
-    if (pp.topExpansionBuffer.items.len == 0) {
-        try pp.addError(eof, .expected_value_in_expr);
-        return false;
-    }
+    for (pp.topExpansionBuffer.items) |token| {
+        if (token.id == .MacroWS) continue;
+        if (!token.id.validPreprocessorExprStart()) {
+            try pp.comp.diag.add(.{
+                .tag = .invalid_preproc_expr_start,
+                .loc = token.loc,
+            }, token.expansionSlice());
 
-    if (!pp.topExpansionBuffer.items[0].id.validPreprocessorExprStart()) {
-        const token = pp.topExpansionBuffer.items[0];
-        try pp.comp.diag.add(.{
-            .tag = .invalid_preproc_expr_start,
-            .loc = token.loc,
-        }, token.expansionSlice());
+            return false;
+        }
+        break;
+    } else {
+        try pp.addError(eof, .expected_value_in_expr);
         return false;
     }
 
