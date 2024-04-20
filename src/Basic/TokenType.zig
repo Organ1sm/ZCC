@@ -401,12 +401,13 @@ pub const TokenType = enum(u8) {
     /// # Note
     /// This function is designed to simplify the processing of macro-related keywords,
     /// treating them uniformly as identifiers.
-    pub fn simplifyMacroKeyword(id: *TokenType) void {
+    /// `KeywordDefined` is special since it should only turn into an identifier if
+    /// we are *not* in an #if or #elif expression
+    pub fn simplifyMacroKeywordExtra(id: *TokenType, definedToIdentifier: bool) void {
         switch (id.*) {
             .KeywordInclude,
             .KeywordIncludeNext,
             .KeywordDefine,
-            .KeywordDefined,
             .KeywordUndef,
             .KeywordIfdef,
             .KeywordIfndef,
@@ -418,8 +419,16 @@ pub const TokenType = enum(u8) {
             .KeywordLine,
             .KeywordVarArgs,
             => id.* = .Identifier,
+
+            .KeywordDefined => if (definedToIdentifier) {
+                id.* = .Identifier;
+            },
             else => {},
         }
+    }
+
+    pub fn simplifyMacroKeyword(id: *TokenType) void {
+        simplifyMacroKeywordExtra(id, false);
     }
 
     pub fn getTokenText(id: TokenType) ?[]const u8 {
@@ -648,16 +657,7 @@ pub const TokenType = enum(u8) {
 
     pub fn symbol(id: TokenType) []const u8 {
         return switch (id) {
-            .Identifier,
-            .ExtendedIdentifier,
-            .MacroFunc,
-            .MacroFunction,
-            .MacroPrettyFunc,
-            .BuiltinChooseExpr,
-            .BuiltinVaArg,
-            .BuiltinOffsetof,
-            .BuiltinBitOffsetof
-            => "an identifier",
+            .Identifier, .ExtendedIdentifier, .MacroFunc, .MacroFunction, .MacroPrettyFunc, .BuiltinChooseExpr, .BuiltinVaArg, .BuiltinOffsetof, .BuiltinBitOffsetof => "an identifier",
 
             .StringLiteral,
             .StringLiteralUTF_8,
@@ -745,6 +745,7 @@ pub const TokenType = enum(u8) {
             .Bang,
             .Identifier,
             .ExtendedIdentifier,
+            .KeywordDefined,
             .One,
             .Zero,
             => true,

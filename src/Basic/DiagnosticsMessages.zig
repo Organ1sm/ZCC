@@ -1862,3 +1862,16 @@ pub const old_style_flexible_struct = struct {
     pub const pedantic = true;
     pub const opt = "old-style-flexible-struct";
 };
+pub const comma_deletion_va_args = struct {
+    pub const msg = "token pasting of ',' and __VA_ARGS__ is a GNU extension";
+    pub const kind = .off;
+    pub const pedantic = true;
+    pub const opt = "gnu-zero-variadic-macro-arguments";
+    pub const suppress_gcc = true;
+};
+pub const expansion_to_defined = struct {
+    pub const msg = "macro expansion producing 'defined' has undefined behavior";
+    pub const kind = .off;
+    pub const pedantic = true;
+    pub const opt = "expansion-to-defined";
+};

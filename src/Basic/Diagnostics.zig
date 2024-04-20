@@ -146,6 +146,8 @@ pub const Options = packed struct {
     @"invalid-noreturn": Kind = .default,
     @"zero-length-array": Kind = .default,
     @"old-style-flexible-struct": Kind = .default,
+    @"gnu-zero-variadic-macro-arguments": Kind = .default,
+    @"expansion-to-defined": Kind = .default,
 };
 
 list: std.ArrayListUnmanaged(Message) = .{},

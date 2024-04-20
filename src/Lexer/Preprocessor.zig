@@ -572,27 +572,9 @@ fn expr(pp: *Preprocessor, lexer: *Lexer) MacroError!bool {
 
     pp.topExpansionBuffer.items.len = 0;
     const eof = while (true) {
-        var token = lexer.next();
+        const token = lexer.next();
         switch (token.id) {
             .NewLine, .Eof => break token,
-            .KeywordDefined => {
-                const first = lexer.nextNoWhiteSpace();
-                const macroToken = if (first.id == .LParen) lexer.next() else first;
-
-                // validate the macro name
-                if (!macroToken.id.isMacroIdentifier())
-                    try pp.addError(macroToken, .macro_name_missing);
-
-                if (first.id == .LParen) {
-                    const rParen = lexer.next();
-                    if (rParen.id != .RParen) {
-                        try pp.addError(rParen, .closing_paren);
-                        try pp.addError(first, .to_match_paren);
-                    }
-                }
-                token.id = if (pp.defines.get(pp.getTokenSlice(macroToken)) != null) .One else .Zero;
-            },
-
             .WhiteSpace => if (pp.topExpansionBuffer.items.len == 0) continue,
             else => {},
         }
@@ -602,27 +584,31 @@ fn expr(pp: *Preprocessor, lexer: *Lexer) MacroError!bool {
 
     if (pp.topExpansionBuffer.items.len != 0) {
         pp.expansionSourceLoc = pp.topExpansionBuffer.items[0].loc;
-        try pp.expandMacroExhaustive(lexer, &pp.topExpansionBuffer, 0, pp.topExpansionBuffer.items.len, false);
+        try pp.expandMacroExhaustive(lexer, &pp.topExpansionBuffer, 0, pp.topExpansionBuffer.items.len, false, .Expr);
     }
 
-    if (pp.topExpansionBuffer.items.len == 0) {
+    for (pp.topExpansionBuffer.items) |token| {
+        if (token.id == .MacroWS) continue;
+        if (!token.id.validPreprocessorExprStart()) {
+            try pp.comp.diag.add(.{
+                .tag = .invalid_preproc_expr_start,
+                .loc = token.loc,
+            }, token.expansionSlice());
+
+            return false;
+        }
+        break;
+    } else {
         try pp.addError(eof, .expected_value_in_expr);
-        return false;
-    }
-
-    if (!pp.topExpansionBuffer.items[0].id.validPreprocessorExprStart()) {
-        const token = pp.topExpansionBuffer.items[0];
-        try pp.comp.diag.add(.{
-            .tag = .invalid_preproc_expr_start,
-            .loc = token.loc,
-        }, token.expansionSlice());
         return false;
     }
 
     // validate the tokens in the expression
     try pp.tokens.ensureUnusedCapacity(pp.gpa, pp.topExpansionBuffer.items.len);
-    for (pp.topExpansionBuffer.items, 0..) |_, i| {
-        var token = pp.topExpansionBuffer.items[i];
+    var i: usize = 0;
+    const items = pp.topExpansionBuffer.items;
+    while (i < items.len) : (i += 1) {
+        var token = items[i];
         switch (token.id) {
             .StringLiteral,
             .StringLiteralUTF_8,
@@ -685,24 +671,29 @@ fn expr(pp: *Preprocessor, lexer: *Lexer) MacroError!bool {
             .MacroWS, .WhiteSpace => continue,
 
             else => if (token.id.isMacroIdentifier()) {
-                try pp.comp.diag.add(.{
-                    .tag = .undefined_macro,
-                    .loc = token.loc,
-                    .extra = .{ .str = pp.expandedSlice(token) },
-                }, token.expansionSlice());
-
-                if (i + 1 < pp.topExpansionBuffer.items.len and
-                    pp.topExpansionBuffer.items[i + 1].id == .LParen)
-                {
+                if (token.id == .KeywordDefined) {
+                    const tokenConsumed = try pp.handleKeywordDefined(&token, items[i + 1 ..], eof);
+                    i += tokenConsumed;
+                } else {
                     try pp.comp.diag.add(.{
-                        .tag = .fn_macro_undefined,
+                        .tag = .undefined_macro,
                         .loc = token.loc,
                         .extra = .{ .str = pp.expandedSlice(token) },
                     }, token.expansionSlice());
-                    return false;
-                }
 
-                token.id = .Zero; // undefined macro
+                    if (i + 1 < pp.topExpansionBuffer.items.len and
+                        pp.topExpansionBuffer.items[i + 1].id == .LParen)
+                    {
+                        try pp.comp.diag.add(.{
+                            .tag = .fn_macro_undefined,
+                            .loc = token.loc,
+                            .extra = .{ .str = pp.expandedSlice(token) },
+                        }, token.expansionSlice());
+                        return false;
+                    }
+
+                    token.id = .Zero; // undefined macro
+                }
             },
         }
         pp.tokens.appendAssumeCapacity(token);
@@ -736,6 +727,58 @@ fn expr(pp: *Preprocessor, lexer: *Lexer) MacroError!bool {
     };
 
     return parser.macroExpr();
+}
+
+/// Turns macro_tok from .keyword_defined into .zero or .one depending on whether the argument is defined
+/// Returns the number of tokens consumed
+fn handleKeywordDefined(pp: *Preprocessor, macroToken: *Token, tokens: []const Token, eof: RawToken) !usize {
+    std.debug.assert(macroToken.id == .KeywordDefined);
+    var it = TokenIterator.init(tokens);
+    const first = it.nextNoWS() orelse {
+        try pp.addError(eof, .macro_name_missing);
+        return it.i;
+    };
+    switch (first.id) {
+        .LParen => {},
+        else => {
+            if (!first.id.isMacroIdentifier()) {
+                try pp.comp.diag.add(.{
+                    .tag = .macro_name_must_be_identifier,
+                    .loc = first.loc,
+                    .extra = .{ .str = pp.expandedSlice(first) },
+                }, first.expansionSlice());
+            }
+            macroToken.id = if (pp.defines.contains(pp.expandedSlice(first))) .One else .Zero;
+            return it.i;
+        },
+    }
+    const second = it.nextNoWS() orelse {
+        try pp.addError(eof, .macro_name_missing);
+        return it.i;
+    };
+    if (!second.id.isMacroIdentifier()) {
+        try pp.comp.diag.add(.{
+            .tag = .macro_name_must_be_identifier,
+            .loc = second.loc,
+        }, second.expansionSlice());
+        return it.i;
+    }
+    macroToken.id = if (pp.defines.contains(pp.expandedSlice(second))) .One else .Zero;
+
+    const last = it.nextNoWS();
+    if (last == null or last.?.id != .RParen) {
+        const tok = last orelse tokenFromRaw(eof);
+        try pp.comp.diag.add(.{
+            .tag = .closing_paren,
+            .loc = tok.loc,
+        }, tok.expansionSlice());
+        try pp.comp.diag.add(.{
+            .tag = .to_match_paren,
+            .loc = first.loc,
+        }, first.expansionSlice());
+    }
+
+    return it.i;
 }
 
 /// Skip until #else #elif #endif, return last directive token id.
@@ -1097,20 +1140,15 @@ fn handleBuiltinMacro(
         => {
             var invalid: ?Token = null;
             var identifier: ?Token = null;
-            for (paramTokens) |tok| switch (tok.id) {
-                .Identifier,
-                .ExtendedIdentifier,
-                .BuiltinChooseExpr,
-                .BuiltinVaArg,
-                => {
-                    if (identifier) |_| invalid = tok else identifier = tok;
-                },
-                .MacroWS => continue,
-                else => {
+            for (paramTokens) |tok| {
+                if (tok.id == .MacroWS) continue;
+                if (!tok.id.isMacroIdentifier()) {
                     invalid = tok;
                     break;
-                },
-            };
+                }
+
+                if (identifier) |_| invalid = tok else identifier = tok;
+            }
             if (identifier == null and invalid == null) invalid = .{ .id = .Eof, .loc = srcLoc };
             if (invalid) |some| {
                 try pp.comp.diag.add(
@@ -1339,6 +1377,50 @@ fn expandFuncMacro(
                 ) else try pp.pragmaOperator(string.?, loc);
             },
 
+            // GNU extension
+            .Comma => {
+                if (tokenIdx + 2 < funcMacro.tokens.len and funcMacro.tokens[tokenIdx + 1].id == .HashHash) {
+                    const hashhash = funcMacro.tokens[tokenIdx + 1];
+                    var maybeVaArgs = funcMacro.tokens[tokenIdx + 2];
+                    var consumed: usize = 2;
+                    if (maybeVaArgs.id == .MacroWS and tokenIdx + 3 < funcMacro.tokens.len) {
+                        consumed = 3;
+                        maybeVaArgs = funcMacro.tokens[tokenIdx + 3];
+                    }
+
+                    if (maybeVaArgs.id == .KeywordVarArgs) {
+                        // GNU extension: `, ##__VA_ARGS__` deletes the comma if __VA_ARGS__ is empty
+                        tokenIdx += consumed;
+                        if (funcMacro.params.len == expandedArgs.items.len) {
+                            // Empty __VA_ARGS__, drop the comma
+                            try pp.addError(hashhash, .comma_deletion_va_args);
+                        } else if (funcMacro.params.len == 0 and expandedArgs.items.len == 1 and expandedArgs.items[0].len == 0) {
+                            // Ambiguous whether this is "empty __VA_ARGS__" or "__VA_ARGS__ omitted"
+                            if (pp.comp.langOpts.standard.isGNU()) {
+                                // GNU standard, drop the comma
+                                try pp.addError(hashhash, .comma_deletion_va_args);
+                            } else {
+                                // C standard, retain the comma
+                                try buf.append(tokenFromRaw(raw));
+                            }
+                        } else {
+                            try buf.append(tokenFromRaw(raw));
+                            if (expandedVarArguments.items.len > 0 or varArguments.items.len == funcMacro.params.len) {
+                                try pp.addError(hashhash, .comma_deletion_va_args);
+                            }
+                            const rawLoc = Source.Location{
+                                .id = maybeVaArgs.source,
+                                .byteOffset = maybeVaArgs.start,
+                                .line = maybeVaArgs.line,
+                            };
+                            try bufCopyTokens(&buf, expandedVarArguments.items, &.{rawLoc});
+                        }
+                        continue;
+                    }
+                }
+                // Regular comma, no token pasting with __VA_ARGS__
+                try buf.append(tokenFromRaw(raw));
+            },
             else => try buf.append(tokenFromRaw(raw)),
         }
     }
@@ -1358,6 +1440,8 @@ fn shouldExpand(tok: Token, macro: *Macro) bool {
             loc.byteOffset <= macro.loc.line)
             return false;
     }
+    if (tok.flags.expansionDisabled)
+        return false;
     return true;
 }
 
@@ -1445,7 +1529,8 @@ fn collectMacroFuncArguments(
     defer curArgument.deinit();
 
     while (true) {
-        const tok = try nextBufToken(pp, lexer, buf, startIdx, endIdx, extendBuffer);
+        var tok = try nextBufToken(pp, lexer, buf, startIdx, endIdx, extendBuffer);
+        tok.flags.isMacroArg = true;
         switch (tok.id) {
             .Comma => {
                 if (parens == 0) {
@@ -1524,6 +1609,36 @@ fn removeExpandedTokens(
     movingEndIdx.* -|= len;
 }
 
+/// The behavior of `defined` depends on whether we are in a preprocessor
+/// expression context (#if or #elif) or not.
+/// In a non-expression context it's just an identifier. Within a preprocessor
+/// expression it is a unary operator or one-argument function.
+const EvalContext = enum {
+    Expr,
+    NonExpr,
+};
+
+/// Helper for safely iterating over a slice of tokens while skipping whitespace
+const TokenIterator = struct {
+    toks: []const Token,
+    i: usize,
+
+    fn init(toks: []const Token) TokenIterator {
+        return .{ .toks = toks, .i = 0 };
+    }
+
+    fn nextNoWS(self: *TokenIterator) ?Token {
+        while (self.i < self.toks.len) : (self.i += 1) {
+            const tok = self.toks[self.i];
+            if (tok.id == .WhiteSpace or tok.id == .MacroWS) continue;
+
+            self.i += 1;
+            return tok;
+        }
+        return null;
+    }
+};
+
 fn expandMacroExhaustive(
     pp: *Preprocessor,
     lexer: *Lexer,
@@ -1531,6 +1646,7 @@ fn expandMacroExhaustive(
     startIdx: usize,
     endIdx: usize,
     extendBuffer: bool,
+    evalCtx: EvalContext,
 ) MacroError!void {
     var movingEndIdx = endIdx;
     var advanceIdx: usize = 0;
@@ -1544,6 +1660,23 @@ fn expandMacroExhaustive(
         //try pp.debugTokenBuf(buf.items[start_idx+advance_index .. moving_end_idx]);
         while (idx < movingEndIdx) {
             const macroToken = buf.items[idx];
+            if (macroToken.id == .KeywordDefined and evalCtx == .Expr) {
+                idx += 1;
+                var it = TokenIterator.init(buf.items[idx..movingEndIdx]);
+                if (it.nextNoWS()) |tok| {
+                    switch (tok.id) {
+                        .LParen => {
+                            _ = it.nextNoWS(); // eat (what should be) identifier
+                            _ = it.nextNoWS(); // eat (what should be) r paren
+                        },
+                        .Identifier, .ExtendedIdentifier => {},
+                        else => {},
+                    }
+                }
+                idx += it.i;
+                continue;
+            }
+
             const macroEntry = pp.defines.getPtr(pp.expandedSlice(macroToken));
             if (macroEntry == null or !shouldExpand(macroToken, macroEntry.?)) {
                 idx += 1;
@@ -1562,6 +1695,8 @@ fn expandMacroExhaustive(
                         macro.isBuiltin,
                     ) catch |err| switch (err) {
                         error.MissLParen => {
+                            if (!buf.items[idx].flags.isMacroArg)
+                                buf.items[idx].flags.expansionDisabled = true;
                             idx += 1;
                             break :macroHandler;
                         },
@@ -1593,10 +1728,12 @@ fn expandMacroExhaustive(
                     }
 
                     // Validate argument count.
-                    const extra = Diagnostics.Message.Extra{ .arguments = .{
-                        .expected = @intCast(macro.params.len),
-                        .actual = argsCount,
-                    } };
+                    const extra = Diagnostics.Message.Extra{
+                        .arguments = .{
+                            .expected = @intCast(macro.params.len),
+                            .actual = argsCount,
+                        },
+                    };
                     if (macro.varArgs and argsCount < macro.params.len) {
                         try pp.comp.diag.add(
                             .{ .tag = .expected_at_least_arguments, .loc = buf.items[idx].loc, .extra = extra },
@@ -1626,7 +1763,7 @@ fn expandMacroExhaustive(
                         errdefer expandBuffer.deinit();
                         try expandBuffer.appendSlice(arg);
 
-                        try pp.expandMacroExhaustive(lexer, &expandBuffer, 0, expandBuffer.items.len, false);
+                        try pp.expandMacroExhaustive(lexer, &expandBuffer, 0, expandBuffer.items.len, false, evalCtx);
                         expandedArgs.appendAssumeCapacity(try expandBuffer.toOwnedSlice());
                     }
 
@@ -1655,15 +1792,26 @@ fn expandMacroExhaustive(
                     defer res.deinit();
 
                     const macroExpansionLocs = macroToken.expansionSlice();
-                    for (res.items) |*tok| {
+                    var incrementIdxBy = res.items.len;
+                    for (res.items, 0..) |*tok, i| {
+                        tok.flags.isMacroArg = macroToken.flags.isMacroArg;
                         try tok.addExpansionLocation(pp.gpa, &.{macroToken.loc});
                         try tok.addExpansionLocation(pp.gpa, macroExpansionLocs);
+                        if (tok.id == .KeywordDefined and evalCtx == .Expr) {
+                            try pp.comp.diag.add(.{
+                                .tag = .expansion_to_defined,
+                                .loc = tok.loc,
+                            }, tok.expansionSlice());
+                        }
+                        if (i < incrementIdxBy and (tok.id == .KeywordDefined or pp.defines.contains(pp.expandedSlice(tok.*)))) {
+                            incrementIdxBy = i;
+                        }
                     }
 
                     Token.free(buf.items[idx].expansionLocs, pp.gpa);
 
                     try buf.replaceRange(idx, 1, res.items);
-                    idx += res.items.len;
+                    idx += incrementIdxBy;
                     movingEndIdx = movingEndIdx + res.items.len - 1;
                     doRescan = true;
                 }
@@ -1694,14 +1842,14 @@ fn expandMacro(pp: *Preprocessor, lexer: *Lexer, raw: RawToken) MacroError!void 
     try pp.topExpansionBuffer.append(sourceToken);
     pp.expansionSourceLoc = sourceToken.loc;
 
-    try pp.expandMacroExhaustive(lexer, &pp.topExpansionBuffer, 0, 1, true);
+    try pp.expandMacroExhaustive(lexer, &pp.topExpansionBuffer, 0, 1, true, .NonExpr);
     try pp.tokens.ensureUnusedCapacity(pp.gpa, pp.topExpansionBuffer.items.len);
     for (pp.topExpansionBuffer.items) |*tok| {
         if (tok.id == .MacroWS and !pp.comp.onlyPreprocess) {
             Token.free(tok.expansionLocs, pp.gpa);
             continue;
         }
-        tok.id.simplifyMacroKeyword();
+        tok.id.simplifyMacroKeywordExtra(true);
         pp.tokens.appendAssumeCapacity(tok.*);
     }
 
