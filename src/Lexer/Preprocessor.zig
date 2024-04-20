@@ -673,7 +673,7 @@ fn expr(pp: *Preprocessor, lexer: *Lexer) MacroError!bool {
             else => if (token.id.isMacroIdentifier()) {
                 if (token.id == .KeywordDefined) {
                     const tokenConsumed = try pp.handleKeywordDefined(&token, items[i + 1 ..], eof);
-                    i += tokenConsumed + 1; // +1 for keywordDefined
+                    i += tokenConsumed;
                 } else {
                     try pp.comp.diag.add(.{
                         .tag = .undefined_macro,
