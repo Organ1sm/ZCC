@@ -125,6 +125,7 @@ pub const Node = struct {
         cast: struct { operand: NodeIndex, kind: CastKind },
 
         int: u64,
+        returnZero: bool,
 
         pub fn forDecl(data: Data, tree: AST) struct {
             decls: []const NodeIndex,
@@ -428,6 +429,13 @@ fn dumpNode(
         try w.writeAll(" (value: ");
         try val.dump(ty, tree.comp, w);
         try w.writeByte(')');
+    }
+
+    if (tag == .ImplicitReturn and data.returnZero)
+    {
+        if (color) util.setColor(IMPLICIT, w);
+        try w.writeAll(" (value: 0)");
+        if (color) util.setColor(.reset, w);
     }
 
     try w.writeAll("\n");
