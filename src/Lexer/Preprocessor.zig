@@ -1097,20 +1097,15 @@ fn handleBuiltinMacro(
         => {
             var invalid: ?Token = null;
             var identifier: ?Token = null;
-            for (paramTokens) |tok| switch (tok.id) {
-                .Identifier,
-                .ExtendedIdentifier,
-                .BuiltinChooseExpr,
-                .BuiltinVaArg,
-                => {
-                    if (identifier) |_| invalid = tok else identifier = tok;
-                },
-                .MacroWS => continue,
-                else => {
+            for (paramTokens) |tok| {
+                if (tok.id == .MacroWS) continue;
+                if (!tok.id.isMacroIdentifier()) {
                     invalid = tok;
                     break;
-                },
-            };
+                }
+
+                if (identifier) |_| invalid = tok else identifier = tok;
+            }
             if (identifier == null and invalid == null) invalid = .{ .id = .Eof, .loc = srcLoc };
             if (invalid) |some| {
                 try pp.comp.diag.add(
