@@ -1869,3 +1869,9 @@ pub const comma_deletion_va_args = struct {
     pub const opt = "gnu-zero-variadic-macro-arguments";
     pub const suppress_gcc = true;
 };
+pub const expansion_to_defined = struct {
+    pub const msg = "macro expansion producing 'defined' has undefined behavior";
+    pub const kind = .off;
+    pub const pedantic = true;
+    pub const opt = "expansion-to-defined";
+};

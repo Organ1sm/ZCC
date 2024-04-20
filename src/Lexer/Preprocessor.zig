@@ -572,27 +572,9 @@ fn expr(pp: *Preprocessor, lexer: *Lexer) MacroError!bool {
 
     pp.topExpansionBuffer.items.len = 0;
     const eof = while (true) {
-        var token = lexer.next();
+        const token = lexer.next();
         switch (token.id) {
             .NewLine, .Eof => break token,
-            .KeywordDefined => {
-                const first = lexer.nextNoWhiteSpace();
-                const macroToken = if (first.id == .LParen) lexer.next() else first;
-
-                // validate the macro name
-                if (!macroToken.id.isMacroIdentifier())
-                    try pp.addError(macroToken, .macro_name_missing);
-
-                if (first.id == .LParen) {
-                    const rParen = lexer.next();
-                    if (rParen.id != .RParen) {
-                        try pp.addError(rParen, .closing_paren);
-                        try pp.addError(first, .to_match_paren);
-                    }
-                }
-                token.id = if (pp.defines.get(pp.getTokenSlice(macroToken)) != null) .One else .Zero;
-            },
-
             .WhiteSpace => if (pp.topExpansionBuffer.items.len == 0) continue,
             else => {},
         }
@@ -602,7 +584,7 @@ fn expr(pp: *Preprocessor, lexer: *Lexer) MacroError!bool {
 
     if (pp.topExpansionBuffer.items.len != 0) {
         pp.expansionSourceLoc = pp.topExpansionBuffer.items[0].loc;
-        try pp.expandMacroExhaustive(lexer, &pp.topExpansionBuffer, 0, pp.topExpansionBuffer.items.len, false);
+        try pp.expandMacroExhaustive(lexer, &pp.topExpansionBuffer, 0, pp.topExpansionBuffer.items.len, false, .Expr);
     }
 
     for (pp.topExpansionBuffer.items) |token| {
@@ -623,8 +605,10 @@ fn expr(pp: *Preprocessor, lexer: *Lexer) MacroError!bool {
 
     // validate the tokens in the expression
     try pp.tokens.ensureUnusedCapacity(pp.gpa, pp.topExpansionBuffer.items.len);
-    for (pp.topExpansionBuffer.items, 0..) |_, i| {
-        var token = pp.topExpansionBuffer.items[i];
+    var i: usize = 0;
+    const items = pp.topExpansionBuffer.items;
+    while (i < items.len) : (i += 1) {
+        var token = items[i];
         switch (token.id) {
             .StringLiteral,
             .StringLiteralUTF_8,
@@ -687,24 +671,29 @@ fn expr(pp: *Preprocessor, lexer: *Lexer) MacroError!bool {
             .MacroWS, .WhiteSpace => continue,
 
             else => if (token.id.isMacroIdentifier()) {
-                try pp.comp.diag.add(.{
-                    .tag = .undefined_macro,
-                    .loc = token.loc,
-                    .extra = .{ .str = pp.expandedSlice(token) },
-                }, token.expansionSlice());
-
-                if (i + 1 < pp.topExpansionBuffer.items.len and
-                    pp.topExpansionBuffer.items[i + 1].id == .LParen)
-                {
+                if (token.id == .KeywordDefined) {
+                    const tokenConsumed = try pp.handleKeywordDefined(&token, items[i + 1 ..], eof);
+                    i += tokenConsumed + 1; // +1 for keywordDefined
+                } else {
                     try pp.comp.diag.add(.{
-                        .tag = .fn_macro_undefined,
+                        .tag = .undefined_macro,
                         .loc = token.loc,
                         .extra = .{ .str = pp.expandedSlice(token) },
                     }, token.expansionSlice());
-                    return false;
-                }
 
-                token.id = .Zero; // undefined macro
+                    if (i + 1 < pp.topExpansionBuffer.items.len and
+                        pp.topExpansionBuffer.items[i + 1].id == .LParen)
+                    {
+                        try pp.comp.diag.add(.{
+                            .tag = .fn_macro_undefined,
+                            .loc = token.loc,
+                            .extra = .{ .str = pp.expandedSlice(token) },
+                        }, token.expansionSlice());
+                        return false;
+                    }
+
+                    token.id = .Zero; // undefined macro
+                }
             },
         }
         pp.tokens.appendAssumeCapacity(token);
@@ -738,6 +727,58 @@ fn expr(pp: *Preprocessor, lexer: *Lexer) MacroError!bool {
     };
 
     return parser.macroExpr();
+}
+
+/// Turns macro_tok from .keyword_defined into .zero or .one depending on whether the argument is defined
+/// Returns the number of tokens consumed
+fn handleKeywordDefined(pp: *Preprocessor, macroToken: *Token, tokens: []const Token, eof: RawToken) !usize {
+    std.debug.assert(macroToken.id == .KeywordDefined);
+    var it = TokenIterator.init(tokens);
+    const first = it.nextNoWS() orelse {
+        try pp.addError(eof, .macro_name_missing);
+        return it.i;
+    };
+    switch (first.id) {
+        .LParen => {},
+        else => {
+            if (!first.id.isMacroIdentifier()) {
+                try pp.comp.diag.add(.{
+                    .tag = .macro_name_must_be_identifier,
+                    .loc = first.loc,
+                    .extra = .{ .str = pp.expandedSlice(first) },
+                }, first.expansionSlice());
+            }
+            macroToken.id = if (pp.defines.contains(pp.expandedSlice(first))) .One else .Zero;
+            return it.i;
+        },
+    }
+    const second = it.nextNoWS() orelse {
+        try pp.addError(eof, .macro_name_missing);
+        return it.i;
+    };
+    if (!second.id.isMacroIdentifier()) {
+        try pp.comp.diag.add(.{
+            .tag = .macro_name_must_be_identifier,
+            .loc = second.loc,
+        }, second.expansionSlice());
+        return it.i;
+    }
+    macroToken.id = if (pp.defines.contains(pp.expandedSlice(second))) .One else .Zero;
+
+    const last = it.nextNoWS();
+    if (last == null or last.?.id != .RParen) {
+        const tok = last orelse tokenFromRaw(eof);
+        try pp.comp.diag.add(.{
+            .tag = .closing_paren,
+            .loc = tok.loc,
+        }, tok.expansionSlice());
+        try pp.comp.diag.add(.{
+            .tag = .to_match_paren,
+            .loc = first.loc,
+        }, first.expansionSlice());
+    }
+
+    return it.i;
 }
 
 /// Skip until #else #elif #endif, return last directive token id.
@@ -1565,6 +1606,36 @@ fn removeExpandedTokens(
     movingEndIdx.* -|= len;
 }
 
+/// The behavior of `defined` depends on whether we are in a preprocessor
+/// expression context (#if or #elif) or not.
+/// In a non-expression context it's just an identifier. Within a preprocessor
+/// expression it is a unary operator or one-argument function.
+const EvalContext = enum {
+    Expr,
+    NonExpr,
+};
+
+/// Helper for safely iterating over a slice of tokens while skipping whitespace
+const TokenIterator = struct {
+    toks: []const Token,
+    i: usize,
+
+    fn init(toks: []const Token) TokenIterator {
+        return .{ .toks = toks, .i = 0 };
+    }
+
+    fn nextNoWS(self: *TokenIterator) ?Token {
+        while (self.i < self.toks.len) : (self.i += 1) {
+            const tok = self.toks[self.i];
+            if (tok.id == .WhiteSpace or tok.id == .MacroWS) continue;
+
+            self.i += 1;
+            return tok;
+        }
+        return null;
+    }
+};
+
 fn expandMacroExhaustive(
     pp: *Preprocessor,
     lexer: *Lexer,
@@ -1572,6 +1643,7 @@ fn expandMacroExhaustive(
     startIdx: usize,
     endIdx: usize,
     extendBuffer: bool,
+    evalCtx: EvalContext,
 ) MacroError!void {
     var movingEndIdx = endIdx;
     var advanceIdx: usize = 0;
@@ -1585,6 +1657,23 @@ fn expandMacroExhaustive(
         //try pp.debugTokenBuf(buf.items[start_idx+advance_index .. moving_end_idx]);
         while (idx < movingEndIdx) {
             const macroToken = buf.items[idx];
+            if (macroToken.id == .KeywordDefined and evalCtx == .Expr) {
+                idx += 1;
+                var it = TokenIterator.init(buf.items[idx..movingEndIdx]);
+                if (it.nextNoWS()) |tok| {
+                    switch (tok.id) {
+                        .LParen => {
+                            _ = it.nextNoWS(); // eat (what should be) identifier
+                            _ = it.nextNoWS(); // eat (what should be) r paren
+                        },
+                        .Identifier, .ExtendedIdentifier => {},
+                        else => {},
+                    }
+                }
+                idx += it.i;
+                continue;
+            }
+
             const macroEntry = pp.defines.getPtr(pp.expandedSlice(macroToken));
             if (macroEntry == null or !shouldExpand(macroToken, macroEntry.?)) {
                 idx += 1;
@@ -1667,7 +1756,7 @@ fn expandMacroExhaustive(
                         errdefer expandBuffer.deinit();
                         try expandBuffer.appendSlice(arg);
 
-                        try pp.expandMacroExhaustive(lexer, &expandBuffer, 0, expandBuffer.items.len, false);
+                        try pp.expandMacroExhaustive(lexer, &expandBuffer, 0, expandBuffer.items.len, false, evalCtx);
                         expandedArgs.appendAssumeCapacity(try expandBuffer.toOwnedSlice());
                     }
 
@@ -1700,7 +1789,13 @@ fn expandMacroExhaustive(
                     for (res.items, 0..) |*tok, i| {
                         try tok.addExpansionLocation(pp.gpa, &.{macroToken.loc});
                         try tok.addExpansionLocation(pp.gpa, macroExpansionLocs);
-                        if (i < incrementIdxBy and pp.defines.contains(pp.expandedSlice(tok.*))) {
+                        if (tok.id == .KeywordDefined and evalCtx == .Expr) {
+                            try pp.comp.diag.add(.{
+                                .tag = .expansion_to_defined,
+                                .loc = tok.loc,
+                            }, tok.expansionSlice());
+                        }
+                        if (i < incrementIdxBy and (tok.id == .KeywordDefined or pp.defines.contains(pp.expandedSlice(tok.*)))) {
                             incrementIdxBy = i;
                         }
                     }
@@ -1739,14 +1834,14 @@ fn expandMacro(pp: *Preprocessor, lexer: *Lexer, raw: RawToken) MacroError!void 
     try pp.topExpansionBuffer.append(sourceToken);
     pp.expansionSourceLoc = sourceToken.loc;
 
-    try pp.expandMacroExhaustive(lexer, &pp.topExpansionBuffer, 0, 1, true);
+    try pp.expandMacroExhaustive(lexer, &pp.topExpansionBuffer, 0, 1, true, .NonExpr);
     try pp.tokens.ensureUnusedCapacity(pp.gpa, pp.topExpansionBuffer.items.len);
     for (pp.topExpansionBuffer.items) |*tok| {
         if (tok.id == .MacroWS and !pp.comp.onlyPreprocess) {
             Token.free(tok.expansionLocs, pp.gpa);
             continue;
         }
-        tok.id.simplifyMacroKeyword();
+        tok.id.simplifyMacroKeywordExtra(true);
         pp.tokens.appendAssumeCapacity(tok.*);
     }
 
