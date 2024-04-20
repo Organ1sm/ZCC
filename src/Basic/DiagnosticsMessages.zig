@@ -1875,3 +1875,8 @@ pub const expansion_to_defined = struct {
     pub const pedantic = true;
     pub const opt = "expansion-to-defined";
 };
+pub const main_return_type = struct {
+    pub const msg = "return type of 'main' is not 'int'";
+    pub const kind = .warning;
+    pub const opt = "main-return-type";
+};

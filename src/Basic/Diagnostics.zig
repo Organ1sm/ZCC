@@ -148,6 +148,7 @@ pub const Options = packed struct {
     @"old-style-flexible-struct": Kind = .default,
     @"gnu-zero-variadic-macro-arguments": Kind = .default,
     @"expansion-to-defined": Kind = .default,
+    @"main-return-type": Kind = .default,
 };
 
 list: std.ArrayListUnmanaged(Message) = .{},
