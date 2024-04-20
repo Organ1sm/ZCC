@@ -1696,15 +1696,19 @@ fn expandMacroExhaustive(
                     defer res.deinit();
 
                     const macroExpansionLocs = macroToken.expansionSlice();
-                    for (res.items) |*tok| {
+                    var incrementIdxBy = res.items.len;
+                    for (res.items, 0..) |*tok, i| {
                         try tok.addExpansionLocation(pp.gpa, &.{macroToken.loc});
                         try tok.addExpansionLocation(pp.gpa, macroExpansionLocs);
+                        if (i < incrementIdxBy and pp.defines.contains(pp.expandedSlice(tok.*))) {
+                            incrementIdxBy = i;
+                        }
                     }
 
                     Token.free(buf.items[idx].expansionLocs, pp.gpa);
 
                     try buf.replaceRange(idx, 1, res.items);
-                    idx += res.items.len;
+                    idx += incrementIdxBy;
                     movingEndIdx = movingEndIdx + res.items.len - 1;
                     doRescan = true;
                 }
