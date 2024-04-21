@@ -51,6 +51,7 @@ pub const Message = struct {
             specifier: enum { @"struct", @"union", @"enum" },
         },
         actualCodePoint: u21,
+        ascii: u7,
         pow2AsString: u8,
         unsigned: u64,
         signed: i64,
@@ -358,6 +359,7 @@ pub fn renderExtra(comp: *Compilation, m: anytype) void {
                             msg.extra.attrArgType.actual.toString(),
                         }),
                         .actual_codepoint => m.print(info.msg, .{msg.extra.actualCodePoint}),
+                        .ascii => m.print(info.msg, .{msg.extra.ascii}),
                         .pow_2_as_string => m.print(info.msg, .{switch (msg.extra.pow2AsString) {
                             63 => "9223372036854775808",
                             64 => "18446744073709551616",
@@ -449,6 +451,10 @@ fn tagKind(diag: *Diagnostics, tag: Tag) Kind {
 
             if (@hasDecl(info, "suppress_language_option"))
                 if (!@field(comp.langOpts, info.suppress_language_option))
+                    return .off;
+
+            if (@hasDecl(info, "suppress_gcc"))
+                if (comp.langOpts.emulate == .gcc)
                     return .off;
 
             if (kind == .@"error" and diag.fatalErrors)

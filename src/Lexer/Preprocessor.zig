@@ -389,7 +389,7 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!Token {
 
                     .KeywordLine => {
                         const digits = lexer.nextNoWhiteSpace();
-                        if (digits.id != .IntegerLiteral)
+                        if (digits.id != .PPNumber)
                             try pp.addError(digits, .line_simple_digit);
 
                         if (digits.id == .Eof or digits.id == .NewLine)
@@ -404,8 +404,11 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!Token {
 
                         try pp.expectNewLine(&lexer);
                     },
-                    .IntegerLiteral => {
+
+                    .PPNumber => {
                         // # number "file" flags
+                        // TODO: validate that the pp_num token is solely digits
+                        // if not, emit `GNU line marker directive requires a simple digit sequence`
                         const name = lexer.nextNoWhiteSpace();
                         if (name.id == .Eof or name.id == .NewLine) continue;
                         if (name.id != .StringLiteral) try pp.addError(name, .line_invalid_filename);
@@ -618,20 +621,6 @@ fn expr(pp: *Preprocessor, lexer: *Lexer) MacroError!bool {
             => {
                 try pp.comp.diag.add(.{
                     .tag = .string_literal_in_pp_expr,
-                    .loc = token.loc,
-                }, token.expansionSlice());
-                return false;
-            },
-
-            .FloatLiteral,
-            .FloatLiteral_F,
-            .FloatLiteral_L,
-            .ImaginaryLiteral,
-            .ImaginaryLiteral_F,
-            .ImaginaryLiteral_L,
-            => {
-                try pp.comp.diag.add(.{
-                    .tag = .float_literal_in_pp_expr,
                     .loc = token.loc,
                 }, token.expansionSlice());
                 return false;
@@ -906,14 +895,14 @@ fn expandObjMacro(pp: *Preprocessor, simpleMacro: *const Macro) Error!ExpandBuff
                 const source = pp.comp.getSource(pp.expansionSourceLoc.id);
                 try pp.comp.generatedBuffer.writer().print("{d}\n", .{source.physicalLine(pp.expansionSourceLoc)});
 
-                buff.appendAssumeCapacity(try pp.makeGeneratedToken(start, .IntegerLiteral, token));
+                buff.appendAssumeCapacity(try pp.makeGeneratedToken(start, .PPNumber, token));
             },
             .MacroCounter => {
                 defer pp.counter += 1;
                 const start = pp.comp.generatedBuffer.items.len;
                 try pp.comp.generatedBuffer.writer().print("{d}\n", .{pp.counter});
 
-                buff.appendAssumeCapacity(try pp.makeGeneratedToken(start, .IntegerLiteral, token));
+                buff.appendAssumeCapacity(try pp.makeGeneratedToken(start, .PPNumber, token));
             },
             else => buff.appendAssumeCapacity(token),
         }
@@ -1350,7 +1339,7 @@ fn expandFuncMacro(
 
                 const start = pp.comp.generatedBuffer.items.len;
                 try pp.comp.generatedBuffer.writer().print("{}\n", .{@intFromBool(result)});
-                try buf.append(try pp.makeGeneratedToken(start, .IntegerLiteral, tokenFromRaw(raw)));
+                try buf.append(try pp.makeGeneratedToken(start, .PPNumber, tokenFromRaw(raw)));
             },
 
             .MacroParamPragmaOperator => {

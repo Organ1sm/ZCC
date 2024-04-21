@@ -55,31 +55,8 @@ const State = enum {
     multi_line_comment,
     multi_line_comment_asterisk,
     multi_line_comment_done,
-    zero,
-    integer_literal_oct,
-    integer_literal_binary,
-    integer_literal_binary_first,
-    integer_literal_hex,
-    integer_literal_hex_first,
-    integer_literal,
-    integer_suffix,
-    integer_suffix_u,
-    integer_suffix_l,
-    integer_suffix_ll,
-    integer_suffix_ul,
-    integer_suffix_i,
-    integer_suffix_ui,
-    integer_suffix_li,
-    integer_suffix_lli,
-    integer_suffix_uli,
-    float_fraction,
-    float_fraction_hex,
-    float_exponent,
-    float_exponent_digits,
-    float_suffix,
-    float_suffix_f,
-    float_suffix_i,
-    float_suffix_l,
+    pp_num,
+    pp_num_exponent,
 };
 
 pub fn next(self: *Lexer) Token {
@@ -189,8 +166,7 @@ pub fn next(self: *Lexer) Token {
                 '/' => state = .slash,
                 '&' => state = .ampersand,
                 '#' => state = .hash,
-                '0' => state = .zero,
-                '1'...'9' => state = .integer_literal,
+                '0'...'9' => state = .pp_num,
                 '\t', '\x0B', '\x0C', ' ' => state = .whitespace,
                 '$' => if (self.comp.langOpts.dollarsInIdentifiers) {
                     state = .extended_identifier;
@@ -554,7 +530,7 @@ pub fn next(self: *Lexer) Token {
 
             .period => switch (c) {
                 '.' => state = .period2,
-                '0'...'9' => state = .float_fraction,
+                '0'...'9' => state = .pp_num,
                 else => {
                     id = .Period;
                     break;
@@ -678,276 +654,35 @@ pub fn next(self: *Lexer) Token {
                 },
             },
 
-            .zero => switch (c) {
-                '0'...'9' => state = .integer_literal_oct,
-                'b', 'B' => state = .integer_literal_binary_first,
-                'x', 'X' => state = .integer_literal_hex_first,
-                '.' => state = .float_fraction,
+            .pp_num => switch (c) {
+                'a'...'d',
+                'A'...'D',
+                'f'...'o',
+                'F'...'O',
+                'q'...'z',
+                'Q'...'Z',
+                '0'...'9',
+                '_',
+                '.',
+                => {},
+                'e', 'E', 'p', 'P' => state = .pp_num_exponent,
                 else => {
-                    if (c <= 0x7F) {
-                        state = .integer_suffix;
-                        self.index -= 1;
-                    } else {
-                        id = .IntegerLiteral;
-                        break;
-                    }
-                },
-            },
-
-            .integer_literal_oct => switch (c) {
-                '0'...'7' => {},
-                else => {
-                    if (c <= 0x7F) {
-                        state = .integer_suffix;
-                        self.index -= 1;
-                    } else {
-                        id = .IntegerLiteral;
-                        break;
-                    }
-                },
-            },
-
-            .integer_literal_binary_first => switch (c) {
-                '0', '1' => state = .integer_literal_binary,
-                else => {
-                    id = .Invalid;
-                    break;
-                },
-            },
-            .integer_literal_binary => switch (c) {
-                '0', '1' => {},
-                else => {
-                    if (c <= 0x7F) {
-                        state = .integer_suffix;
-                        self.index -= 1;
-                    } else {
-                        id = .IntegerLiteral;
-                        break;
-                    }
-                },
-            },
-
-            .integer_literal_hex_first => switch (c) {
-                '0'...'9', 'a'...'f', 'A'...'F' => state = .integer_literal_hex,
-                '.' => state = .float_fraction_hex,
-                'p', 'P' => state = .float_exponent,
-                else => {
-                    id = .Invalid;
-                    break;
-                },
-            },
-            .integer_literal_hex => switch (c) {
-                '0'...'9', 'a'...'f', 'A'...'F' => {},
-                '.' => state = .float_fraction_hex,
-                'p', 'P' => state = .float_exponent,
-                else => {
-                    if (c <= 0x7F) {
-                        state = .integer_suffix;
-                        self.index -= 1;
-                    } else {
-                        id = .IntegerLiteral;
-                        break;
-                    }
-                },
-            },
-            .integer_literal => switch (c) {
-                '0'...'9' => {},
-                '.' => state = .float_fraction,
-                'e', 'E' => state = .float_exponent,
-                else => {
-                    if (c <= 0x7F) {
-                        state = .integer_suffix;
-                        self.index -= 1;
-                    } else {
-                        id = .IntegerLiteral;
-                        break;
-                    }
-                },
-            },
-            .integer_suffix => switch (c) {
-                'u', 'U' => state = .integer_suffix_u,
-                'l', 'L' => state = .integer_suffix_l,
-                'i', 'I' => state = .integer_suffix_i,
-                else => {
-                    id = .IntegerLiteral;
-                    break;
-                },
-            },
-            .integer_suffix_u => switch (c) {
-                'l', 'L' => state = .integer_suffix_ul,
-                'i', 'I' => state = .integer_suffix_ui,
-                else => {
-                    id = .IntegerLiteral_U;
-                    break;
-                },
-            },
-            .integer_suffix_i => switch (c) {
-                'l', 'L' => state = .integer_suffix_li,
-                'u', 'U' => state = .integer_suffix_ui,
-                else => {
-                    id = .ImaginaryIntegerLiteral;
-                    break;
-                },
-            },
-            .integer_suffix_ui => switch (c) {
-                'l', 'L' => state = .integer_suffix_uli,
-                else => {
-                    id = .ImaginaryIntegerLiteral_U;
-                    break;
-                },
-            },
-            .integer_suffix_l => switch (c) {
-                'l', 'L' => state = .integer_suffix_ll,
-                'i', 'I' => state = .integer_suffix_li,
-                'u', 'U' => state = .integer_suffix_ul,
-                else => {
-                    id = .IntegerLiteral_L;
-                    break;
-                },
-            },
-            .integer_suffix_li => switch (c) {
-                'l', 'L' => state = .integer_suffix_lli,
-                'u', 'U' => state = .integer_suffix_uli,
-                else => {
-                    id = .ImaginaryIntegerLiteral_L;
-                    break;
-                },
-            },
-            .integer_suffix_ll => switch (c) {
-                'i', 'I' => state = .integer_suffix_lli,
-                'u', 'U' => {
-                    id = .IntegerLiteral_LLU;
-                    self.index += 1;
-                    break;
-                },
-                else => {
-                    id = .IntegerLiteral_LL;
-                    break;
-                },
-            },
-            .integer_suffix_lli => switch (c) {
-                'u', 'U' => {
-                    id = .ImaginaryIntegerLiteral_LLU;
-                    self.index += 1;
-                    break;
-                },
-                else => {
-                    id = .ImaginaryIntegerLiteral_LL;
-                    break;
-                },
-            },
-            .integer_suffix_ul => switch (c) {
-                'i', 'I' => state = .integer_suffix_uli,
-                'l', 'L' => {
-                    id = .IntegerLiteral_LLU;
-                    self.index += 1;
-                    break;
-                },
-                else => {
-                    id = .IntegerLiteral_LU;
-                    break;
-                },
-            },
-            .integer_suffix_uli => switch (c) {
-                'l', 'L' => {
-                    id = .ImaginaryIntegerLiteral_LLU;
-                    self.index += 1;
-                    break;
-                },
-                else => {
-                    id = .ImaginaryIntegerLiteral_LU;
+                    id = .PPNumber;
                     break;
                 },
             },
 
-            .float_fraction => switch (c) {
-                '0'...'9' => {},
-                'e', 'E' => state = .float_exponent,
+            .pp_num_exponent => switch (c) {
+                'a'...'z',
+                'A'...'Z',
+                '0'...'9',
+                '_',
+                '.',
+                '+',
+                '-',
+                => state = .pp_num,
                 else => {
-                    if (c <= 0x7F) {
-                        self.index -= 1;
-                        state = .float_suffix;
-                    } else {
-                        id = .FloatLiteral;
-                        break;
-                    }
-                },
-            },
-            .float_fraction_hex => switch (c) {
-                '0'...'9', 'a'...'f', 'A'...'F' => {},
-                'p', 'P' => state = .float_exponent,
-                else => {
-                    id = .Invalid;
-                    break;
-                },
-            },
-            .float_exponent => switch (c) {
-                '+', '-' => state = .float_exponent_digits,
-                else => {
-                    self.index -= 1;
-                    state = .float_exponent_digits;
-                },
-            },
-            .float_exponent_digits => switch (c) {
-                '0'...'9' => counter += 1,
-                else => {
-                    if (counter == 0) {
-                        id = .Invalid;
-                        break;
-                    }
-                    self.index -= 1;
-                    state = .float_suffix;
-                },
-            },
-
-            .float_suffix => switch (c) {
-                'l', 'L' => state = .float_suffix_l,
-                'f', 'F' => state = .float_suffix_f,
-                'i', 'I' => state = .float_suffix_i,
-
-                else => {
-                    id = .FloatLiteral;
-                    break;
-                },
-            },
-
-            .float_suffix_f => switch (c) {
-                'i', 'I' => {
-                    id = .ImaginaryLiteral_F;
-                    self.index += 1;
-                    break;
-                },
-                else => {
-                    id = .FloatLiteral_F;
-                    break;
-                },
-            },
-
-            .float_suffix_i => switch (c) {
-                'f', 'F' => {
-                    id = .ImaginaryLiteral_F;
-                    self.index += 1;
-                    break;
-                },
-                'l', 'L' => {
-                    id = .ImaginaryLiteral_L;
-                    self.index += 1;
-                    break;
-                },
-                else => {
-                    id = .ImaginaryLiteral;
-                    break;
-                },
-            },
-
-            .float_suffix_l => switch (c) {
-                'i', 'I' => {
-                    id = .ImaginaryLiteral_L;
-                    self.index += 1;
-                    break;
-                },
-                else => {
-                    id = .FloatLiteral_L;
+                    id = .PPNumber;
                     break;
                 },
             },
@@ -971,39 +706,7 @@ pub fn next(self: *Lexer) Token {
             .unicode_escape,
             .multi_line_comment,
             .multi_line_comment_asterisk,
-            .float_exponent,
-            .integer_literal_binary_first,
-            .integer_literal_hex_first,
             => id = TokenType.Invalid,
-
-            .float_exponent_digits => id = if (counter == 0) TokenType.Invalid else TokenType.FloatLiteral,
-            .float_fraction,
-            .float_fraction_hex,
-            => id = TokenType.FloatLiteral,
-
-            .integer_literal_oct,
-            .integer_literal_binary,
-            .integer_literal_hex,
-            .integer_literal,
-            .integer_suffix,
-            .zero,
-            => id = TokenType.IntegerLiteral,
-
-            .integer_suffix_u => id = TokenType.IntegerLiteral_U,
-            .integer_suffix_l => id = TokenType.IntegerLiteral_L,
-            .integer_suffix_ll => id = TokenType.IntegerLiteral_LL,
-            .integer_suffix_ul => id = TokenType.IntegerLiteral_LU,
-
-            .integer_suffix_i => id = TokenType.ImaginaryIntegerLiteral,
-            .integer_suffix_ui => id = TokenType.ImaginaryIntegerLiteral_U,
-            .integer_suffix_li => id = TokenType.ImaginaryIntegerLiteral_L,
-            .integer_suffix_lli => id = TokenType.ImaginaryIntegerLiteral_LL,
-            .integer_suffix_uli => id = TokenType.ImaginaryIntegerLiteral_LLU,
-
-            .float_suffix => id = TokenType.FloatLiteral,
-            .float_suffix_f => id = TokenType.FloatLiteral_F,
-            .float_suffix_i => id = TokenType.ImaginaryLiteral,
-            .float_suffix_l => id = TokenType.FloatLiteral_L,
 
             .equal => id = TokenType.Equal,
             .bang => id = TokenType.Bang,
@@ -1022,6 +725,8 @@ pub fn next(self: *Lexer) Token {
             .percent => id = TokenType.Percent,
             .caret => id = TokenType.Caret,
             .asterisk => id = TokenType.Asterisk,
+
+            .pp_num, .pp_num_exponent => id = TokenType.PPNumber,
         }
     }
 
@@ -1081,21 +786,21 @@ test "extended identifiers" {
     try expectTokens("u8𝓪𝓻𝓸𝓬𝓬", &.{.ExtendedIdentifier});
     try expectTokens("U𝓪𝓻𝓸𝓬𝓬", &.{.ExtendedIdentifier});
     try expectTokens("L𝓪𝓻𝓸𝓬𝓬", &.{.ExtendedIdentifier});
-    try expectTokens("1™", &.{ .IntegerLiteral, .ExtendedIdentifier });
-    try expectTokens("1.™", &.{ .FloatLiteral, .ExtendedIdentifier });
+    try expectTokens("1™", &.{ .PPNumber, .ExtendedIdentifier });
+    try expectTokens("1.™", &.{ .PPNumber, .ExtendedIdentifier });
     try expectTokens("..™", &.{ .Period, .Period, .ExtendedIdentifier });
-    try expectTokens("0™", &.{ .IntegerLiteral, .ExtendedIdentifier });
-    try expectTokens("0b\u{E0000}", &.{ .Invalid, .ExtendedIdentifier });
-    try expectTokens("0b0\u{E0000}", &.{ .IntegerLiteral, .ExtendedIdentifier });
-    try expectTokens("01\u{E0000}", &.{ .IntegerLiteral, .ExtendedIdentifier });
-    try expectTokens("010\u{E0000}", &.{ .IntegerLiteral, .ExtendedIdentifier });
-    try expectTokens("0x\u{E0000}", &.{ .Invalid, .ExtendedIdentifier });
-    try expectTokens("0x0\u{E0000}", &.{ .IntegerLiteral, .ExtendedIdentifier });
+    try expectTokens("0™", &.{ .PPNumber, .ExtendedIdentifier });
+    try expectTokens("0b\u{E0000}", &.{ .PPNumber, .ExtendedIdentifier });
+    try expectTokens("0b0\u{E0000}", &.{ .PPNumber, .ExtendedIdentifier });
+    try expectTokens("01\u{E0000}", &.{ .PPNumber, .ExtendedIdentifier });
+    try expectTokens("010\u{E0000}", &.{ .PPNumber, .ExtendedIdentifier });
+    try expectTokens("0x\u{E0000}", &.{ .PPNumber, .ExtendedIdentifier });
+    try expectTokens("0x0\u{E0000}", &.{ .PPNumber, .ExtendedIdentifier });
     try expectTokens("\"\\0\u{E0000}\"", &.{.StringLiteral});
     try expectTokens("\"\\x\u{E0000}\"", &.{.StringLiteral});
     try expectTokens("\"\\u\u{E0000}\"", &.{ .Invalid, .ExtendedIdentifier, .Invalid });
-    try expectTokens("1e\u{E0000}", &.{ .Invalid, .ExtendedIdentifier });
-    try expectTokens("1e1\u{E0000}", &.{ .FloatLiteral, .ExtendedIdentifier });
+    try expectTokens("1e\u{E0000}", &.{ .PPNumber, .ExtendedIdentifier });
+    try expectTokens("1e1\u{E0000}", &.{ .PPNumber, .ExtendedIdentifier });
 }
 
 test "operators" {
@@ -1321,37 +1026,37 @@ test "num suffixes" {
         \\ 1.0il 1.0Il 1.0li 1.0lI
         \\
     , &.{
-        .FloatLiteral_F,
-        .FloatLiteral_L,
-        .FloatLiteral,
-        .FloatLiteral,
-        .FloatLiteral,
-        .FloatLiteral_F,
-        .FloatLiteral,
+        .PPNumber,
+        .PPNumber,
+        .PPNumber,
+        .PPNumber,
+        .PPNumber,
+        .PPNumber,
+        .PPNumber,
         .NewLine,
-        .IntegerLiteral_L,
-        .IntegerLiteral_LU,
-        .IntegerLiteral_LL,
-        .IntegerLiteral_LLU,
-        .IntegerLiteral,
+        .PPNumber,
+        .PPNumber,
+        .PPNumber,
+        .PPNumber,
+        .PPNumber,
         .NewLine,
-        .IntegerLiteral_U,
-        .IntegerLiteral_LU,
-        .IntegerLiteral_LLU,
-        .IntegerLiteral,
+        .PPNumber,
+        .PPNumber,
+        .PPNumber,
+        .PPNumber,
         .NewLine,
-        .ImaginaryLiteral,
-        .ImaginaryLiteral,
+        .PPNumber,
+        .PPNumber,
         .NewLine,
-        .ImaginaryLiteral_F,
-        .ImaginaryLiteral_F,
-        .ImaginaryLiteral_F,
-        .ImaginaryLiteral_F,
+        .PPNumber,
+        .PPNumber,
+        .PPNumber,
+        .PPNumber,
         .NewLine,
-        .ImaginaryLiteral_L,
-        .ImaginaryLiteral_L,
-        .ImaginaryLiteral_L,
-        .ImaginaryLiteral_L,
+        .PPNumber,
+        .PPNumber,
+        .PPNumber,
+        .PPNumber,
         .NewLine,
     });
 }

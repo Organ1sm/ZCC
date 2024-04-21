@@ -22,32 +22,6 @@ pub const TokenType = enum(u8) {
     CharLiteralUTF_16,
     CharLiteralUTF_32,
 
-    // float literals with suffixes
-    FloatLiteral,
-    FloatLiteral_F,
-    FloatLiteral_L,
-
-    // imaginary literals
-    ImaginaryLiteral,
-    ImaginaryLiteral_F,
-    ImaginaryLiteral_L,
-
-    // Integer literals with suffixes
-    IntegerLiteral,
-    IntegerLiteral_U,
-    IntegerLiteral_L,
-    IntegerLiteral_LU,
-    IntegerLiteral_LL,
-    IntegerLiteral_LLU,
-
-    // imaginary integer literals with suffixes
-    ImaginaryIntegerLiteral,
-    ImaginaryIntegerLiteral_U,
-    ImaginaryIntegerLiteral_L,
-    ImaginaryIntegerLiteral_LU,
-    ImaginaryIntegerLiteral_LL,
-    ImaginaryIntegerLiteral_LLU,
-
     /// "! !=  = =="
     Bang,
     BangEqual,
@@ -272,6 +246,11 @@ pub const TokenType = enum(u8) {
     KeywordLine,
     KeywordVarArgs,
 
+    /// preprocessor number
+    /// An optional period, followed by a digit 0-9, followed by any number of letters
+    /// digits, underscores, periods, and exponents (e+, e-, E+, E-, p+, p-, P+, P-)
+    PPNumber,
+
     /// This function checks if the provided `id` matches any of the predefined macro-related token types,
     /// and returns `true` if it does, indicating that it is a macro identifier.
     ///
@@ -445,26 +424,9 @@ pub const TokenType = enum(u8) {
             .CharLiteralUTF_16,
             .CharLiteralUTF_32,
             .CharLiteralWide,
-            .FloatLiteral,
-            .FloatLiteral_F,
-            .FloatLiteral_L,
-            .ImaginaryLiteral,
-            .ImaginaryLiteral_F,
-            .ImaginaryLiteral_L,
-            .IntegerLiteral,
-            .IntegerLiteral_U,
-            .IntegerLiteral_L,
-            .IntegerLiteral_LU,
-            .IntegerLiteral_LL,
-            .IntegerLiteral_LLU,
-            .ImaginaryIntegerLiteral,
-            .ImaginaryIntegerLiteral_U,
-            .ImaginaryIntegerLiteral_L,
-            .ImaginaryIntegerLiteral_LU,
-            .ImaginaryIntegerLiteral_LL,
-            .ImaginaryIntegerLiteral_LLU,
             .MacroString,
             .WhiteSpace,
+            .PPNumber,
             => null,
 
             .Eof,
@@ -672,31 +634,7 @@ pub const TokenType = enum(u8) {
             .CharLiteralWide,
             => "a character literal",
 
-            .FloatLiteral,
-            .FloatLiteral_F,
-            .FloatLiteral_L,
-            => "a float literal",
-
-            .ImaginaryLiteral,
-            .ImaginaryLiteral_F,
-            .ImaginaryLiteral_L,
-            => "an imaginary literal",
-
-            .IntegerLiteral,
-            .IntegerLiteral_U,
-            .IntegerLiteral_L,
-            .IntegerLiteral_LU,
-            .IntegerLiteral_LL,
-            .IntegerLiteral_LLU,
-            => "an integer literal",
-
-            .ImaginaryIntegerLiteral,
-            .ImaginaryIntegerLiteral_U,
-            .ImaginaryIntegerLiteral_L,
-            .ImaginaryIntegerLiteral_LU,
-            .ImaginaryIntegerLiteral_LL,
-            .ImaginaryIntegerLiteral_LLU,
-            => "an imaginary integer literal",
+            .PPNumber => "A number",
 
             else => id.getTokenText().?, // handled in getTokenText();
         };
@@ -715,25 +653,6 @@ pub const TokenType = enum(u8) {
             .StringLiteralUTF_16,
             .StringLiteralUTF_32,
             .StringLiteralWide,
-
-            .IntegerLiteral,
-            .IntegerLiteral_U,
-            .IntegerLiteral_L,
-            .IntegerLiteral_LU,
-            .IntegerLiteral_LL,
-            .IntegerLiteral_LLU,
-            .FloatLiteral,
-            .FloatLiteral_F,
-            .FloatLiteral_L,
-            .ImaginaryLiteral,
-            .ImaginaryLiteral_F,
-            .ImaginaryLiteral_L,
-            .ImaginaryIntegerLiteral,
-            .ImaginaryIntegerLiteral_U,
-            .ImaginaryIntegerLiteral_L,
-            .ImaginaryIntegerLiteral_LU,
-            .ImaginaryIntegerLiteral_LL,
-            .ImaginaryIntegerLiteral_LLU,
             .CharLiteral,
             .CharLiteralUTF_16,
             .CharLiteralUTF_32,
@@ -748,6 +667,7 @@ pub const TokenType = enum(u8) {
             .KeywordDefined,
             .One,
             .Zero,
+            .PPNumber,
             => true,
             else => false,
         };
