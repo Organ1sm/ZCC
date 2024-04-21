@@ -1052,18 +1052,10 @@ pub fn packAllEnums(comp: *const Compilation) bool {
 pub fn defaultAlignment(comp: *const Compilation) u29 {
     switch (comp.target.cpu.arch) {
         .avr => return 1,
-
-        .arm,
-        .armeb,
-        .thumb,
-        .thumbeb,
-        => switch (comp.target.abi) {
-            .gnueabi, .gnueabihf, .eabi, .eabihf, .musleabi, .musleabihf => return 8,
-            else => {},
-        },
-        else => {},
+        .arm => if (comp.target.isAndroid() or comp.target.os.tag == .ios) return 16 else return 8,
+        .mips, .mipsel, .s390x, .sparc, .armeb, .thumbeb, .thumb => return 8,
+        else => return 16,
     }
-    return 16;
 }
 
 pub fn systemCompiler(comp: *const Compilation) LangOpts.Compiler {
@@ -1072,10 +1064,15 @@ pub fn systemCompiler(comp: *const Compilation) LangOpts.Compiler {
         target.isAndroid() or
         target.isBSD() or
         target.os.tag == .fuchsia or
-        target.os.tag == .solaris)
+        target.os.tag == .solaris or
+        target.os.tag == .haiku or
+        target.cpu.arch == .hexagon)
     {
         return .clang;
     }
+
+    if (target.os.tag == .uefi)
+        return .msvc;
 
     // this is before windows to grab WindowsGnu
     if (target.abi.isGnu() or target.os.tag == .linux)
@@ -1197,4 +1194,20 @@ test "alignment functions - smoke test" {
     try std.testing.expect(comp.defaultAlignment() == 16);
     try std.testing.expect(!comp.packAllEnums());
     try std.testing.expect(comp.systemCompiler() == .clang);
+}
+
+test "target size/align tests" {
+    var comp = Compilation.init(std.testing.allocator);
+    defer comp.deinit();
+
+    const x86 = std.Target.Cpu.Arch.x86;
+    comp.target.cpu.arch = x86;
+    comp.target.cpu.model = &std.Target.x86.cpu.i586;
+    comp.target.os = std.Target.Os.Tag.defaultVersionRange(.linux, x86);
+    comp.target.abi = std.Target.Abi.gnu;
+
+    const tt: Type = Type.LongLong;
+
+    try std.testing.expectEqual(@as(u64, 8), tt.sizeof(&comp).?);
+    try std.testing.expectEqual(@as(u64, 8), tt.alignof(&comp)); // TODO should be 4
 }
