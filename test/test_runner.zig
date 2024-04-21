@@ -210,7 +210,7 @@ pub fn main() !void {
         try pp.tokens.append(gpa, eof);
 
         if (pp.defines.get("TESTS_SKIPPED")) |macro| {
-            if (macro.isFunc or macro.tokens.len != 1 or macro.tokens[0].id != .IntegerLiteral) {
+            if (macro.isFunc or macro.tokens.len != 1 or macro.tokens[0].id != .PPNumber) {
                 failCount += 1;
                 progress.log("invalid TESTS_SKIPPED, definition should contain exactly one integer literal {}\n", .{macro});
                 continue;

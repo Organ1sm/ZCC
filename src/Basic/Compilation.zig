@@ -1258,8 +1258,8 @@ test "ignore BOM at beginning of file" {
 
             var buff = std.io.fixedBufferStream(buf);
             const source = try comp.addSourceFromReader(buff.reader(), "file.c", @intCast(buf.len));
-            const expected_output = if (std.mem.startsWith(u8, buf, BOM)) buf[BOM.len..] else buf;
-            try std.testing.expectEqualStrings(expected_output, source.buf);
+            const expectedOutput = if (std.mem.startsWith(u8, buf, BOM)) buf[BOM.len..] else buf;
+            try std.testing.expectEqualStrings(expectedOutput, source.buffer);
         }
     };
 

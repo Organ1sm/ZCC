@@ -20,6 +20,9 @@ const CharInfo = @import("../Basic/CharInfo.zig");
 const Value = @import("../AST/Value.zig");
 const StringId = @import("../Basic/StringInterner.zig").StringId;
 const RecordLayout = @import("../Basic/RecordLayout.zig");
+const NumberAffixes = @import("../Lexer/NumberAffixes.zig");
+const NumberPrefix = NumberAffixes.Prefix;
+const NumberSuffix = NumberAffixes.Suffix;
 
 const Token = AST.Token;
 const TokenIndex = AST.TokenIndex;
@@ -6127,61 +6130,6 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
         .CharLiteralWide,
         => return p.parseCharLiteral(),
 
-        .FloatLiteral, .ImaginaryLiteral => |tag| {
-            defer p.tokenIdx += 1;
-
-            const ty = Type.Double;
-            const dValue = try p.parseFloat(p.tokenIdx, f64);
-            var res = Result{
-                .ty = ty,
-                .node = try p.addNode(.{ .tag = .DoubleLiteral, .type = ty, .data = undefined }),
-                .value = Value.float(dValue),
-            };
-
-            if (!p.inMacro)
-                try p.valueMap.put(res.node, res.value);
-
-            if (tag == .ImaginaryLiteral) {
-                try p.err(.gnu_imaginary_constant);
-                res.ty = Type.ComplexDouble;
-                res.value.tag = .unavailable;
-                try res.un(p, .ImaginaryLiteral);
-            }
-            return res;
-        },
-
-        .FloatLiteral_F,
-        .ImaginaryLiteral_F,
-        => |tag| {
-            defer p.tokenIdx += 1;
-
-            const ty = Type.Float;
-            const fValue = try p.parseFloat(p.tokenIdx, f64);
-            var res = Result{
-                .ty = ty,
-                .node = try p.addNode(.{ .tag = .FloatLiteral, .type = ty, .data = undefined }),
-                .value = Value.float(fValue),
-            };
-
-            if (!p.inMacro)
-                try p.valueMap.put(res.node, res.value);
-
-            if (tag == .ImaginaryLiteral_F) {
-                try p.err(.gnu_imaginary_constant);
-                res.ty = Type.ComplexFloat;
-                res.value.tag = .unavailable;
-                try res.un(p, .ImaginaryLiteral);
-            }
-            return res;
-        },
-
-        .FloatLiteral_L => return p.todo("long double literals"),
-
-        .ImaginaryLiteral_L => {
-            try p.err(.gnu_imaginary_constant);
-            return p.todo("long double imaginary literals");
-        },
-
         .Zero => {
             p.tokenIdx += 1;
             var res: Result = .{ .value = Value.int(0) };
@@ -6198,28 +6146,7 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
             return res;
         },
 
-        .IntegerLiteral,
-        .IntegerLiteral_U,
-        .IntegerLiteral_L,
-        .IntegerLiteral_LU,
-        .IntegerLiteral_LL,
-        .IntegerLiteral_LLU,
-        => return p.parseIntegerLiteral(),
-
-        .ImaginaryIntegerLiteral,
-        .ImaginaryIntegerLiteral_U,
-        .ImaginaryIntegerLiteral_L,
-        .ImaginaryIntegerLiteral_LU,
-        .ImaginaryIntegerLiteral_LL,
-        .ImaginaryIntegerLiteral_LLU,
-        => {
-            try p.err(.gnu_imaginary_constant);
-            var res = try p.parseIntegerLiteral();
-            res.ty = res.ty.makeComplex();
-            res.value.tag = .unavailable;
-            try res.un(p, .ImaginaryLiteral);
-            return res;
-        },
+        .PPNumber => return p.parsePPNumber(),
 
         .KeywordGeneric => return p.parseGenericSelection(),
 
@@ -6253,18 +6180,93 @@ fn makePredefinedIdentifier(p: *Parser) !Result {
     };
 }
 
-fn parseFloat(p: *Parser, tok: TokenIndex, comptime T: type) Error!T {
-    var bytes = p.getTokenSlice(tok);
-    switch (p.tokenIds[tok]) {
-        .FloatLiteral => {},
-        .ImaginaryLiteral, .FloatLiteral_F, .FloatLiteral_L => bytes = bytes[0 .. bytes.len - 1],
-        .ImaginaryLiteral_F, .ImaginaryLiteral_L => bytes = bytes[0 .. bytes.len - 2],
+fn parseFloat(p: *Parser, buf: []const u8, suffix: NumberSuffix) !Result {
+    switch (suffix) {
+        .L => return p.todo("long double literals"),
+        .IL => {
+            try p.err(.gnu_imaginary_constant);
+            return p.todo("long double imaginary literals");
+        },
+
+        .None, .I, .F, .IF => {
+            const ty = switch (suffix) {
+                .None, .I => Type.Double,
+                .F, .IF => Type.Float,
+                else => unreachable,
+            };
+            const dValue = std.fmt.parseFloat(f64, buf) catch unreachable;
+            const tag: AstTag = switch (suffix) {
+                .None, .I => .DoubleLiteral,
+                .F, .IF => .FloatLiteral,
+                else => unreachable,
+            };
+
+            var res = Result{
+                .ty = ty,
+                .node = try p.addNode(.{ .tag = tag, .type = ty, .data = undefined }),
+                .value = Value.float(dValue),
+            };
+            if (suffix.isImaginary()) {
+                try p.err(.gnu_imaginary_constant);
+                res.ty = switch (suffix) {
+                    .I => Type.ComplexDouble,
+                    .IF => Type.ComplexFloat,
+                    else => unreachable,
+                };
+                res.value.tag = .unavailable;
+                try res.un(p, .ImaginaryLiteral);
+            }
+            return res;
+        },
+
         else => unreachable,
     }
+}
 
-    return std.fmt.parseFloat(T, bytes) catch |e| switch (e) {
-        error.InvalidCharacter => unreachable, // validated by Tokenizer
-    };
+fn getIntegerPart(p: *Parser, buffer: []const u8, prefix: NumberPrefix, tokenIdx: TokenIndex) ![]const u8 {
+    if (buffer[0] == '.') return "";
+
+    if (!prefix.digitAllowed(buffer[0])) {
+        switch (prefix) {
+            .binary => try p.errExtra(.invalid_binary_digit, tokenIdx, .{ .ascii = @intCast(buffer[0]) }),
+            .octal => try p.errExtra(.invalid_octal_digit, tokenIdx, .{ .ascii = @intCast(buffer[0]) }),
+            .hex => try p.errStr(.invalid_int_suffix, tokenIdx, buffer),
+            .decimal => unreachable,
+        }
+        return error.ParsingFailed;
+    }
+
+    for (buffer, 0..) |c, idx| {
+        if (idx == 0) continue;
+        switch (c) {
+            '.' => return buffer[0..idx],
+            'p', 'P' => return if (prefix == .hex) buffer[0..idx] else {
+                try p.errStr(.invalid_int_suffix, tokenIdx, buffer[idx..]);
+                return error.ParsingFailed;
+            },
+            'e', 'E' => {
+                switch (prefix) {
+                    .hex => continue,
+                    .decimal => return buffer[0..idx],
+                    .binary => try p.errExtra(.invalid_binary_digit, tokenIdx, .{ .ascii = @intCast(c) }),
+                    .octal => try p.errExtra(.invalid_octal_digit, tokenIdx, .{ .ascii = @intCast(c) }),
+                }
+                return error.ParsingFailed;
+            },
+            '0'...'9', 'a'...'d', 'A'...'D', 'f', 'F' => {
+                if (!prefix.digitAllowed(c)) {
+                    switch (prefix) {
+                        .binary => try p.errExtra(.invalid_binary_digit, tokenIdx, .{ .ascii = @intCast(c) }),
+                        .octal => try p.errExtra(.invalid_octal_digit, tokenIdx, .{ .ascii = @intCast(c) }),
+                        .decimal, .hex => try p.errStr(.invalid_int_suffix, tokenIdx, buffer[idx..]),
+                    }
+                    return error.ParsingFailed;
+                }
+            },
+            else => return buffer[0..idx],
+        }
+    }
+    return buffer;
 }
 
 fn castInt(p: *Parser, val: u64, specs: []const Type.Specifier) Error!Result {
@@ -6300,131 +6302,20 @@ fn castInt(p: *Parser, val: u64, specs: []const Type.Specifier) Error!Result {
     return res;
 }
 
-/// Run a parser function but do not evaluate the result
-fn parseNoEval(p: *Parser, comptime func: fn (*Parser) Error!Result) Error!Result {
-    const noEval = p.noEval;
-    defer p.noEval = noEval;
+fn parseInt(
+    p: *Parser,
+    prefix: NumberPrefix,
+    buf: []const u8,
+    suffix: NumberSuffix,
+    tokenIdx: TokenIndex,
+) !Result {
+    if (prefix == .binary)
+        try p.errToken(.binary_integer_literal, tokenIdx);
 
-    p.noEval = true;
-    const parsed = try func(p);
-    try parsed.expect(p);
-    return parsed;
-}
-
-//// genericSelection :
-//// `_Generic` '(' assign-expression ',' generic-association (',' generic-association)* ')'
-//// generic-association
-////  : type-name ':' assign-expression
-////  | `default` ':' assign-expression
-fn parseGenericSelection(p: *Parser) Error!Result {
-    p.tokenIdx += 1;
-    const lp = try p.expectToken(.LParen);
-    const controlling = try p.parseNoEval(parseAssignExpr);
-    _ = try p.expectToken(.Comma);
-
-    const listBufferTop = p.listBuffer.items.len;
-    defer p.listBuffer.items.len = listBufferTop;
-
-    try p.listBuffer.append(controlling.node);
-
-    var defaultToken: ?TokenIndex = null;
-    var chosen: Result = .{};
-
-    while (true) {
-        const start = p.tokenIdx;
-        if (try p.parseTypeName()) |ty| {
-            if (ty.containAnyQual()) {
-                try p.errToken(.generic_qual_type, start);
-            }
-
-            _ = try p.expectToken(.Colon);
-            chosen = try p.parseAssignExpr();
-            try chosen.expect(p);
-            try chosen.saveValue(p);
-
-            try p.listBuffer.append(try p.addNode(.{
-                .tag = .GenericAssociationExpr,
-                .type = ty,
-                .data = .{ .unExpr = chosen.node },
-            }));
-        } else if (p.eat(.KeywordDefault)) |tok| {
-            if (defaultToken) |prev| {
-                try p.errToken(.generic_duplicate_default, tok);
-                try p.errToken(.previous_case, prev);
-            }
-
-            defaultToken = tok;
-            _ = try p.expectToken(.Colon);
-            chosen = try p.parseAssignExpr();
-            try chosen.expect(p);
-            try chosen.saveValue(p);
-
-            try p.listBuffer.append(try p.addNode(.{
-                .tag = .GenericDefaultExpr,
-                .data = .{ .unExpr = chosen.node },
-            }));
-        } else {
-            if (p.listBuffer.items.len == listBufferTop + 1) {
-                try p.err(.expected_type);
-                return error.ParsingFailed;
-            }
-            break;
-        }
-
-        if (p.eat(.Comma) == null)
-            break;
-    }
-
-    try p.expectClosing(lp, .RParen);
-    var genericNode: AST.Node = .{
-        .tag = .GenericExprOne,
-        .type = chosen.ty,
-        .data = .{ .binExpr = .{ .lhs = controlling.node, .rhs = chosen.node } },
-    };
-
-    const associations = p.listBuffer.items[listBufferTop..];
-    if (associations.len > 2) { // associations[0] == controlling.node
-        genericNode.tag = .GenericExpr;
-        genericNode.data = .{ .range = try p.addList(associations) };
-    }
-
-    chosen.node = try p.addNode(genericNode);
-    return chosen;
-}
-
-fn parseIntegerLiteral(p: *Parser) Error!Result {
-    const curToken = p.getCurrToken();
-    var slice = p.getTokenSlice(p.tokenIdx);
-
-    defer p.tokenIdx += 1;
-
-    var base: u8 = 10;
-    if (std.ascii.startsWithIgnoreCase(slice, "0x")) {
-        slice = slice[2..];
-        base = 16;
-    } else if (std.ascii.startsWithIgnoreCase(slice, "0b")) {
-        try p.err(.binary_integer_literal);
-        slice = slice[2..];
-        base = 2;
-    } else if (slice[0] == '0') {
-        base = 8;
-    }
-
-    const end: u32 = switch (curToken) {
-        .IntegerLiteral_U, .IntegerLiteral_L => 1,
-        .IntegerLiteral_LU, .IntegerLiteral_LL => 2,
-        .IntegerLiteral_LLU => 3,
-        .ImaginaryLiteral => 1,
-        .ImaginaryIntegerLiteral_U, .ImaginaryIntegerLiteral_L => 2,
-        .ImaginaryIntegerLiteral_LU, .ImaginaryIntegerLiteral_LL => 3,
-        .ImaginaryIntegerLiteral_LLU => 4,
-        else => 0,
-    };
-    slice = slice[0 .. slice.len - end];
-
+    const base = @intFromEnum(prefix);
     var value: u64 = 0;
     var overflow = false;
-    for (slice) |ch| {
+    for (buf) |ch| {
         const digit: u64 = switch (ch) {
             '0'...'9' => ch - '0',
             'A'...'Z' => ch - 'A' + 10,
@@ -6447,7 +6338,7 @@ fn parseIntegerLiteral(p: *Parser) Error!Result {
     }
 
     if (overflow) {
-        try p.err(.int_literal_too_big);
+        try p.errToken(.int_literal_too_big, tokenIdx);
         var res: Result = .{ .ty = Type.ULongLong, .value = Value.int(value) };
         res.node = try p.addNode(.{ .tag = .IntLiteral, .type = res.ty, .data = undefined });
         if (!p.inMacro)
@@ -6455,38 +6346,133 @@ fn parseIntegerLiteral(p: *Parser) Error!Result {
         return res;
     }
 
-    switch (curToken) {
-        .IntegerLiteral,
-        .IntegerLiteral_L,
-        .IntegerLiteral_LL,
-        => {
-            if (value > std.math.maxInt(i64))
-                try p.err(.implicitly_unsigned_literal);
-        },
-        else => {},
+    if (suffix.isSignedInteger()) {
+        if (value > std.math.maxInt(i64)) {
+            try p.errToken(.implicitly_unsigned_literal, tokenIdx);
+        }
     }
 
-    if (base == 10) {
-        switch (curToken) {
-            .IntegerLiteral, .ImaginaryIntegerLiteral => return p.castInt(value, &.{ .Int, .Long, .LongLong }),
-            .IntegerLiteral_U, .ImaginaryIntegerLiteral_U => return p.castInt(value, &.{ .UInt, .ULong, .ULongLong }),
-            .IntegerLiteral_L, .ImaginaryIntegerLiteral_L => return p.castInt(value, &.{ .Long, .LongLong }),
-            .IntegerLiteral_LU, .ImaginaryIntegerLiteral_LU => return p.castInt(value, &.{ .ULong, .ULongLong }),
-            .IntegerLiteral_LL, .ImaginaryIntegerLiteral_LL => return p.castInt(value, &.{.LongLong}),
-            .IntegerLiteral_LLU, .ImaginaryIntegerLiteral_LLU => return p.castInt(value, &.{.ULongLong}),
+    var res = try if (base == 10)
+        switch (suffix) {
+            .None, .I => p.castInt(value, &.{ .Int, .Long, .LongLong }),
+            .U, .IU => p.castInt(value, &.{ .UInt, .ULong, .ULongLong }),
+            .L, .IL => p.castInt(value, &.{ .Long, .LongLong }),
+            .UL, .IUL => p.castInt(value, &.{ .ULong, .ULongLong }),
+            .LL, .ILL => p.castInt(value, &.{.LongLong}),
+            .ULL, .IULL => p.castInt(value, &.{.ULongLong}),
             else => unreachable,
+        }
+    else switch (suffix) {
+        .None, .I => p.castInt(value, &.{ .Int, .UInt, .Long, .ULong, .LongLong, .ULongLong }),
+        .U, .IU => p.castInt(value, &.{ .UInt, .ULong, .ULongLong }),
+        .L, .IL => p.castInt(value, &.{ .Long, .ULong, .LongLong, .ULongLong }),
+        .UL, .IUL => p.castInt(value, &.{ .ULong, .ULongLong }),
+        .LL, .ILL => p.castInt(value, &.{ .LongLong, .ULongLong }),
+        .ULL, .IULL => p.castInt(value, &.{.ULongLong}),
+        else => unreachable,
+    };
+
+    if (suffix.isImaginary()) {
+        try p.errToken(.gnu_imaginary_constant, tokenIdx);
+        res.ty = res.ty.makeComplex();
+        res.value.tag = .unavailable;
+        try res.un(p, .ImaginaryLiteral);
+    }
+    return res;
+}
+
+fn getFracPart(p: *Parser, buffer: []const u8, prefix: NumberPrefix, tokenIdx: TokenIndex) ![]const u8 {
+    if (buffer.len == 0 or buffer[0] != '.') return "";
+    std.debug.assert(prefix != .octal);
+    if (prefix == .binary) {
+        try p.errStr(.invalid_int_suffix, tokenIdx, buffer);
+        return error.ParsingFailed;
+    }
+    for (buffer, 0..) |c, idx| {
+        if (idx == 0) continue;
+        if (!prefix.digitAllowed(c)) return buffer[0..idx];
+    }
+    return buffer;
+}
+
+fn getExponent(p: *Parser, buffer: []const u8, prefix: NumberPrefix, tokenIdx: TokenIndex) ![]const u8 {
+    if (buffer.len == 0) return "";
+
+    switch (buffer[0]) {
+        'e', 'E' => std.debug.assert(prefix == .decimal),
+        'p', 'P' => if (prefix != .hex) {
+            try p.errStr(.invalid_float_suffix, tokenIdx, buffer);
+            return error.ParsingFailed;
+        },
+        else => return "",
+    }
+    const end = for (buffer, 0..) |c, idx| {
+        if (idx == 0) continue;
+        if (idx == 1 and (c == '+' or c == '-')) continue;
+        switch (c) {
+            '0'...'9' => {},
+            else => break idx,
+        }
+    } else buffer.len;
+    const exponent = buffer[0..end];
+    if (std.mem.indexOfAny(u8, exponent, "0123456789") == null) {
+        try p.errToken(.exponent_has_no_digits, tokenIdx);
+        return error.ParsingFailed;
+    }
+    return exponent;
+}
+
+/// Using an explicit `tok_i` parameter instead of `p.tok_i` makes it easier
+/// to parse numbers in pragma handlers.
+pub fn parseNumberToken(p: *Parser, tokenIdx: TokenIndex) !Result {
+    const buffer = p.getTokenSlice(tokenIdx);
+    const prefix = NumberPrefix.fromString(buffer);
+    const afterPrefix = buffer[prefix.stringLen()..];
+
+    const intPart = try p.getIntegerPart(afterPrefix, prefix, tokenIdx);
+
+    const afterInt = afterPrefix[intPart.len..];
+
+    const frac = try p.getFracPart(afterInt, prefix, tokenIdx);
+    const afterFrac = afterInt[frac.len..];
+
+    const exponent = try p.getExponent(afterFrac, prefix, tokenIdx);
+    const suffixStr = afterFrac[exponent.len..];
+    const isFloat = (exponent.len > 0 or frac.len > 0);
+    const suffix = NumberSuffix.fromString(suffixStr, if (isFloat) .float else .int) orelse {
+        if (isFloat) {
+            try p.errStr(.invalid_float_suffix, tokenIdx, suffixStr);
+        } else {
+            try p.errStr(.invalid_int_suffix, tokenIdx, suffixStr);
+        }
+        return error.ParsingFailed;
+    };
+
+    if (isFloat) {
+        std.debug.assert(prefix == .hex or prefix == .decimal);
+        if (prefix == .hex and exponent.len == 0) {
+            try p.errToken(.hex_floating_constant_requires_exponent, tokenIdx);
+            return error.ParsingFailed;
+        }
+        const number = buffer[0 .. buffer.len - suffixStr.len];
+        return p.parseFloat(number, suffix);
+    } else {
+        return p.parseInt(prefix, intPart, suffix, tokenIdx);
+    }
+}
+
+fn parsePPNumber(p: *Parser) Error!Result {
+    defer p.tokenIdx += 1;
+    const res = try p.parseNumberToken(p.tokenIdx);
+    if (p.inMacro) {
+        if (res.ty.isFloat() or !res.ty.isReal()) {
+            try p.errToken(.float_literal_in_pp_expr, p.tokenIdx);
+            return error.ParsingFailed;
         }
     } else {
-        switch (curToken) {
-            .IntegerLiteral, .ImaginaryIntegerLiteral => return p.castInt(value, &.{ .Int, .UInt, .Long, .ULong, .LongLong, .ULongLong }),
-            .IntegerLiteral_U, .ImaginaryIntegerLiteral_U => return p.castInt(value, &.{ .UInt, .ULong, .ULongLong }),
-            .IntegerLiteral_L, .ImaginaryIntegerLiteral_L => return p.castInt(value, &.{ .Long, .ULong, .LongLong, .ULongLong }),
-            .IntegerLiteral_LU, .ImaginaryIntegerLiteral_LU => return p.castInt(value, &.{ .ULong, .ULongLong }),
-            .IntegerLiteral_LL, .ImaginaryIntegerLiteral_LL => return p.castInt(value, &.{ .LongLong, .ULongLong }),
-            .IntegerLiteral_LLU, .ImaginaryIntegerLiteral_LLU => return p.castInt(value, &.{.ULongLong}),
-            else => unreachable,
-        }
+        try p.valueMap.put(res.node, res.value);
     }
+    return res;
 }
 
 fn parseCharLiteral(p: *Parser) Error!Result {
@@ -6748,4 +6734,96 @@ fn parseUnicodeEscape(p: *Parser, tok: TokenIndex, count: u8, slice: []const u8,
     var buf: [4]u8 = undefined;
     const to_write = std.unicode.utf8Encode(c, &buf) catch unreachable; // validated above
     p.strings.appendSliceAssumeCapacity(buf[0..to_write]);
+}
+
+/// Run a parser function but do not evaluate the result
+fn parseNoEval(p: *Parser, comptime func: fn (*Parser) Error!Result) Error!Result {
+    const noEval = p.noEval;
+    defer p.noEval = noEval;
+
+    p.noEval = true;
+    const parsed = try func(p);
+    try parsed.expect(p);
+    return parsed;
+}
+
+//// genericSelection :
+//// `_Generic` '(' assign-expression ',' generic-association (',' generic-association)* ')'
+//// generic-association
+////  : type-name ':' assign-expression
+////  | `default` ':' assign-expression
+fn parseGenericSelection(p: *Parser) Error!Result {
+    p.tokenIdx += 1;
+    const lp = try p.expectToken(.LParen);
+    const controlling = try p.parseNoEval(parseAssignExpr);
+    _ = try p.expectToken(.Comma);
+
+    const listBufferTop = p.listBuffer.items.len;
+    defer p.listBuffer.items.len = listBufferTop;
+
+    try p.listBuffer.append(controlling.node);
+
+    var defaultToken: ?TokenIndex = null;
+    var chosen: Result = .{};
+
+    while (true) {
+        const start = p.tokenIdx;
+        if (try p.parseTypeName()) |ty| {
+            if (ty.containAnyQual()) {
+                try p.errToken(.generic_qual_type, start);
+            }
+
+            _ = try p.expectToken(.Colon);
+            chosen = try p.parseAssignExpr();
+            try chosen.expect(p);
+            try chosen.saveValue(p);
+
+            try p.listBuffer.append(try p.addNode(.{
+                .tag = .GenericAssociationExpr,
+                .type = ty,
+                .data = .{ .unExpr = chosen.node },
+            }));
+        } else if (p.eat(.KeywordDefault)) |tok| {
+            if (defaultToken) |prev| {
+                try p.errToken(.generic_duplicate_default, tok);
+                try p.errToken(.previous_case, prev);
+            }
+
+            defaultToken = tok;
+            _ = try p.expectToken(.Colon);
+            chosen = try p.parseAssignExpr();
+            try chosen.expect(p);
+            try chosen.saveValue(p);
+
+            try p.listBuffer.append(try p.addNode(.{
+                .tag = .GenericDefaultExpr,
+                .data = .{ .unExpr = chosen.node },
+            }));
+        } else {
+            if (p.listBuffer.items.len == listBufferTop + 1) {
+                try p.err(.expected_type);
+                return error.ParsingFailed;
+            }
+            break;
+        }
+
+        if (p.eat(.Comma) == null)
+            break;
+    }
+
+    try p.expectClosing(lp, .RParen);
+    var genericNode: AST.Node = .{
+        .tag = .GenericExprOne,
+        .type = chosen.ty,
+        .data = .{ .binExpr = .{ .lhs = controlling.node, .rhs = chosen.node } },
+    };
+
+    const associations = p.listBuffer.items[listBufferTop..];
+    if (associations.len > 2) { // associations[0] == controlling.node
+        genericNode.tag = .GenericExpr;
+        genericNode.data = .{ .range = try p.addList(associations) };
+    }
+
+    chosen.node = try p.addNode(genericNode);
+    return chosen;
 }

@@ -1880,3 +1880,31 @@ pub const main_return_type = struct {
     pub const kind = .warning;
     pub const opt = "main-return-type";
 };
+pub const invalid_int_suffix = struct {
+    pub const msg = "invalid suffix '{s}' on integer constant";
+    pub const extra = .str;
+    pub const kind = .@"error";
+};
+pub const invalid_float_suffix = struct {
+    pub const msg = "invalid suffix '{s}' on floating constant";
+    pub const extra = .str;
+    pub const kind = .@"error";
+};
+pub const invalid_octal_digit = struct {
+    pub const msg = "invalid digit '{c}' in octal constant";
+    pub const extra = .ascii;
+    pub const kind = .@"error";
+};
+pub const invalid_binary_digit = struct {
+    pub const msg = "invalid digit '{c}' in binary constant";
+    pub const extra = .ascii;
+    pub const kind = .@"error";
+};
+pub const exponent_has_no_digits = struct {
+    pub const msg = "exponent has no digits";
+    pub const kind = .@"error";
+};
+pub const hex_floating_constant_requires_exponent = struct {
+    pub const msg = "hexadecimal floating constant requires an exponent";
+    pub const kind = .@"error";
+};
