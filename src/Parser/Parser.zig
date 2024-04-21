@@ -6188,35 +6188,31 @@ fn parseFloat(p: *Parser, buf: []const u8, suffix: NumberSuffix) !Result {
             return p.todo("long double imaginary literals");
         },
 
-        .None, .I => {
-            const ty = Type.Double;
+        .None, .I, .F, .IF => {
+            const ty = switch (suffix) {
+                .None, .I => Type.Double,
+                .F, .IF => Type.Float,
+                else => unreachable,
+            };
             const dValue = std.fmt.parseFloat(f64, buf) catch unreachable;
+            const tag: AstTag = switch (suffix) {
+                .None, .I => .DoubleLiteral,
+                .F, .IF => .FloatLiteral,
+                else => unreachable,
+            };
+
             var res = Result{
                 .ty = ty,
-                .node = try p.addNode(.{ .tag = .DoubleLiteral, .type = ty, .data = undefined }),
+                .node = try p.addNode(.{ .tag = tag, .type = ty, .data = undefined }),
                 .value = Value.float(dValue),
             };
-            if (suffix == .I) {
+            if (suffix.isImaginary()) {
                 try p.err(.gnu_imaginary_constant);
-                res.ty = Type.ComplexDouble;
-                res.value.tag = .unavailable;
-                try res.un(p, .ImaginaryLiteral);
-            }
-            return res;
-        },
-
-        .IF, .F => {
-            const ty = Type.Float;
-            const fValue = std.fmt.parseFloat(f64, buf) catch unreachable;
-            var res = Result{
-                .ty = ty,
-                .node = try p.addNode(.{ .tag = .FloatLiteral, .type = ty, .data = undefined }),
-                .value = Value.float(fValue),
-            };
-            if (!p.inMacro) try p.valueMap.put(res.node, res.value);
-            if (suffix == .IF) {
-                try p.err(.gnu_imaginary_constant);
-                res.ty = Type.ComplexFloat;
+                res.ty = switch (suffix) {
+                    .I => Type.ComplexDouble,
+                    .IF => Type.ComplexFloat,
+                    else => unreachable,
+                };
                 res.value.tag = .unavailable;
                 try res.un(p, .ImaginaryLiteral);
             }
