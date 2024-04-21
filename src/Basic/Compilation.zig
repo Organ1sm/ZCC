@@ -10,6 +10,7 @@ const LangOpts = @import("LangOpts.zig");
 const Type = @import("../AST/Type.zig");
 const Pragma = @import("../Lexer/Pragma.zig");
 const StringInterner = @import("../Basic/StringInterner.zig");
+const RecordLayout = @import("RecordLayout.zig");
 
 const Allocator = std.mem.Allocator;
 const EpochSeconds = std.time.epoch.EpochSeconds;
@@ -450,6 +451,7 @@ fn generateVaListType(comp: *Compilation) !Type {
             recordType.fields[3] = .{ .name = try comp.intern("__gr_offs"), .ty = Type.Int };
             recordType.fields[4] = .{ .name = try comp.intern("__vr_offs"), .ty = Type.Int };
             ty = .{ .specifier = .Struct, .data = .{ .record = recordType } };
+            RecordLayout.compute(&ty, comp, null);
         },
         .x86_64_va_list => {
             const recordType = try arena.create(Type.Record);
@@ -467,6 +469,7 @@ fn generateVaListType(comp: *Compilation) !Type {
             recordType.fields[2] = .{ .name = try comp.intern("overflow_arg_area"), .ty = voidPtr };
             recordType.fields[3] = .{ .name = try comp.intern("reg_save_area"), .ty = voidPtr };
             ty = .{ .specifier = .Struct, .data = .{ .record = recordType } };
+            RecordLayout.compute(&ty, comp, null);
         },
     }
 

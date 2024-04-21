@@ -19,6 +19,7 @@ const Attribute = @import("../Lexer/Attribute.zig");
 const CharInfo = @import("../Basic/CharInfo.zig");
 const Value = @import("../AST/Value.zig");
 const StringId = @import("../Basic/StringInterner.zig").StringId;
+const RecordLayout = @import("../Basic/RecordLayout.zig");
 
 const Token = AST.Token;
 const TokenIndex = AST.TokenIndex;
@@ -1893,7 +1894,6 @@ fn parseRecordSpec(p: *Parser) Error!Type {
         if (field.ty.hasIncompleteSize()) break;
     } else {
         recordType.fields = try p.arena.dupe(Type.Record.Field, p.recordBuffer.items[recordBufferTop..]);
-        recordType.typeLayout = Type.TypeLayout.init(1, 1);
     }
 
     if (oldFieldAttrStart < p.fieldAttrBuffer.items.len) {
@@ -1919,6 +1919,10 @@ fn parseRecordSpec(p: *Parser) Error!Type {
 
     if (ty.specifier == .Attributed and symbolIndex != null) {
         p.symStack.symbols.items(.type)[symbolIndex.?] = ty;
+    }
+
+    if (!ty.hasIncompleteSize()) {
+        RecordLayout.compute(&ty, p.comp, p.pragmaPack);
     }
 
     // finish by creating a node

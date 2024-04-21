@@ -1155,23 +1155,39 @@ pub fn requestedAlignment(ty: Type, comp: *const Compilation) ?u29 {
     return switch (ty.specifier) {
         .TypeofType, .DecayedTypeofType => ty.data.subType.requestedAlignment(comp),
         .TypeofExpr, .DecayedTypeofExpr => ty.data.expr.ty.requestedAlignment(comp),
-        .Attributed => {
-            var maxRequested: ?u29 = null;
-            for (ty.data.attributed.attributes) |attribute| {
-                if (attribute.tag != .aligned) continue;
-                const requested: u29 = if (attribute.args.aligned.alignment) |alignment|
-                    alignment.requested
-                else
-                    comp.defaultAlignment();
-
-                if (maxRequested == null or maxRequested.? < requested) {
-                    maxRequested = requested;
-                }
-            }
-            return maxRequested;
-        },
+        .Attributed => annotationAlignment(comp, ty.data.attributed.attributes),
         else => null,
     };
+}
+
+/// Determines the maximum alignment requested by a set of attributes.
+/// This function iterates over each attribute in the given array and checks if it is an 'aligned'
+/// attribute. If so, it gets the requested alignment value for that attribute. It then determines
+/// the maximum alignment requested among all 'aligned' attributes.
+/// If no 'aligned' attributes are present, the function returns null.
+/// @param comp A pointer to the Compilation context.
+/// @param attrs An optional array of Attribute structures to inspect.
+/// @return The maximum requested alignment as u29, or null if not applicable.
+pub fn annotationAlignment(comp: *const Compilation, attrs: ?[]const Attribute) ?u29 {
+    // If attrs is null, exit early as there are no attributes to process.
+    const a = attrs orelse return null;
+
+    // Initialize maxRequested to null, to be updated with the max alignment found.
+    var maxRequested: ?u29 = null;
+
+    for (a) |attribute| {
+        // Skip any attribute that is not tagged as 'aligned'.
+        if (attribute.tag != .aligned) continue;
+
+        // Get the requested alignment from the attribute, or use the default if not specified.
+        const requested = if (attribute.args.aligned.alignment) |alignment| alignment.requested else comp.defaultAlignment();
+
+        if (maxRequested == null or maxRequested.? < requested) {
+            maxRequested = requested;
+        }
+    }
+
+    return maxRequested;
 }
 
 pub fn eql(aParam: Type, bParam: Type, comp: *const Compilation, checkQualifiers: bool) bool {
