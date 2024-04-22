@@ -88,6 +88,18 @@ pub fn build(b: *std.Build) !void {
     integration_test_runner.addArg(b.pathFromRoot("test/cases"));
     integration_test_runner.addArg(b.graph.zig_exe);
 
+    const record_tests = b.addExecutable(.{
+        .name = "record-runner",
+        .root_source_file = .{ .path = "test/record_runner.zig" },
+        .optimize = mode,
+        .target = target,
+    });
+    record_tests.root_module.addImport("zcc", zccModule);
+    const record_tests_runner = b.addRunArtifact(record_tests);
+    record_tests_runner.addArg(b.pathFromRoot("test/records"));
+
     b.installArtifact(integration_tests);
+
     test_step.dependOn(&integration_test_runner.step);
+    test_step.dependOn(&record_tests.step);
 }
