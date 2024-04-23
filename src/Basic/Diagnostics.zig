@@ -457,6 +457,10 @@ fn tagKind(diag: *Diagnostics, tag: Tag) Kind {
                 if (comp.langOpts.emulate == .gcc)
                     return .off;
 
+            if (@hasDecl(info, "suppress_clang"))
+                if (comp.langOpts.emulate == .clang)
+                    return .off;
+
             if (@hasDecl(info, "suppress_msvc"))
                 if (comp.langOpts.emulate == .msvc)
                     return .off;

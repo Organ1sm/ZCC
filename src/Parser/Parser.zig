@@ -5484,6 +5484,7 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
             }
 
             if (res.ty.sizeof(p.comp)) |size| {
+                if (size == 0) try p.errToken(.sizeof_returns_zero, token);
                 res.value = .{ .tag = .int, .data = .{ .int = size } };
             } else {
                 res.value.tag = .unavailable;

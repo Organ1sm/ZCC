@@ -1909,3 +1909,9 @@ pub const hex_floating_constant_requires_exponent = struct {
     pub const msg = "hexadecimal floating constant requires an exponent";
     pub const kind = .@"error";
 };
+pub const sizeof_returns_zero = struct {
+    pub const msg = "sizeof returns 0";
+    pub const kind = .warning;
+    pub const suppress_gcc = true;
+    pub const suppress_clang = true;
+};
