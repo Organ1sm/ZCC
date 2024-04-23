@@ -95,6 +95,7 @@ const usage =
     \\  -Wno-<warning>          Disable the specified warning
     \\
     \\Debug options:
+    \\  -dump-pp               Dump preprocessor state
     \\  -dump-ast              Dump produced AST to stdout
     \\  -dump-tokens           Run preprocessor, dump internal rep of tokens to stdout 
     \\  -dump-raw-tokens        Lex file in raw mode and dump raw tokens to stdout
@@ -256,6 +257,8 @@ pub fn parseArgs(
                 };
                 comp.target = target;
                 comp.langOpts.setEmulatedCompiler(comp.systemCompiler());
+            } else if (std.mem.eql(u8, arg, "-dump-pp")) {
+                comp.dumpPP = true;
             } else if (std.mem.eql(u8, arg, "-dump-ast")) {
                 comp.dumpAst = true;
             } else if (std.mem.eql(u8, arg, "-dump-tokens")) {

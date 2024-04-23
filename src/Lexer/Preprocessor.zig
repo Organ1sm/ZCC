@@ -257,9 +257,13 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!Token {
 
                         if (try pp.expr(&lexer)) {
                             ifKind.set(ifLevel, untilEndIf);
+                            if (pp.comp.dumpPP)
+                                pp.verboseLog(directive, "entering then branch of #if", .{});
                         } else {
                             ifKind.set(ifLevel, untilElse);
                             try pp.skip(&lexer, .untilElse);
+                            if (pp.comp.dumpPP)
+                                pp.verboseLog(directive, "entering else branch of #if", .{});
                         }
                     },
 
@@ -275,9 +279,13 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!Token {
 
                         if (pp.defines.get(macroName) != null) {
                             ifKind.set(ifLevel, untilEndIf);
+                            if (pp.comp.dumpPP)
+                                pp.verboseLog(directive, "entering then branch of #ifdef", .{});
                         } else {
                             ifKind.set(ifLevel, untilElse);
                             try pp.skip(&lexer, .untilElse);
+                            if (pp.comp.dumpPP)
+                                pp.verboseLog(directive, "entering else branch of #ifdef", .{});
                         }
                     },
 
@@ -317,8 +325,12 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!Token {
                         switch (ifKind.get(ifLevel)) {
                             untilElse => if (try pp.expr(&lexer)) {
                                 ifKind.set(ifLevel, untilEndIf);
+                                if (pp.comp.dumpPP)
+                                    pp.verboseLog(directive, "entering then branch of #elif", .{});
                             } else {
                                 try pp.skip(&lexer, .untilElse);
+                                if (pp.comp.dumpPP)
+                                    pp.verboseLog(directive, "entering else branch of #elif", .{});
                             },
 
                             untilEndIf => try pp.skip(&lexer, .untilEndIf),
@@ -341,7 +353,11 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!Token {
                         }
 
                         switch (ifKind.get(ifLevel)) {
-                            untilElse => ifKind.set(ifLevel, untilEndIfSeenElse),
+                            untilElse => {
+                                ifKind.set(ifLevel, untilEndIfSeenElse);
+                                if (pp.comp.dumpPP)
+                                    pp.verboseLog(directive, "#else branch here", .{});
+                            },
                             untilEndIf => try pp.skip(&lexer, .untilEndIfSeenElse),
                             untilEndIfSeenElse => {
                                 try pp.addError(directive, .else_after_else);
@@ -533,6 +549,21 @@ fn fatal(pp: *Preprocessor, raw: RawToken, comptime fmt: []const u8, args: anyty
     const source = pp.comp.getSource(raw.source);
     const lineAndCol = source.getLineCol(.{ .id = raw.source, .line = raw.line, .byteOffset = raw.start });
     return pp.comp.diag.fatal(source.path, lineAndCol.line, raw.line, lineAndCol.col, fmt, args);
+}
+
+fn verboseLog(pp: *Preprocessor, raw: RawToken, comptime fmt: []const u8, args: anytype) void {
+    const source = pp.comp.getSource(raw.source);
+    const lineCol = source.getLineCol(.{ .id = raw.source, .line = raw.line, .byteOffset = raw.start });
+
+    const stderr = std.io.getStdErr().writer();
+    var buffWriter = std.io.bufferedWriter(stderr);
+    const writer = buffWriter.writer();
+    defer buffWriter.flush() catch {};
+    writer.print("{s}:{d}:{d}: ", .{ source.path, lineCol.lineNO, lineCol.col }) catch return;
+    writer.print(fmt, args) catch return;
+    writer.writeByte('\n') catch return;
+    writer.writeAll(lineCol.line) catch return;
+    writer.writeByte('\n') catch return;
 }
 
 /// Consume next token, error if it is not an identifier.
@@ -1977,6 +2008,9 @@ fn defineMacro(pp: *Preprocessor, nameToken: RawToken, macro: Macro) Error!void 
         }, &.{});
     }
 
+    if (pp.comp.dumpPP)
+        pp.verboseLog(nameToken, "macro {s} defined", .{name});
+
     gop.value_ptr.* = macro;
 }
 
@@ -2251,6 +2285,9 @@ fn include(pp: *Preprocessor, lexer: *Lexer, which: Compilation.WhichInclude) Ma
         if (pp.defines.contains(guard))
             return;
     }
+
+    if (pp.comp.dumpPP)
+        pp.verboseLog(first, "include file {s}", .{newSource.path});
 
     _ = pp.preprocessExtra(newSource) catch |err| switch (err) {
         error.StopPreprocessing => {},
