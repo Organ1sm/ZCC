@@ -205,10 +205,9 @@ fn floatToIntExtra(comptime FloatTy: type, intTySignedness: std.builtin.Signedne
     const hadFraction = std.math.modf(floatVal).fpart != 0;
 
     // Iterate through all combinations of signedness and byte count.
-    inline for ([_]std.builtin.Signedness{ .signed, .unsigned }) |signedness| {
-        inline for ([_]u16{ 1, 2, 4, 8 }) |bytecount| {
-            // When the current signedness and byte count match the target, perform the conversion.
-            if (signedness == intTySignedness and bytecount == intTySize) {
+    switch (intTySignedness) {
+        inline else => |signedness| switch (intTySize) {
+            inline 1, 2, 4, 8 => |bytecount| {
                 // Define the type of integer to cast to based on the signedness and size.
                 const IntTy = std.meta.Int(signedness, bytecount * 8);
 
@@ -226,11 +225,10 @@ fn floatToIntExtra(comptime FloatTy: type, intTySignedness: std.builtin.Signedne
                 if (hadFraction) return FloatToIntChangeKind.valueChanged;
                 // If none of the special cases apply, no significant change occurred.
                 return FloatToIntChangeKind.none;
-            }
-        }
+            },
+            else => unreachable,
+        },
     }
-    // This point should be unreachable because all valid paths return from within the loop.
-    unreachable;
 }
 
 /// Converts the stored value from a float to an integer.

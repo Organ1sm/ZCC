@@ -207,20 +207,17 @@ pub fn diagnoseIdent(attr: Tag, arguments: *Arguments, ident: []const u8) ?Diagn
 }
 
 pub fn wantsAlignment(attr: Tag, idx: usize) bool {
-    inline for (@typeInfo(Tag).Enum.fields, 0..) |field, i| {
-        if (field.value == @intFromEnum(attr)) {
-            const decl = @typeInfo(attributes).Struct.decls[i];
-            const fields = getArguments(@field(attributes, decl.name));
+    switch (attr) {
+        inline else => |tag| {
+            const fields = getArguments(@field(attributes, @tagName(tag)));
+            if (fields.len == 0) return false;
 
-            if (idx >= fields.len) return false;
-            inline for (fields, 0..) |arg_field, field_idx| {
-                if (field_idx == idx) {
-                    return UnwrapOptional(arg_field.type) == Alignment;
-                }
-            }
-        }
+            return switch (idx) {
+                inline 0...fields.len - 1 => |i| UnwrapOptional(fields[i].type) == Alignment,
+                else => false,
+            };
+        },
     }
-    unreachable;
 }
 
 pub fn diagnoseAlignment(attr: Tag, arguments: *Arguments, arg_idx: u32, val: Value, ty: Type, comp: *Compilation) ?Diagnostics.Message {
@@ -914,17 +911,15 @@ pub fn ArgumentsForTag(comptime tag: Tag) type {
 }
 
 pub fn initArguments(tag: Tag, nameToken: TokenIndex) Arguments {
-    inline for (@typeInfo(Tag).Enum.fields) |field| {
-        if (@intFromEnum(tag) == field.value) {
-            var args = @unionInit(Arguments, field.name, undefined);
-            const decl = @typeInfo(attributes).Struct.decls[field.value];
-            if (@hasDecl(@field(attributes, decl.name), "Args") and @hasField(@field(attributes, decl.name).Args, "__name_token")) {
-                @field(@field(args, field.name), "__name_token") = nameToken;
+    switch (tag) {
+        inline else => |arg_tag| {
+            var args = @unionInit(Arguments, @tagName(arg_tag), undefined);
+            if (@hasDecl(@field(attributes, @tagName(arg_tag)), "Args") and @hasField(@field(attributes, @tagName(arg_tag)).Args, "__name_token")) {
+                @field(args, @tagName(arg_tag)).__name_token = nameToken;
             }
             return args;
-        }
+        },
     }
-    unreachable;
 }
 
 pub fn fromString(kind: Kind, namespace: ?[]const u8, name: []const u8) ?Tag {

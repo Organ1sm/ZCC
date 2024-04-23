@@ -334,9 +334,9 @@ pub fn renderExtra(comp: *Compilation, m: anytype) void {
 
         m.start(msg.kind);
         @setEvalBranchQuota(1500);
-        inline for (std.meta.fields(Tag)) |field| {
-            if (field.value == @intFromEnum(msg.tag)) {
-                const info = @field(DiagnosticsMessages, field.name);
+        switch (msg.tag) {
+            inline else => |tag| {
+                const info = @field(DiagnosticsMessages, @tagName(tag));
                 if (@hasDecl(info, "extra")) {
                     switch (info.extra) {
                         .str => m.print(info.msg, .{msg.extra.str}),
@@ -390,7 +390,7 @@ pub fn renderExtra(comp: *Compilation, m: anytype) void {
                         m.print(" [-W{s}]", .{info.opt});
                     }
                 }
-            }
+            },
         }
 
         m.end(line, width, endWithSplice);
@@ -415,9 +415,9 @@ fn tagKind(diag: *Diagnostics, tag: Tag) Kind {
     const comp: *Compilation = @fieldParentPtr("diag", diag);
 
     var kind: Kind = undefined;
-    inline for (std.meta.fields(Tag)) |field| {
-        if (field.value == @intFromEnum(tag)) {
-            const info = @field(DiagnosticsMessages, field.name);
+    switch (tag) {
+        inline else => |tagVal| {
+            const info = @field(DiagnosticsMessages, @tagName(tagVal));
             kind = info.kind;
 
             // stage1 doesn't like when I combine these ifs
@@ -469,9 +469,8 @@ fn tagKind(diag: *Diagnostics, tag: Tag) Kind {
                 kind = .@"fatal error";
 
             return kind;
-        }
+        },
     }
-    unreachable;
 }
 
 const MsgWriter = struct {
