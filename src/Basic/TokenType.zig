@@ -251,6 +251,12 @@ pub const TokenType = enum(u8) {
     /// digits, underscores, periods, and exponents (e+, e-, E+, E-, p+, p-, P+, P-)
     PPNumber,
 
+    /// preprocessor placemarker token
+    /// generated if `##` is used with a zero-token argument
+    /// removed after substitution, so the parser should never see this
+    /// See C99 6.10.3.3.2
+    PlaceMarker,
+
     /// This function checks if the provided `id` matches any of the predefined macro-related token types,
     /// and returns `true` if it does, indicating that it is a macro identifier.
     ///
@@ -447,6 +453,7 @@ pub const TokenType = enum(u8) {
             .MacroParamPragmaOperator,
             .StringifyParam,
             .StringifyVarArgs,
+            .PlaceMarker,
             => "",
 
             .MacroWS => " ",
