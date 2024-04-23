@@ -1398,6 +1398,7 @@ pub const flexible_non_final = struct {
 pub const flexible_in_empty = struct {
     pub const msg = "flexible array member in otherwise empty struct";
     pub const kind = .@"error";
+    pub const suppress_msvc = true;
 };
 pub const duplicate_member = struct {
     pub const msg = "duplicate member '{s}'";

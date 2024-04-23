@@ -457,6 +457,10 @@ fn tagKind(diag: *Diagnostics, tag: Tag) Kind {
                 if (comp.langOpts.emulate == .gcc)
                     return .off;
 
+            if (@hasDecl(info, "suppress_msvc"))
+                if (comp.langOpts.emulate == .msvc)
+                    return .off;
+
             if (kind == .@"error" and diag.fatalErrors)
                 kind = .@"fatal error";
 
