@@ -286,15 +286,20 @@ pub fn fatalNoSrc(diag: *Diagnostics, comptime fmt: []const u8, args: anytype) e
     return error.FatalError;
 }
 
-pub fn render(comp: *Compilation) void {
-    if (comp.diag.list.items.len == 0) return;
-    var m = MsgWriter.init(comp.diag.color);
-    defer m.deinit();
-
-    renderExtra(comp, &m);
+pub fn defaultMsgWriter(comp: *const Compilation) MsgWriter {
+    return MsgWriter.init(comp.diag.color);
 }
 
-pub fn renderExtra(comp: *Compilation, m: anytype) void {
+pub fn render(comp: *Compilation) void {
+    if (comp.diag.list.items.len == 0) return;
+
+    var m = defaultMsgWriter(comp);
+    defer m.deinit();
+
+    renderMessages(comp, &m);
+}
+
+pub fn renderMessages(comp: *Compilation, m: anytype) void {
     var errors: u32 = 0;
     var warnings: u32 = 0;
     for (comp.diag.list.items) |msg| {
@@ -305,95 +310,7 @@ pub fn renderExtra(comp: *Compilation, m: anytype) void {
             .off => continue, // happens if an error is added before it is disabled
             .default => unreachable,
         }
-
-        var line: ?[]const u8 = null;
-        var endWithSplice = false;
-        const width = if (msg.loc.id != .unused) blk: {
-            var loc = msg.loc;
-            switch (msg.tag) {
-                .escape_sequence_overflow,
-                .invalid_universal_character,
-                .non_standard_escape_char,
-                // use msg.extra.unsigned for index into string literal
-                => loc.byteOffset += @as(u32, @truncate(msg.extra.unsigned)),
-                else => {},
-            }
-
-            const source = comp.getSource(loc.id);
-            var lineAndCol = source.getLineCol(loc);
-            line = lineAndCol.line;
-            endWithSplice = lineAndCol.endWithSplic;
-            if (msg.tag == .backslash_newline_escape) {
-                line = lineAndCol.line[0 .. lineAndCol.col - 1];
-                lineAndCol.col += 1;
-                lineAndCol.width += 1;
-            }
-            m.location(source.path, lineAndCol.lineNO, lineAndCol.col);
-            break :blk lineAndCol.width;
-        } else 0;
-
-        m.start(msg.kind);
-        @setEvalBranchQuota(1500);
-        switch (msg.tag) {
-            inline else => |tag| {
-                const info = @field(DiagnosticsMessages, @tagName(tag));
-                if (@hasDecl(info, "extra")) {
-                    switch (info.extra) {
-                        .str => m.print(info.msg, .{msg.extra.str}),
-                        .tok_id => m.print(info.msg, .{
-                            msg.extra.tokenId.expected.symbol(),
-                            msg.extra.tokenId.actual.symbol(),
-                        }),
-                        .tok_id_expected => m.print(info.msg, .{msg.extra.expectedTokenId.symbol()}),
-                        .arguments => m.print(info.msg, .{ msg.extra.arguments.expected, msg.extra.arguments.actual }),
-                        .codepoints => m.print(info.msg, .{
-                            msg.extra.codePoints.actual,
-                            msg.extra.codePoints.resembles,
-                        }),
-                        .attr_arg_count => m.print(info.msg, .{
-                            @tagName(msg.extra.attrArgCount.attribute),
-                            msg.extra.attrArgCount.expected,
-                        }),
-                        .attr_arg_type => m.print(info.msg, .{
-                            msg.extra.attrArgType.expected.toString(),
-                            msg.extra.attrArgType.actual.toString(),
-                        }),
-                        .actual_codepoint => m.print(info.msg, .{msg.extra.actualCodePoint}),
-                        .ascii => m.print(info.msg, .{msg.extra.ascii}),
-                        .pow_2_as_string => m.print(info.msg, .{switch (msg.extra.pow2AsString) {
-                            63 => "9223372036854775808",
-                            64 => "18446744073709551616",
-                            127 => "170141183460469231731687303715884105728",
-                            128 => "340282366920938463463374607431768211456",
-                            else => unreachable,
-                        }}),
-                        .unsigned => m.print(info.msg, .{msg.extra.unsigned}),
-                        .signed => m.print(info.msg, .{msg.extra.signed}),
-                        .attr_enum => m.print(info.msg, .{
-                            @tagName(msg.extra.attrEnum.tag),
-                            Attribute.Formatting.choices(msg.extra.attrEnum.tag),
-                        }),
-                        .ignored_record_attr => m.print(info.msg, .{
-                            @tagName(msg.extra.ignoredRecordAttr.tag),
-                            @tagName(msg.extra.ignoredRecordAttr.specifier),
-                        }),
-                        else => @compileError("invalid extra kind " ++ @tagName(info.extra)),
-                    }
-                } else {
-                    m.write(info.msg);
-                }
-
-                if (@hasDecl(info, "opt")) {
-                    if (msg.kind == .@"error" and info.kind != .@"error") {
-                        m.print(" [-Werror, -W{s}]", .{info.opt});
-                    } else if (msg.kind != .note) {
-                        m.print(" [-W{s}]", .{info.opt});
-                    }
-                }
-            },
-        }
-
-        m.end(line, width, endWithSplice);
+        renderMessage(comp, m, msg);
     }
 
     const ws: []const u8 = if (warnings == 1) "" else "s";
@@ -408,6 +325,97 @@ pub fn renderExtra(comp: *Compilation, m: anytype) void {
 
     comp.diag.list.items.len = 0;
     comp.diag.errors += errors;
+}
+
+pub fn renderMessage(comp: *Compilation, m: anytype, msg: Message) void {
+    var line: ?[]const u8 = null;
+    var endWithSplice = false;
+    const width = if (msg.loc.id != .unused) blk: {
+        var loc = msg.loc;
+        switch (msg.tag) {
+            .escape_sequence_overflow,
+            .invalid_universal_character,
+            .non_standard_escape_char,
+            // use msg.extra.unsigned for index into string literal
+            => loc.byteOffset += @as(u32, @truncate(msg.extra.unsigned)),
+            else => {},
+        }
+
+        const source = comp.getSource(loc.id);
+        var lineAndCol = source.getLineCol(loc);
+        line = lineAndCol.line;
+        endWithSplice = lineAndCol.endWithSplic;
+        if (msg.tag == .backslash_newline_escape) {
+            line = lineAndCol.line[0 .. lineAndCol.col - 1];
+            lineAndCol.col += 1;
+            lineAndCol.width += 1;
+        }
+        m.location(source.path, lineAndCol.lineNO, lineAndCol.col);
+        break :blk lineAndCol.width;
+    } else 0;
+
+    m.start(msg.kind);
+    @setEvalBranchQuota(1500);
+    switch (msg.tag) {
+        inline else => |tag| {
+            const info = @field(DiagnosticsMessages, @tagName(tag));
+            if (@hasDecl(info, "extra")) {
+                switch (info.extra) {
+                    .str => m.print(info.msg, .{msg.extra.str}),
+                    .tok_id => m.print(info.msg, .{
+                        msg.extra.tokenId.expected.symbol(),
+                        msg.extra.tokenId.actual.symbol(),
+                    }),
+                    .tok_id_expected => m.print(info.msg, .{msg.extra.expectedTokenId.symbol()}),
+                    .arguments => m.print(info.msg, .{ msg.extra.arguments.expected, msg.extra.arguments.actual }),
+                    .codepoints => m.print(info.msg, .{
+                        msg.extra.codePoints.actual,
+                        msg.extra.codePoints.resembles,
+                    }),
+                    .attr_arg_count => m.print(info.msg, .{
+                        @tagName(msg.extra.attrArgCount.attribute),
+                        msg.extra.attrArgCount.expected,
+                    }),
+                    .attr_arg_type => m.print(info.msg, .{
+                        msg.extra.attrArgType.expected.toString(),
+                        msg.extra.attrArgType.actual.toString(),
+                    }),
+                    .actual_codepoint => m.print(info.msg, .{msg.extra.actualCodePoint}),
+                    .ascii => m.print(info.msg, .{msg.extra.ascii}),
+                    .pow_2_as_string => m.print(info.msg, .{switch (msg.extra.pow2AsString) {
+                        63 => "9223372036854775808",
+                        64 => "18446744073709551616",
+                        127 => "170141183460469231731687303715884105728",
+                        128 => "340282366920938463463374607431768211456",
+                        else => unreachable,
+                    }}),
+                    .unsigned => m.print(info.msg, .{msg.extra.unsigned}),
+                    .signed => m.print(info.msg, .{msg.extra.signed}),
+                    .attr_enum => m.print(info.msg, .{
+                        @tagName(msg.extra.attrEnum.tag),
+                        Attribute.Formatting.choices(msg.extra.attrEnum.tag),
+                    }),
+                    .ignored_record_attr => m.print(info.msg, .{
+                        @tagName(msg.extra.ignoredRecordAttr.tag),
+                        @tagName(msg.extra.ignoredRecordAttr.specifier),
+                    }),
+                    else => @compileError("invalid extra kind " ++ @tagName(info.extra)),
+                }
+            } else {
+                m.write(info.msg);
+            }
+
+            if (@hasDecl(info, "opt")) {
+                if (msg.kind == .@"error" and info.kind != .@"error") {
+                    m.print(" [-Werror, -W{s}]", .{info.opt});
+                } else if (msg.kind != .note) {
+                    m.print(" [-W{s}]", .{info.opt});
+                }
+            }
+        },
+    }
+
+    m.end(line, width, endWithSplice);
 }
 
 fn tagKind(diag: *Diagnostics, tag: Tag) Kind {
@@ -485,12 +493,12 @@ const MsgWriter = struct {
         };
     }
 
-    fn deinit(m: *MsgWriter) void {
+    pub fn deinit(m: *MsgWriter) void {
         m.w.flush() catch {};
         std.debug.getStderrMutex().unlock();
     }
 
-    fn print(m: *MsgWriter, comptime fmt: []const u8, args: anytype) void {
+    pub fn print(m: *MsgWriter, comptime fmt: []const u8, args: anytype) void {
         m.w.writer().print(fmt, args) catch {};
     }
 

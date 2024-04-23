@@ -435,7 +435,7 @@ fn checkExpectedErrors(pp: *zcc.Preprocessor, progress: *std.Progress, buf: *std
     const expectedCount = pp.comp.diag.list.items.len;
     var m = MsgWriter.init(pp.comp.gpa);
     defer m.deinit();
-    zcc.Diagnostics.renderExtra(pp.comp, &m);
+    zcc.Diagnostics.renderMessages(pp.comp, &m);
 
     if (macro.isFunc) {
         progress.log("invalid EXPECTED_ERRORS {}\n", .{macro});
