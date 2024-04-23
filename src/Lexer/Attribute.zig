@@ -1127,13 +1127,17 @@ pub fn applyTypeAttributes(p: *Parser, ty: Type, attrBufferStart: usize, tag: ?D
     };
 
     const existing = ty.getAttributes();
-    if (existing.len == 0 and p.attrApplicationBuffer.items.len == 0)
-        return baseTy;
-    if (existing.len == 0)
-        return baseTy.withAttributes(p.arena, p.attrApplicationBuffer.items);
+    // TODO: the alignment annotation on a type should override
+    // the decl it refers to. This might not be true for others.  Maybe bug.
 
-    const attributedTy = try Type.Attributed.create(p.arena, baseTy, existing, p.attrApplicationBuffer.items);
-    return Type{ .specifier = .Attributed, .data = .{ .attributed = attributedTy } };
+    // if there are annotations on this type def use those.
+    if (p.attrApplicationBuffer.items.len > 0) {
+        return try baseTy.withAttributes(p.arena, p.attrApplicationBuffer.items);
+    } else if (existing.len > 0) {
+        // else use the ones on the typedef decl we were refering to.
+        return try baseTy.withAttributes(p.arena, existing);
+    }
+    return baseTy;
 }
 
 pub fn applyFunctionAttributes(p: *Parser, ty: Type, attrBufferStart: usize) !Type {

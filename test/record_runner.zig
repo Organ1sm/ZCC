@@ -5,9 +5,6 @@ const zcc = @import("zcc");
 /// These tests don't work for any platform due to Aro bugs.
 /// Skip entirely.
 const global_test_exclude = std.ComptimeStringMap(void, .{
-    .{"0011"},
-    .{"0014"},
-    .{"0046"},
     .{"0044"},
 });
 
@@ -1173,7 +1170,7 @@ const compErr = blk: {
             "hexagon-generic-linux-musl:Clang|0063",
             .{ .parse = false, .layout = true, .extra = true, .offset = false },
         },
-        
+
         .{
             "x86-i586-linux-gnu:Gcc|0002",
             .{ .parse = false, .layout = true, .extra = true, .offset = false },
