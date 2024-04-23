@@ -1398,6 +1398,7 @@ pub const flexible_non_final = struct {
 pub const flexible_in_empty = struct {
     pub const msg = "flexible array member in otherwise empty struct";
     pub const kind = .@"error";
+    pub const suppress_msvc = true;
 };
 pub const duplicate_member = struct {
     pub const msg = "duplicate member '{s}'";
@@ -1907,4 +1908,10 @@ pub const exponent_has_no_digits = struct {
 pub const hex_floating_constant_requires_exponent = struct {
     pub const msg = "hexadecimal floating constant requires an exponent";
     pub const kind = .@"error";
+};
+pub const sizeof_returns_zero = struct {
+    pub const msg = "sizeof returns 0";
+    pub const kind = .warning;
+    pub const suppress_gcc = true;
+    pub const suppress_clang = true;
 };

@@ -979,8 +979,9 @@ pub fn sizeof(ty: Type, comp: *const Compilation) ?u64 {
     return switch (ty.specifier) {
         .VariableLenArray,
         .UnspecifiedVariableLenArray,
-        .IncompleteArray,
         => return null,
+
+        .IncompleteArray => return if(comp.langOpts.emulate == .msvc) @as(?u64, 0) else null,
 
         .Func,
         .VarArgsFunc,
