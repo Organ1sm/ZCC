@@ -502,6 +502,10 @@ pub const addr_of_rvalue = struct {
     pub const msg = "cannot take the address of an rvalue";
     pub const kind = .@"error";
 };
+pub const addr_of_bitfield = struct {
+    pub const msg = "address of bit-field requested";
+    pub const kind = .@"error";
+};
 pub const not_assignable = struct {
     pub const msg = "expression is not assignable";
     pub const kind = .@"error";

@@ -225,6 +225,22 @@ pub const CastKind = enum(u8) {
     VectorSplat,
 };
 
+pub fn isBitField(nodes: Node.List.Slice, node: NodeIndex) bool {
+    switch (nodes.items(.tag)[@intFromEnum(node)]) {
+        .MemberAccessExpr, .MemberAccessPtrExpr => {
+            const member = nodes.items(.data)[@intFromEnum(node)].member;
+            var ty = nodes.items(.type)[@intFromEnum(member.lhs)];
+            if (ty.isPointer())
+                ty = ty.getElemType();
+
+            const recordTy = ty.get(.Struct) orelse ty.get(.Union) orelse return false;
+            const field = recordTy.data.record.fields[member.index];
+            return field.bitWidth != null;
+        },
+        else => return false,
+    }
+}
+
 pub fn isLValue(nodes: Node.List.Slice, extra: []const NodeIndex, valueMap: ValueMap, node: NodeIndex) bool {
     var isConst: bool = undefined;
     return isLValueExtra(nodes, extra, valueMap, node, &isConst);
@@ -423,6 +439,11 @@ fn dumpNode(
         try w.writeAll(" lvalue");
     }
 
+    if (isBitField(tree.nodes, node)) {
+        if (color) util.setColor(ATTRIBUTE, w);
+        try w.writeAll(" bitfield");
+    }
+
     if (tree.valueMap.get(node)) |val| {
         if (color)
             util.setColor(LITERAL, w);
@@ -431,8 +452,7 @@ fn dumpNode(
         try w.writeByte(')');
     }
 
-    if (tag == .ImplicitReturn and data.returnZero)
-    {
+    if (tag == .ImplicitReturn and data.returnZero) {
         if (color) util.setColor(IMPLICIT, w);
         try w.writeAll(" (value: 0)");
         if (color) util.setColor(.reset, w);

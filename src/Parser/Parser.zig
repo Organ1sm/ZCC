@@ -5263,6 +5263,12 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
             try operand.expect(p);
 
             const slice = p.nodes.slice();
+
+            if (p.getNode(operand.node, .MemberAccessExpr) orelse p.getNode(operand.node, .MemberAccessPtrExpr)) |memberNode| {
+                if (AST.isBitField(slice, memberNode))
+                    try p.errToken(.addr_of_bitfield, token);
+            }
+
             if (!AST.isLValue(slice, p.data.items, p.valueMap, operand.node)) {
                 try p.errToken(.addr_of_rvalue, token);
             }
