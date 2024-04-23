@@ -981,7 +981,7 @@ pub fn sizeof(ty: Type, comp: *const Compilation) ?u64 {
         .UnspecifiedVariableLenArray,
         => return null,
 
-        .IncompleteArray => return if(comp.langOpts.emulate == .msvc) @as(?u64, 0) else null,
+        .IncompleteArray => return if (comp.langOpts.emulate == .msvc) @as(?u64, 0) else null,
 
         .Func,
         .VarArgsFunc,
@@ -1044,7 +1044,15 @@ pub fn sizeof(ty: Type, comp: *const Compilation) ?u64 {
         .Array, .Vector => {
             const size = ty.data.array.elem.sizeof(comp) orelse return null;
             const arraySize = size * ty.data.array.len;
-            return std.mem.alignForward(u64, arraySize, ty.alignof(comp));
+            if (comp.langOpts.emulate == .msvc) {
+                // msvc ignores array type alignment.
+                // Since the size might not be a multiple of the field
+                // alignment, the address of the second element might not be properly aligned
+                // for the field alignment. A flexible array has size 0. See test case 0018.
+                return arraySize;
+            } else {
+                return std.mem.alignForward(u64, arraySize, ty.alignof(comp));
+            }
         },
 
         .Struct, .Union => if (ty.data.record.isIncomplete()) null else @as(u64, ty.data.record.typeLayout.sizeBits / 8),

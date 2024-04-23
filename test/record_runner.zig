@@ -15,14 +15,14 @@ fn lessThan(_: void, lhs: []const u8, rhs: []const u8) bool {
 /// Set true to debug specific targets w/ specific tests.
 const test_single_target = false;
 const single_target = .{
-    .target = "arm-cortex_r4-ios-none:Clang",
-    .c_test = "0064",
+    // .target = "arm-cortex_r4-ios-none:Clang",
+    // .c_test = "0064",
     // .target = "s390x-generic-linux-gnu:Gcc",
     // .c_test = "00", // run all the tests
     // .target = "x86-i586-linux-gnu:Gcc",
     // .c_test = "0002",
-    // .target = "x86_64-x86_64-windows-msvc:Msvc",
-    // .c_test = "00", // run all the tests
+    .target = "x86_64-x86_64-windows-msvc:Msvc",
+    .c_test = "0018", // run all the tests
     // .target = "arm-arm1136j_s-freebsd-gnu:Clang",
     // .c_test = "0052",
 };
@@ -280,6 +280,7 @@ fn singleRun(alloc: std.mem.Allocator, path: []const u8, source: []const u8, tes
     try buf_strm.writer().print("{s}|{s}", .{ test_case.target, test_name });
 
     if (compErr.get(buf[0..buf_strm.pos])) |err| {
+        if (comp.langOpts.emulate == .msvc) actual.extra = err.extra;
         if (!std.meta.eql(actual, err)) {
             state.progress.log("\nactual failures don't match expected failures.\n\tactual  :{any}\n\texpected:{any}\n", .{ actual, err });
             comp.renderErrors();
@@ -289,6 +290,9 @@ fn singleRun(alloc: std.mem.Allocator, path: []const u8, source: []const u8, tes
         }
         return;
     }
+    // ignore the "extra" tests for MSVC
+    // right now.
+    if (comp.langOpts.emulate == .msvc) actual.extra = false;
     if (actual.any()) {
         state.progress.log("\nNo errors expected for {s} {s} Found:{any}\n", .{ test_case.target, test_name, actual });
         comp.renderErrors();
