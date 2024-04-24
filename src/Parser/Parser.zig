@@ -1894,7 +1894,7 @@ fn parseRecordSpec(p: *Parser) Error!Type {
     }
 
     for (p.recordBuffer.items[recordBufferTop..]) |field| {
-        if (field.ty.hasIncompleteSize()) break;
+        if (field.ty.hasIncompleteSize() and !field.ty.is(.IncompleteArray)) break;
     } else {
         recordType.fields = try p.arena.dupe(Type.Record.Field, p.recordBuffer.items[recordBufferTop..]);
     }
