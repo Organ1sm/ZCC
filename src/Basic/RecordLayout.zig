@@ -118,18 +118,23 @@ const SysVContext = struct {
         fieldLayout: TypeLayout,
     ) void {
         const bitWidth = field.bitWidth.?;
-
         const tySizeBits = fieldLayout.sizeBits;
         var tyFieldAlignBits: u32 = fieldLayout.fieldAlignmentBits;
 
-        // Some targets ignore the alignment of the underlying type when laying out
-        // non-zero-sized bit-fields. See test case 0072. On such targets, bit-fields never
-        // cross a storage boundary. See test case 0081.
-        if (comp.ignoreNonZeroSizedBitfieldTypeAlignment()) {
-            tyFieldAlignBits = 1;
-        }
-
-        if (bitWidth == 0) {
+        if (bitWidth > 0) {
+            std.debug.assert(bitWidth <= tySizeBits); // TODO: currently checked in parser, move check here?
+            //// Some targets ignore the alignment of the underlying type when laying out
+            //// non-zero-sized bit-fields. See test case 0072. On such targets, bit-fields never
+            //// cross a storage boundary. See test case 0081.
+            if (comp.ignoreNonZeroSizedBitfieldTypeAlignment()) {
+                tyFieldAlignBits = 1;
+            }
+        } else {
+            // Some targets ignore the alignment of the underlying type when laying out
+            // zero-sized bit-fields. See test case 0073.
+            if (comp.ignoreZeroSizedBitfieldTypeAlignment()) {
+                tyFieldAlignBits = 1;
+            }
             // Some targets have a minimum alignment of zero-sized bit-fields. See test case
             // 0074.
             if (comp.minZeroWidthBitfieldAlignment()) |targetAlign| {
