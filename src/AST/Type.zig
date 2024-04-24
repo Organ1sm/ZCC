@@ -1102,35 +1102,60 @@ pub fn alignof(ty: Type, comp: *const Compilation) u29 {
         => ty.getElemType().alignof(comp),
 
         .Func, .VarArgsFunc, .OldStyleFunc => 4, // TODO check target
-        .Char, .SChar, .UChar, .Void, .Bool, .ComplexChar, .ComplexSChar, .ComplexUChar => 1,
-        .Short, .UShort, .ComplexShort, .ComplexUShort => 2,
+        .Char, .SChar, .UChar, .Void, .Bool => 1,
 
-        .Int, .UInt, .ComplexInt, .ComplexUInt => switch (comp.target.cpu.arch) {
+        .ComplexChar,
+        .ComplexSChar,
+        .ComplexUChar,
+        .ComplexShort,
+        .ComplexUShort,
+        .ComplexInt,
+        .ComplexUInt,
+        .ComplexLong,
+        .ComplexULong,
+        .ComplexLongLong,
+        .ComplexULongLong,
+        .ComplexInt128,
+        .ComplexUInt128,
+        .ComplexFP16,
+        .ComplexFloat,
+        .ComplexDouble,
+        .ComplexLongDouble,
+        .ComplexFloat80,
+        .ComplexFloat128,
+        => return ty.makeReal().alignof(comp),
+
+        .Short,
+        .UShort,
+        .Int,
+        .UInt,
+        .Long,
+        .ULong,
+        => switch (comp.target.cpu.arch) {
             .msp430 => @as(u29, 2),
-            else => 4,
-        },
-
-        .Long, .ULong, .ComplexLong, .ComplexULong => switch (comp.target.os.tag) {
-            .linux,
-            .macos,
-            .freebsd,
-            .netbsd,
-            .dragonfly,
-            .openbsd,
-            .wasi,
-            .emscripten,
-            => comp.target.ptrBitWidth() >> 3,
-
-            .windows, .uefi => 4,
-
-            else => if (comp.target.cpu.arch == .msp430) @as(u29, 2) else 4,
+            else => @as(u29, @intCast(ty.sizeof(comp).?)),
         },
 
         .LongLong,
         .ULongLong,
-        .ComplexLongLong,
-        .ComplexULongLong,
         => switch (comp.target.cpu.arch) {
+            .msp430 => 2,
+            .x86 => switch (comp.target.os.tag) {
+                .windows, .uefi => 8,
+                else => 4,
+            },
+            .arm => switch (comp.target.os.tag) {
+                .ios => 4,
+                else => 8,
+            },
+            else => @as(u29, @intCast(ty.sizeof(comp).?)),
+        },
+
+        .Int128, .UInt128 => 16,
+        .FP16 => 2,
+        .Float => if (comp.target.cpu.arch == .msp430) @as(u29, 2) else 4,
+
+        .Double => switch (comp.target.cpu.arch) {
             .msp430 => 2,
             .x86 => switch (comp.target.os.tag) {
                 .windows, .uefi => 8,
@@ -1139,22 +1164,7 @@ pub fn alignof(ty: Type, comp: *const Compilation) u29 {
             else => 8,
         },
 
-        .Int128, .UInt128, .ComplexInt128, .ComplexUInt128 => 16,
-        .FP16, .ComplexFP16 => 2,
-        .Float, .ComplexFloat => if (comp.target.cpu.arch == .msp430) @as(u29, 2) else 4,
-
-        .Double,
-        .ComplexDouble,
-        => switch (comp.target.cpu.arch) {
-            .msp430 => 2,
-            .x86 => switch (comp.target.os.tag) {
-                .windows, .uefi => 8,
-                else => 4,
-            },
-            else => 8,
-        },
-
-        .LongDouble, .ComplexLongDouble => switch (comp.target.cpu.arch) {
+        .LongDouble => switch (comp.target.cpu.arch) {
             .msp430 => 2,
             .x86 => switch (comp.target.os.tag) {
                 .windows, .uefi => 8,
@@ -1163,11 +1173,7 @@ pub fn alignof(ty: Type, comp: *const Compilation) u29 {
             else => 16,
         },
 
-        .Float80,
-        .Float128,
-        .ComplexFloat80,
-        .ComplexFloat128,
-        => 16,
+        .Float80, .Float128 => 16,
 
         .Pointer,
         .StaticArray,
