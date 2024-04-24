@@ -6200,7 +6200,12 @@ fn parseFloat(p: *Parser, buf: []const u8, suffix: NumberSuffix) !Result {
                 .F, .IF => Type.Float,
                 else => unreachable,
             };
-            const dValue = std.fmt.parseFloat(f64, buf) catch unreachable;
+
+            const dValue = std.fmt.parseFloat(f64, buf) catch |er| switch (er) {
+                error.InvalidCharacter => return p.todo("c2x digit separators in floats"),
+                else => unreachable,
+            };
+
             const tag: AstTag = switch (suffix) {
                 .None, .I => .DoubleLiteral,
                 .F, .IF => .FloatLiteral,
@@ -6269,6 +6274,7 @@ fn getIntegerPart(p: *Parser, buffer: []const u8, prefix: NumberPrefix, tokenIdx
                     return error.ParsingFailed;
                 }
             },
+            '\'' => {},
             else => return buffer[0..idx],
         }
     }
@@ -6326,6 +6332,7 @@ fn parseInt(
             '0'...'9' => ch - '0',
             'A'...'Z' => ch - 'A' + 10,
             'a'...'z' => ch - 'a' + 10,
+            '\'' => continue,
             else => unreachable,
         };
 
@@ -6396,6 +6403,7 @@ fn getFracPart(p: *Parser, buffer: []const u8, prefix: NumberPrefix, tokenIdx: T
     }
     for (buffer, 0..) |c, idx| {
         if (idx == 0) continue;
+        if (c == '\'') continue;
         if (!prefix.digitAllowed(c)) return buffer[0..idx];
     }
     return buffer;
@@ -6417,6 +6425,7 @@ fn getExponent(p: *Parser, buffer: []const u8, prefix: NumberPrefix, tokenIdx: T
         if (idx == 1 and (c == '+' or c == '-')) continue;
         switch (c) {
             '0'...'9' => {},
+            '\'' => continue,
             else => break idx,
         }
     } else buffer.len;

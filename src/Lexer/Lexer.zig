@@ -57,6 +57,7 @@ const State = enum {
     multi_line_comment_done,
     pp_num,
     pp_num_exponent,
+    pp_num_digit_separator,
 };
 
 pub fn next(self: *Lexer) Token {
@@ -666,6 +667,12 @@ pub fn next(self: *Lexer) Token {
                 '.',
                 => {},
                 'e', 'E', 'p', 'P' => state = .pp_num_exponent,
+                '\'' => if (self.comp.langOpts.standard.atLeast(.c2x)) {
+                    state = .pp_num_digit_separator;
+                } else {
+                    id = .PPNumber;
+                    break;
+                },
                 else => {
                     id = .PPNumber;
                     break;
@@ -682,6 +689,23 @@ pub fn next(self: *Lexer) Token {
                 '-',
                 => state = .pp_num,
                 else => {
+                    id = .PPNumber;
+                    break;
+                },
+            },
+
+            .pp_num_digit_separator => switch (c) {
+                'a'...'d',
+                'A'...'D',
+                'f'...'o',
+                'F'...'O',
+                'q'...'z',
+                'Q'...'Z',
+                '0'...'9',
+                '_',
+                => state = .pp_num,
+                else => {
+                    self.index -= 1;
                     id = .PPNumber;
                     break;
                 },
@@ -726,7 +750,7 @@ pub fn next(self: *Lexer) Token {
             .caret => id = TokenType.Caret,
             .asterisk => id = TokenType.Asterisk,
 
-            .pp_num, .pp_num_exponent => id = TokenType.PPNumber,
+            .pp_num, .pp_num_exponent, .pp_num_digit_separator => id = TokenType.PPNumber,
         }
     }
 
