@@ -170,7 +170,7 @@ const SysVContext = struct {
         // See test case 0070.
         if (self.isUnion) {
             self.sizeBits = @max(self.sizeBits, width);
-            if (!named) return .{ .offsetBits = 0, .sizeBits = 0 };
+            if (!named) return .{};
             return .{
                 .offsetBits = 0,
                 .sizeBits = width,
@@ -187,7 +187,7 @@ const SysVContext = struct {
                 if (ongoing.sizeBits == tySizeBits and ongoing.unusedSizeBits >= width) {
                     const offsetBits = self.sizeBits - ongoing.unusedSizeBits;
                     ongoing.unusedSizeBits -= width;
-                    if (!named) return .{ .offsetBits = 0, .sizeBits = 0 };
+                    if (!named) return .{};
                     return .{
                         .offsetBits = offsetBits,
                         .sizeBits = width,
@@ -203,7 +203,7 @@ const SysVContext = struct {
 
         const offsetBits = std.mem.alignForward(u64, self.sizeBits, fieldAlignmentBits);
         self.sizeBits = if (width == 0) offsetBits else offsetBits + tySizeBits;
-        if (!named) return .{ .offsetBits = 0, .sizeBits = 0 };
+        if (!named) return .{};
         return .{
             .offsetBits = offsetBits,
             .sizeBits = width,
