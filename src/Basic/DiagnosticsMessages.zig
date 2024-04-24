@@ -1394,6 +1394,7 @@ pub const field_incomplete_ty = struct {
 pub const flexible_in_union = struct {
     pub const msg = "flexible array member in union is not allowed";
     pub const kind = .@"error";
+    pub const suppress_msvc = true;
 };
 pub const flexible_non_final = struct {
     pub const msg = "flexible array member is not at the end of struct";

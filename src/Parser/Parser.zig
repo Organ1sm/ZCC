@@ -2095,14 +2095,16 @@ fn parseRecordDeclarator(p: *Parser) Error!bool {
         } else if (ty.is(.IncompleteArray)) {
             if (p.record.kind == .KeywordUnion)
                 try p.errToken(.flexible_in_union, firstToken);
-            if (p.record.flexibleField) |some|
-                try p.errToken(.flexible_non_final, some);
+            if (p.record.flexibleField) |some| {
+                if (p.record.kind == .KeywordStruct)
+                    try p.errToken(.flexible_non_final, some);
+            }
 
             p.record.flexibleField = firstToken;
         } else if (ty.hasIncompleteSize()) {
             try p.errStr(.field_incomplete_ty, firstToken, try p.typeStr(ty));
         } else if (p.record.flexibleField) |some| {
-            if (some != firstToken)
+            if (some != firstToken and p.record.kind == .KeywordStruct)
                 try p.errToken(.flexible_non_final, some);
         }
         if (p.eat(.Comma) == null) break;
