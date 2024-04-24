@@ -1,3 +1,6 @@
+//! Record layout code adapted from https://github.com/mahkoh/repr-c
+//! Licensed under MIT license: https://github.com/mahkoh/repr-c/tree/master/repc/facade
+
 const std = @import("std");
 const Type = @import("../AST/Type.zig");
 const Attribute = @import("../Lexer/Attribute.zig");
@@ -7,14 +10,6 @@ const Record = Type.Record;
 const Field = Record.Field;
 const TypeLayout = Type.TypeLayout;
 const FieldLayout = Type.FieldLayout;
-
-// almost all the code for record layout
-// was liberally copied from this repro
-// https://github.com/mahkoh/repr-c
-// specifically the code in "repc/impl/src/" directory.
-// At the time of this writing (Q3 2022)
-// that code marked as "SPDX-License-Identifier: MIT OR Apache-2.0"
-// so is compatible with zcc's MIT licence
 
 const BITS_PER_BYTE = 8;
 
@@ -70,15 +65,16 @@ const SysVContext = struct {
                 fieldAttrs = attrs[fieldIdx];
 
             if (self.comp.target.isMinGW()) {
-                self.layoutMinGWField(field, fieldAttrs, typeLayout);
+                field.layout = self.layoutMinGWField(field, fieldAttrs, typeLayout);
             } else {
                 if (field.isRegularField())
-                    self.layoutRegularField(field, fieldAttrs, typeLayout)
+                    field.layout = self.layoutRegularField(fieldAttrs, typeLayout)
                 else
-                    self.layoutBitField(field, fieldAttrs, typeLayout);
+                    field.layout = self.layoutBitField(fieldAttrs, typeLayout, field.isNamed(), field.specifiedBitWidth());
             }
         }
     }
+
     /// On MinGW the alignment of the field is calculated in the usual way except that the alignment of
     /// the underlying type is ignored in three cases
     /// - the field is packed
@@ -104,10 +100,10 @@ const SysVContext = struct {
 
     fn layoutMinGWField(
         self: *SysVContext,
-        field: *Field,
+        field: *const Field,
         fieldAttrs: ?[]const Attribute,
         fieldLayout: TypeLayout,
-    ) void {
+    ) FieldLayout {
         const annotationAlignmentBits = BITS_PER_BYTE * (Type.annotationAlignment(self.comp, fieldAttrs) orelse 1);
         const isAttrPacked = self.attrPacked or isPacked(fieldAttrs);
         const ignoreTypeAlign = ignoreTypeAlignment(isAttrPacked, field.bitWidth, self.ongoingBitfield, fieldLayout);
@@ -151,26 +147,25 @@ const SysVContext = struct {
         //     { offset: 8, size: 8 }d { size: 8, alignment: 8 }char,
         // }
         if (field.isRegularField())
-            field.layout = self.layoutRegularFieldMinGW(fieldLayout.sizeBits, fieldAlignmentBits)
+            return self.layoutRegularFieldMinGW(fieldLayout.sizeBits, fieldAlignmentBits)
         else
-            field.layout = self.layoutBitFieldMinGW(fieldLayout.sizeBits, fieldAlignmentBits, field);
+            return self.layoutBitFieldMinGW(fieldLayout.sizeBits, fieldAlignmentBits, field.isNamed(), field.specifiedBitWidth());
     }
 
     fn layoutBitFieldMinGW(
         self: *SysVContext,
         tySizeBits: u64,
         fieldAlignmentBits: u64,
-        field: *const Field,
+        isNamed: bool,
+        width: u64,
     ) FieldLayout {
-        const named = field.isNamed();
-        const width = @as(u64, field.specifiedBitWidth());
         std.debug.assert(width <= tySizeBits); // validated in parser
 
         // In a union, the size of the underlying type does not affect the size of the union.
         // See test case 0070.
         if (self.isUnion) {
             self.sizeBits = @max(self.sizeBits, width);
-            if (!named) return .{};
+            if (!isNamed) return .{};
             return .{
                 .offsetBits = 0,
                 .sizeBits = width,
@@ -187,7 +182,7 @@ const SysVContext = struct {
                 if (ongoing.sizeBits == tySizeBits and ongoing.unusedSizeBits >= width) {
                     const offsetBits = self.sizeBits - ongoing.unusedSizeBits;
                     ongoing.unusedSizeBits -= width;
-                    if (!named) return .{};
+                    if (!isNamed) return .{};
                     return .{
                         .offsetBits = offsetBits,
                         .sizeBits = width,
@@ -203,7 +198,7 @@ const SysVContext = struct {
 
         const offsetBits = std.mem.alignForward(u64, self.sizeBits, fieldAlignmentBits);
         self.sizeBits = if (width == 0) offsetBits else offsetBits + tySizeBits;
-        if (!named) return .{};
+        if (!isNamed) return .{};
         return .{
             .offsetBits = offsetBits,
             .sizeBits = width,
@@ -233,10 +228,9 @@ const SysVContext = struct {
 
     fn layoutRegularField(
         self: *SysVContext,
-        field: *Field,
         fieldAttrs: ?[]const Attribute,
         fieldLayout: TypeLayout,
-    ) void {
+    ) FieldLayout {
         var fieldAlignBits = fieldLayout.fieldAlignmentBits;
 
         // If the struct or the field is packed, then the alignment of the underlying type is
@@ -267,17 +261,16 @@ const SysVContext = struct {
         self.sizeBits = @max(self.sizeBits, offsetBits + sizeBits);
         self.alignedBits = @max(self.alignedBits, fieldAlignBits);
 
-        field.layout.offsetBits = offsetBits;
-        field.layout.sizeBits = sizeBits;
+        return FieldLayout{ .offsetBits = offsetBits, .sizeBits = sizeBits };
     }
 
     fn layoutBitField(
         self: *SysVContext,
-        field: *Field,
         fieldAttrs: ?[]const Attribute,
         fieldLayout: TypeLayout,
-    ) void {
-        const bitWidth = field.specifiedBitWidth();
+        isNamed: bool,
+        bitWidth: u64,
+    ) FieldLayout {
         const tySizeBits = fieldLayout.sizeBits;
         var tyFieldAlignBits: u32 = fieldLayout.fieldAlignmentBits;
 
@@ -357,7 +350,7 @@ const SysVContext = struct {
 
         // Unnamed fields do not contribute to the record alignment except on a few targets.
         // See test case 0079.
-        if (field.isNamed() or self.comp.unnamedFieldAffectsAlignment()) {
+        if (isNamed or self.comp.unnamedFieldAffectsAlignment()) {
             var inheritedAlignBits: u32 = undefined;
 
             if (bitWidth == 0) {
@@ -381,8 +374,8 @@ const SysVContext = struct {
             self.alignedBits = @max(self.alignedBits, inheritedAlignBits);
         }
 
-        field.layout.sizeBits = bitWidth;
-        field.layout.offsetBits = offsetBits;
+        if (!isNamed) return .{};
+        return FieldLayout{ .offsetBits = offsetBits, .sizeBits = bitWidth };
     }
 };
 
@@ -475,9 +468,9 @@ const MsvcContext = struct {
         // pack(1) had been applied only to this field. See test case 0057.
         fieldAlignBits = @max(fieldAlignBits, reqAlign);
         if (field.isRegularField())
-            self.layoutRegularField(typeLayout.sizeBits, fieldAlignBits, field)
+            field.layout = self.layoutRegularField(typeLayout.sizeBits, fieldAlignBits)
         else
-            self.layoutBitField(typeLayout.sizeBits, fieldAlignBits, field.specifiedBitWidth(), field);
+            field.layout = self.layoutBitField(typeLayout.sizeBits, fieldAlignBits, field.specifiedBitWidth());
     }
 
     fn layoutBitField(
@@ -485,11 +478,7 @@ const MsvcContext = struct {
         tySizeBits: u64,
         fieldAlign: u32,
         bitWidth: u32,
-        fld: *Field,
-    ) void {
-        // size is already know. rest of function will set offset.
-        fld.layout = .{ .offsetBits = 0, .sizeBits = bitWidth };
-
+    ) FieldLayout {
         if (bitWidth == 0) {
             // A zero-sized bit-field that does not follow a non-zero-sized bit-field does not affect
             // the overall layout of the record. Even in a union where the order would otherwise
@@ -498,8 +487,7 @@ const MsvcContext = struct {
                 self.ongoingBitField = null;
             } else {
                 // this field takes 0 space.
-                fld.layout.offsetBits = self.sizeBits;
-                return;
+                return .{ .offsetBits = self.sizeBits, .sizeBits = bitWidth };
             }
         } else {
             std.debug.assert(bitWidth <= tySizeBits);
@@ -512,8 +500,7 @@ const MsvcContext = struct {
                     if (p.sizeBits == tySizeBits and p.unusedSizeBits >= bitWidth) {
                         const offsetBits = self.sizeBits - p.unusedSizeBits;
                         p.unusedSizeBits -= bitWidth;
-                        fld.layout.offsetBits = offsetBits;
-                        return;
+                        return FieldLayout{ .offsetBits = offsetBits, .sizeBits = bitWidth };
                     }
                 }
             }
@@ -542,10 +529,15 @@ const MsvcContext = struct {
             self.sizeBits = @max(self.sizeBits, tySizeBits);
             break :bits 0;
         };
-        fld.layout.offsetBits = offsetBits;
+
+        return FieldLayout{ .offsetBits = offsetBits, .sizeBits = bitWidth };
     }
 
-    fn layoutRegularField(self: *MsvcContext, sizeBits: u64, fieldAlign: u32, field: *Field) void {
+    fn layoutRegularField(
+        self: *MsvcContext,
+        sizeBits: u64,
+        fieldAlign: u32,
+    ) FieldLayout {
         self.containsNonBitField = true;
         self.ongoingBitField = null;
         self.pointerAlignBits = @max(self.pointerAlignBits, fieldAlign);
@@ -555,10 +547,7 @@ const MsvcContext = struct {
             false => std.mem.alignForward(u64, self.sizeBits, fieldAlign),
         };
         self.sizeBits = @max(self.sizeBits, offsetBits + sizeBits);
-        field.layout = .{
-            .offsetBits = offsetBits,
-            .sizeBits = sizeBits,
-        };
+        return FieldLayout{ .offsetBits = offsetBits, .sizeBits = sizeBits };
     }
     fn handleZeroSizedRecord(self: *MsvcContext) void {
         if (self.isUnion) {
