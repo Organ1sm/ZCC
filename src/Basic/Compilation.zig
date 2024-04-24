@@ -131,6 +131,8 @@ pub fn generateBuiltinMacros(comp: *Compilation) !Source {
     var buf = std.ArrayList(u8).init(comp.gpa);
     defer buf.deinit();
 
+    const ptrWidth = comp.target.ptrBitWidth();
+
     const w = buf.writer();
 
     // Standard macros
@@ -157,7 +159,7 @@ pub fn generateBuiltinMacros(comp: *Compilation) !Source {
             \\#define __linux__ 1
             \\
         ),
-        .windows => if (comp.target.ptrBitWidth() == 32)
+        .windows => if (ptrWidth == 32)
             try w.writeAll(
                 \\#define WIN32 1
                 \\#define _WIN32 1
@@ -287,7 +289,7 @@ pub fn generateBuiltinMacros(comp: *Compilation) !Source {
         else => {},
     }
 
-    if (comp.target.os.tag != .windows) switch (comp.target.ptrBitWidth()) {
+    if (comp.target.os.tag != .windows) switch (ptrWidth) {
         64 => try w.writeAll(
             \\#define _LP64 1
             \\#define __LP64__ 1
