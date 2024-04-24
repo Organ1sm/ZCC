@@ -1004,8 +1004,8 @@ pub fn sizeof(ty: Type, comp: *const Compilation) ?u64 {
         .Int128, .UInt128 => 16,
 
         .FP16 => 2,
-        .Float => 4,
-        .Double => 8,
+        .Float => comp.target.c_type_byte_size(.float),
+        .Double => comp.target.c_type_byte_size(.double),
         .Float80 => 16,
         .Float128 => 16,
 
@@ -1125,61 +1125,20 @@ pub fn alignof(ty: Type, comp: *const Compilation) u29 {
         .ComplexFloat128,
         => return ty.makeReal().alignof(comp),
 
-        .Short,
-        .UShort,
-        .Int,
-        .UInt,
-        .Long,
-        .ULong,
-        => switch (comp.target.cpu.arch) {
-            .msp430 => @as(u29, 2),
-            else => @as(u29, @intCast(ty.sizeof(comp).?)),
-        },
-
-        .LongLong,
-        .ULongLong,
-        => switch (comp.target.cpu.arch) {
-            .msp430 => 2,
-            .x86 => switch (comp.target.os.tag) {
-                .windows, .uefi => 8,
-                else => 4,
-            },
-            .arm => switch (comp.target.os.tag) {
-                .ios => 4,
-                else => 8,
-            },
-            else => @as(u29, @intCast(ty.sizeof(comp).?)),
-        },
+        .Short => comp.target.c_type_alignment(.short),
+        .UShort => comp.target.c_type_alignment(.ushort),
+        .Int => comp.target.c_type_alignment(.int),
+        .UInt => comp.target.c_type_alignment(.uint),
+        .Long => comp.target.c_type_alignment(.long),
+        .ULong => comp.target.c_type_alignment(.ulong),
+        .LongLong => comp.target.c_type_alignment(.longlong),
+        .ULongLong => comp.target.c_type_alignment(.ulonglong),
 
         .Int128, .UInt128 => 16,
         .FP16 => 2,
-        .Float => if (comp.target.cpu.arch == .msp430) @as(u29, 2) else 4,
-
-        .Double => switch (comp.target.cpu.arch) {
-            .msp430 => 2,
-            .x86 => switch (comp.target.os.tag) {
-                .windows, .uefi => 8,
-                else => 4,
-            },
-            .arm => switch (comp.target.os.tag) {
-                .ios => 4,
-                else => 8,
-            },
-            else => 8,
-        },
-
-        .LongDouble => switch (comp.target.cpu.arch) {
-            .msp430 => 2,
-            .x86 => switch (comp.target.os.tag) {
-                .windows, .uefi => 8,
-                else => 4,
-            },
-            .arm => switch (comp.target.os.tag) {
-                .ios => 4,
-                else => 8,
-            },
-            else => 16,
-        },
+        .Float => comp.target.c_type_alignment(.float),
+        .Double => comp.target.c_type_alignment(.double),
+        .LongDouble => comp.target.c_type_alignment(.longdouble),
 
         .Float80, .Float128 => 16,
 
@@ -1190,7 +1149,10 @@ pub fn alignof(ty: Type, comp: *const Compilation) u29 {
         .DecayedIncompleteArray,
         .DecayedVariableLenArray,
         .DecayedUnspecifiedVariableLenArray,
-        => comp.target.ptrBitWidth() >> 3,
+        => switch (comp.target.cpu.arch) {
+            .avr => 1,
+            else => comp.target.ptrBitWidth() / 8,
+        },
 
         .Struct, .Union => if (ty.data.record.isIncomplete()) 0 else @intCast(ty.data.record.typeLayout.fieldAlignmentBits / 8),
         .Enum => if (ty.data.@"enum".isIncomplete() and !ty.data.@"enum".fixed) 0 else ty.data.@"enum".tagType.alignof(comp),
