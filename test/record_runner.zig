@@ -206,7 +206,7 @@ fn singleRun(alloc: std.mem.Allocator, path: []const u8, source: []const u8, tes
 
     const mac_writer = macro_buf.writer();
     try mac_writer.print("#define {s}\n", .{test_case.c_define});
-    if (comp.target.os.tag == .windows) {
+    if (comp.langOpts.emulate == .msvc) {
         comp.langOpts.enableMSExtensions();
         try mac_writer.writeAll("#define MSVC\n");
     }
@@ -357,8 +357,6 @@ fn parseTargetsFromCode(alloc: std.mem.Allocator, source: []const u8) !std.Array
 
         while (parts.next()) |target| {
             if (std.mem.startsWith(u8, target, "END")) break;
-            // skip MinGW targets for now.
-            if (std.ascii.indexOfIgnoreCase(target, "windows-gnu") != null) continue;
             // These point to source, which lives
             // for the life of the test. So should be ok
             try result.append(.{
