@@ -1039,7 +1039,7 @@ pub fn sizeof(ty: Type, comp: *const Compilation) ?u64 {
         .DecayedUnspecifiedVariableLenArray,
         .DecayedTypeofType,
         .DecayedTypeofExpr,
-        => comp.target.ptrBitWidth() >> 3,
+        =>  if  (comp.target.abi == .gnux32) 4 else comp.target.ptrBitWidth() >> 3,
 
         .Array, .Vector => {
             const size = ty.data.array.elem.sizeof(comp) orelse return null;
