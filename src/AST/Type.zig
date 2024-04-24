@@ -263,8 +263,22 @@ pub const Record = struct {
         bitWidth: ?u32 = null,
         layout: FieldLayout = .{ .offsetBits = 0, .sizeBits = 0 },
 
+        pub fn isNamed(f: *const Field) bool {
+            return f.nameToken != 0;
+        }
+
         pub fn isAnonymousRecord(f: Field) bool {
-            return f.nameToken == 0 and f.ty.isRecord();
+            return !f.isNamed() and f.ty.isRecord();
+        }
+
+        /// false for bitfields
+        pub fn isRegularField(f: *const Field) bool {
+            return f.bitWidth == null;
+        }
+
+        /// bit width as specified in the C source. Asserts that `f` is a bitfield.
+        pub fn specifiedBitWidth(f: *const Field) u32 {
+            return f.bitWidth.?;
         }
     };
 
