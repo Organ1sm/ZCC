@@ -1158,7 +1158,12 @@ pub fn alignof(ty: Type, comp: *const Compilation) u29 {
         .LongLong => comp.target.c_type_alignment(.longlong),
         .ULongLong => comp.target.c_type_alignment(.ulonglong),
 
-        .Int128, .UInt128 => 16,
+        .Int128,
+        .UInt128,
+        => if (comp.target.cpu.arch == .s390x and
+            comp.target.os.tag == .linux and
+            comp.target.isGnu()) 8 else 16,
+
         .FP16 => 2,
         .Float => comp.target.c_type_alignment(.float),
         .Double => comp.target.c_type_alignment(.double),
