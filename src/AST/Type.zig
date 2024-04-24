@@ -1161,6 +1161,10 @@ pub fn alignof(ty: Type, comp: *const Compilation) u29 {
                 .windows, .uefi => 8,
                 else => 4,
             },
+            .arm => switch (comp.target.os.tag) {
+                .ios => 4,
+                else => 8,
+            },
             else => 8,
         },
 
@@ -1169,6 +1173,10 @@ pub fn alignof(ty: Type, comp: *const Compilation) u29 {
             .x86 => switch (comp.target.os.tag) {
                 .windows, .uefi => 8,
                 else => 4,
+            },
+            .arm => switch (comp.target.os.tag) {
+                .ios => 4,
+                else => 8,
             },
             else => 16,
         },
