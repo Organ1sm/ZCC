@@ -1132,6 +1132,9 @@ pub fn systemCompiler(comp: *const Compilation) LangOpts.Compiler {
     if (target.os.tag == .windows)
         return .msvc;
 
+    if (target.cpu.arch == .avr)
+        return .gcc;
+
     return .clang;
 }
 
