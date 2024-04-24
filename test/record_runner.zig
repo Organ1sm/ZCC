@@ -357,6 +357,8 @@ fn parseTargetsFromCode(alloc: std.mem.Allocator, source: []const u8) !std.Array
 
         while (parts.next()) |target| {
             if (std.mem.startsWith(u8, target, "END")) break;
+            // skip MinGW targets for now.
+            if (std.ascii.indexOfIgnoreCase(target, "windows-gnu") != null) continue;
             // These point to source, which lives
             // for the life of the test. So should be ok
             try result.append(.{

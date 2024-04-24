@@ -1126,12 +1126,42 @@ pub fn alignof(ty: Type, comp: *const Compilation) u29 {
             else => if (comp.target.cpu.arch == .msp430) @as(u29, 2) else 4,
         },
 
-        .LongLong, .ULongLong, .ComplexLongLong, .ComplexULongLong => if (comp.target.cpu.arch == .msp430) @as(u29, 2) else 8,
+        .LongLong,
+        .ULongLong,
+        .ComplexLongLong,
+        .ComplexULongLong,
+        => switch (comp.target.cpu.arch) {
+            .msp430 => 2,
+            .x86 => switch (comp.target.os.tag) {
+                .windows, .uefi => 8,
+                else => 4,
+            },
+            else => 8,
+        },
+
         .Int128, .UInt128, .ComplexInt128, .ComplexUInt128 => 16,
         .FP16, .ComplexFP16 => 2,
         .Float, .ComplexFloat => if (comp.target.cpu.arch == .msp430) @as(u29, 2) else 4,
-        .Double, .ComplexDouble => if (comp.target.cpu.arch == .msp430) @as(u29, 2) else 8,
-        .LongDouble, .ComplexLongDouble => if (comp.target.cpu.arch == .msp430) @as(u29, 2) else 16,
+
+        .Double,
+        .ComplexDouble,
+        => switch (comp.target.cpu.arch) {
+            .msp430 => 2,
+            .x86 => switch (comp.target.os.tag) {
+                .windows, .uefi => 8,
+                else => 4,
+            },
+            else => 8,
+        },
+
+        .LongDouble, .ComplexLongDouble => switch (comp.target.cpu.arch) {
+            .msp430 => 2,
+            .x86 => switch (comp.target.os.tag) {
+                .windows, .uefi => 8,
+                else => 4,
+            },
+            else => 16,
+        },
 
         .Float80,
         .Float128,

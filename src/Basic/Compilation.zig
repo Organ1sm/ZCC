@@ -1246,7 +1246,7 @@ test "target size/align tests" {
     const tt: Type = Type.LongLong;
 
     try std.testing.expectEqual(@as(u64, 8), tt.sizeof(&comp).?);
-    try std.testing.expectEqual(@as(u64, 8), tt.alignof(&comp)); // TODO should be 4
+    try std.testing.expectEqual(@as(u64, 4), tt.alignof(&comp));
 }
 
 test "ignore BOM at beginning of file" {
