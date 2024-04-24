@@ -1039,7 +1039,7 @@ pub fn sizeof(ty: Type, comp: *const Compilation) ?u64 {
         .DecayedUnspecifiedVariableLenArray,
         .DecayedTypeofType,
         .DecayedTypeofExpr,
-        =>  if  (comp.target.abi == .gnux32) 4 else comp.target.ptrBitWidth() >> 3,
+        => if (comp.target.abi == .gnux32) 4 else comp.target.ptrBitWidth() >> 3,
 
         .Array, .Vector => {
             const size = ty.data.array.elem.sizeof(comp) orelse return null;
@@ -1164,6 +1164,11 @@ pub fn alignof(ty: Type, comp: *const Compilation) u29 {
 
         else => unreachable,
     };
+}
+
+pub fn enumIsPacked(ty: Type, comp: *const Compilation) bool {
+    std.debug.assert(ty.is(.Enum));
+    return comp.langOpts.shortEnums or comp.packAllEnums() or ty.hasAttribute(.@"packed");
 }
 
 pub fn requestedAlignment(ty: Type, comp: *const Compilation) ?u29 {

@@ -2261,9 +2261,8 @@ fn parseEnumSpec(p: *Parser) Error!*Type.Enum {
     };
     ty = try Attribute.applyTypeAttributes(p, ty, attrBufferTop, null);
 
-    const isPacked = ty.hasAttribute(.@"packed") or p.comp.langOpts.shortEnums;
     if (!enumType.fixed) {
-        const tagSpecifier = try e.getTypeSpecifier(p, isPacked, maybeID orelse enumTK);
+        const tagSpecifier = try e.getTypeSpecifier(p, ty.enumIsPacked(p.comp), maybeID orelse enumTK);
         enumType.tagType = .{ .specifier = tagSpecifier };
     }
 
