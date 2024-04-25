@@ -26,12 +26,15 @@ pub fn main() u8 {
         return 1;
     };
 
+    const fastExit = @import("builtin").mode != .Debug;
+
     var comp = Compilation.init(gpa);
     defer comp.deinit();
 
     comp.addDefaultPragmaHandlers() catch |er| switch (er) {
         error.OutOfMemory => {
             std.debug.print("Out of Memory\n", .{});
+            if (fastExit) std.process.exit(1);
             return 1;
         },
     };
@@ -41,16 +44,23 @@ pub fn main() u8 {
     mainExtra(&comp, args) catch |er| switch (er) {
         error.OutOfMemory => {
             std.debug.print("Out of Memory\n", .{});
+            if (fastExit) std.process.exit(1);
             return 1;
         },
         error.StreamTooLong => {
-            std.debug.print("Stream too long\n", .{});
+            std.debug.print("maximum file size exceeded\n", .{});
+            if (fastExit) std.process.exit(1);
             return 1;
         },
-        error.FatalError => comp.renderErrors(),
+        error.FatalError => {
+            comp.renderErrors();
+            if (fastExit) std.process.exit(1);
+            return 1;
+        },
         else => return 1,
     };
 
+    if (fastExit) std.process.exit(@intFromBool(comp.diag.errors != 0));
     return @intFromBool(comp.diag.errors != 0);
 }
 
