@@ -1468,7 +1468,7 @@ fn msvcAttribute(p: *Parser) !bool {
     try p.parseMSVCAttrList();
     _ = try p.expectClosing(lparen, .RParen);
 
-    return false;
+    return true;
 }
 
 fn gnuAttribute(p: *Parser) !bool {
@@ -1488,10 +1488,25 @@ fn gnuAttribute(p: *Parser) !bool {
 
 /// attribute-specifier : (keyword_attrbute '( '(' attribute-list ')' ')')*
 fn parseAttrSpec(p: *Parser) Error!void {
+    try p.attributeSpecifier(null);
+}
+
+fn attributeSpecifier(p: *Parser, declaratorName: ?TokenIndex) Error!void {
     while (true) {
         if (try p.gnuAttribute()) continue;
         if (try p.c23Attribute()) continue;
-        if (try p.msvcAttribute()) continue;
+
+        const maybeDeclspecToken = p.tokenIdx;
+        const attrBufferTop = p.attrBuffer.len;
+
+        if (try p.msvcAttribute()) {
+            if (declaratorName) |nameToken| {
+                try p.errToken(.declspec_not_allowed_after_declarator, maybeDeclspecToken);
+                try p.errToken(.declarator_name_tok, nameToken);
+                p.attrBuffer.len = attrBufferTop;
+            }
+            continue;
+        }
         break;
     }
 }
@@ -1505,9 +1520,9 @@ fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec, attrBufferTop: usize) Er
 
     var ID = InitDeclarator{ .d = (try p.declarator(declSpec.type, .normal)) orelse return null };
 
-    try p.parseAttrSpec();
+    try p.attributeSpecifier(ID.d.name);
     _ = try p.parseAssembly(.declLable);
-    try p.parseAttrSpec();
+    try p.attributeSpecifier(ID.d.name);
 
     if (declSpec.storageClass == .typedef) {
         ID.d.type = try Attribute.applyTypeAttributes(p, ID.d.type, attrBufferTop, null);

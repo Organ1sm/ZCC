@@ -1925,3 +1925,11 @@ pub const sizeof_returns_zero = struct {
     pub const suppress_gcc = true;
     pub const suppress_clang = true;
 };
+pub const declspec_not_allowed_after_declarator = struct {
+    pub const msg = "'declspec' attribute not allowed after declarator";
+    pub const kind = .@"error";
+};
+pub const declarator_name_tok = struct {
+    pub const msg = "this declarator";
+    pub const kind = .note;
+};
