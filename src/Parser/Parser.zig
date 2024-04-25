@@ -1668,7 +1668,11 @@ fn parseTypeSpec(p: *Parser, ty: *TypeBuilder) Error!bool {
                 const alignToken = p.tokenIdx;
                 p.tokenIdx += 1;
                 const lparen = try p.expectToken(.LParen);
+                const typenameStart = p.tokenIdx;
                 if (try p.parseTypeName()) |innerTy| {
+                    if (!innerTy.alignable())
+                        try p.errStr(.invalid_alignof, typenameStart, try p.typeStr(innerTy));
+
                     const alignment = Attribute.Alignment{ .requested = innerTy.alignof(p.comp) };
                     try p.attrBuffer.append(p.gpa, .{
                         .attr = .{
@@ -5530,6 +5534,9 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
                 res = try p.parseNoEval(parseUnaryExpr);
                 try p.errToken(.alignof_expr, expectedParen);
             }
+
+            if (!res.ty.alignable())
+                try p.errStr(.invalid_alignof, expectedParen, try p.typeStr(res.ty));
 
             res.value = Value.int(res.ty.alignof(p.comp));
             res.ty = p.comp.types.size;

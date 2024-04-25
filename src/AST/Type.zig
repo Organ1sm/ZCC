@@ -1100,6 +1100,10 @@ pub fn bitSizeof(ty: Type, comp: *const Compilation) ?u64 {
     };
 }
 
+pub fn alignable(ty: Type) bool {
+    return ty.isArray() or !ty.hasIncompleteSize();
+}
+
 /// Get the alignment of a type
 pub fn alignof(ty: Type, comp: *const Compilation) u29 {
     // don't return the attribute for records

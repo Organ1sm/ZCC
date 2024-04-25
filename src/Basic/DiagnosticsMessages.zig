@@ -573,6 +573,11 @@ pub const alignof_expr = struct {
     pub const kind = .warning;
     pub const suppress_gnu = true;
 };
+pub const invalid_alignof = struct {
+    pub const msg = "invalid application of 'alignof' to an incomplete type '{s}'";
+    pub const extra = .str;
+    pub const kind = .@"error";
+};
 pub const invalid_sizeof = struct {
     pub const msg = "invalid application of 'sizeof' to an incomplete type '{s}'";
     pub const extra = .str;
