@@ -313,8 +313,18 @@ fn mainExtra(comp: *Compilation, args: [][]const u8) !void {
     const builtinMacros = try comp.generateBuiltinMacros();
     const userDefinedMacros = try comp.addSourceFromBuffer("<command line>", macroBuffer.items);
 
+    if (@import("builtin").mode != .Debug and sourceFiles.items.len == 1) {
+        processSource(comp, sourceFiles.items[0], builtin, userDefinedMacros, true) catch |e| switch (e) {
+            error.OutOfMemory => return error.OutOfMemory,
+            error.FatalError => {
+                comp.renderErrors();
+            },
+        };
+        return;
+    }
+
     for (sourceFiles.items) |source| {
-        processSource(comp, source, builtinMacros, userDefinedMacros) catch |e| switch (e) {
+        processSource(comp, source, builtinMacros, userDefinedMacros, false) catch |e| switch (e) {
             error.OutOfMemory => return error.OutOfMemory,
             error.FatalError => comp.renderErrors(),
         };
@@ -345,7 +355,13 @@ fn fatal(comp: *Compilation, comptime fmt: []const u8, args: anytype) error{Fata
     return comp.diag.fatalNoSrc(fmt, args);
 }
 
-fn processSource(comp: *Compilation, source: Source, builtinMacro: Source, userDefinedMacros: Source) !void {
+fn processSource(
+    comp: *Compilation,
+    source: Source,
+    builtinMacro: Source,
+    userDefinedMacros: Source,
+    comptime fastExit: bool,
+) !void {
     comp.generatedBuffer.items.len = 0;
     var pp = Preprocessor.init(comp);
     defer pp.deinit();
@@ -375,8 +391,13 @@ fn processSource(comp: *Compilation, source: Source, builtinMacro: Source, userD
         pp.prettyPrintTokens(bufWriter.writer()) catch |er|
             return fatal(comp, "unable to write result: {s}", .{Util.errorDescription(er)});
 
-        return bufWriter.flush() catch |er|
-            fatal(comp, "unable to write result: {s}", .{Util.errorDescription(er)});
+        bufWriter.flush() catch |er|
+            return fatal(comp, "unable to write result: {s}", .{Util.errorDescription(er)});
+
+        if (fastExit)
+            std.process.exit(0);
+
+        return;
     }
 
     if (comp.dumpTokens or comp.dumpRawTokens) {
@@ -420,8 +441,11 @@ fn processSource(comp: *Compilation, source: Source, builtinMacro: Source, userD
     comp.renderErrors();
 
     // do not compile if there were errors
-    if (comp.diag.errors != prevErrors)
-        return;
+    if (comp.diag.errors != prevErrors) {
+        if (fastExit)
+            std.process.exit(1);
+        return; // Don't compile if there were errors
+    }
 
     if (comp.target.ofmt != .elf or comp.target.cpu.arch != .x86_64) {
         return fatal(
@@ -448,9 +472,16 @@ fn processSource(comp: *Compilation, source: Source, builtinMacro: Source, userD
     obj.finish(outFile) catch |er|
         return fatal(comp, "could output to object file '{s}': {s}", .{ outFileName, Util.errorDescription(er) });
 
-    if (comp.onlyCompile) return;
+    if (comp.onlyCompile) {
+        if (fastExit)
+            std.process.exit(0);
+        return;
+    }
 
     // TODO invoke linker
+
+    if (fastExit)
+        std.process.exit(0);
 }
 
 test "simple test" {
