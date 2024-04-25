@@ -86,6 +86,7 @@ const usage =
     \\  -o <file>               Write output to <file>
     \\  -pedantic               Warn on language extensions
     \\  -std=<standard>         Specify language standard
+    \\  -S                      Only run preprocess and compilation step
     \\ --target=<value>         Generate code for the given target
     \\  -U <macro>              Undefine <macro>
     \\  -Wall                   Enable all warnings
@@ -247,6 +248,8 @@ pub fn parseArgs(
                 const standard = arg["-std=".len..];
                 comp.langOpts.setStandard(standard) catch
                     try comp.diag.add(.{ .tag = .cli_invalid_standard, .extra = .{ .str = arg } }, &.{});
+            } else if (std.mem.startsWith(u8, arg, "-S")) {
+                comp.onlyPreprocessAndCompile = true;
             } else if (std.mem.startsWith(u8, arg, "--target=")) {
                 const triple = arg["--target=".len..];
                 const query = std.Target.Query.parse(.{ .arch_os_abi = triple }) catch {
@@ -300,7 +303,9 @@ fn mainExtra(comp: *Compilation, args: [][]const u8) !void {
 
     if (sourceFiles.items.len == 0) {
         return fatal(comp, "no input files", .{});
-    } else if (sourceFiles.items.len != 1 and comp.outputName != null) {
+    } else if ((sourceFiles.items.len != 1 and comp.outputName != null) and
+        (comp.onlyPreprocess or comp.onlyCompile or comp.onlyPreprocessAndCompile))
+    {
         return fatal(comp, "cannot specify -o when generating multiple output files", .{});
     }
 
