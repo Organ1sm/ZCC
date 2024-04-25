@@ -20,7 +20,8 @@ fn addCommandLineArgs(comp: *zcc.Compilation, file: zcc.Source, macroBuffer: any
         while (it.next()) |some| try testArgs.append(some);
 
         var sourceFiles = std.ArrayList(zcc.Source).init(std.testing.failing_allocator);
-        _ = try zcc.parseArgs(comp, std.io.null_writer, &sourceFiles, macroBuffer, testArgs.items);
+        var linkObjects = std.ArrayList([]const u8).init(std.testing.failing_allocator);
+        _ = try zcc.parseArgs(comp, std.io.null_writer, &sourceFiles, &linkObjects, macroBuffer, testArgs.items);
     }
 }
 
