@@ -1108,16 +1108,20 @@ pub fn alignable(ty: Type) bool {
 pub fn alignof(ty: Type, comp: *const Compilation) u29 {
     // don't return the attribute for records
     // layout has already accounted for requested alignment
-    if (!ty.isRecord()) {
-        if (ty.requestedAlignment(comp)) |requested| {
-            // gcc does not respect alignment on enums
-            if (ty.get(.Enum)) |ty_enum| {
-                if (comp.langOpts.emulate == .gcc) {
-                    return ty_enum.alignof(comp);
-                }
+    if (ty.requestedAlignment(comp)) |requested| {
+        // gcc does not respect alignment on enums
+        if (ty.get(.Enum)) |ty_enum| {
+            if (comp.langOpts.emulate == .gcc) {
+                return ty_enum.alignof(comp);
             }
-            return requested;
+        } else if (ty.getRecord()) |rec| {
+            if (ty.hasIncompleteSize())
+                return 0;
+
+            const computed: u29 = @intCast(@divExact(rec.typeLayout.fieldAlignmentBits, 8));
+            return @max(requested, computed);
         }
+        return requested;
     }
 
     // TODO get target from compilation

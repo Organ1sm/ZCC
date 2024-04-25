@@ -621,7 +621,13 @@ pub fn compute(ty: *Type, comp: *const Compilation, pragmaPack: ?u8) void {
 
 pub fn computeLayout(ty: Type, comp: *const Compilation, typeLayout: *TypeLayout) void {
     if (ty.getRecord()) |rec| {
-        typeLayout.* = rec.typeLayout;
+        const requested = BITS_PER_BYTE * (ty.requestedAlignment(comp) orelse 0);
+        typeLayout.* = .{
+            .sizeBits = rec.typeLayout.sizeBits,
+            .pointerAlignmentBits = @max(requested, rec.typeLayout.pointerAlignmentBits),
+            .fieldAlignmentBits = @max(requested, rec.typeLayout.fieldAlignmentBits),
+            .requiredAlignmentBits = rec.typeLayout.requiredAlignmentBits,
+        };
     } else {
         typeLayout.sizeBits = ty.bitSizeof(comp) orelse 0;
         typeLayout.pointerAlignmentBits = ty.alignof(comp) * BITS_PER_BYTE;
