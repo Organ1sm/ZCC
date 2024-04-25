@@ -1775,6 +1775,7 @@ fn getAnonymousName(p: *Parser, kindToken: TokenIndex) !StringId {
 ///  : 'struct'
 ///  | 'union'
 fn parseRecordSpec(p: *Parser) Error!Type {
+    const startingPragmaPack = p.pragmaPack;
     const kindToken = p.tokenIdx;
     const isStruct = p.tokenIds[kindToken] == .KeywordStruct;
     p.tokenIdx += 1;
@@ -1925,7 +1926,12 @@ fn parseRecordSpec(p: *Parser) Error!Type {
     }
 
     if (!ty.hasIncompleteSize()) {
-        RecordLayout.compute(&ty, p.comp, p.pragmaPack);
+        const pragmaPackValue = switch (p.comp.langOpts.emulate) {
+            .clang => startingPragmaPack,
+            .gcc => p.pragmaPack,
+            .msvc => p.pragmaPack,
+        };
+        RecordLayout.compute(&ty, p.comp, pragmaPackValue);
     }
 
     // finish by creating a node
