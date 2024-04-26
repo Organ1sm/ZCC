@@ -56,9 +56,7 @@ const SysVContext = struct {
 
     fn layoutFields(self: *SysVContext, rec: *const Record) void {
         for (rec.fields, 0..) |*field, fieldIdx| {
-            var typeLayout = TypeLayout.init(0, 0);
-
-            computeLayout(field.ty, self.comp, &typeLayout);
+            const typeLayout = computeLayout(field.ty, self.comp);
 
             var fieldAttrs: ?[]const Attribute = null;
             if (rec.fieldAttributes) |attrs|
@@ -436,9 +434,7 @@ const MsvcContext = struct {
         field: *Field,
         fieldAttrs: ?[]const Attribute,
     ) void {
-        var typeLayout: TypeLayout = TypeLayout.init(0, 0);
-
-        computeLayout(field.ty, self.comp, &typeLayout);
+        const typeLayout = computeLayout(field.ty, self.comp);
 
         // The required alignment of the field is the maximum of the required alignment of the
         // underlying type and the __declspec(align) annotation on the field itself.
@@ -619,20 +615,23 @@ pub fn compute(ty: *Type, comp: *const Compilation, pragmaPack: ?u8) void {
     }
 }
 
-pub fn computeLayout(ty: Type, comp: *const Compilation, typeLayout: *TypeLayout) void {
+pub fn computeLayout(ty: Type, comp: *const Compilation) TypeLayout {
     if (ty.getRecord()) |rec| {
         const requested = BITS_PER_BYTE * (ty.requestedAlignment(comp) orelse 0);
-        typeLayout.* = .{
+        return .{
             .sizeBits = rec.typeLayout.sizeBits,
             .pointerAlignmentBits = @max(requested, rec.typeLayout.pointerAlignmentBits),
             .fieldAlignmentBits = @max(requested, rec.typeLayout.fieldAlignmentBits),
             .requiredAlignmentBits = rec.typeLayout.requiredAlignmentBits,
         };
     } else {
-        typeLayout.sizeBits = ty.bitSizeof(comp) orelse 0;
-        typeLayout.pointerAlignmentBits = ty.alignof(comp) * BITS_PER_BYTE;
-        typeLayout.fieldAlignmentBits = typeLayout.pointerAlignmentBits;
-        typeLayout.requiredAlignmentBits = BITS_PER_BYTE;
+        const typeAlign = ty.alignof(comp) * BITS_PER_BYTE;
+        return .{
+            .sizeBits = ty.bitSizeof(comp) orelse 0,
+            .pointerAlignmentBits = typeAlign,
+            .fieldAlignmentBits = typeAlign,
+            .requiredAlignmentBits = BITS_PER_BYTE,
+        };
     }
 }
 

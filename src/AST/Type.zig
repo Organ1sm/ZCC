@@ -224,15 +224,6 @@ pub const TypeLayout = struct {
     /// targets. On MSVC targets, this value restricts the effects of `#pragma pack` except
     /// in some cases involving bit-fields.
     requiredAlignmentBits: u32,
-
-    pub fn init(sizeBytes: u64, alignmentBytes: u64) TypeLayout {
-        return TypeLayout{
-            .sizeBits = sizeBytes * 8,
-            .fieldAlignmentBits = @intCast(alignmentBytes * 8),
-            .pointerAlignmentBits = @intCast(alignmentBytes * 8),
-            .requiredAlignmentBits = 8,
-        };
-    }
 };
 
 pub const FieldLayout = struct {
