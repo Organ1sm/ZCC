@@ -431,9 +431,9 @@ const MsvcContext = struct {
 
     fn layoutField(
         self: *MsvcContext,
-        field: *Field,
+        field: *const Field,
         fieldAttrs: ?[]const Attribute,
-    ) void {
+    ) FieldLayout {
         const typeLayout = computeLayout(field.ty, self.comp);
 
         // The required alignment of the field is the maximum of the required alignment of the
@@ -464,9 +464,9 @@ const MsvcContext = struct {
         // pack(1) had been applied only to this field. See test case 0057.
         fieldAlignBits = @max(fieldAlignBits, reqAlign);
         if (field.isRegularField())
-            field.layout = self.layoutRegularField(typeLayout.sizeBits, fieldAlignBits)
+            return self.layoutRegularField(typeLayout.sizeBits, fieldAlignBits)
         else
-            field.layout = self.layoutBitField(typeLayout.sizeBits, fieldAlignBits, field.specifiedBitWidth());
+            return self.layoutBitField(typeLayout.sizeBits, fieldAlignBits, field.specifiedBitWidth());
     }
 
     fn layoutBitField(
@@ -595,7 +595,7 @@ pub fn compute(ty: Type, comp: *const Compilation, pragmaPack: ?u8) void {
                     fieldAttrs = attrs[fieldIdx];
                 }
 
-                context.layoutField(field, fieldAttrs);
+                field.layout = context.layoutField(field, fieldAttrs);
             }
             if (context.sizeBits == 0) {
                 // As an extension, MSVC allows records that only contain zero-sized bitfields and empty
