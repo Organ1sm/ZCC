@@ -3831,11 +3831,6 @@ fn parseIfStmt(p: *Parser) Error!NodeIndex {
                 },
             },
         });
-    } else if (then == .none and elseTK != .none) {
-        return try p.addNode(.{
-            .tag = .IfElseStmt,
-            .data = .{ .binExpr = .{ .lhs = cond.node, .rhs = elseTK } },
-        });
     } else return try p.addNode(.{
         .tag = .IfThenStmt,
         .data = .{ .binExpr = .{ .lhs = cond.node, .rhs = then } },

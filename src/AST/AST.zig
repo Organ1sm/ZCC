@@ -637,16 +637,6 @@ fn dumpNode(
             try tree.dumpNode(tree.data[data.if3.body + 1], level + delta, mapper, color, w);
         },
 
-        .IfElseStmt => {
-            try w.writeByteNTimes(' ', level + half);
-            try w.writeAll("cond:\n");
-            try tree.dumpNode(data.binExpr.lhs, level + delta, mapper, color, w);
-
-            try w.writeByteNTimes(' ', level + half);
-            try w.writeAll("else:\n");
-            try tree.dumpNode(data.binExpr.rhs, level + delta, mapper, color, w);
-        },
-
         .IfThenStmt => {
             try w.writeByteNTimes(' ', level + half);
             try w.writeAll("cond:\n");

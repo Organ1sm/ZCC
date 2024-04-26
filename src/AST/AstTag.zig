@@ -72,9 +72,6 @@ pub const Tag = enum(u8) {
     /// if (a) do_1 else do_2
     IfThenElseStmt,
 
-    /// if (a); else do_2;
-    IfElseStmt,
-
     /// if (a) do_1; do_1 may be null
     IfThenStmt,
 
