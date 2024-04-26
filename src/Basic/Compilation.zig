@@ -1164,6 +1164,11 @@ pub fn getLinkerPath(comp: *Compilation) []const u8 {
     };
 }
 
+pub fn hasInt128(comp: *const Compilation) bool {
+    if (comp.target.cpu.arch == .wasm32) return true;
+    return comp.target.ptrBitWidth() >= 64;
+}
+
 test "addSourceFromReader" {
     const Test = struct {
         fn addSourceFromReader(str: []const u8, expected: []const u8, warningCount: u32, splices: []const u32) !void {

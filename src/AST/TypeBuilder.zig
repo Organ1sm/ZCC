@@ -536,6 +536,9 @@ fn combineExtra(b: *@This(), p: *Parser, new: Specifier, sourceToken: TokenIndex
     if (new == .Complex)
         b.complexToken = sourceToken;
 
+    if (new == .Int128 and !p.comp.hasInt128())
+        try p.errStr(.type_not_supported_on_target, sourceToken, "__int128");
+
     switch (new) {
         .Signed => b.specifier = switch (b.specifier) {
             .None => .Signed,

@@ -1943,3 +1943,8 @@ pub const declarator_name_tok = struct {
     pub const msg = "this declarator";
     pub const kind = .note;
 };
+pub const type_not_supported_on_target = struct {
+    pub const msg = "{s} is not supported on this target";
+    pub const extra = .str;
+    pub const kind = .@"error";
+};
