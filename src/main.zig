@@ -87,6 +87,7 @@ const usage =
     \\                          Disallow '$' in identifiers
     \\  -fshort-enums           Use the narrowest possible integer type for enums.
     \\  -fno-short-enums        Use "int" as the tag type for enums.
+    \\  -fsyntax-only           Only run the preprocessor parser, and semantic analysis stages
     \\  -fmacro-backtrace-limit=<limit>
     \\                          Set limit on how many macro expansion traces are shown in errors (default 6)
     \\  -I <dir>                Add directory to include search path
@@ -114,7 +115,7 @@ const usage =
     \\  -dump-pp               Dump preprocessor state
     \\  -dump-ast              Dump produced AST to stdout
     \\  -dump-tokens           Run preprocessor, dump internal rep of tokens to stdout 
-    \\  -dump-raw-tokens        Lex file in raw mode and dump raw tokens to stdout
+    \\  -dump-raw-tokens       Lex file in raw mode and dump raw tokens to stdout
     \\
 ;
 
@@ -217,6 +218,10 @@ pub fn parseArgs(
                     path = args[i];
                 }
                 try comp.includeDirs.append(path);
+            } else if (std.mem.eql(u8, arg, "-fsyntax-only")) {
+                comp.onlySyntax = true;
+            } else if (std.mem.eql(u8, arg, "-fno-syntax-only")) {
+                comp.onlySyntax = false;
             } else if (std.mem.startsWith(u8, arg, "-isystem")) {
                 var path = arg["-isystem".len..];
                 if (path.len == 0) {
@@ -327,7 +332,7 @@ fn mainExtra(comp: *Compilation, args: [][]const u8) !void {
     if (try parseArgs(comp, stdOut, &sourceFiles, &linkObjects, macroBuffer.writer(), args))
         return;
 
-    const linking = !(comp.onlyPreprocess or comp.onlyCompile or comp.onlyPreprocessAndCompile);
+    const linking = !(comp.onlyPreprocess or comp.onlySyntax or comp.onlyCompile or comp.onlyPreprocessAndCompile);
     var tempFileCount: u32 = 0;
     defer if (linking) for (linkObjects.items[linkObjects.items.len - tempFileCount ..]) |obj| {
         std.fs.deleteFileAbsolute(obj) catch {};
@@ -377,6 +382,11 @@ fn mainExtra(comp: *Compilation, args: [][]const u8) !void {
 
     if (comp.diag.errors != 0) {
         if (fastExit) exitWithCleanup(linkObjects.items, tempFileCount, 1);
+        return;
+    }
+
+    if (comp.onlySyntax) {
+        if (fastExit) std.process.exit(0); // Not linking, no need for clean up.
         return;
     }
 
