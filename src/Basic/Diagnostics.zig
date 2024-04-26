@@ -150,6 +150,7 @@ pub const Options = packed struct {
     @"gnu-zero-variadic-macro-arguments": Kind = .default,
     @"expansion-to-defined": Kind = .default,
     @"main-return-type": Kind = .default,
+    @"bit-int-extension": Kind = .default,
 };
 
 list: std.ArrayListUnmanaged(Message) = .{},

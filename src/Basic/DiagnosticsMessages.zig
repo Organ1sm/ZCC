@@ -1948,3 +1948,25 @@ pub const type_not_supported_on_target = struct {
     pub const extra = .str;
     pub const kind = .@"error";
 };
+pub const bit_int = struct {
+    pub const msg = "'_BitInt' in C17 and earlier is a Clang extension'";
+    pub const kind = .off;
+    pub const pedantic = true;
+    pub const opt = "bit-int-extension";
+    pub const suppress_version = .c2x;
+};
+pub const unsigned_bit_int_too_small = struct {
+    pub const msg = "{s} must have a bit size of at least 1";
+    pub const extra = .str;
+    pub const kind = .@"error";
+};
+pub const signed_bit_int_too_small = struct {
+    pub const msg = "{s} must have a bit size of at least 2";
+    pub const extra = .str;
+    pub const kind = .@"error";
+};
+pub const bit_int_too_big = struct {
+    pub const msg = "{s} of bit sizes greater than 128 not supported";
+    pub const extra = .str;
+    pub const kind = .@"error";
+};

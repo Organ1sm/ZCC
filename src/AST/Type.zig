@@ -12,16 +12,10 @@ const Type = @This();
 const NodeIndex = Tree.NodeIndex;
 const TokenIndex = Tree.TokenIndex;
 
-data: union {
-    subType: *Type,
-    func: *Function,
-    array: *Array,
-    expr: *Expr,
-    @"enum": *Enum,
-    record: *Record,
-    attributed: *Attributed,
-    none: void,
-} = .{ .none = {} },
+data: union { subType: *Type, func: *Function, array: *Array, expr: *Expr, @"enum": *Enum, record: *Record, attributed: *Attributed, none: void, int: struct {
+    bits: u8,
+    signedness: std.builtin.Signedness,
+} } = .{ .none = {} },
 
 qual: Qualifiers = .{},
 specifier: Specifier,
@@ -327,6 +321,10 @@ pub const Specifier = enum {
     ComplexInt128,
     ComplexUInt128,
 
+    // data.int
+    BitInt,
+    ComplexBitInt,
+
     // floating point numbers
     FP16,
     Float,
@@ -501,6 +499,8 @@ pub fn isInt(ty: Type) bool {
         .ComplexULongLong,
         .ComplexInt128,
         .ComplexUInt128,
+        .BitInt,
+        .ComplexBitInt,
         => true,
 
         .TypeofType => ty.data.subType.isInt(),
@@ -556,6 +556,7 @@ pub fn isReal(ty: Type) bool {
         .ComplexULongLong,
         .ComplexInt128,
         .ComplexUInt128,
+        .ComplexBitInt,
         => false,
 
         .TypeofType => ty.data.subType.isReal(),
@@ -611,6 +612,8 @@ pub fn isUnsignedInt(ty: Type, comp: *const Compilation) bool {
         .ComplexULongLong,
         .ComplexUInt128,
         => return true,
+
+        .BitInt, .ComplexBitInt => return ty.data.int.signedness == .unsigned,
 
         .TypeofType => ty.data.subType.isUnsignedInt(comp),
         .TypeofExpr => ty.data.expr.ty.isUnsignedInt(comp),
@@ -835,6 +838,8 @@ pub fn integerPromotion(ty: Type, comp: *Compilation) Type {
             .ComplexULongLong,
             .ComplexInt128,
             .ComplexUInt128,
+            .BitInt,
+            .ComplexBitInt,
             => specifier,
 
             .TypeofType => return ty.data.subType.integerPromotion(comp),
@@ -1022,6 +1027,8 @@ pub fn sizeof(ty: Type, comp: *const Compilation) ?u64 {
         .Float80 => 16,
         .Float128 => 16,
 
+        .BitInt => return std.mem.alignForward(u64, (ty.data.int.bits + 7) / 8, ty.alignof(comp)),
+
         .ComplexChar,
         .ComplexSChar,
         .ComplexUChar,
@@ -1041,6 +1048,7 @@ pub fn sizeof(ty: Type, comp: *const Compilation) ?u64 {
         .ComplexLongDouble,
         .ComplexFloat80,
         .ComplexFloat128,
+        .ComplexBitInt,
         => return 2 * ty.makeReal().sizeof(comp).?,
 
         .Pointer,
@@ -1085,6 +1093,7 @@ pub fn bitSizeof(ty: Type, comp: *const Compilation) ?u64 {
         .TypeofType, .DecayedTypeofType => ty.data.subType.bitSizeof(comp),
         .TypeofExpr, .DecayedTypeofExpr => ty.data.expr.ty.bitSizeof(comp),
         .Attributed => ty.data.attributed.base.bitSizeof(comp),
+        .BitInt => return ty.data.int.bits,
         else => 8 * (ty.sizeof(comp) orelse return null),
     };
 }
@@ -1144,6 +1153,7 @@ pub fn alignof(ty: Type, comp: *const Compilation) u29 {
         .ComplexLongDouble,
         .ComplexFloat80,
         .ComplexFloat128,
+        .ComplexBitInt,
         => return ty.makeReal().alignof(comp),
 
         .Short => comp.target.c_type_alignment(.short),
@@ -1154,6 +1164,11 @@ pub fn alignof(ty: Type, comp: *const Compilation) u29 {
         .ULong => comp.target.c_type_alignment(.ulong),
         .LongLong => comp.target.c_type_alignment(.longlong),
         .ULongLong => comp.target.c_type_alignment(.ulonglong),
+
+        .BitInt => @min(
+            std.math.ceilPowerOfTwoAssert(u16, (ty.data.int.bits + 7) / 8),
+            comp.target.maxIntAlignment(),
+        ),
 
         .Int128,
         .UInt128,
@@ -1334,6 +1349,12 @@ pub fn makeReal(ty: Type) Type {
             base.specifier = @enumFromInt(@intFromEnum(base.specifier) - 6);
             return base;
         },
+
+        .ComplexBitInt => {
+            base.specifier = .BitInt;
+            return base;
+        },
+
         .ComplexChar,
         .ComplexSChar,
         .ComplexUChar,
@@ -1385,6 +1406,11 @@ pub fn makeComplex(ty: Type) Type {
         .UInt128,
         => {
             base.specifier = @enumFromInt(@intFromEnum(base.specifier) + 13);
+            return base;
+        },
+
+        .BitInt => {
+            base.specifier = .ComplexBitInt;
             return base;
         },
 

@@ -8,6 +8,7 @@ const Qualifiers = @import("Type.zig").Qualifiers;
 const TypeBuilder = @This();
 
 complexToken: ?TokenIndex = null,
+bitIntToken: ?TokenIndex = null,
 typedef: ?struct {
     token: TokenIndex,
     type: Type,
@@ -83,6 +84,13 @@ pub const Specifier = union(enum) {
     ComplexInt128,
     ComplexSInt128,
     ComplexUInt128,
+
+    BitInt: i16,
+    SBitInt: i16,
+    UBitInt: i16,
+    ComplexBitInt: i16,
+    ComplexSBitInt: i16,
+    ComplexUBitInt: i16,
 
     FP16,
     Float,
@@ -167,6 +175,10 @@ pub const Specifier = union(enum) {
             .UInt128 => "unsigned __int128",
             .SInt128 => "signed __int128",
 
+            .BitInt => "_BitInt",
+            .SBitInt => "signed _BitInt",
+            .UBitInt => "unsigned _BitInt",
+
             .ComplexChar => "_Complex char",
             .ComplexSChar => "_Complex signed char",
             .ComplexUChar => "_Complex unsigned char",
@@ -196,6 +208,9 @@ pub const Specifier = union(enum) {
             .ComplexInt128 => "_Complex __int128",
             .ComplexSInt128 => "_Complex signed __int128",
             .ComplexUInt128 => "_Complex unsigned __int128",
+            .ComplexBitInt => "_Complex _BitInt",
+            .ComplexSBitInt => "_Complex signed _BitInt",
+            .ComplexUBitInt => "_Complex unsigned _BitInt",
 
             .FP16 => "__fp16",
             .Float => "float",
@@ -322,6 +337,40 @@ pub fn finish(b: @This(), p: *Parser) Parser.Error!Type {
 
         Specifier.ComplexInt128, Specifier.ComplexSInt128 => ty.specifier = .ComplexInt128,
         Specifier.ComplexUInt128 => ty.specifier = .ComplexUInt128,
+
+        Specifier.BitInt,
+        Specifier.SBitInt,
+        Specifier.UBitInt,
+        Specifier.ComplexBitInt,
+        Specifier.ComplexUBitInt,
+        Specifier.ComplexSBitInt,
+        => |bits| {
+            const unsigned = b.specifier == .UBitInt or b.specifier == .ComplexUBitInt;
+            if (unsigned) {
+                if (bits < 1) {
+                    try p.errStr(.unsigned_bit_int_too_small, b.bitIntToken.?, b.specifier.toString().?);
+                    return error.ParsingFailed;
+                }
+            } else {
+                if (bits < 2) {
+                    try p.errStr(.signed_bit_int_too_small, b.bitIntToken.?, b.specifier.toString().?);
+                    return error.ParsingFailed;
+                }
+            }
+
+            if (bits > 128) {
+                try p.errStr(.bit_int_too_big, b.bitIntToken.?, b.specifier.toString().?);
+                return error.ParsingFailed;
+            }
+
+            ty.specifier = if (b.complexToken != null) .ComplexBitInt else .BitInt;
+            ty.data = .{
+                .int = .{
+                    .signedness = if (unsigned) .unsigned else .signed,
+                    .bits = @intCast(bits),
+                },
+            };
+        },
 
         Specifier.FP16 => ty.specifier = .FP16,
         Specifier.Float => ty.specifier = .Float,
@@ -536,6 +585,9 @@ fn combineExtra(b: *@This(), p: *Parser, new: Specifier, sourceToken: TokenIndex
     if (new == .Complex)
         b.complexToken = sourceToken;
 
+    if (new == .BitInt)
+        b.bitIntToken = sourceToken;
+
     if (new == .Int128 and !p.comp.hasInt128())
         try p.errStr(.type_not_supported_on_target, sourceToken, "__int128");
 
@@ -552,6 +604,8 @@ fn combineExtra(b: *@This(), p: *Parser, new: Specifier, sourceToken: TokenIndex
             .LongLongInt => .SLongLongInt,
             .Int128 => .SInt128,
 
+            .BitInt => |bits| .{ .SBitInt = bits },
+
             .Complex => .ComplexSigned,
             .ComplexChar => .ComplexSChar,
             .ComplexShort => .ComplexSShort,
@@ -562,6 +616,7 @@ fn combineExtra(b: *@This(), p: *Parser, new: Specifier, sourceToken: TokenIndex
             .ComplexLongLong => .ComplexSLongLong,
             .ComplexLongLongInt => .ComplexSLongLongInt,
             .ComplexInt128 => .ComplexSInt128,
+            .ComplexBitInt => |bits| .{ .ComplexSBitInt = bits },
 
             .Signed,
             .SShort,
@@ -572,6 +627,7 @@ fn combineExtra(b: *@This(), p: *Parser, new: Specifier, sourceToken: TokenIndex
             .SLongLong,
             .SLongLongInt,
             .SInt128,
+            .SBitInt,
             .ComplexSChar,
             .ComplexSigned,
             .ComplexSShort,
@@ -582,6 +638,7 @@ fn combineExtra(b: *@This(), p: *Parser, new: Specifier, sourceToken: TokenIndex
             .ComplexSLongLong,
             .ComplexSLongLongInt,
             .ComplexSInt128,
+            .ComplexSBitInt,
             => return b.duplicateSpec(p, sourceToken, "signed"),
             else => return b.cannotCombine(p, sourceToken),
         },
@@ -597,6 +654,7 @@ fn combineExtra(b: *@This(), p: *Parser, new: Specifier, sourceToken: TokenIndex
             .LongLong => .ULongLong,
             .LongLongInt => .ULongLongInt,
             .Int128 => .UInt128,
+            .BitInt => |bits| .{ .UBitInt = bits },
             .Complex => .ComplexUnsigned,
             .ComplexChar => .ComplexUChar,
             .ComplexShort => .ComplexUShort,
@@ -607,15 +665,17 @@ fn combineExtra(b: *@This(), p: *Parser, new: Specifier, sourceToken: TokenIndex
             .ComplexLongLong => .ComplexULongLong,
             .ComplexLongLongInt => .ComplexULongLongInt,
             .ComplexInt128 => .ComplexUInt128,
+            .ComplexBitInt => |bits| .{ .ComplexUBitInt = bits },
             .Unsigned,
             .UShort,
             .UShortInt,
             .UInt,
             .ULong,
             .ULongInt,
-            .ULongLong, //
+            .ULongLong,
             .ULongLongInt,
             .UInt128,
+            .UBitInt,
             .ComplexUChar,
             .ComplexUnsigned,
             .ComplexUShort,
@@ -626,6 +686,7 @@ fn combineExtra(b: *@This(), p: *Parser, new: Specifier, sourceToken: TokenIndex
             .ComplexULongLong,
             .ComplexULongLongInt,
             .ComplexUInt128,
+            .ComplexUBitInt,
             => return b.duplicateSpec(p, sourceToken, "unsigned"),
             else => return b.cannotCombine(p, sourceToken),
         },
@@ -709,6 +770,16 @@ fn combineExtra(b: *@This(), p: *Parser, new: Specifier, sourceToken: TokenIndex
             else => return b.cannotCombine(p, sourceToken),
         },
 
+        .BitInt => b.specifier = switch (b.specifier) {
+            .None => .{ .BitInt = new.BitInt },
+            .Unsigned => .{ .UBitInt = new.BitInt },
+            .Signed => .{ .SBitInt = new.BitInt },
+            .Complex => .{ .ComplexBitInt = new.BitInt },
+            .ComplexSigned => .{ .ComplexSBitInt = new.BitInt },
+            .ComplexUnsigned => .{ .ComplexUBitInt = new.BitInt },
+            else => return b.cannotCombine(p, sourceToken),
+        },
+
         .FP16 => b.specifier = switch (b.specifier) {
             .None => .FP16,
             .Complex => .ComplexFP16,
@@ -781,6 +852,10 @@ fn combineExtra(b: *@This(), p: *Parser, new: Specifier, sourceToken: TokenIndex
             .SInt128 => .ComplexSInt128,
             .UInt128 => .ComplexUInt128,
 
+            .BitInt => |bits| .{ .ComplexBitInt = bits },
+            .SBitInt => |bits| .{ .ComplexSBitInt = bits },
+            .UBitInt => |bits| .{ .ComplexUBitInt = bits },
+
             .Complex,
             .ComplexFP16,
             .ComplexFloat,
@@ -817,6 +892,9 @@ fn combineExtra(b: *@This(), p: *Parser, new: Specifier, sourceToken: TokenIndex
             .ComplexInt128,
             .ComplexSInt128,
             .ComplexUInt128,
+            .ComplexBitInt,
+            .ComplexSBitInt,
+            .ComplexUBitInt,
             => return b.duplicateSpec(p, sourceToken, "_Complex"),
             else => return b.cannotCombine(p, sourceToken),
         },
@@ -845,6 +923,12 @@ pub fn fromType(ty: Type) Specifier {
         .ULongLong => Specifier.ULongLong,
         .Int128 => Specifier.Int128,
         .UInt128 => Specifier.UInt128,
+
+        .BitInt => if (ty.data.int.signedness == .unsigned)
+            return .{ .UBitInt = ty.data.int.bits }
+        else
+            return .{ .SBitInt = ty.data.int.bits },
+
         .ComplexChar => Specifier.ComplexChar,
         .ComplexSChar => Specifier.ComplexSChar,
         .ComplexUChar => Specifier.ComplexUChar,
@@ -858,6 +942,12 @@ pub fn fromType(ty: Type) Specifier {
         .ComplexULongLong => Specifier.ComplexULongLong,
         .ComplexInt128 => Specifier.ComplexInt128,
         .ComplexUInt128 => Specifier.ComplexUInt128,
+
+        .ComplexBitInt => if (ty.data.int.signedness == .unsigned)
+            return .{ .ComplexUBitInt = ty.data.int.bits }
+        else
+            return .{ .ComplexSBitInt = ty.data.int.bits },
+
         .FP16 => Specifier.FP16,
         .Float => Specifier.Float,
         .Double => Specifier.Double,
