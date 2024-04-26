@@ -53,11 +53,8 @@ pub const Token = struct {
         };
     }
 
-    pub const AllKeywords = std.ComptimeStringMap(TokenType, .{
-        .{ "auto", auto: {
-            @setEvalBranchQuota(3000);
-            break :auto .KeywordAuto;
-        } },
+    pub const AllKeywords = std.StaticStringMap(TokenType).initComptime(.{
+        .{ "auto", .KeywordAuto },
         .{ "enum", .KeywordEnum },
         .{ "union", .KeywordUnion },
         .{ "struct", .KeywordStruct },

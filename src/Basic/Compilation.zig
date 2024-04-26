@@ -16,6 +16,15 @@ const Allocator = std.mem.Allocator;
 const EpochSeconds = std.time.epoch.EpochSeconds;
 
 const Compilation = @This();
+
+pub const Linker = enum {
+    ld,
+    bfd,
+    gold,
+    lld,
+    mold,
+};
+
 pub const Error = error{
     /// A fatal error has ocurred and compilation has stopped.
     FatalError,
@@ -30,7 +39,9 @@ outputName: ?[]const u8 = null,
 target: std.Target = builtin.target,
 pragmaHandlers: std.StringArrayHashMapUnmanaged(*Pragma) = .{},
 onlyPreprocess: bool = false,
+onlySyntax: bool = false,
 onlyCompile: bool = false,
+onlyPreprocessAndCompile: bool = false,
 dumpPP: bool = false,
 dumpAst: bool = false,
 dumpTokens: bool = false,
@@ -46,6 +57,10 @@ types: struct {
 } = undefined,
 
 stringInterner: StringInterner = .{},
+
+// linker options
+useLinker: Linker = .ld,
+linkerPath: ?[]const u8 = null,
 
 pub fn init(gpa: Allocator) Compilation {
     return .{
@@ -1136,6 +1151,17 @@ pub fn systemCompiler(comp: *const Compilation) LangOpts.Compiler {
         return .gcc;
 
     return .clang;
+}
+
+pub fn getLinkerPath(comp: *Compilation) []const u8 {
+    // TODO extremely incomplete
+    return switch (comp.useLinker) {
+        .ld => "/usr/bin/ld",
+        .bfd => "/usr/bin/ld.bfd",
+        .gold => "/usr/bin/ld.gold",
+        .lld => "/usr/bin/ld.lld",
+        .mold => "/usr/bin/ld.mold",
+    };
 }
 
 test "addSourceFromReader" {

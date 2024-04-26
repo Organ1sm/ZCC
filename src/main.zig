@@ -26,12 +26,15 @@ pub fn main() u8 {
         return 1;
     };
 
+    const fastExit = @import("builtin").mode != .Debug;
+
     var comp = Compilation.init(gpa);
     defer comp.deinit();
 
     comp.addDefaultPragmaHandlers() catch |er| switch (er) {
         error.OutOfMemory => {
             std.debug.print("Out of Memory\n", .{});
+            if (fastExit) std.process.exit(1);
             return 1;
         },
     };
@@ -41,16 +44,23 @@ pub fn main() u8 {
     mainExtra(&comp, args) catch |er| switch (er) {
         error.OutOfMemory => {
             std.debug.print("Out of Memory\n", .{});
+            if (fastExit) std.process.exit(1);
             return 1;
         },
         error.StreamTooLong => {
-            std.debug.print("Stream too long\n", .{});
+            std.debug.print("maximum file size exceeded\n", .{});
+            if (fastExit) std.process.exit(1);
             return 1;
         },
-        error.FatalError => comp.renderErrors(),
+        error.FatalError => {
+            comp.renderErrors();
+            if (fastExit) std.process.exit(1);
+            return 1;
+        },
         else => return 1,
     };
 
+    if (fastExit) std.process.exit(@intFromBool(comp.diag.errors != 0));
     return @intFromBool(comp.diag.errors != 0);
 }
 
@@ -77,6 +87,7 @@ const usage =
     \\                          Disallow '$' in identifiers
     \\  -fshort-enums           Use the narrowest possible integer type for enums.
     \\  -fno-short-enums        Use "int" as the tag type for enums.
+    \\  -fsyntax-only           Only run the preprocessor parser, and semantic analysis stages
     \\  -fmacro-backtrace-limit=<limit>
     \\                          Set limit on how many macro expansion traces are shown in errors (default 6)
     \\  -I <dir>                Add directory to include search path
@@ -86,6 +97,7 @@ const usage =
     \\  -o <file>               Write output to <file>
     \\  -pedantic               Warn on language extensions
     \\  -std=<standard>         Specify language standard
+    \\  -S                      Only run preprocess and compilation step
     \\ --target=<value>         Generate code for the given target
     \\  -U <macro>              Undefine <macro>
     \\  -Wall                   Enable all warnings
@@ -94,18 +106,30 @@ const usage =
     \\  -W<warning>             Enable the specified warning
     \\  -Wno-<warning>          Disable the specified warning
     \\
+    \\Link options:
+    \\  -fuse-ld=[bfd|gold|lld|mold]
+    \\                          Use specific linker
+    \\  --ld-path=<path>        Use linker specified by <path>
+    \\
     \\Debug options:
     \\  -dump-pp               Dump preprocessor state
     \\  -dump-ast              Dump produced AST to stdout
     \\  -dump-tokens           Run preprocessor, dump internal rep of tokens to stdout 
-    \\  -dump-raw-tokens        Lex file in raw mode and dump raw tokens to stdout
+    \\  -dump-raw-tokens       Lex file in raw mode and dump raw tokens to stdout
     \\
 ;
+
+fn option(arg: []const u8, name: []const u8) ?[]const u8 {
+    if (std.mem.startsWith(u8, arg, name) and arg.len > name.len)
+        return arg[name.len..];
+    return null;
+}
 
 pub fn parseArgs(
     comp: *Compilation,
     stdOut: anytype,
     sources: *std.ArrayList(Source),
+    linkObjects: *std.ArrayList([]const u8),
     macroBuffer: anytype,
     args: [][]const u8,
 ) !bool {
@@ -176,8 +200,7 @@ pub fn parseArgs(
                 comp.langOpts.dollarsInIdentifiers = true;
             } else if (std.mem.eql(u8, arg, "-fno-dollars-in-identifiers")) {
                 comp.langOpts.dollarsInIdentifiers = false;
-            } else if (std.mem.startsWith(u8, arg, "-fmacro-backtrace-limit=")) {
-                const limitStr = arg["-fmacro-backtrace-limit=".len..];
+            } else if (option(arg, "-fmacro-backtrace-limit=")) |limitStr| {
                 var limit = std.fmt.parseInt(u32, limitStr, 10) catch {
                     try err(comp, "-fmacro-backtrace-limit takes a number argument");
                     continue;
@@ -195,6 +218,10 @@ pub fn parseArgs(
                     path = args[i];
                 }
                 try comp.includeDirs.append(path);
+            } else if (std.mem.eql(u8, arg, "-fsyntax-only")) {
+                comp.onlySyntax = true;
+            } else if (std.mem.eql(u8, arg, "-fno-syntax-only")) {
+                comp.onlySyntax = false;
             } else if (std.mem.startsWith(u8, arg, "-isystem")) {
                 var path = arg["-isystem".len..];
                 if (path.len == 0) {
@@ -206,8 +233,7 @@ pub fn parseArgs(
                     path = args[i];
                 }
                 try comp.systemIncludeDirs.append(path);
-            } else if (std.mem.startsWith(u8, arg, "--emulate=")) {
-                const compilerStr = arg["--emulate=".len..];
+            } else if (option(arg, "--emulate=")) |compilerStr| {
                 const compiler = std.meta.stringToEnum(LangOpts.Compiler, compilerStr) orelse {
                     try comp.diag.add(.{ .tag = .cli_invalid_emulate, .extra = .{ .str = arg } }, &.{});
                     continue;
@@ -234,21 +260,18 @@ pub fn parseArgs(
                 comp.diag.fatalErrors = true;
             } else if (std.mem.eql(u8, arg, "-Wno-fatal-errors")) {
                 comp.diag.fatalErrors = false;
-            } else if (std.mem.startsWith(u8, arg, "-Werror=")) {
-                const option = arg["-Werror=".len..];
-                try comp.diag.set(option, .@"error");
-            } else if (std.mem.startsWith(u8, arg, "-Wno-")) {
-                const option = arg["-Wno-".len..];
-                try comp.diag.set(option, .off);
-            } else if (std.mem.startsWith(u8, arg, "-W")) {
-                const option = arg["-W".len..];
-                try comp.diag.set(option, .warning);
-            } else if (std.mem.startsWith(u8, arg, "-std=")) {
-                const standard = arg["-std=".len..];
+            } else if (option(arg, "-Werror=")) |errName| {
+                try comp.diag.set(errName, .@"error");
+            } else if (option(arg, "-Wno-")) |errName| {
+                try comp.diag.set(errName, .off);
+            } else if (option(arg, "-W")) |errName| {
+                try comp.diag.set(errName, .warning);
+            } else if (option(arg, "-std=")) |standard| {
                 comp.langOpts.setStandard(standard) catch
                     try comp.diag.add(.{ .tag = .cli_invalid_standard, .extra = .{ .str = arg } }, &.{});
-            } else if (std.mem.startsWith(u8, arg, "--target=")) {
-                const triple = arg["--target=".len..];
+            } else if (std.mem.startsWith(u8, arg, "-S")) {
+                comp.onlyPreprocessAndCompile = true;
+            } else if (option(arg, "--target=")) |triple| {
                 const query = std.Target.Query.parse(.{ .arch_os_abi = triple }) catch {
                     return comp.diag.fatalNoSrc("Invalid target '{s}'", .{triple});
                 };
@@ -265,9 +288,18 @@ pub fn parseArgs(
                 comp.dumpTokens = true;
             } else if (std.mem.eql(u8, arg, "-dump-raw-tokens")) {
                 comp.dumpRawTokens = true;
+            } else if (option(arg, "-fuse-ld=")) |linkerName| {
+                comp.useLinker = std.meta.stringToEnum(Compilation.Linker, linkerName) orelse {
+                    try comp.diag.add(.{ .tag = .cli_unknown_linker, .extra = .{ .str = arg } }, &.{});
+                    continue;
+                };
+            } else if (option(arg, "--ld-path=")) |linkerPath| {
+                comp.linkerPath = linkerPath;
             } else {
                 try comp.diag.add(.{ .tag = .cli_unknown_arg, .extra = .{ .str = arg } }, &.{});
             }
+        } else if (std.mem.endsWith(u8, arg, ".o") or std.mem.endsWith(u8, arg, ".obj")) {
+            try linkObjects.append(arg);
         } else {
             const file = addSource(comp, arg) catch |er| {
                 return fatal(comp, "unable to add source file '{s}': {s}", .{ arg, Util.errorDescription(er) });
@@ -288,21 +320,37 @@ pub fn parseArgs(
 fn mainExtra(comp: *Compilation, args: [][]const u8) !void {
     var sourceFiles = std.ArrayList(Source).init(comp.gpa);
     var macroBuffer = std.ArrayList(u8).init(comp.gpa);
+    var linkObjects = std.ArrayList([]const u8).init(comp.gpa);
 
     defer {
         sourceFiles.deinit();
         macroBuffer.deinit();
+        linkObjects.deinit();
     }
 
     const stdOut = std.io.getStdOut().writer();
-    if (try parseArgs(comp, stdOut, &sourceFiles, macroBuffer.writer(), args))
+    if (try parseArgs(comp, stdOut, &sourceFiles, &linkObjects, macroBuffer.writer(), args))
         return;
+
+    const linking = !(comp.onlyPreprocess or comp.onlySyntax or comp.onlyCompile or comp.onlyPreprocessAndCompile);
+    var tempFileCount: u32 = 0;
+    defer if (linking) for (linkObjects.items[linkObjects.items.len - tempFileCount ..]) |obj| {
+        std.fs.deleteFileAbsolute(obj) catch {};
+        comp.gpa.free(obj);
+    };
 
     if (sourceFiles.items.len == 0) {
         return fatal(comp, "no input files", .{});
-    } else if (sourceFiles.items.len != 1 and comp.outputName != null) {
+    } else if ((sourceFiles.items.len != 1 and comp.outputName != null) and !linking) {
         return fatal(comp, "cannot specify -o when generating multiple output files", .{});
     }
+
+    if (!linking)
+        for (linkObjects.items) |obj|
+            try comp.diag.add(.{ .tag = .cli_unused_link_object, .extra = .{ .str = obj } }, &.{});
+
+    if (linking and comp.linkerPath == null)
+        comp.linkerPath = comp.getLinkerPath();
 
     comp.defineSystemIncludes() catch |er| switch (er) {
         error.OutOfMemory => return error.OutOfMemory,
@@ -313,12 +361,43 @@ fn mainExtra(comp: *Compilation, args: [][]const u8) !void {
     const builtinMacros = try comp.generateBuiltinMacros();
     const userDefinedMacros = try comp.addSourceFromBuffer("<command line>", macroBuffer.items);
 
+    const fastExit = @import("builtin").mode != .Debug;
+    if (fastExit and sourceFiles.items.len == 1) {
+        processSource(comp, sourceFiles.items[0], &linkObjects, &tempFileCount, builtinMacros, userDefinedMacros, fastExit) catch |e| switch (e) {
+            error.OutOfMemory => return error.OutOfMemory,
+            error.FatalError => {
+                comp.renderErrors();
+                exitWithCleanup(linkObjects.items, tempFileCount, 1);
+            },
+        };
+        unreachable;
+    }
+
     for (sourceFiles.items) |source| {
-        processSource(comp, source, builtinMacros, userDefinedMacros) catch |e| switch (e) {
+        processSource(comp, source, &linkObjects, &tempFileCount, builtinMacros, userDefinedMacros, fastExit) catch |e| switch (e) {
             error.OutOfMemory => return error.OutOfMemory,
             error.FatalError => comp.renderErrors(),
         };
     }
+
+    if (comp.diag.errors != 0) {
+        if (fastExit) exitWithCleanup(linkObjects.items, tempFileCount, 1);
+        return;
+    }
+
+    if (comp.onlySyntax) {
+        if (fastExit) std.process.exit(0); // Not linking, no need for clean up.
+        return;
+    }
+
+    if (linking) {
+        try invokeLinker(comp, linkObjects.items, tempFileCount);
+        if (fastExit)
+            exitWithCleanup(linkObjects.items, tempFileCount, 0);
+    }
+
+    if (fastExit)
+        std.process.exit(0);
 }
 
 fn addSource(comp: *Compilation, path: []const u8) !Source {
@@ -345,7 +424,15 @@ fn fatal(comp: *Compilation, comptime fmt: []const u8, args: anytype) error{Fata
     return comp.diag.fatalNoSrc(fmt, args);
 }
 
-fn processSource(comp: *Compilation, source: Source, builtinMacro: Source, userDefinedMacros: Source) !void {
+fn processSource(
+    comp: *Compilation,
+    source: Source,
+    linkObjects: *std.ArrayList([]const u8),
+    tempFileCount: *u32,
+    builtinMacro: Source,
+    userDefinedMacros: Source,
+    comptime fastExit: bool,
+) !void {
     comp.generatedBuffer.items.len = 0;
     var pp = Preprocessor.init(comp);
     defer pp.deinit();
@@ -375,8 +462,13 @@ fn processSource(comp: *Compilation, source: Source, builtinMacro: Source, userD
         pp.prettyPrintTokens(bufWriter.writer()) catch |er|
             return fatal(comp, "unable to write result: {s}", .{Util.errorDescription(er)});
 
-        return bufWriter.flush() catch |er|
-            fatal(comp, "unable to write result: {s}", .{Util.errorDescription(er)});
+        bufWriter.flush() catch |er|
+            return fatal(comp, "unable to write result: {s}", .{Util.errorDescription(er)});
+
+        if (fastExit)
+            std.process.exit(0); // Not linking, no need for clean up.
+
+        return;
     }
 
     if (comp.dumpTokens or comp.dumpRawTokens) {
@@ -420,8 +512,11 @@ fn processSource(comp: *Compilation, source: Source, builtinMacro: Source, userD
     comp.renderErrors();
 
     // do not compile if there were errors
-    if (comp.diag.errors != prevErrors)
-        return;
+    if (comp.diag.errors != prevErrors) {
+        if (fastExit)
+            exitWithCleanup(linkObjects.items, tempFileCount.*, 1);
+        return; // Don't compile if there were errors
+    }
 
     if (comp.target.ofmt != .elf or comp.target.cpu.arch != .x86_64) {
         return fatal(
@@ -434,12 +529,26 @@ fn processSource(comp: *Compilation, source: Source, builtinMacro: Source, userD
     const obj = try Codegen.generateTree(comp, tree);
     defer obj.deinit();
 
-    const basename = std.fs.path.basename(source.path);
-    const outFileName = comp.outputName orelse try std.fmt.allocPrint(comp.gpa, "{s}{s}", .{
-        basename[0 .. basename.len - std.fs.path.extension(source.path).len],
-        comp.target.ofmt.fileExt(comp.target.cpu.arch),
-    });
-    defer if (comp.outputName == null) comp.gpa.free(outFileName);
+    const outFileName = if (comp.onlyCompile) blk: {
+        const basename = std.fs.path.basename(source.path);
+        break :blk comp.outputName orelse try std.fmt.allocPrint(comp.gpa, "{s}{s}", .{
+            basename[0 .. basename.len - std.fs.path.extension(source.path).len],
+            comp.target.ofmt.fileExt(comp.target.cpu.arch),
+        });
+    } else blk: {
+        const randomBytesCount = 12;
+        const subPathLen = comptime std.fs.base64_encoder.calcSize(randomBytesCount);
+
+        var randomBytes: [randomBytesCount]u8 = undefined;
+        std.crypto.random.bytes(&randomBytes);
+        var randomName: [subPathLen]u8 = undefined;
+        _ = std.fs.base64_encoder.encode(&randomName, &randomBytes);
+
+        break :blk try std.fmt.allocPrint(comp.gpa, "/tmp/{s}{s}", .{
+            randomName, comp.target.ofmt.fileExt(comp.target.cpu.arch),
+        });
+    };
+    defer if (comp.onlyCompile) comp.gpa.free(outFileName);
 
     const outFile = std.fs.cwd().createFile(outFileName, .{}) catch |er|
         return fatal(comp, "unable to create output file '{s}': {s}", .{ outFileName, Util.errorDescription(er) });
@@ -448,9 +557,67 @@ fn processSource(comp: *Compilation, source: Source, builtinMacro: Source, userD
     obj.finish(outFile) catch |er|
         return fatal(comp, "could output to object file '{s}': {s}", .{ outFileName, Util.errorDescription(er) });
 
-    if (comp.onlyCompile) return;
+    if (comp.onlyCompile) {
+        if (fastExit)
+            std.process.exit(0); // Not linking, no need clean up.
+        return;
+    }
 
-    // TODO invoke linker
+    try linkObjects.append(outFileName);
+    tempFileCount.* += 1;
+    if (fastExit) {
+        try invokeLinker(comp, linkObjects.items, tempFileCount.*);
+        exitWithCleanup(linkObjects, tempFileCount.*, 0);
+    }
+}
+
+fn invokeLinker(comp: *Compilation, linkObjects: []const []const u8, tempFileCount: u32) !void {
+    const argsLen = 1 // linker name
+    + 2 // -o output
+    + 2 // -dynamic-linker <path>
+    + 1 // -lc
+    + 1 // -L/lib
+    + 1 // -L/usr/lib
+    + 1 // Scrt1.0
+    + linkObjects.len;
+
+    var argv = try std.ArrayList([]const u8).initCapacity(comp.gpa, argsLen);
+    defer argv.deinit();
+
+    argv.appendAssumeCapacity(comp.linkerPath.?);
+    argv.appendAssumeCapacity("-o");
+    argv.appendAssumeCapacity(comp.outputName orelse "a.out");
+    argv.appendAssumeCapacity("-dynamic-linker");
+    argv.appendAssumeCapacity(comp.target.standardDynamicLinkerPath().get().?);
+    argv.appendAssumeCapacity("-L/lib");
+    argv.appendAssumeCapacity("-L/usr/lib");
+    argv.appendAssumeCapacity("-lc");
+    argv.appendAssumeCapacity("/usr/lib/Scrt1.o"); // TODO very bad
+    argv.appendSliceAssumeCapacity(linkObjects);
+
+    var child = std.ChildProcess.init(argv.items, comp.gpa);
+    // TODO handle better
+    child.stdin_behavior = .Inherit;
+    child.stdout_behavior = .Inherit;
+    child.stderr_behavior = .Inherit;
+
+    const term = child.spawnAndWait() catch |er| {
+        return fatal(comp, "unable to spawn linker: {s}", .{Util.errorDescription(er)});
+    };
+    switch (term) {
+        .Exited => |code| if (code != 0) exitWithCleanup(linkObjects, tempFileCount, code),
+        else => std.process.abort(),
+    }
+
+    if (@import("builtin").mode != .Debug)
+        exitWithCleanup(linkObjects, tempFileCount, 1);
+}
+
+fn exitWithCleanup(linkObjects: []const []const u8, tempFileCount: u32, code: u8) noreturn {
+    for (linkObjects[linkObjects.len - tempFileCount ..]) |obj|
+        std.fs.deleteFileAbsolute(obj) catch {};
+
+    std.process.exit(code);
 }
 
 test "simple test" {
