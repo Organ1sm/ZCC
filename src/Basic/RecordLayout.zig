@@ -34,7 +34,7 @@ const SysVContext = struct {
 
     comp: *const Compilation,
 
-    fn init(ty: *Type, comp: *const Compilation, pragmaPack: ?u8) SysVContext {
+    fn init(ty: Type, comp: *const Compilation, pragmaPack: ?u8) SysVContext {
         var packValue: ?u64 = null;
         if (pragmaPack) |pak|
             packValue = pak * BITS_PER_BYTE;
@@ -393,7 +393,7 @@ const MsvcContext = struct {
     isUnion: bool,
     comp: *const Compilation,
 
-    fn init(ty: *const Type, comp: *const Compilation, pragmaPack: ?u8) MsvcContext {
+    fn init(ty: Type, comp: *const Compilation, pragmaPack: ?u8) MsvcContext {
         var packValue: ?u32 = null;
         if (ty.hasAttribute(.@"packed")) {
             // __attribute__((packed)) behaves like #pragma pack(1) in clang. See test case 0056.
@@ -566,17 +566,16 @@ const MsvcContext = struct {
     }
 };
 
-pub fn compute(ty: *Type, comp: *const Compilation, pragmaPack: ?u8) void {
+pub fn compute(ty: Type, comp: *const Compilation, pragmaPack: ?u8) void {
     // const mapper = comp.string_interner.getSlowTypeMapper();
     // const name = mapper.lookup(ty.getRecord().?.name);
     // std.debug.print("struct {s}\n", .{name});
+    const rec = getMutableRecord(ty);
     switch (comp.langOpts.emulate) {
         .gcc, .clang => {
             var context = SysVContext.init(ty, comp, pragmaPack);
-            var rec = getMutableRecord(ty);
 
             context.layoutFields(rec);
-
             context.sizeBits = std.mem.alignForward(u64, context.sizeBits, context.alignedBits);
 
             rec.typeLayout = TypeLayout{
@@ -589,7 +588,6 @@ pub fn compute(ty: *Type, comp: *const Compilation, pragmaPack: ?u8) void {
 
         .msvc => {
             var context = MsvcContext.init(ty, comp, pragmaPack);
-            var rec = getMutableRecord(ty);
 
             for (rec.fields, 0..) |*field, fieldIdx| {
                 var fieldAttrs: ?[]const Attribute = null;
@@ -635,11 +633,11 @@ pub fn computeLayout(ty: Type, comp: *const Compilation) TypeLayout {
     }
 }
 
-pub fn getMutableRecord(ty: *Type) *Type.Record {
+pub fn getMutableRecord(ty: Type) *Type.Record {
     return switch (ty.specifier) {
-        .Attributed => getMutableRecord(&ty.data.attributed.base),
-        .TypeofType, .DecayedTypeofType => getMutableRecord(ty.data.subType),
-        .TypeofExpr, .DecayedTypeofExpr => getMutableRecord(&ty.data.expr.ty),
+        .Attributed => getMutableRecord(ty.data.attributed.base),
+        .TypeofType, .DecayedTypeofType => getMutableRecord(ty.data.subType.*),
+        .TypeofExpr, .DecayedTypeofExpr => getMutableRecord(ty.data.expr.ty),
         .Struct, .Union => ty.data.record,
         else => unreachable,
     };
