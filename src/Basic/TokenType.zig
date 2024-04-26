@@ -184,6 +184,9 @@ pub const TokenType = enum(u8) {
     KeywordStaticAssert,
     KeywordThreadLocal,
 
+    // ISO C23
+    KeywordBitInt,
+
     // GCC keywords
     KeywordGccConst1,
     KeywordGccConst2,
@@ -566,6 +569,8 @@ pub const TokenType = enum(u8) {
             .KeywordNoreturn => "_Noreturn",
             .KeywordStaticAssert => "_Static_assert",
             .KeywordThreadLocal => "_Thread_local",
+
+            .KeywordBitInt => "_BitInt",
 
             .KeywordGccConst1 => "__const",
             .KeywordGccConst2 => "__const__",

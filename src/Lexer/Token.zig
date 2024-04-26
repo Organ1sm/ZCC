@@ -110,6 +110,9 @@ pub const Token = struct {
         .{ "_Static_assert", .KeywordStaticAssert },
         .{ "_Thread_local", .KeywordThreadLocal },
 
+        // ISO C23
+        .{ "_BitInt", .KeywordBitInt },
+
         // Preprocessor directives
         .{ "include", .KeywordInclude },
         .{ "include_next", .KeywordIncludeNext },

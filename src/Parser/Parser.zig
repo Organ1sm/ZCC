@@ -781,9 +781,11 @@ fn nextExternDecl(p: *Parser) void {
             .KeywordGccExtension,
             .KeywordTypeof1,
             .KeywordTypeof2,
+            .KeywordBitInt,
             .Identifier,
             .ExtendedIdentifier,
             => if (parens == 0) return,
+
             .KeywordPragma => p.skipToPragmaSentinel(),
             .Eof => return,
             .Semicolon => if (parens == 0) {
@@ -1618,6 +1620,7 @@ fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec, attrBufferTop: usize) Er
 ///  | enum-sepcifier
 ///  | typedef-name
 ///  | typeof-specifier
+///  | `_BitInt`  '(' constExpr ')'
 /// atomic-type-specifier
 ///   : keyword-atomic '(' typeName ')'
 /// align-specifier
@@ -1754,6 +1757,31 @@ fn parseTypeSpec(p: *Parser, ty: *TypeBuilder) Error!bool {
                 const typedef = (try p.symStack.findTypedef(internedName, p.tokenIdx, ty.specifier != .None)) orelse break;
                 if (!ty.combineTypedef(p, typedef.type, typedef.token))
                     break;
+            },
+
+            .KeywordBitInt => {
+                try p.err(.bit_int);
+                const bitIntToken = p.tokenIdx;
+                p.tokenIdx += 1;
+
+                const lparen = try p.expectToken(.LParen);
+                const res = try p.parseConstExpr(.GNUFoldingExtension);
+                try p.expectClosing(lparen, .RParen);
+
+                var bits: i16 = undefined;
+                if (res.value.tag == .unavailable) {
+                    try p.errToken(.expected_integer_constant_expr, bitIntToken);
+                    return error.ParsingFailed;
+                } else if (res.value.compare(.lte, Value.int(0), res.ty, p.comp)) {
+                    bits = -1;
+                } else if (res.value.compare(.gt, Value.int(128), res.ty, p.comp)) {
+                    bits = 129;
+                } else {
+                    bits = res.value.getInt(i16);
+                }
+
+                try ty.combine(p, .{ .BitInt = bits }, bitIntToken);
+                continue;
             },
             else => break,
         }

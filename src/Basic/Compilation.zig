@@ -357,6 +357,9 @@ pub fn generateBuiltinMacros(comp: *Compilation) !Source {
     // try comp.generateIntMax(w, "__INTPTR_MAX__", Type.wideChar(comp));
     // try comp.generateIntMax(w, "__UINTPTR_MAX__", Type.sizeT(comp));
 
+    // int widths
+    try w.writeAll("#define __BITINT_MAXWIDTH__ 128\n");
+
     // sizeof types
     try comp.generateSizeofType(w, "__SIZEOF_FLOAT__", Type.Float);
     try comp.generateSizeofType(w, "__SIZEOF_DOUBLE__", Type.Double);
