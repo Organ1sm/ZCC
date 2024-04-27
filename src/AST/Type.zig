@@ -1094,6 +1094,8 @@ pub fn bitSizeof(ty: Type, comp: *const Compilation) ?u64 {
         .TypeofExpr, .DecayedTypeofExpr => ty.data.expr.ty.bitSizeof(comp),
         .Attributed => ty.data.attributed.base.bitSizeof(comp),
         .BitInt => return ty.data.int.bits,
+        .LongDouble => comp.target.c_type_bit_size(.longdouble),
+        .Float80 => return 80,
         else => 8 * (ty.sizeof(comp) orelse return null),
     };
 }
@@ -1166,7 +1168,7 @@ pub fn alignof(ty: Type, comp: *const Compilation) u29 {
         .ULongLong => comp.target.c_type_alignment(.ulonglong),
 
         .BitInt => @min(
-            std.math.ceilPowerOfTwoAssert(u16, (ty.data.int.bits + 7) / 8),
+            std.math.ceilPowerOfTwoPromote(u16, (ty.data.int.bits + 7) / 8),
             comp.target.maxIntAlignment(),
         ),
 
