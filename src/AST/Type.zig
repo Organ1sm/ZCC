@@ -455,6 +455,10 @@ pub fn isArray(ty: Type) bool {
     };
 }
 
+pub fn isVector(ty: Type) bool {
+    return ty.specifier == .Vector;
+}
+
 pub fn isScalar(ty: Type) bool {
     return ty.isInt() or ty.isFloat() or ty.isPointer();
 }
