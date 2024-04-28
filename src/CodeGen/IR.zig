@@ -98,9 +98,9 @@ pub const Builder = struct {
         const valRef = try b.pool.put(b.gpa, key);
 
         try b.instructions.append(b.gpa, .{
-            .tag = .constant,
+            .tag = .Constant,
             .data = .{ .constant = valRef },
-            .ty = ty,
+            .type = ty,
         });
         return ref;
     }
