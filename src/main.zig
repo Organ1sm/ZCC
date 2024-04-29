@@ -114,6 +114,7 @@ const usage =
     \\Debug options:
     \\  -dump-pp               Dump preprocessor state
     \\  -dump-ast              Dump produced AST to stdout
+    \\  -dump-ir               Dump ir to stdout
     \\  -dump-tokens           Run preprocessor, dump internal rep of tokens to stdout 
     \\  -dump-raw-tokens       Lex file in raw mode and dump raw tokens to stdout
     \\
@@ -284,6 +285,8 @@ pub fn parseArgs(
                 comp.dumpPP = true;
             } else if (std.mem.eql(u8, arg, "-dump-ast")) {
                 comp.dumpAst = true;
+            } else if (std.mem.eql(u8, arg, "-dump-ir")) {
+                comp.dumpIR = true;
             } else if (std.mem.eql(u8, arg, "-dump-tokens")) {
                 comp.dumpTokens = true;
             } else if (std.mem.eql(u8, arg, "-dump-raw-tokens")) {
@@ -525,6 +528,9 @@ fn processSource(
             .{ @tagName(comp.target.cpu.arch), @tagName(comp.target.os.tag), @tagName(comp.target.abi) },
         );
     }
+
+    if (comp.dumpIR)
+        try @import("CodeGen/CodeGen.zig").generateTree(comp, tree);
 
     const obj = try Codegen.generateTree(comp, tree);
     defer obj.deinit();
