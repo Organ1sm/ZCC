@@ -20,7 +20,7 @@ const WipSwitch = struct {
     size: u64,
 
     const Cases = std.MultiArrayList(struct {
-        val: Interner.Ref,
+        value: Interner.Ref,
         label: IR.Ref,
     });
 };
@@ -253,6 +253,11 @@ fn genStmt(c: *CodeGen, node: NodeIndex) Error!void {
             }
         },
 
+        .LabeledStmt => {
+            const label = try c.builder.addLabel("label");
+            try c.builder.body.append(c.comp.gpa, label);
+        },
+
         .CompoundStmtTwo => {
             const oldSymLen = c.symbols.items.len;
             c.symbols.items.len = oldSymLen;
@@ -268,6 +273,271 @@ fn genStmt(c: *CodeGen, node: NodeIndex) Error!void {
             for (c.tree.data[data.range.start..data.range.end]) |stmt|
                 try c.genStmt(stmt);
         },
+
+        .IfThenElseStmt => {
+            const thenLabel = try c.builder.addLabel("if.then");
+            const elseLabel = try c.builder.addLabel("if.else");
+            const endLabel = try c.builder.addLabel("if.end");
+
+            {
+                c.builder.branch = .{
+                    .trueLabel = thenLabel,
+                    .falseLabel = elseLabel,
+                };
+                defer c.builder.branch = null;
+                try c.genBoolExpr(data.if3.cond);
+            }
+
+            try c.builder.body.append(c.builder.gpa, thenLabel);
+            try c.genStmt(c.tree.data[data.if3.body]); // then
+            try c.builder.addJump(endLabel);
+
+            try c.builder.body.append(c.builder.gpa, elseLabel);
+            try c.genStmt(c.tree.data[data.if3.body + 1]); // else
+
+            try c.builder.body.append(c.builder.gpa, endLabel);
+        },
+
+        .IfThenStmt => {
+            const thenLabel = try c.builder.addLabel("if.then");
+            const endLabel = try c.builder.addLabel("if.end");
+
+            {
+                c.builder.branch = .{
+                    .trueLabel = thenLabel,
+                    .falseLabel = endLabel,
+                };
+                defer c.builder.branch = null;
+                try c.genBoolExpr(data.binExpr.lhs);
+            }
+            try c.builder.body.append(c.builder.gpa, thenLabel);
+            try c.genStmt(data.binExpr.rhs); // then
+            try c.builder.body.append(c.builder.gpa, endLabel);
+        },
+
+        .SwitchStmt => {
+            var wipSwitch = WipSwitch{
+                .size = c.nodeTy[@intFromEnum(data.binExpr.lhs)].sizeof(c.comp).?,
+            };
+            defer wipSwitch.cases.deinit(c.builder.gpa);
+
+            const oldWipSwitch = c.wipSwitch;
+            defer c.wipSwitch = oldWipSwitch;
+            c.wipSwitch = &wipSwitch;
+
+            const oldBreakLabel = c.breakLabel;
+            defer c.breakLabel = oldBreakLabel;
+
+            const endRef = try c.builder.addLabel("switch.end");
+            c.breakLabel = endRef;
+
+            const cond = try c.genExpr(data.binExpr.lhs);
+            const switchIndex = c.builder.instructions.len;
+            _ = try c.builder.addInst(.Switch, undefined, .noreturn);
+
+            try c.genStmt(data.binExpr.rhs); // body
+
+            try c.builder.body.append(c.comp.gpa, endRef);
+            const defaultRef = wipSwitch.default orelse endRef;
+            try c.builder.body.append(c.builder.gpa, endRef);
+
+            const a = c.builder.arena.allocator();
+            const switchData = try a.create(Inst.Switch);
+            switchData.* = .{
+                .target = cond,
+                .casesLen = @intCast(wipSwitch.cases.len),
+                .caseVals = (try a.dupe(Interner.Ref, wipSwitch.cases.items(.value))).ptr,
+                .caseLabels = (try a.dupe(IR.Ref, wipSwitch.cases.items(.label))).ptr,
+                .default = defaultRef,
+            };
+            c.builder.instructions.items(.data)[switchIndex] = .{ .@"switch" = switchData };
+        },
+
+        .CaseStmt => {
+            const val = c.tree.valueMap.get(data.binExpr.lhs).?;
+            const label = try c.builder.addLabel("case");
+            try c.builder.body.append(c.comp.gpa, label);
+            try c.wipSwitch.cases.append(c.builder.gpa, .{
+                .value = try c.builder.pool.put(c.builder.gpa, .{ .value = val }),
+                .label = label,
+            });
+            try c.genStmt(data.binExpr.rhs);
+        },
+
+        .DefaultStmt => {
+            const default = try c.builder.addLabel("default");
+            try c.builder.body.append(c.comp.gpa, default);
+            c.wipSwitch.default = default;
+            try c.genStmt(data.unExpr);
+        },
+
+        .WhileStmt => {
+            const oldBreakLabel = c.breakLabel;
+            const oldContinueLabel = c.continueLabel;
+
+            defer {
+                c.breakLabel = oldBreakLabel;
+                c.continueLabel = oldContinueLabel;
+            }
+
+            const condLabel = try c.builder.addLabel("while.cond");
+            const thenLabel = try c.builder.addLabel("while.then");
+            const endLabel = try c.builder.addLabel("while.end");
+
+            c.continueLabel = condLabel;
+            c.breakLabel = endLabel;
+
+            try c.builder.body.append(c.builder.gpa, condLabel);
+            {
+                c.builder.branch = .{
+                    .trueLabel = thenLabel,
+                    .falseLabel = endLabel,
+                };
+                defer c.builder.branch = null;
+                try c.genBoolExpr(data.binExpr.lhs);
+            }
+            try c.builder.body.append(c.builder.gpa, thenLabel);
+            try c.genStmt(data.binExpr.rhs);
+            try c.builder.addJump(condLabel);
+            try c.builder.body.append(c.builder.gpa, endLabel);
+        },
+
+        .DoWhileStmt => {
+            const oldBreakLabel = c.breakLabel;
+            const oldContinueLabel = c.continueLabel;
+
+            defer {
+                c.breakLabel = oldBreakLabel;
+                c.continueLabel = oldContinueLabel;
+            }
+
+            const thenLabel = try c.builder.addLabel("do.then");
+            const condLabel = try c.builder.addLabel("do.cond");
+            const endLabel = try c.builder.addLabel("do.end");
+
+            c.continueLabel = condLabel;
+            c.breakLabel = endLabel;
+
+            try c.builder.body.append(c.builder.gpa, thenLabel);
+            try c.genStmt(data.binExpr.rhs);
+            try c.builder.body.append(c.builder.gpa, condLabel);
+            {
+                c.builder.branch = .{
+                    .trueLabel = thenLabel,
+                    .falseLabel = endLabel,
+                };
+                defer c.builder.branch = null;
+                try c.genBoolExpr(data.binExpr.lhs);
+            }
+            try c.builder.body.append(c.builder.gpa, endLabel);
+        },
+
+        .ForDeclStmt => {
+            const oldBreakLabel = c.breakLabel;
+            const oldContinueLabel = c.continueLabel;
+
+            defer {
+                c.breakLabel = oldBreakLabel;
+                c.continueLabel = oldContinueLabel;
+            }
+
+            const forDecl = data.forDecl(c.tree);
+            for (forDecl.decls) |decl|
+                try c.genStmt(decl);
+
+            const thenLabel = try c.builder.addLabel("for.then");
+            var condLabel = thenLabel;
+            const contLabel = try c.builder.addLabel("for.cont");
+            const endLabel = try c.builder.addLabel("for.end");
+
+            c.continueLabel = contLabel;
+            c.breakLabel = endLabel;
+
+            if (forDecl.cond != .none) {
+                condLabel = try c.builder.addLabel("for.cond");
+                try c.builder.body.append(c.builder.gpa, condLabel);
+
+                c.builder.branch = .{
+                    .trueLabel = thenLabel,
+                    .falseLabel = endLabel,
+                };
+                defer c.builder.branch = null;
+                try c.genBoolExpr(forDecl.cond);
+            }
+
+            try c.builder.body.append(c.builder.gpa, thenLabel);
+            try c.genStmt(forDecl.body);
+            if (forDecl.incr != .none)
+                _ = try c.genExpr(forDecl.incr);
+
+            try c.builder.addJump(condLabel);
+            try c.builder.body.append(c.builder.gpa, endLabel);
+        },
+
+        .ForEverStmt => {
+            const oldBreakLabel = c.breakLabel;
+            const oldContinueLabel = c.continueLabel;
+
+            defer {
+                c.breakLabel = oldBreakLabel;
+                c.continueLabel = oldContinueLabel;
+            }
+
+            const thenLabel = try c.builder.addLabel("for.then");
+            const endLabel = try c.builder.addLabel("for.end");
+
+            c.continueLabel = thenLabel;
+            c.breakLabel = endLabel;
+
+            try c.builder.body.append(c.builder.gpa, thenLabel);
+            try c.genStmt(data.unExpr);
+            try c.builder.body.append(c.builder.gpa, endLabel);
+        },
+
+        .ForStmt => {
+            const oldBreakLabel = c.breakLabel;
+            const oldContinueLabel = c.continueLabel;
+
+            defer {
+                c.breakLabel = oldBreakLabel;
+                c.continueLabel = oldContinueLabel;
+            }
+
+            const forStmt = data.forStmt(c.tree);
+            if (forStmt.init != .none)
+                _ = try c.genExpr(forStmt.init);
+
+            const thenLabel = try c.builder.addLabel("for.then");
+            var condLabel = thenLabel;
+            const contLabel = try c.builder.addLabel("for.cont");
+            const endLabel = try c.builder.addLabel("for.end");
+
+            c.continueLabel = contLabel;
+            c.breakLabel = endLabel;
+
+            if (forStmt.cond != .none) {
+                condLabel = try c.builder.addLabel("for.cond");
+                try c.builder.body.append(c.builder.gpa, condLabel);
+
+                c.builder.branch = .{
+                    .trueLabel = thenLabel,
+                    .falseLabel = endLabel,
+                };
+                defer c.builder.branch = null;
+                try c.genBoolExpr(forStmt.cond);
+            }
+
+            try c.builder.body.append(c.builder.gpa, thenLabel);
+            try c.genStmt(forStmt.body);
+            if (forStmt.incr != .none) {
+                _ = try c.genExpr(forStmt.incr);
+            }
+            try c.builder.addJump(condLabel);
+            try c.builder.body.append(c.builder.gpa, endLabel);
+        },
+
+        .ContinueStmt => try c.builder.addJump(c.continueLabel),
+        .BreakStmt => try c.builder.addJump(c.breakLabel),
 
         .ReturnStmt => {
             if (data.unExpr != .none) {
@@ -285,6 +555,11 @@ fn genStmt(c: *CodeGen, node: NodeIndex) Error!void {
             // No need to emit a jump since implicit_return is always the last instruction.
         },
 
+        .CaseRangeStmt,
+        .GotoStmt,
+        .ComputedGotoStmt,
+        => return c.comp.diag.fatalNoSrc("TODO CodeGen.genStmt {}\n", .{c.nodeTag[@intFromEnum(node)]}),
+
         else => _ = try c.genExpr(node),
     }
 }
@@ -297,7 +572,8 @@ fn genExpr(c: *CodeGen, node: NodeIndex) Error!IR.Ref {
         return c.builder.addConstant(val, try c.genType(ty));
 
     const data = c.nodeData[@intFromEnum(node)];
-    switch (c.nodeTag[@intFromEnum(node)]) {
+    const tag = c.nodeTag[@intFromEnum(node)];
+    switch (tag) {
         .EnumerationRef,
         .IntLiteral,
         .CharLiteral,
@@ -637,7 +913,129 @@ fn genLval(c: *CodeGen, node: NodeIndex) Error!IR.Ref {
     }
 }
 
-fn genBoolExpr(_: *CodeGen, _: NodeIndex) Error!void {}
+fn genBoolExpr(c: *CodeGen, base: NodeIndex) Error!void {
+    var node = base;
+    while (true) {
+        switch (c.nodeTag[@intFromEnum(node)]) {
+            .ParenExpr => node = c.nodeData[@intFromEnum(node)].unExpr,
+            else => break,
+        }
+    }
+
+    const data = c.nodeData[@intFromEnum(node)];
+    const tag = c.nodeTag[@intFromEnum(node)];
+    switch (tag) {
+        .BoolOrExpr => {
+            if (c.tree.valueMap.get(data.binExpr.lhs)) |lhs| {
+                const cond = lhs.getBool();
+                if (cond)
+                    return c.builder.addJump(c.builder.branch.?.trueLabel);
+
+                return c.genBoolExpr(data.binExpr.rhs);
+            }
+
+            const oldBoolCtx = c.builder.branch;
+            defer c.builder.branch = oldBoolCtx;
+
+            const falseLabel = try c.builder.addLabel("bool_or.false");
+            c.builder.branch = .{
+                .trueLabel = c.builder.branch.?.trueLabel,
+                .falseLabel = falseLabel,
+            };
+            try c.genBoolExpr(data.binExpr.lhs);
+            try c.builder.body.append(c.builder.gpa, falseLabel);
+            c.builder.branch = .{
+                .trueLabel = c.builder.branch.?.trueLabel,
+                .falseLabel = oldBoolCtx.?.falseLabel,
+            };
+            return c.genBoolExpr(data.binExpr.rhs);
+        },
+
+        .BoolAndExpr => {
+            if (c.tree.valueMap.get(data.binExpr.lhs)) |lhs| {
+                const cond = lhs.getBool();
+                if (!cond)
+                    return c.builder.addJump(c.builder.branch.?.falseLabel);
+
+                return c.genBoolExpr(data.binExpr.rhs);
+            }
+
+            const oldBoolCtx = c.builder.branch;
+            defer c.builder.branch = oldBoolCtx;
+
+            const trueLabel = try c.builder.addLabel("bool_and.true");
+            c.builder.branch = .{
+                .trueLabel = trueLabel,
+                .falseLabel = c.builder.branch.?.falseLabel,
+            };
+            try c.genBoolExpr(data.binExpr.lhs);
+            try c.builder.body.append(c.builder.gpa, trueLabel);
+            c.builder.branch = .{
+                .trueLabel = oldBoolCtx.?.trueLabel,
+                .falseLabel = c.builder.branch.?.falseLabel,
+            };
+            return c.genBoolExpr(data.binExpr.rhs);
+        },
+
+        .BoolNotExpr => {
+            const oldBoolCtx = c.builder.branch;
+            defer c.builder.branch = oldBoolCtx;
+
+            c.builder.branch = .{
+                .trueLabel = c.builder.branch.?.falseLabel,
+                .falseLabel = c.builder.branch.?.trueLabel,
+            };
+            return c.genBoolExpr(data.unExpr);
+        },
+
+        .EqualExpr => {
+            const cmp = try c.genComparison(node, .CmpEQ);
+            return c.builder.addBranch(cmp);
+        },
+
+        .NotEqualExpr => {
+            const cmp = try c.genComparison(node, .CmpNE);
+            return c.builder.addBranch(cmp);
+        },
+
+        .LessThanExpr => {
+            const cmp = try c.genComparison(node, .CmpLT);
+            return c.builder.addBranch(cmp);
+        },
+
+        .LessThanEqualExpr => {
+            const cmp = try c.genComparison(node, .CmpLTE);
+            return c.builder.addBranch(cmp);
+        },
+
+        .GreaterThanExpr => {
+            const cmp = try c.genComparison(node, .CmpGT);
+            return c.builder.addBranch(cmp);
+        },
+
+        .GreaterThanEqualExpr => {
+            const cmp = try c.genComparison(node, .CmpGTE);
+            return c.builder.addBranch(cmp);
+        },
+
+        .ExplicitCast, .ImplicitCast => switch (data.cast.kind) {
+            .BoolToInt => {
+                const operand = try c.genExpr(data.cast.operand);
+                return c.builder.addBranch(operand);
+            },
+            else => {},
+        },
+
+        else => {},
+    }
+
+    // Assume int operand.
+    const lhs = try c.genExpr(node);
+    const rhs = try c.builder.addConstant(Value.int(0), try c.genType(c.nodeTy[@intFromEnum(node)]));
+    const cmp = try c.builder.addInst(.CmpNE, .{ .bin = .{ .lhs = lhs, .rhs = rhs } }, .i1);
+    try c.builder.body.append(c.comp.gpa, cmp);
+    try c.builder.addBranch(cmp);
+}
 
 fn genCall(c: *CodeGen, fnNode: NodeIndex, argNodes: []const NodeIndex, ty: Type) Error!IR.Ref {
     // Detect direct calls.
