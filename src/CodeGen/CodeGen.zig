@@ -6,6 +6,7 @@ const TreeTag = @import("../AST/AstTag.zig").Tag;
 const NodeIndex = Tree.NodeIndex;
 const IR = @import("IR.zig");
 const IRBuilder = IR.Builder;
+const Inst = IR.Inst;
 const Type = @import("../AST/Type.zig");
 const Interner = @import("Interner.zig");
 const Value = @import("../AST/Value.zig");
@@ -187,11 +188,11 @@ fn genFn(c: *CodeGen, decl: NodeIndex) Error!void {
     res.dump(name, c.comp.diag.color, std.io.getStdOut().writer()) catch {};
 }
 
-fn addUn(c: *CodeGen, tag: IR.Inst.Tag, operand: IR.Ref, ty: Type) !IR.Ref {
+fn addUn(c: *CodeGen, tag: Inst.Tag, operand: IR.Ref, ty: Type) !IR.Ref {
     return c.builder.addInst(tag, .{ .un = operand }, try c.genType(ty));
 }
 
-fn addBin(c: *CodeGen, tag: IR.Inst.Tag, lhs: IR.Ref, rhs: IR.Ref, ty: Type) !IR.Ref {
+fn addBin(c: *CodeGen, tag: Inst.Tag, lhs: IR.Ref, rhs: IR.Ref, ty: Type) !IR.Ref {
     return c.builder.addInst(tag, .{ .bin = .{ .lhs = lhs, .rhs = rhs } }, try c.genType(ty));
 }
 
@@ -538,7 +539,7 @@ fn genExpr(c: *CodeGen, node: NodeIndex) Error!IR.Ref {
 
             const @"else" = try c.genExpr(c.tree.data[data.if3.body + 1]);
 
-            const branch = try c.builder.arena.allocator().create(IR.Inst.Branch);
+            const branch = try c.builder.arena.allocator().create(Inst.Branch);
             branch.* = .{ .cond = cond, .then = then, .@"else" = @"else" };
 
             // TODO can't use select here
@@ -552,7 +553,7 @@ fn genExpr(c: *CodeGen, node: NodeIndex) Error!IR.Ref {
             const then = try c.genExpr(c.tree.data[data.if3.body]);
             const @"else" = try c.genExpr(c.tree.data[data.if3.body + 1]);
 
-            const branch = try c.builder.arena.allocator().create(IR.Inst.Branch);
+            const branch = try c.builder.arena.allocator().create(Inst.Branch);
             branch.* = .{ .cond = cond, .then = then, .@"else" = @"else" };
             // TODO can't use select here
             return c.builder.addInst(.Select, .{ .branch = branch }, try c.genType(ty));
@@ -638,11 +639,60 @@ fn genLval(c: *CodeGen, node: NodeIndex) Error!IR.Ref {
 
 fn genBoolExpr(_: *CodeGen, _: NodeIndex) Error!void {}
 
-fn genCall(c: *CodeGen, _: NodeIndex, _: []const NodeIndex, _: Type) Error!IR.Ref {
-    return c.comp.diag.fatalNoSrc("TODO CodeGen.genCall\n", .{});
+fn genCall(c: *CodeGen, fnNode: NodeIndex, argNodes: []const NodeIndex, ty: Type) Error!IR.Ref {
+    // Detect direct calls.
+    const fnRef = blk: {
+        const data = c.nodeData[@intFromEnum(fnNode)];
+        if (c.nodeTag[@intFromEnum(fnNode)] != .ImplicitCast or data.cast.kind != .FunctionToPointer)
+            break :blk try c.genExpr(fnNode);
+
+        var cur = @intFromEnum(data.cast.operand);
+        while (true) switch (c.nodeTag[cur]) {
+            .ParenExpr, .AddrOfExpr, .DerefExpr => {
+                cur = @intFromEnum(c.nodeData[cur].unExpr);
+            },
+
+            .ImplicitCast => {
+                const cast = c.nodeData[cur].cast;
+                if (cast.kind != .FunctionToPointer) {
+                    break :blk try c.genExpr(fnNode);
+                }
+                cur = @intFromEnum(cast.operand);
+            },
+
+            .DeclRefExpr => {
+                const slice = c.tree.getTokenSlice(c.nodeData[cur].declRef);
+                const name = try c.comp.intern(slice);
+                var i = c.symbols.items.len;
+                while (i > 0) {
+                    i -= 1;
+                    if (c.symbols.items[i].name == name) {
+                        break :blk try c.genExpr(fnNode);
+                    }
+                }
+
+                break :blk try c.builder.addInst(.Symbol, .{ .label = try c.builder.arena.allocator().dupeZ(u8, slice) }, .func);
+            },
+            else => break :blk try c.genExpr(fnNode),
+        };
+    };
+
+    const args = try c.builder.arena.allocator().alloc(IR.Ref, argNodes.len);
+    for (argNodes, 0..) |node, i| {
+        // TODO handle calling convention here
+        args[i] = try c.genExpr(node);
+    }
+    // TODO handle variadic call
+    const call = try c.builder.arena.allocator().create(Inst.Call);
+    call.* = .{
+        .func = fnRef,
+        .argsLen = @intCast(args.len),
+        .argsPtr = args.ptr,
+    };
+    return c.builder.addInst(.Call, .{ .call = call }, try c.genType(ty));
 }
 
-fn genCompoundAssign(c: *CodeGen, node: NodeIndex, tag: IR.Inst.Tag) Error!IR.Ref {
+fn genCompoundAssign(c: *CodeGen, node: NodeIndex, tag: Inst.Tag) Error!IR.Ref {
     const bin = c.nodeData[@intFromEnum(node)].binExpr;
     const ty = c.nodeTy[@intFromEnum(node)];
     const rhs = try c.genExpr(bin.rhs);
@@ -653,7 +703,7 @@ fn genCompoundAssign(c: *CodeGen, node: NodeIndex, tag: IR.Inst.Tag) Error!IR.Re
     return res;
 }
 
-fn genBinOp(c: *CodeGen, node: NodeIndex, tag: IR.Inst.Tag) Error!IR.Ref {
+fn genBinOp(c: *CodeGen, node: NodeIndex, tag: Inst.Tag) Error!IR.Ref {
     const bin = c.nodeData[@intFromEnum(node)].binExpr;
     const ty = c.nodeTy[@intFromEnum(node)];
     const lhs = try c.genExpr(bin.lhs);
@@ -661,7 +711,7 @@ fn genBinOp(c: *CodeGen, node: NodeIndex, tag: IR.Inst.Tag) Error!IR.Ref {
     return c.addBin(tag, lhs, rhs, ty);
 }
 
-fn genComparison(c: *CodeGen, node: NodeIndex, tag: IR.Inst.Tag) Error!IR.Ref {
+fn genComparison(c: *CodeGen, node: NodeIndex, tag: Inst.Tag) Error!IR.Ref {
     const bin = c.nodeData[@intFromEnum(node)].binExpr;
     const lhs = try c.genExpr(bin.lhs);
     const rhs = try c.genExpr(bin.rhs);
