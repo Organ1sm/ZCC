@@ -6,6 +6,7 @@ const TypeBuilder = @import("TypeBuilder.zig");
 const Attribute = @import("../Lexer/Attribute.zig");
 const StringInterner = @import("../Basic/StringInterner.zig");
 const StringId = StringInterner.StringId;
+const Target = @import("../Basic/Target.zig");
 
 const Type = @This();
 
@@ -601,7 +602,7 @@ pub fn isVoidStar(ty: Type) bool {
 
 pub fn isUnsignedInt(ty: Type, comp: *const Compilation) bool {
     return switch (ty.specifier) {
-        .Char, .ComplexChar => return getCharSignedness(comp) == .unsigned,
+        .Char, .ComplexChar => return Target.getCharSignedness(comp.target) == .unsigned,
 
         .UChar,
         .UShort,
@@ -955,29 +956,6 @@ pub fn hasField(ty: Type, name: StringId) bool {
     return false;
 }
 
-pub fn getCharSignedness(comp: *const Compilation) std.builtin.Signedness {
-    switch (comp.target.cpu.arch) {
-        .aarch64,
-        .aarch64_32,
-        .aarch64_be,
-        .arm,
-        .armeb,
-        .thumb,
-        .thumbeb,
-        => return if (comp.target.os.tag.isDarwin() or comp.target.os.tag == .windows) .signed else .unsigned,
-
-        .powerpc, .powerpc64 => return if (comp.target.os.tag.isDarwin()) .signed else .unsigned,
-        .powerpc64le,
-        .s390x,
-        .xcore,
-        .arc,
-        .msp430,
-        => return .unsigned,
-
-        else => return .signed,
-    }
-}
-
 const TypeSizeOrder = enum {
     lt,
     gt,
@@ -997,7 +975,6 @@ pub fn sizeCompare(lhs: Type, rhs: Type, comp: *Compilation) TypeSizeOrder {
 
 /// Size of type as reported by sizeof
 pub fn sizeof(ty: Type, comp: *const Compilation) ?u64 {
-    // TODO get target from compilation
     return switch (ty.specifier) {
         .VariableLenArray,
         .UnspecifiedVariableLenArray,
@@ -1128,7 +1105,6 @@ pub fn alignof(ty: Type, comp: *const Compilation) u29 {
         return requested;
     }
 
-    // TODO get target from compilation
     return switch (ty.specifier) {
         .UnspecifiedVariableLenArray,
         .VariableLenArray,
@@ -1137,7 +1113,7 @@ pub fn alignof(ty: Type, comp: *const Compilation) u29 {
         .Vector,
         => ty.getElemType().alignof(comp),
 
-        .Func, .VarArgsFunc, .OldStyleFunc => 4, // TODO check target
+        .Func, .VarArgsFunc, .OldStyleFunc => Target.defaultFunctionAlignment(comp.target),
         .Char, .SChar, .UChar, .Void, .Bool => 1,
 
         .ComplexChar,
@@ -1215,7 +1191,7 @@ pub fn alignof(ty: Type, comp: *const Compilation) u29 {
 
 pub fn enumIsPacked(ty: Type, comp: *const Compilation) bool {
     std.debug.assert(ty.is(.Enum));
-    return comp.langOpts.shortEnums or comp.packAllEnums() or ty.hasAttribute(.@"packed");
+    return comp.langOpts.shortEnums or Target.packAllEnums(comp.target) or ty.hasAttribute(.@"packed");
 }
 
 pub fn requestedAlignment(ty: Type, comp: *const Compilation) ?u29 {
@@ -1247,7 +1223,10 @@ pub fn annotationAlignment(comp: *const Compilation, attrs: ?[]const Attribute) 
         if (attribute.tag != .aligned) continue;
 
         // Get the requested alignment from the attribute, or use the default if not specified.
-        const requested = if (attribute.args.aligned.alignment) |alignment| alignment.requested else comp.defaultAlignment();
+        const requested = if (attribute.args.aligned.alignment) |alignment|
+            alignment.requested
+        else
+            Target.defaultAlignment(comp.target);
 
         if (maxRequested == null or maxRequested.? < requested) {
             maxRequested = requested;

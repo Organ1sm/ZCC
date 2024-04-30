@@ -4,6 +4,7 @@ const NodeIndex = @import("AST.zig").NodeIndex;
 const Parser = @import("../Parser/Parser.zig");
 const Compilation = @import("../Basic/Compilation.zig");
 const Qualifiers = @import("Type.zig").Qualifiers;
+const Target = @import("../Basic/Target.zig");
 
 const TypeBuilder = @This();
 
@@ -588,7 +589,7 @@ fn combineExtra(b: *@This(), p: *Parser, new: Specifier, sourceToken: TokenIndex
     if (new == .BitInt)
         b.bitIntToken = sourceToken;
 
-    if (new == .Int128 and !p.comp.hasInt128())
+    if (new == .Int128 and !Target.hasInt128(p.comp.target))
         try p.errStr(.type_not_supported_on_target, sourceToken, "__int128");
 
     switch (new) {
