@@ -4963,6 +4963,8 @@ fn parseAddExpr(p: *Parser) Error!Result {
         var rhs = try p.parseMulExpr();
         try rhs.expect(p);
 
+        const errors = p.comp.diag.errors;
+        const lhsTy = lhs.ty;
         if (try lhs.adjustTypes(minus.?, &rhs, p, if (plus != null) .add else .sub)) {
             if (plus != null) {
                 if (lhs.value.add(lhs.value, rhs.value, lhs.ty, p.comp))
@@ -4972,6 +4974,9 @@ fn parseAddExpr(p: *Parser) Error!Result {
                     try p.errOverflow(minus.?, lhs);
             }
         }
+
+        if (errors == p.comp.diag.errors and lhsTy.isPointer() and !lhsTy.isVoidStar() and lhsTy.getElemType().hasIncompleteSize())
+            try p.errStr(.ptr_arithmetic_incomplete, minus.?, try p.typeStr(lhsTy.getElemType()));
 
         try lhs.bin(p, tag, rhs);
     }
