@@ -2,7 +2,7 @@ const std = @import("std");
 const buildOptions = @import("build_options");
 const print = std.debug.print;
 const zcc = @import("zcc");
-const CodeGen = zcc.CodeGen;
+const CodeGen = zcc.CodeGenLegacy;
 const Tree = zcc.Tree;
 const Token = Tree.Token;
 const NodeIndex = Tree.NodeIndex;
@@ -10,7 +10,8 @@ const AllocatorError = std.mem.Allocator.Error;
 
 var general_purpose_allocator = std.heap.GeneralPurposeAllocator(.{}){};
 
-fn addCommandLineArgs(comp: *zcc.Compilation, file: zcc.Source, macroBuffer: anytype) !void {
+/// Return true if saw -E option
+fn addCommandLineArgs(comp: *zcc.Compilation, file: zcc.Source, macroBuffer: anytype) !bool {
     if (std.mem.startsWith(u8, file.buffer, "//zcc-args")) {
         var testArgs = std.ArrayList([]const u8).init(comp.gpa);
         defer testArgs.deinit();
@@ -19,10 +20,13 @@ fn addCommandLineArgs(comp: *zcc.Compilation, file: zcc.Source, macroBuffer: any
         var it = std.mem.tokenize(u8, file.buffer[0..nl], " ");
         while (it.next()) |some| try testArgs.append(some);
 
-        var sourceFiles = std.ArrayList(zcc.Source).init(std.testing.failing_allocator);
-        var linkObjects = std.ArrayList([]const u8).init(std.testing.failing_allocator);
-        _ = try zcc.parseArgs(comp, std.io.null_writer, &sourceFiles, &linkObjects, macroBuffer, testArgs.items);
+        var driver = zcc.Driver{ .comp = comp };
+        defer driver.deinit();
+
+        _ = try driver.parseArgs(std.io.null_writer, macroBuffer, testArgs.items);
+        return driver.onlyPreprocess;
     }
+    return false;
 }
 
 fn testOne(allocator: std.mem.Allocator, path: []const u8) !void {
@@ -36,7 +40,7 @@ fn testOne(allocator: std.mem.Allocator, path: []const u8) !void {
     var macroBuffer = std.ArrayList(u8).init(comp.gpa);
     defer macroBuffer.deinit();
 
-    try addCommandLineArgs(&comp, file, macroBuffer.writer());
+    _ = try addCommandLineArgs(&comp, file, macroBuffer.writer());
     const userMacros = try comp.addSourceFromBuffer("<command line>", macroBuffer.items);
 
     const bulitinMacros = try comp.generateBuiltinMacros();
@@ -189,7 +193,7 @@ pub fn main() !void {
         var macroBuffer = std.ArrayList(u8).init(comp.gpa);
         defer macroBuffer.deinit();
 
-        try addCommandLineArgs(&comp, file, macroBuffer.writer());
+        const onlyPreprocess = try addCommandLineArgs(&comp, file, macroBuffer.writer());
         const userMacros = try comp.addSourceFromBuffer("<command line>", macroBuffer.items);
 
         const builtinMacros = try comp.generateBuiltinMacros();
@@ -198,6 +202,7 @@ pub fn main() !void {
         var pp = zcc.Preprocessor.init(&comp);
         defer pp.deinit();
 
+        if (onlyPreprocess) pp.preserveWhitespace = true;
         try pp.addBuiltinMacros();
 
         _ = try pp.preprocess(builtinMacros);
@@ -223,7 +228,7 @@ pub fn main() !void {
             continue;
         }
 
-        if (comp.onlyPreprocess) {
+        if (onlyPreprocess) {
             if (try checkExpectedErrors(&pp, &progress, &buffer)) |some| {
                 if (!some) {
                     failCount += 1;
