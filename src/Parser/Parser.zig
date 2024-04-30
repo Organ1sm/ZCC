@@ -5369,8 +5369,14 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
             try operand.expect(p);
 
             if (operand.ty.isArray() or operand.ty.isPointer()) {
+                const elemTy = operand.ty.getElemType();
+                if (elemTy.isFunc())
+                    try operand.lvalConversion(p);
+                operand.ty = elemTy;
+            } else if (operand.ty.isFunc()) {
+                try operand.lvalConversion(p);
                 operand.ty = operand.ty.getElemType();
-            } else if (!operand.ty.isFunc()) {
+            } else {
                 try p.errToken(.indirection_ptr, token);
             }
 
