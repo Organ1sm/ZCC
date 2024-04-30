@@ -201,7 +201,7 @@ fn singleRun(alloc: std.mem.Allocator, path: []const u8, source: []const u8, tes
     var macro_buf = std.ArrayList(u8).init(comp.gpa);
     defer macro_buf.deinit();
 
-    comp.langOpts.setEmulatedCompiler(comp.systemCompiler());
+    comp.langOpts.setEmulatedCompiler(zcc.TargetUtil.systemCompiler(comp.target));
 
     const mac_writer = macro_buf.writer();
     try mac_writer.print("#define {s}\n", .{test_case.c_define});
@@ -335,7 +335,7 @@ fn setTarget(comp: *zcc.Compilation, target: []const u8) !std.Target {
     comp.target.os.version_range = zig_target.os.version_range;
     comp.target.abi = zig_target.abi;
 
-    comp.langOpts.emulate = comp.systemCompiler();
+    comp.langOpts.emulate = zcc.TargetUtil.systemCompiler(comp.target);
 
     const expected_compiler_name = target[compiler_split_index + 1 ..];
     const set_name = @tagName(comp.langOpts.emulate);

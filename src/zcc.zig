@@ -12,5 +12,6 @@ pub const Tree = @import("AST/AST.zig");
 pub const VersionStr = @import("Basic/Info.zig").VersionStr;
 pub const parseArgs = @import("main.zig").parseArgs;
 pub const TypeMapper = @import("Basic/StringInterner.zig").TypeMapper;
+pub const TargetUtil = @import("Basic/Target.zig");
 
 pub const version = std.SemanticVersion.parse(VersionStr) catch unreachable;

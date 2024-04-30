@@ -8,6 +8,7 @@ const Lexer = @import("Lexer/Lexer.zig");
 const Parser = @import("Parser/Parser.zig");
 const LangOpts = @import("Basic/LangOpts.zig");
 const Util = @import("Basic/Util.zig");
+const Target = @import("Basic/Target.zig");
 
 var GeneralPurposeAllocator = std.heap.GeneralPurposeAllocator(.{}){};
 
@@ -39,7 +40,7 @@ pub fn main() u8 {
         },
     };
 
-    comp.langOpts.setEmulatedCompiler(comp.systemCompiler());
+    comp.langOpts.setEmulatedCompiler(Target.systemCompiler(comp.target));
 
     mainExtra(&comp, args) catch |er| switch (er) {
         error.OutOfMemory => {
@@ -280,7 +281,7 @@ pub fn parseArgs(
                     return comp.diag.fatalNoSrc("unable to resolve target: {s}", .{@errorName(e)});
                 };
                 comp.target = target;
-                comp.langOpts.setEmulatedCompiler(comp.systemCompiler());
+                comp.langOpts.setEmulatedCompiler(Target.systemCompiler(comp.target));
             } else if (std.mem.eql(u8, arg, "-dump-pp")) {
                 comp.dumpPP = true;
             } else if (std.mem.eql(u8, arg, "-dump-ast")) {

@@ -1,5 +1,6 @@
 const std = @import("std");
 const Compilation = @import("../Basic/Compilation.zig");
+const Target = @import("../Basic/Target.zig");
 
 /// Used to implement the __has_feature macro.
 pub fn hasFeature(comp: *Compilation, ext: []const u8) bool {
@@ -42,7 +43,7 @@ pub fn hasFeature(comp: *Compilation, ext: []const u8) bool {
         .c_atomic = comp.langOpts.standard.atLeast(.c11),
         .c_generic_selections = comp.langOpts.standard.atLeast(.c11),
         .c_static_assert = comp.langOpts.standard.atLeast(.c11),
-        .c_thread_local = comp.langOpts.standard.atLeast(.c11) and comp.isTlsSupported(),
+        .c_thread_local = comp.langOpts.standard.atLeast(.c11) and Target.isTlsSupported(comp.target),
     };
 
     inline for (std.meta.fields(@TypeOf(list))) |f| {
@@ -60,7 +61,7 @@ pub fn hasExtension(comp: *Compilation, ext: []const u8) bool {
         .c_atomic = false, // TODO
         .c_generic_selections = true,
         .c_static_assert = true,
-        .c_thread_local = comp.isTlsSupported(),
+        .c_thread_local = Target.isTlsSupported(comp.target),
         // misc
         .overloadable_unmarked = false, // TODO
         .statement_attributes_with_gnu_syntax = false, // TODO
