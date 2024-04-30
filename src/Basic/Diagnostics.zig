@@ -270,6 +270,9 @@ pub fn fatal(
     m.start(.@"fatal error");
     m.print(fmt, args);
     m.end(line, col, false);
+
+    diag.errors += 1;
+
     return error.FatalError;
 }
 
