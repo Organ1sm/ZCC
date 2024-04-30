@@ -1970,3 +1970,8 @@ pub const bit_int_too_big = struct {
     pub const extra = .str;
     pub const kind = .@"error";
 };
+pub const ptr_arithmetic_incomplete = struct {
+    pub const msg = "arithmetic on a pointer to an incomplete type '{s}'";
+    pub const extra = .str;
+    pub const kind = .@"error";
+};
