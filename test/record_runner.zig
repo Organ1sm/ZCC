@@ -210,10 +210,6 @@ fn singleRun(alloc: std.mem.Allocator, path: []const u8, source: []const u8, tes
         try mac_writer.writeAll("#define MSVC\n");
     }
 
-    var source_files = std.ArrayList(zcc.Source).init(std.testing.failing_allocator);
-    var linkObjects = std.ArrayList([]const u8).init(std.testing.failing_allocator);
-    _ = try zcc.parseArgs(&comp, std.io.null_writer, &source_files, &linkObjects, mac_writer, &.{});
-
     const user_macros = try comp.addSourceFromBuffer("<command line>", macro_buf.items);
     const builtin_macros = try comp.generateBuiltinMacros();
 

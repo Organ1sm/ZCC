@@ -18,14 +18,6 @@ const EpochSeconds = std.time.epoch.EpochSeconds;
 
 const Compilation = @This();
 
-pub const Linker = enum {
-    ld,
-    bfd,
-    gold,
-    lld,
-    mold,
-};
-
 pub const Error = error{
     /// A fatal error has ocurred and compilation has stopped.
     FatalError,
@@ -36,18 +28,8 @@ sources: std.StringArrayHashMap(Source),
 diag: Diagnostics,
 includeDirs: std.ArrayList([]const u8),
 systemIncludeDirs: std.ArrayList([]const u8),
-outputName: ?[]const u8 = null,
 target: std.Target = builtin.target,
 pragmaHandlers: std.StringArrayHashMapUnmanaged(*Pragma) = .{},
-onlyPreprocess: bool = false,
-onlySyntax: bool = false,
-onlyCompile: bool = false,
-onlyPreprocessAndCompile: bool = false,
-dumpPP: bool = false,
-dumpAst: bool = false,
-dumpIR: bool = false,
-dumpTokens: bool = false,
-dumpRawTokens: bool = false,
 langOpts: LangOpts = .{},
 generatedBuffer: std.ArrayList(u8),
 builtins: Builtins = .{},
@@ -59,10 +41,6 @@ types: struct {
 } = undefined,
 
 stringInterner: StringInterner = .{},
-
-// linker options
-useLinker: Linker = .ld,
-linkerPath: ?[]const u8 = null,
 
 pub fn init(gpa: Allocator) Compilation {
     return .{
@@ -1020,19 +998,6 @@ pub fn pragmaEvent(comp: *Compilation, event: PragmaEvent) void {
 }
 
 pub const renderErrors = Diagnostics.render;
-
-
-
-pub fn getLinkerPath(comp: *Compilation) []const u8 {
-    // TODO extremely incomplete
-    return switch (comp.useLinker) {
-        .ld => "/usr/bin/ld",
-        .bfd => "/usr/bin/ld.bfd",
-        .gold => "/usr/bin/ld.gold",
-        .lld => "/usr/bin/ld.lld",
-        .mold => "/usr/bin/ld.mold",
-    };
-}
 
 test "addSourceFromReader" {
     const Test = struct {
