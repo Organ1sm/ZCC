@@ -37,7 +37,7 @@ pub const Token = struct {
         return switch (kw) {
             .KeywordInline => if (standard.isGNU() or standard.atLeast(.c99)) kw else .Identifier,
             .KeywordRestrict => if (standard.atLeast(.c99)) kw else .Identifier,
-            .KeywordGccTypeof => if (standard.isGNU()) kw else .Identifier,
+            .KeywordTypeof => if (standard.isGNU() or standard.atLeast(.c2x)) kw else .Identifier,
             .KeywordGccAsm => if (standard.isGNU()) kw else .Identifier,
 
             .KeywordC23Alignas,
@@ -157,7 +157,7 @@ pub const Token = struct {
         .{ "__restrict__", .KeywordGccRestrict2 },
         .{ "__alignof", .KeywordGccAlignof1 },
         .{ "__alignof__", .KeywordGccAlignof2 },
-        .{ "typeof", .KeywordGccTypeof },
+        .{ "typeof", .KeywordTypeof },
         .{ "__extension__", .KeywordGccExtension },
         .{ "asm", .KeywordGccAsm },
         .{ "__asm", .KeywordGccAsm1 },

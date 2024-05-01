@@ -782,8 +782,8 @@ fn nextExternDecl(p: *Parser) void {
             .KeywordUnion,
             .KeywordAlignas,
             .KeywordC23Alignas,
-            .KeywordGccTypeof,
             .KeywordGccExtension,
+            .KeywordTypeof,
             .KeywordTypeof1,
             .KeywordTypeof2,
             .KeywordBitInt,
@@ -1187,7 +1187,7 @@ fn parseStaticAssert(p: *Parser) Error!bool {
 ///   | `typeof` '(' expr ')'
 fn typeof(p: *Parser) Error!?Type {
     switch (p.getCurrToken()) {
-        .KeywordGccTypeof, .KeywordTypeof1, .KeywordTypeof2 => p.tokenIdx += 1,
+        .KeywordTypeof, .KeywordTypeof1, .KeywordTypeof2 => p.tokenIdx += 1,
         else => return null,
     }
 
@@ -4499,9 +4499,9 @@ fn nextStmt(p: *Parser, lBrace: TokenIndex) !void {
             .KeywordUnion,
             .KeywordAlignas,
             .KeywordC23Alignas,
+            .KeywordTypeof,
             .KeywordTypeof1,
             .KeywordTypeof2,
-            .KeywordGccTypeof,
             .KeywordGccExtension,
             => if (parens == 0) return,
             .KeywordPragma => p.skipToPragmaSentinel(),
