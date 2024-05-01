@@ -679,9 +679,11 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
 
             if (try p.parseOrNextDecl(parseDeclaration))
                 continue;
+
             switch (p.getCurrToken()) {
                 .Semicolon => p.tokenIdx += 1,
                 .KeywordStaticAssert,
+                .KeywordC23StaticAssert,
                 .KeywordPragma,
                 .KeywordGccExtension,
                 .KeywordGccAsm,
@@ -757,12 +759,14 @@ fn nextExternDecl(p: *Parser) void {
             .KeywordAuto,
             .KeywordRegister,
             .KeywordThreadLocal,
+            .KeywordC23ThreadLocal,
             .KeywordInline,
             .KeywordGccInline1,
             .KeywordGccInline2,
             .KeywordNoreturn,
             .KeywordVoid,
             .KeywordBool,
+            .KeywordC23Bool,
             .KeywordChar,
             .KeywordShort,
             .KeywordInt,
@@ -777,6 +781,7 @@ fn nextExternDecl(p: *Parser) void {
             .KeywordStruct,
             .KeywordUnion,
             .KeywordAlignas,
+            .KeywordC23Alignas,
             .KeywordGccTypeof,
             .KeywordGccExtension,
             .KeywordTypeof1,
@@ -1109,7 +1114,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
 /// static-assert-declaration
 ///  : (`_Static_assert` | `static_assert`) '(' constExpr ',' StringLiteral+ ')' ';'
 fn parseStaticAssert(p: *Parser) Error!bool {
-    const curToken = p.eat(.KeywordStaticAssert) orelse return false;
+    const curToken = p.eat(.KeywordStaticAssert) orelse p.eat(.KeywordC23StaticAssert) orelse return false;
     const lp = try p.expectToken(.LParen);
     const resToken = p.tokenIdx;
     const res = try p.parseConstExpr(.NoConstDeclFolding);
@@ -1280,9 +1285,9 @@ fn parseDeclSpec(p: *Parser) Error!?DeclSpec {
                 }
             },
 
-            .KeywordThreadLocal => {
+            .KeywordThreadLocal, .KeywordC23ThreadLocal => {
                 if (d.threadLocal != null) {
-                    try p.errStr(.duplicate_declspec, p.tokenIdx, "_Thread_local");
+                    try p.errStr(.duplicate_declspec, p.tokenIdx, token.getTokenText().?);
                 }
 
                 switch (d.storageClass) {
@@ -1614,6 +1619,7 @@ fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec, attrBufferTop: usize) Er
 ///  | `signed`
 ///  | `unsigned`
 ///  | `bool`
+///  | `KeywordC23Bool`
 ///  | `_Complex`
 ///  | atomic-type-specifier
 ///  | record-specifier
@@ -1626,6 +1632,8 @@ fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec, attrBufferTop: usize) Er
 /// align-specifier
 ///   : keyword-alignas '(' typeName ')'
 ///   | keyword-alignas '(' constExpr ')'
+///   | keyword-c23-alignas '(' typeName ')'
+///   | keyword-c23-alignas '(' constExpr ')'
 fn parseTypeSpec(p: *Parser, ty: *TypeBuilder) Error!bool {
     const start = p.tokenIdx;
     while (true) {
@@ -1640,7 +1648,7 @@ fn parseTypeSpec(p: *Parser, ty: *TypeBuilder) Error!bool {
 
         switch (p.getCurrToken()) {
             .KeywordVoid => try ty.combine(p, .Void, p.tokenIdx),
-            .KeywordBool => try ty.combine(p, .Bool, p.tokenIdx),
+            .KeywordBool, .KeywordC23Bool => try ty.combine(p, .Bool, p.tokenIdx),
             .KeywordMSInt8_, .KeywordMSInt8__, .KeywordChar => try ty.combine(p, .Char, p.tokenIdx),
             .KeywordMSInt16_, .KeywordMSInt16__, .KeywordShort => try ty.combine(p, .Short, p.tokenIdx),
             .KeywordMSInt32_, .KeywordMSInt32__, .KeywordInt => try ty.combine(p, .Int, p.tokenIdx),
@@ -1682,7 +1690,7 @@ fn parseTypeSpec(p: *Parser, ty: *TypeBuilder) Error!bool {
                 continue;
             },
 
-            .KeywordAlignas => {
+            .KeywordAlignas, .KeywordC23Alignas => {
                 const alignToken = p.tokenIdx;
                 p.tokenIdx += 1;
                 const lparen = try p.expectToken(.LParen);
@@ -4468,12 +4476,14 @@ fn nextStmt(p: *Parser, lBrace: TokenIndex) !void {
             .KeywordAuto,
             .KeywordRegister,
             .KeywordThreadLocal,
+            .KeywordC23ThreadLocal,
             .KeywordInline,
             .KeywordGccInline1,
             .KeywordGccInline2,
             .KeywordNoreturn,
             .KeywordVoid,
             .KeywordBool,
+            .KeywordC23Bool,
             .KeywordChar,
             .KeywordShort,
             .KeywordInt,
@@ -4488,6 +4498,7 @@ fn nextStmt(p: *Parser, lBrace: TokenIndex) !void {
             .KeywordStruct,
             .KeywordUnion,
             .KeywordAlignas,
+            .KeywordC23Alignas,
             .KeywordTypeof1,
             .KeywordTypeof2,
             .KeywordGccTypeof,
@@ -5303,7 +5314,7 @@ fn offsetofMemberDesignator(p: *Parser, baseType: Type) Error!Result {
 ///  | ('&' | '*' | '+' | '-' | '~' | '!' | '++' | '--' | `__extension__` | `__imag__` | `__real__`) cast-expression
 ///  | `sizeof` unary-expression
 ///  | `sizeof` '(' type-name ')'
-///  | alignof '(' type-name ')'
+///  | (`keyword-alignof` | `keyword-c23-alignof`) '(' type-name ')'
 fn parseUnaryExpr(p: *Parser) Error!Result {
     const token = p.tokenIdx;
     switch (p.tokenIds[token]) {
@@ -5563,7 +5574,11 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
             return res;
         },
 
-        .KeywordAlignof, .KeywordGccAlignof1, .KeywordGccAlignof2 => {
+        .KeywordAlignof,
+        .KeywordGccAlignof1,
+        .KeywordGccAlignof2,
+        .KeywordC23Alignof,
+        => {
             p.tokenIdx += 1;
             const expectedParen = p.tokenIdx;
             var res = Result{};

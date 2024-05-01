@@ -39,7 +39,16 @@ pub const Token = struct {
             .KeywordRestrict => if (standard.atLeast(.c99)) kw else .Identifier,
             .KeywordGccTypeof => if (standard.isGNU()) kw else .Identifier,
             .KeywordGccAsm => if (standard.isGNU()) kw else .Identifier,
-            .KeywordDeclSpec => if (comp.langOpts.msExtensions) kw else .Identifier,
+
+            .KeywordC23Alignas,
+            .KeywordC23Alignof,
+            .KeywordC23Bool,
+            .KeywordC23StaticAssert,
+            .KeywordC23ThreadLocal,
+            => if (standard.atLeast(.c2x)) kw else .Identifier,
+
+            .KeywordDeclSpec => if (comp.langOpts.declSpecAttrs) kw else .Identifier,
+
             .KeywordMSInt64_,
             .KeywordMSInt64__,
             .KeywordMSInt32_,
@@ -112,6 +121,11 @@ pub const Token = struct {
 
         // ISO C23
         .{ "_BitInt", .KeywordBitInt },
+        .{ "alignas", .KeywordC23Alignas },
+        .{ "alignof", .KeywordC23Alignof },
+        .{ "bool", .KeywordC23Bool },
+        .{ "static_assert", .KeywordC23StaticAssert },
+        .{ "thread_local", .KeywordC23ThreadLocal },
 
         // Preprocessor directives
         .{ "include", .KeywordInclude },

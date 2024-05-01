@@ -186,6 +186,11 @@ pub const TokenType = enum(u8) {
 
     // ISO C23
     KeywordBitInt,
+    KeywordC23Alignas,
+    KeywordC23Alignof,
+    KeywordC23Bool,
+    KeywordC23StaticAssert,
+    KeywordC23ThreadLocal,
 
     // GCC keywords
     KeywordGccConst1,
@@ -376,6 +381,11 @@ pub const TokenType = enum(u8) {
             .KeywordMSInt16__,
             .KeywordMSInt8_,
             .KeywordMSInt8__,
+            .KeywordC23Alignas,
+            .KeywordC23Alignof,
+            .KeywordC23Bool,
+            .KeywordC23StaticAssert,
+            .KeywordC23ThreadLocal,
             => return true,
             else => false,
         };
@@ -571,6 +581,11 @@ pub const TokenType = enum(u8) {
             .KeywordThreadLocal => "_Thread_local",
 
             .KeywordBitInt => "_BitInt",
+            .KeywordC23Alignof => "alignof",
+            .KeywordC23Alignas => "alignas",
+            .KeywordC23Bool => "bool",
+            .KeywordC23StaticAssert => "static_assert",
+            .KeywordC23ThreadLocal => "thread_local",
 
             .KeywordGccConst1 => "__const",
             .KeywordGccConst2 => "__const__",

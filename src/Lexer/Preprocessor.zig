@@ -2032,6 +2032,15 @@ fn define(pp: *Preprocessor, lexer: *Lexer) Error!void {
         return skipToNewLine(lexer);
     }
 
+    var macroNameTokenID = macroName.id;
+    macroNameTokenID.simplifyMacroKeyword();
+    switch (macroNameTokenID) {
+        .Identifier, .ExtendedIdentifier => {},
+        else => if (macroNameTokenID.isMacroIdentifier()) {
+            try pp.addError(macroName, .keyword_macro);
+        },
+    }
+
     var first = lexer.next();
     switch (first.id) {
         .NewLine, .Eof => return pp.defineMacro(macroName, .{
