@@ -192,6 +192,8 @@ pub const TokenType = enum(u8) {
     KeywordC23StaticAssert,
     KeywordC23ThreadLocal,
     KeywordConstexpr,
+    KeywordTrue,
+    KeywordFalse,
 
     // GCC keywords
     KeywordGccConst1,
@@ -389,6 +391,8 @@ pub const TokenType = enum(u8) {
             .KeywordC23StaticAssert,
             .KeywordC23ThreadLocal,
             .KeywordConstexpr,
+            .KeywordTrue,
+            .KeywordFalse,
             => return true,
             else => false,
         };
@@ -590,6 +594,8 @@ pub const TokenType = enum(u8) {
             .KeywordC23StaticAssert => "static_assert",
             .KeywordC23ThreadLocal => "thread_local",
             .KeywordConstexpr => "constexpr",
+            .KeywordTrue => "true",
+            .KeywordFalse => "false",
 
             .KeywordGccConst1 => "__const",
             .KeywordGccConst2 => "__const__",
@@ -699,6 +705,8 @@ pub const TokenType = enum(u8) {
             .One,
             .Zero,
             .PPNumber,
+            .KeywordTrue,
+            .KeywordFalse,
             => true,
             else => false,
         };

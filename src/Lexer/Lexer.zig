@@ -778,9 +778,16 @@ pub fn nextNoSpecificTokens(self: *Lexer, skipTokens: std.EnumSet(TokenType)) To
     return token;
 }
 
-fn expectTokens(contents: []const u8, expected: []const TokenType) !void {
+fn expectTokens(contents: []const u8, expectedTokens: []const TokenType) !void {
+    return expectTokensExtra(contents, expectedTokens, null);
+}
+
+fn expectTokensExtra(contents: []const u8, expected: []const TokenType, standard: ?LangOpts.Standard) !void {
     var comp = Compilation.init(std.testing.allocator);
     defer comp.deinit();
+
+    if (standard) |provided|
+        comp.langOpts.standard = provided;
 
     const source = try comp.addSourceFromBuffer("path", contents);
     var lexer = Lexer{
@@ -1083,4 +1090,27 @@ test "num suffixes" {
         .PPNumber,
         .NewLine,
     });
+}
+
+test "comments" {
+    try expectTokens(
+        \\//foo
+        \\#foo
+    , &.{
+        .NewLine,
+        .Hash,
+        .Identifier,
+    });
+}
+
+test "C23 keywords" {
+    try expectTokensExtra("true false alignas alignof bool static_assert thread_local", &.{
+        .KeywordTrue,
+        .KeywordFalse,
+        .KeywordC23Alignas,
+        .KeywordC23Alignof,
+        .KeywordC23Bool,
+        .KeywordC23StaticAssert,
+        .KeywordC23ThreadLocal,
+    }, .c2x);
 }

@@ -6071,6 +6071,7 @@ fn checkArrayBounds(p: *Parser, index: Result, array: Result, token: TokenIndex)
 
 //// primary-expression
 ////  : identifier
+////  | keywordTrue or keywordFalse
 ////  | integer-literal
 ////  | float-literal
 ////  | imaginary-literal
@@ -6170,6 +6171,23 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
             }
             try p.errStr(.undeclared_identifier, nameToken, p.getTokenSlice(nameToken));
             return error.ParsingFailed;
+        },
+
+        .KeywordTrue, .KeywordFalse => |id| {
+            p.tokenIdx += 1;
+            const numericValue = @intFromBool(id == .KeywordTrue);
+            const res = Result{
+                .value = Value.int(numericValue),
+                .ty = .{ .specifier = .Bool },
+                .node = try p.addNode(.{
+                    .tag = .BoolLiteral,
+                    .type = .{ .specifier = .Bool },
+                    .data = .{ .int = numericValue },
+                }),
+            };
+            std.debug.assert(!p.inMacro); // Should have been replaced with .one / .zero
+            try p.valueMap.put(res.node, res.value);
+            return res;
         },
 
         .MacroFunc, .MacroFunction => {

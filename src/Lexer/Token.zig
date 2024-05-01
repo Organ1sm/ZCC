@@ -46,6 +46,8 @@ pub const Token = struct {
             .KeywordC23StaticAssert,
             .KeywordC23ThreadLocal,
             .KeywordConstexpr,
+            .KeywordTrue,
+            .KeywordFalse,
             => if (standard.atLeast(.c2x)) kw else .Identifier,
 
             .KeywordDeclSpec => if (comp.langOpts.declSpecAttrs) kw else .Identifier,
@@ -128,6 +130,8 @@ pub const Token = struct {
         .{ "static_assert", .KeywordC23StaticAssert },
         .{ "thread_local", .KeywordC23ThreadLocal },
         .{ "constexpr", .KeywordConstexpr },
+        .{ "true", .KeywordTrue },
+        .{ "false", .KeywordFalse },
 
         // Preprocessor directives
         .{ "include", .KeywordInclude },

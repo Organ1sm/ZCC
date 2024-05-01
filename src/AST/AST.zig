@@ -982,6 +982,7 @@ fn dumpNode(
                 util.setColor(.reset, w);
         },
 
+        .BoolLiteral,
         .CharLiteral,
         .IntLiteral,
         .FloatLiteral,

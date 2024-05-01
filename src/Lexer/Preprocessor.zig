@@ -694,6 +694,9 @@ fn expr(pp: *Preprocessor, lexer: *Lexer) MacroError!bool {
 
             .MacroWS, .WhiteSpace => continue,
 
+            .KeywordFalse => token.id = .Zero,
+            .KeywordTrue => token.id = .One,
+
             else => if (token.id.isMacroIdentifier()) {
                 if (token.id == .KeywordDefined) {
                     const tokenConsumed = try pp.handleKeywordDefined(&token, items[i + 1 ..], eof);
