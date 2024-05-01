@@ -356,16 +356,16 @@ pub fn generateBuiltinMacros(comp: *Compilation) !Source {
 
     // various int types
     const mapper = comp.stringInterner.getSlowTypeMapper();
-    try generateTypeMacro(w, mapper, "__PTRDIFF_TYPE__", comp.types.ptrdiff);
-    try generateTypeMacro(w, mapper, "__SIZE_TYPE__", comp.types.size);
-    try generateTypeMacro(w, mapper, "__WCHAR_TYPE__", comp.types.wchar);
+    try generateTypeMacro(w, mapper, "__PTRDIFF_TYPE__", comp.types.ptrdiff, comp.langOpts);
+    try generateTypeMacro(w, mapper, "__SIZE_TYPE__", comp.types.size, comp.langOpts);
+    try generateTypeMacro(w, mapper, "__WCHAR_TYPE__", comp.types.wchar, comp.langOpts);
 
     return comp.addSourceFromBuffer("<builtin>", buf.items);
 }
 
-fn generateTypeMacro(w: anytype, mapper: StringInterner.TypeMapper, name: []const u8, ty: Type) !void {
+fn generateTypeMacro(w: anytype, mapper: StringInterner.TypeMapper, name: []const u8, ty: Type, langopts: LangOpts) !void {
     try w.print("#define {s} ", .{name});
-    try ty.print(mapper, w);
+    try ty.print(mapper, langopts, w);
     try w.writeByte('\n');
 }
 

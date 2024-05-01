@@ -430,7 +430,7 @@ fn dumpNode(
     if (color)
         util.setColor(TYPE, w);
     try w.writeByte('\'');
-    try ty.dump(mapper, w);
+    try ty.dump(mapper, tree.comp.langOpts, w);
     try w.writeByte('\'');
 
     if (isLValue(tree.nodes, tree.data, tree.valueMap, node)) {

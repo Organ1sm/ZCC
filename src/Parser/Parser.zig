@@ -389,12 +389,12 @@ pub fn todo(p: *Parser, msg: []const u8) Error {
 }
 
 pub fn typeStr(p: *Parser, ty: Type) ![]const u8 {
-    if (TypeBuilder.fromType(ty).toString()) |str| return str;
+    if (TypeBuilder.fromType(ty).toString(p.comp.langOpts)) |str| return str;
     const stringsTop = p.strings.items.len;
     defer p.strings.items.len = stringsTop;
 
     const mapper = p.comp.stringInterner.getSlowTypeMapper();
-    try ty.print(mapper, p.strings.writer());
+    try ty.print(mapper, p.comp.langOpts, p.strings.writer());
     return try p.comp.diag.arena.allocator().dupe(u8, p.strings.items[stringsTop..]);
 }
 
@@ -408,11 +408,11 @@ pub fn typePairStrExtra(p: *Parser, a: Type, msg: []const u8, b: Type) ![]const 
 
     try p.strings.append('\'');
     const mapper = p.comp.stringInterner.getSlowTypeMapper();
-    try a.print(mapper, p.strings.writer());
+    try a.print(mapper, p.comp.langOpts, p.strings.writer());
     try p.strings.append('\'');
     try p.strings.appendSlice(msg);
     try p.strings.append('\'');
-    try b.print(mapper, p.strings.writer());
+    try b.print(mapper, p.comp.langOpts, p.strings.writer());
     try p.strings.append('\'');
     return try p.comp.diag.arena.allocator().dupe(u8, p.strings.items[stringsTop..]);
 }
@@ -5842,7 +5842,7 @@ fn validateFieldAccess(
 
     try p.strings.writer().print("'{s}' in '", .{p.getTokenSlice(fieldNameToken)});
     const mapper = p.comp.stringInterner.getSlowTypeMapper();
-    try exprType.print(mapper, p.strings.writer());
+    try exprType.print(mapper, p.comp.langOpts, p.strings.writer());
     try p.strings.append('\'');
 
     const duped = try p.comp.diag.arena.allocator().dupe(u8, p.strings.items);
@@ -6232,7 +6232,7 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
             } else if (p.func.type) |funcType| {
                 const mapper = p.comp.stringInterner.getSlowTypeMapper();
                 p.strings.items.len = 0;
-                try Type.printNamed(funcType, p.getTokenSlice(p.func.name), mapper, p.strings.writer());
+                try Type.printNamed(funcType, p.getTokenSlice(p.func.name), mapper, p.comp.langOpts, p.strings.writer());
                 try p.strings.append(0);
                 const predef = try p.makePredefinedIdentifier();
                 ty = predef.ty;
