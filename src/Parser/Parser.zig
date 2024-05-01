@@ -926,7 +926,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
 
         const node = try p.addNode(undefined); // reserve space
         const internedDeclaratorName = try p.getInternString(ID.d.name);
-        try p.symStack.defineSymbol(internedDeclaratorName, ID.d.type, ID.d.name, node, .{});
+        try p.symStack.defineSymbol(internedDeclaratorName, ID.d.type, ID.d.name, node, .{}, false);
 
         const func = p.func;
         defer p.func = func;
@@ -1087,12 +1087,14 @@ fn parseDeclaration(p: *Parser) Error!bool {
         } else if (ID.initializer.node != .none or
             (declSpec.storageClass != .@"extern" and p.func.type != null))
         {
+            // TODO validate global variable/constexpr initializer comptime known
             try p.symStack.defineSymbol(
                 internedName,
                 ID.d.type,
                 ID.d.name,
                 node,
-                if (ID.d.type.isConst()) ID.initializer.value else .{},
+                if (ID.d.type.isConst() or declSpec.constexpr != null) ID.initializer.value else .{},
+                declSpec.constexpr != null,
             );
         } else {
             try p.symStack.declareSymbol(internedName, ID.d.type, ID.d.name, node);
@@ -1260,19 +1262,25 @@ fn parseDeclSpec(p: *Parser) Error!?DeclSpec {
             => {
                 if (d.storageClass != .none) {
                     try p.errStr(.multiple_storage_class, p.tokenIdx, @tagName(d.storageClass));
-
                     return error.ParsingFailed;
                 }
 
                 if (d.threadLocal != null) {
                     switch (token) {
-                        .KeywordTypedef,
-                        .KeywordAuto,
-                        .KeywordRegister,
-                        => try p.errStr(.cannot_combine_spec, p.tokenIdx, token.getTokenText().?),
-
-                        else => {},
+                        .KeywordExtern, .KeywordStatic => {},
+                        else => try p.errStr(.cannot_combine_spec, p.tokenIdx, token.getTokenText().?),
                     }
+                    if (d.constexpr) |tok|
+                        try p.errStr(.cannot_combine_spec, p.tokenIdx, p.tokenIds[tok].getTokenText().?);
+                }
+
+                if (d.constexpr != null) {
+                    switch (token) {
+                        .KeywordAuto, .KeywordRegister, .KeywordStatic => {},
+                        else => try p.errStr(.cannot_combine_spec, p.tokenIdx, token.getTokenText().?),
+                    }
+                    if (d.threadLocal) |tok|
+                        try p.errStr(.cannot_combine_spec, p.tokenIdx, p.tokenIds[tok].getTokenText().?);
                 }
 
                 switch (token) {
@@ -1286,9 +1294,11 @@ fn parseDeclSpec(p: *Parser) Error!?DeclSpec {
             },
 
             .KeywordThreadLocal, .KeywordC23ThreadLocal => {
-                if (d.threadLocal != null) {
+                if (d.threadLocal != null)
                     try p.errStr(.duplicate_declspec, p.tokenIdx, token.getTokenText().?);
-                }
+
+                if (d.constexpr) |tok|
+                    try p.errStr(.cannot_combine_spec, p.tokenIdx, p.tokenIds[tok].getTokenText().?);
 
                 switch (d.storageClass) {
                     .@"extern", .none, .static => {},
@@ -1296,6 +1306,21 @@ fn parseDeclSpec(p: *Parser) Error!?DeclSpec {
                 }
 
                 d.threadLocal = p.tokenIdx;
+            },
+
+            .KeywordConstexpr => {
+                if (d.constexpr != null)
+                    try p.errStr(.duplicate_declspec, p.tokenIdx, token.getTokenText().?);
+
+                if (d.threadLocal) |tok|
+                    try p.errStr(.cannot_combine_spec, p.tokenIdx, p.tokenIds[tok].getTokenText().?);
+
+                switch (d.storageClass) {
+                    .auto, .register, .none, .static => {},
+                    else => try p.errStr(.cannot_combine_spec, p.tokenIdx, @tagName(d.storageClass)),
+                }
+
+                d.constexpr = p.tokenIdx;
             },
 
             .KeywordInline, .KeywordGccInline1, .KeywordGccInline2 => {
@@ -6087,6 +6112,19 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
             }
             if (p.symStack.findSymbol(internedName)) |sym| {
                 try p.checkDeprecatedUnavailable(sym.type, nameToken, sym.token);
+
+                if (sym.kind == .constexpr) {
+                    return Result{
+                        .value = sym.value,
+                        .ty = sym.type,
+                        .node = try p.addNode(.{
+                            .tag = .DeclRefExpr,
+                            .type = sym.type,
+                            .data = .{ .declRef = nameToken },
+                        }),
+                    };
+                }
+
                 if (sym.value.tag == .int) {
                     switch (p.constDeclFolding) {
                         .GNUFoldingExtension => try p.errToken(.const_decl_folded, nameToken),

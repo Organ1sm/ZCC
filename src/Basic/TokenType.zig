@@ -191,6 +191,7 @@ pub const TokenType = enum(u8) {
     KeywordC23Bool,
     KeywordC23StaticAssert,
     KeywordC23ThreadLocal,
+    KeywordConstexpr,
 
     // GCC keywords
     KeywordGccConst1,
@@ -381,11 +382,13 @@ pub const TokenType = enum(u8) {
             .KeywordMSInt16__,
             .KeywordMSInt8_,
             .KeywordMSInt8__,
+            .KeywordBitInt,
             .KeywordC23Alignas,
             .KeywordC23Alignof,
             .KeywordC23Bool,
             .KeywordC23StaticAssert,
             .KeywordC23ThreadLocal,
+            .KeywordConstexpr,
             => return true,
             else => false,
         };
@@ -586,6 +589,7 @@ pub const TokenType = enum(u8) {
             .KeywordC23Bool => "bool",
             .KeywordC23StaticAssert => "static_assert",
             .KeywordC23ThreadLocal => "thread_local",
+            .KeywordConstexpr => "constexpr",
 
             .KeywordGccConst1 => "__const",
             .KeywordGccConst2 => "__const__",

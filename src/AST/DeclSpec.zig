@@ -18,6 +18,7 @@ storageClass: union(enum) {
 } = .none,
 
 threadLocal: ?TokenIndex = null,
+constexpr: ?TokenIndex = null,
 @"inline": ?TokenIndex = null,
 noreturn: ?TokenIndex = null,
 type: Type,
@@ -32,6 +33,7 @@ pub fn validateParam(d: DeclSpec, p: *Parser, ty: *Type) Error!void {
     if (d.threadLocal) |tokenIndex| try p.errToken(.threadlocal_non_var, tokenIndex);
     if (d.@"inline") |tokenIndex| try p.errStr(.func_spec_non_func, tokenIndex, "inline");
     if (d.noreturn) |tokenIndex| try p.errStr(.func_spec_non_func, tokenIndex, "_Noreturn");
+    if (d.constexpr) |tokenIndex| try p.errToken(.invalid_storage_on_param, tokenIndex);
 }
 
 pub fn validateFnDef(d: DeclSpec, p: *Parser) Error!AstTag {
@@ -47,8 +49,11 @@ pub fn validateFnDef(d: DeclSpec, p: *Parser) Error!AstTag {
         => |index| try p.errToken(.illegal_storage_on_func, index),
     }
 
-    if (d.threadLocal) |index|
-        try p.errToken(.threadlocal_non_var, index);
+    if (d.threadLocal) |tokenIdx|
+        try p.errToken(.threadlocal_non_var, tokenIdx);
+
+    if (d.constexpr) |tokenIdx|
+        try p.errToken(.illegal_storage_on_func, tokenIdx);
 
     const isStatic = d.storageClass == .static;
     const isInline = d.@"inline" != null;
@@ -78,8 +83,12 @@ pub fn validate(d: DeclSpec, p: *Parser, ty: *Type, hasInit: bool) Error!AstTag 
             .register,
             => |tokenIndex| try p.errToken(.illegal_storage_on_func, tokenIndex),
         }
+
         if (d.threadLocal) |tokenIndex|
             try p.errToken(.threadlocal_non_var, tokenIndex);
+
+        if (d.constexpr) |tokenIdx|
+            try p.errToken(.illegal_storage_on_func, tokenIdx);
 
         const isInline = d.@"inline" != null;
 
