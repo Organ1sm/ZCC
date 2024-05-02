@@ -56,8 +56,10 @@ pub const Builder = struct {
         return ref;
     }
 
-    pub fn addLabel(b: *Builder, name: [*:0]const u8) Allocator.Error!Ref {
-        return b.addInst(.Label, .{ .label = name }, .void);
+    pub fn makeLabel(b: *Builder, name: [*:0]const u8) Allocator.Error!Ref {
+        const ref: Ref = @enumFromInt(b.instructions.len);
+        try b.instructions.append(b.gpa, .{ .tag = .Label, .data = .{ .label = name }, .type = .void });
+        return ref;
     }
 
     pub fn addJump(b: *Builder, label: Ref) Allocator.Error!void {
@@ -104,9 +106,18 @@ pub const Builder = struct {
         });
         return ref;
     }
+
+    pub fn addPhi(b: *Builder, inputs: []const Inst.Phi.Input, ty: Interner.Ref) Allocator.Error!Ref {
+        const a = b.arena.allocator();
+        const inputRefs = try a.alloc(Ref, inputs.len * 2 + 1);
+        inputRefs[0] = @enumFromInt(inputs.len);
+        @memcpy(inputRefs[1..], std.mem.bytesAsSlice(Ref, std.mem.sliceAsBytes(inputs)));
+
+        return b.addInst(.Phi, .{ .phi = .{ .ptr = inputRefs.ptr } }, ty);
+    }
 };
 
-pub const Ref = enum(u32) { _ };
+pub const Ref = enum(u32) { none = std.math.maxInt(u32), _ };
 
 pub const Inst = struct {
     tag: Tag,
@@ -146,6 +157,9 @@ pub const Inst = struct {
         // data.alloc
         Alloc,
 
+        // data.phi
+        Phi,
+
         // data.bin
         Store,
         BitOr,
@@ -166,16 +180,13 @@ pub const Inst = struct {
         Mod,
 
         // data.un
-        RetValue,
+        Ret,
         Load,
         BitNot,
         Negate,
         Trunc,
         Zext,
         Sext,
-
-        // data.none
-        Ret,
     };
 
     pub const Data = union {
@@ -195,6 +206,7 @@ pub const Inst = struct {
         call: *Call,
         label: [*:0]const u8,
         branch: *Branch,
+        phi: Phi,
     };
 
     pub const Branch = struct {
@@ -218,6 +230,21 @@ pub const Inst = struct {
 
         pub fn args(c: Call) []Ref {
             return c.argsPtr[0..c.argsLen];
+        }
+    };
+
+    pub const Phi = struct {
+        ptr: [*]IR.Ref,
+
+        pub const Input = struct {
+            label: IR.Ref,
+            value: IR.Ref,
+        };
+
+        pub fn inputs(p: Phi) []Input {
+            const len = @intFromEnum(p.ptr[0]) * 2;
+            const slice = (p.ptr + 1)[0..len];
+            return std.mem.bytesAsSlice(Input, std.mem.sliceAsBytes(slice));
         }
     };
 };
@@ -376,6 +403,27 @@ pub fn dump(ir: IR, name: []const u8, color: bool, w: anytype) !void {
                 try w.writeByte('\n');
             },
 
+            .Phi => {
+                try w.writeAll("    ");
+                try ir.writeRef(@enumFromInt(i), color, w);
+                if (color) util.setColor(.reset, w);
+                try w.writeAll(" = ");
+                if (color) util.setColor(INST, w);
+                try w.writeAll("phi ");
+                if (color) util.setColor(.reset, w);
+                for (data[i].phi.inputs(), 0..) |input, inputIdx| {
+                    if (inputIdx != 0) try w.writeAll(", ");
+                    try w.writeAll("[ ");
+                    try ir.writeRef(input.value, color, w);
+                    if (color) util.setColor(.reset, w);
+                    try w.writeAll(", ");
+                    try ir.writeLabel(input.label, color, w);
+                    if (color) util.setColor(.reset, w);
+                    try w.writeAll(" ]");
+                }
+                try w.writeByte('\n');
+            },
+
             .Store => {
                 const bin = data[i].bin;
                 if (color) util.setColor(INST, w);
@@ -390,12 +438,8 @@ pub fn dump(ir: IR, name: []const u8, color: bool, w: anytype) !void {
             .Ret => {
                 if (color) util.setColor(INST, w);
                 try w.writeAll("    Ret\n");
-            },
-
-            .RetValue => {
-                if (color) util.setColor(INST, w);
-                try w.writeAll("   RetValue ");
-                try ir.writeRef(data[i].un, color, w);
+                if (data[i].un != .none)
+                    try ir.writeRef(data[i].un, color, w);
                 try w.writeByte('\n');
             },
 
@@ -456,7 +500,8 @@ pub fn dump(ir: IR, name: []const u8, color: bool, w: anytype) !void {
                 try ir.writeRef(un, color, w);
                 try w.writeByte('\n');
             },
-            else => {},
+
+            .LabelAddr, .JmpVal => {},
         }
     }
     if (color) util.setColor(.reset, w);

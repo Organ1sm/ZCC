@@ -5409,12 +5409,7 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
             var operand = try p.parseCastExpr();
             try operand.expect(p);
 
-            if (operand.ty.isArray() or operand.ty.isPointer()) {
-                const elemTy = operand.ty.getElemType();
-                if (elemTy.isFunc())
-                    try operand.lvalConversion(p);
-                operand.ty = elemTy;
-            } else if (operand.ty.isFunc()) {
+            if (operand.ty.isArray() or operand.ty.isPointer() or operand.ty.isFunc()) {
                 try operand.lvalConversion(p);
                 operand.ty = operand.ty.getElemType();
             } else {

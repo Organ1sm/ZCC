@@ -41,9 +41,11 @@ nodeTy: []const Type,
 wipSwitch: *WipSwitch = undefined,
 condDummyRef: IR.Ref = undefined,
 symbols: std.ArrayListUnmanaged(Symbol) = .{},
+retNodes: std.ArrayListUnmanaged(IR.Inst.Phi.Input) = .{},
 continueLabel: IR.Ref = undefined,
 breakLabel: IR.Ref = undefined,
 returnLabel: IR.Ref = undefined,
+currentLabel: IR.Ref = undefined,
 
 pub fn generateTree(comp: *Compilation, tree: Tree) Compilation.Error!void {
     var c = CodeGen{
@@ -58,6 +60,8 @@ pub fn generateTree(comp: *Compilation, tree: Tree) Compilation.Error!void {
         .nodeTy = tree.nodes.items(.type),
     };
     defer c.symbols.deinit(c.builder.gpa);
+    defer c.retNodes.deinit(c.comp.gpa);
+    defer c.builder.deinit();
 
     const nodeTags = tree.nodes.items(.tag);
     for (tree.rootDecls) |decl| {
@@ -146,6 +150,7 @@ fn genFn(c: *CodeGen, decl: NodeIndex) Error!void {
     const name = c.tree.getTokenSlice(c.nodeData[@intFromEnum(decl)].decl.name);
     const funcTy = c.nodeTy[@intFromEnum(decl)].canonicalize(.standard);
     c.builder.allocCount = 0;
+    c.retNodes.items.len = 0;
 
     // reserve space for arg instructions
     const params = funcTy.getParams();
@@ -171,12 +176,20 @@ fn genFn(c: *CodeGen, decl: NodeIndex) Error!void {
     }
 
     // Generate body
-    c.returnLabel = try c.builder.addLabel("return");
+    c.returnLabel = try c.builder.makeLabel("return");
     try c.genStmt(c.nodeData[@intFromEnum(decl)].decl.node);
 
     // Relocate returns
-    try c.builder.body.append(c.builder.gpa, c.returnLabel);
-    _ = try c.builder.addInst(.Ret, undefined, .noreturn);
+    if (c.retNodes.items.len == 0) {
+        _ = try c.builder.addInst(.Ret, .{ .un = .none }, .noreturn);
+    } else if (c.retNodes.items.len == 1) {
+        c.builder.body.items.len -= 1;
+        _ = try c.builder.addInst(.Ret, .{ .un = c.retNodes.items[0].value }, .noreturn);
+    } else {
+        try c.startBlock(c.returnLabel);
+        const phi = try c.builder.addPhi(c.retNodes.items, try c.genType(funcTy.getReturnType()));
+        _ = try c.builder.addInst(.Ret, .{ .un = phi }, .noreturn);
+    }
 
     var res = IR{
         .pool = c.builder.pool,
@@ -194,6 +207,11 @@ fn addUn(c: *CodeGen, tag: Inst.Tag, operand: IR.Ref, ty: Type) !IR.Ref {
 
 fn addBin(c: *CodeGen, tag: Inst.Tag, lhs: IR.Ref, rhs: IR.Ref, ty: Type) !IR.Ref {
     return c.builder.addInst(tag, .{ .bin = .{ .lhs = lhs, .rhs = rhs } }, try c.genType(ty));
+}
+
+fn startBlock(c: *CodeGen, label: IR.Ref) !void {
+    try c.builder.body.append(c.builder.gpa, label);
+    c.currentLabel = label;
 }
 
 fn genStmt(c: *CodeGen, node: NodeIndex) Error!void {
@@ -254,8 +272,9 @@ fn genStmt(c: *CodeGen, node: NodeIndex) Error!void {
         },
 
         .LabeledStmt => {
-            const label = try c.builder.addLabel("label");
-            try c.builder.body.append(c.comp.gpa, label);
+            const label = try c.builder.makeLabel("label");
+            try c.startBlock(label);
+            try c.genStmt(data.decl.node);
         },
 
         .CompoundStmtTwo => {
@@ -275,9 +294,9 @@ fn genStmt(c: *CodeGen, node: NodeIndex) Error!void {
         },
 
         .IfThenElseStmt => {
-            const thenLabel = try c.builder.addLabel("if.then");
-            const elseLabel = try c.builder.addLabel("if.else");
-            const endLabel = try c.builder.addLabel("if.end");
+            const thenLabel = try c.builder.makeLabel("if.then");
+            const elseLabel = try c.builder.makeLabel("if.else");
+            const endLabel = try c.builder.makeLabel("if.end");
 
             {
                 c.builder.branch = .{
@@ -288,19 +307,19 @@ fn genStmt(c: *CodeGen, node: NodeIndex) Error!void {
                 try c.genBoolExpr(data.if3.cond);
             }
 
-            try c.builder.body.append(c.builder.gpa, thenLabel);
+            try c.startBlock(thenLabel);
             try c.genStmt(c.tree.data[data.if3.body]); // then
             try c.builder.addJump(endLabel);
 
-            try c.builder.body.append(c.builder.gpa, elseLabel);
+            try c.startBlock(elseLabel);
             try c.genStmt(c.tree.data[data.if3.body + 1]); // else
 
-            try c.builder.body.append(c.builder.gpa, endLabel);
+            try c.startBlock(endLabel);
         },
 
         .IfThenStmt => {
-            const thenLabel = try c.builder.addLabel("if.then");
-            const endLabel = try c.builder.addLabel("if.end");
+            const thenLabel = try c.builder.makeLabel("if.then");
+            const endLabel = try c.builder.makeLabel("if.end");
 
             {
                 c.builder.branch = .{
@@ -310,9 +329,9 @@ fn genStmt(c: *CodeGen, node: NodeIndex) Error!void {
                 defer c.builder.branch = null;
                 try c.genBoolExpr(data.binExpr.lhs);
             }
-            try c.builder.body.append(c.builder.gpa, thenLabel);
+            try c.startBlock(thenLabel);
             try c.genStmt(data.binExpr.rhs); // then
-            try c.builder.body.append(c.builder.gpa, endLabel);
+            try c.startBlock(endLabel);
         },
 
         .SwitchStmt => {
@@ -328,7 +347,7 @@ fn genStmt(c: *CodeGen, node: NodeIndex) Error!void {
             const oldBreakLabel = c.breakLabel;
             defer c.breakLabel = oldBreakLabel;
 
-            const endRef = try c.builder.addLabel("switch.end");
+            const endRef = try c.builder.makeLabel("switch.end");
             c.breakLabel = endRef;
 
             const cond = try c.genExpr(data.binExpr.lhs);
@@ -337,9 +356,8 @@ fn genStmt(c: *CodeGen, node: NodeIndex) Error!void {
 
             try c.genStmt(data.binExpr.rhs); // body
 
-            try c.builder.body.append(c.comp.gpa, endRef);
             const defaultRef = wipSwitch.default orelse endRef;
-            try c.builder.body.append(c.builder.gpa, endRef);
+            try c.startBlock(endRef);
 
             const a = c.builder.arena.allocator();
             const switchData = try a.create(Inst.Switch);
@@ -355,8 +373,8 @@ fn genStmt(c: *CodeGen, node: NodeIndex) Error!void {
 
         .CaseStmt => {
             const val = c.tree.valueMap.get(data.binExpr.lhs).?;
-            const label = try c.builder.addLabel("case");
-            try c.builder.body.append(c.comp.gpa, label);
+            const label = try c.builder.makeLabel("case");
+            try c.startBlock(label);
             try c.wipSwitch.cases.append(c.builder.gpa, .{
                 .value = try c.builder.pool.put(c.builder.gpa, .{ .value = val }),
                 .label = label,
@@ -365,8 +383,8 @@ fn genStmt(c: *CodeGen, node: NodeIndex) Error!void {
         },
 
         .DefaultStmt => {
-            const default = try c.builder.addLabel("default");
-            try c.builder.body.append(c.comp.gpa, default);
+            const default = try c.builder.makeLabel("default");
+            try c.startBlock(default);
             c.wipSwitch.default = default;
             try c.genStmt(data.unExpr);
         },
@@ -380,14 +398,14 @@ fn genStmt(c: *CodeGen, node: NodeIndex) Error!void {
                 c.continueLabel = oldContinueLabel;
             }
 
-            const condLabel = try c.builder.addLabel("while.cond");
-            const thenLabel = try c.builder.addLabel("while.then");
-            const endLabel = try c.builder.addLabel("while.end");
+            const condLabel = try c.builder.makeLabel("while.cond");
+            const thenLabel = try c.builder.makeLabel("while.then");
+            const endLabel = try c.builder.makeLabel("while.end");
 
             c.continueLabel = condLabel;
             c.breakLabel = endLabel;
 
-            try c.builder.body.append(c.builder.gpa, condLabel);
+            try c.startBlock(condLabel);
             {
                 c.builder.branch = .{
                     .trueLabel = thenLabel,
@@ -396,10 +414,11 @@ fn genStmt(c: *CodeGen, node: NodeIndex) Error!void {
                 defer c.builder.branch = null;
                 try c.genBoolExpr(data.binExpr.lhs);
             }
-            try c.builder.body.append(c.builder.gpa, thenLabel);
+
+            try c.startBlock(thenLabel);
             try c.genStmt(data.binExpr.rhs);
             try c.builder.addJump(condLabel);
-            try c.builder.body.append(c.builder.gpa, endLabel);
+            try c.startBlock(endLabel);
         },
 
         .DoWhileStmt => {
@@ -411,16 +430,16 @@ fn genStmt(c: *CodeGen, node: NodeIndex) Error!void {
                 c.continueLabel = oldContinueLabel;
             }
 
-            const thenLabel = try c.builder.addLabel("do.then");
-            const condLabel = try c.builder.addLabel("do.cond");
-            const endLabel = try c.builder.addLabel("do.end");
+            const thenLabel = try c.builder.makeLabel("do.then");
+            const condLabel = try c.builder.makeLabel("do.cond");
+            const endLabel = try c.builder.makeLabel("do.end");
 
             c.continueLabel = condLabel;
             c.breakLabel = endLabel;
 
-            try c.builder.body.append(c.builder.gpa, thenLabel);
+            try c.startBlock(thenLabel);
             try c.genStmt(data.binExpr.rhs);
-            try c.builder.body.append(c.builder.gpa, condLabel);
+            try c.startBlock(condLabel);
             {
                 c.builder.branch = .{
                     .trueLabel = thenLabel,
@@ -429,7 +448,7 @@ fn genStmt(c: *CodeGen, node: NodeIndex) Error!void {
                 defer c.builder.branch = null;
                 try c.genBoolExpr(data.binExpr.lhs);
             }
-            try c.builder.body.append(c.builder.gpa, endLabel);
+            try c.startBlock(endLabel);
         },
 
         .ForDeclStmt => {
@@ -445,17 +464,17 @@ fn genStmt(c: *CodeGen, node: NodeIndex) Error!void {
             for (forDecl.decls) |decl|
                 try c.genStmt(decl);
 
-            const thenLabel = try c.builder.addLabel("for.then");
+            const thenLabel = try c.builder.makeLabel("for.then");
             var condLabel = thenLabel;
-            const contLabel = try c.builder.addLabel("for.cont");
-            const endLabel = try c.builder.addLabel("for.end");
+            const contLabel = try c.builder.makeLabel("for.cont");
+            const endLabel = try c.builder.makeLabel("for.end");
 
             c.continueLabel = contLabel;
             c.breakLabel = endLabel;
 
             if (forDecl.cond != .none) {
-                condLabel = try c.builder.addLabel("for.cond");
-                try c.builder.body.append(c.builder.gpa, condLabel);
+                condLabel = try c.builder.makeLabel("for.cond");
+                try c.startBlock(condLabel);
 
                 c.builder.branch = .{
                     .trueLabel = thenLabel,
@@ -465,13 +484,13 @@ fn genStmt(c: *CodeGen, node: NodeIndex) Error!void {
                 try c.genBoolExpr(forDecl.cond);
             }
 
-            try c.builder.body.append(c.builder.gpa, thenLabel);
+            try c.startBlock(thenLabel);
             try c.genStmt(forDecl.body);
             if (forDecl.incr != .none)
                 _ = try c.genExpr(forDecl.incr);
 
             try c.builder.addJump(condLabel);
-            try c.builder.body.append(c.builder.gpa, endLabel);
+            try c.startBlock(endLabel);
         },
 
         .ForEverStmt => {
@@ -483,15 +502,15 @@ fn genStmt(c: *CodeGen, node: NodeIndex) Error!void {
                 c.continueLabel = oldContinueLabel;
             }
 
-            const thenLabel = try c.builder.addLabel("for.then");
-            const endLabel = try c.builder.addLabel("for.end");
+            const thenLabel = try c.builder.makeLabel("for.then");
+            const endLabel = try c.builder.makeLabel("for.end");
 
             c.continueLabel = thenLabel;
             c.breakLabel = endLabel;
 
-            try c.builder.body.append(c.builder.gpa, thenLabel);
+            try c.startBlock(thenLabel);
             try c.genStmt(data.unExpr);
-            try c.builder.body.append(c.builder.gpa, endLabel);
+            try c.startBlock(endLabel);
         },
 
         .ForStmt => {
@@ -507,17 +526,17 @@ fn genStmt(c: *CodeGen, node: NodeIndex) Error!void {
             if (forStmt.init != .none)
                 _ = try c.genExpr(forStmt.init);
 
-            const thenLabel = try c.builder.addLabel("for.then");
+            const thenLabel = try c.builder.makeLabel("for.then");
             var condLabel = thenLabel;
-            const contLabel = try c.builder.addLabel("for.cont");
-            const endLabel = try c.builder.addLabel("for.end");
+            const contLabel = try c.builder.makeLabel("for.cont");
+            const endLabel = try c.builder.makeLabel("for.end");
 
             c.continueLabel = contLabel;
             c.breakLabel = endLabel;
 
             if (forStmt.cond != .none) {
-                condLabel = try c.builder.addLabel("for.cond");
-                try c.builder.body.append(c.builder.gpa, condLabel);
+                condLabel = try c.builder.makeLabel("for.cond");
+                try c.startBlock(condLabel);
 
                 c.builder.branch = .{
                     .trueLabel = thenLabel,
@@ -527,13 +546,13 @@ fn genStmt(c: *CodeGen, node: NodeIndex) Error!void {
                 try c.genBoolExpr(forStmt.cond);
             }
 
-            try c.builder.body.append(c.builder.gpa, thenLabel);
+            try c.startBlock(thenLabel);
             try c.genStmt(forStmt.body);
             if (forStmt.incr != .none) {
                 _ = try c.genExpr(forStmt.incr);
             }
             try c.builder.addJump(condLabel);
-            try c.builder.body.append(c.builder.gpa, endLabel);
+            try c.startBlock(endLabel);
         },
 
         .ContinueStmt => try c.builder.addJump(c.continueLabel),
@@ -542,7 +561,7 @@ fn genStmt(c: *CodeGen, node: NodeIndex) Error!void {
         .ReturnStmt => {
             if (data.unExpr != .none) {
                 const operand = try c.genExpr(data.unExpr);
-                _ = try c.builder.addInst(.RetValue, .{ .un = operand }, .void);
+                try c.retNodes.append(c.comp.gpa, .{ .value = operand, .label = c.currentLabel });
             }
             try c.builder.addJump(c.returnLabel);
         },
@@ -550,7 +569,7 @@ fn genStmt(c: *CodeGen, node: NodeIndex) Error!void {
         .ImplicitReturn => {
             if (data.returnZero) {
                 const operand = try c.builder.addConstant(Value.int(0), try c.genType(ty));
-                _ = try c.builder.addInst(.RetValue, .{ .un = operand }, .void);
+                try c.retNodes.append(c.comp.gpa, .{ .value = operand, .label = c.currentLabel });
             }
             // No need to emit a jump since implicit_return is always the last instruction.
         },
@@ -705,7 +724,7 @@ fn genExpr(c: *CodeGen, node: NodeIndex) Error!IR.Ref {
         },
 
         .PreIncExpr => {
-            const operand = try c.genExpr(data.unExpr);
+            const operand = try c.genLval(data.unExpr);
             const val = try c.addUn(.Load, operand, ty);
             const one = try c.builder.addConstant(Value.int(1), try c.genType(ty));
             const plusOne = try c.addBin(.Add, val, one, ty);
@@ -713,7 +732,7 @@ fn genExpr(c: *CodeGen, node: NodeIndex) Error!IR.Ref {
             return plusOne;
         },
         .PreDecExpr => {
-            const operand = try c.genExpr(data.unExpr);
+            const operand = try c.genLval(data.unExpr);
             const val = try c.addUn(.Load, operand, ty);
             const one = try c.builder.addConstant(Value.int(1), try c.genType(ty));
             const decOne = try c.addBin(.Sub, val, one, ty);
@@ -722,7 +741,7 @@ fn genExpr(c: *CodeGen, node: NodeIndex) Error!IR.Ref {
         },
 
         .PostIncExpr => {
-            const operand = try c.genExpr(data.unExpr);
+            const operand = try c.genLval(data.unExpr);
             const val = try c.addUn(.Load, operand, ty);
             const one = try c.builder.addConstant(Value.int(1), try c.genType(ty));
             const plusOne = try c.addBin(.Add, val, one, ty);
@@ -730,7 +749,7 @@ fn genExpr(c: *CodeGen, node: NodeIndex) Error!IR.Ref {
             return val;
         },
         .PostDecExpr => {
-            const operand = try c.genExpr(data.unExpr);
+            const operand = try c.genLval(data.unExpr);
             const val = try c.addUn(.Load, operand, ty);
             const one = try c.builder.addConstant(Value.int(1), try c.genType(ty));
             const decOne = try c.addBin(.Sub, val, one, ty);
@@ -935,19 +954,20 @@ fn genBoolExpr(c: *CodeGen, base: NodeIndex) Error!void {
                 return c.genBoolExpr(data.binExpr.rhs);
             }
 
-            const oldBoolCtx = c.builder.branch;
-            defer c.builder.branch = oldBoolCtx;
+            const oldBranch = c.builder.branch;
+            defer c.builder.branch = oldBranch;
 
-            const falseLabel = try c.builder.addLabel("bool_or.false");
+            const falseLabel = try c.builder.makeLabel("bool_or.false");
             c.builder.branch = .{
                 .trueLabel = c.builder.branch.?.trueLabel,
                 .falseLabel = falseLabel,
             };
+
             try c.genBoolExpr(data.binExpr.lhs);
-            try c.builder.body.append(c.builder.gpa, falseLabel);
+            try c.startBlock(falseLabel);
             c.builder.branch = .{
                 .trueLabel = c.builder.branch.?.trueLabel,
-                .falseLabel = oldBoolCtx.?.falseLabel,
+                .falseLabel = oldBranch.?.falseLabel,
             };
             return c.genBoolExpr(data.binExpr.rhs);
         },
@@ -961,26 +981,27 @@ fn genBoolExpr(c: *CodeGen, base: NodeIndex) Error!void {
                 return c.genBoolExpr(data.binExpr.rhs);
             }
 
-            const oldBoolCtx = c.builder.branch;
-            defer c.builder.branch = oldBoolCtx;
+            const oldBranch = c.builder.branch;
+            defer c.builder.branch = oldBranch;
 
-            const trueLabel = try c.builder.addLabel("bool_and.true");
+            const trueLabel = try c.builder.makeLabel("bool_and.true");
             c.builder.branch = .{
                 .trueLabel = trueLabel,
                 .falseLabel = c.builder.branch.?.falseLabel,
             };
+
             try c.genBoolExpr(data.binExpr.lhs);
-            try c.builder.body.append(c.builder.gpa, trueLabel);
+            try c.startBlock(trueLabel);
             c.builder.branch = .{
-                .trueLabel = oldBoolCtx.?.trueLabel,
+                .trueLabel = oldBranch.?.trueLabel,
                 .falseLabel = c.builder.branch.?.falseLabel,
             };
             return c.genBoolExpr(data.binExpr.rhs);
         },
 
         .BoolNotExpr => {
-            const oldBoolCtx = c.builder.branch;
-            defer c.builder.branch = oldBoolCtx;
+            const oldBranch = c.builder.branch;
+            defer c.builder.branch = oldBranch;
 
             c.builder.branch = .{
                 .trueLabel = c.builder.branch.?.falseLabel,
@@ -1034,7 +1055,6 @@ fn genBoolExpr(c: *CodeGen, base: NodeIndex) Error!void {
     const lhs = try c.genExpr(node);
     const rhs = try c.builder.addConstant(Value.int(0), try c.genType(c.nodeTy[@intFromEnum(node)]));
     const cmp = try c.builder.addInst(.CmpNE, .{ .bin = .{ .lhs = lhs, .rhs = rhs } }, .i1);
-    try c.builder.body.append(c.comp.gpa, cmp);
     try c.builder.addBranch(cmp);
 }
 
