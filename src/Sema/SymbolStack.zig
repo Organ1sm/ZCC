@@ -40,6 +40,7 @@ pub const Kind = enum {
     declaration, // A declaration of a symbol without a definition.
     definition,  // A definition of a symbol where its complete information is provided.
     enumeration, // An enumeration value within an enum.
+    constexpr,
 };
 // zig fmt: on
 
@@ -103,8 +104,8 @@ pub fn findTypedef(self: *SymbolStack, name: StringId, nameToken: TokenIndex, no
                 return self.symbols.get(i);
             },
 
-            // If it's a definition or declaration, return null.
-            .definition, .declaration => if (names[i] == name) return null,
+            // If it's a definition or declaration, constexpr , return null.
+            .definition, .declaration, .constexpr => if (names[i] == name) return null,
             else => {},
         }
     }
@@ -124,7 +125,11 @@ pub fn findSymbol(self: *SymbolStack, name: StringId) ?Symbol {
         i -= 1;
 
         switch (kinds[i]) {
-            .definition, .declaration, .enumeration => if (names[i] == name) return self.symbols.get(i),
+            .definition,
+            .declaration,
+            .enumeration,
+            .constexpr,
+            => if (names[i] == name) return self.symbols.get(i),
             else => {},
         }
     }
@@ -225,6 +230,7 @@ pub fn defineSymbol(
     token: TokenIndex,
     node: NodeIndex,
     val: Value,
+    constexpr: bool,
 ) !void {
     const kinds = self.symbols.items(.kind);
     const names = self.symbols.items(.name);
@@ -246,7 +252,7 @@ pub fn defineSymbol(
                 }
                 break;
             },
-            .definition => if (names[i] == name) {
+            .definition, .constexpr => if (names[i] == name) {
                 try self.p.errStr(.redefinition, token, self.p.getTokenSlice(token));
                 try self.p.errToken(.previous_definition, self.symbols.items(.token)[i]);
                 break;
@@ -255,7 +261,7 @@ pub fn defineSymbol(
         }
     }
     try self.appendSymbol(.{
-        .kind = .definition,
+        .kind = if (constexpr) .constexpr else .definition,
         .name = name,
         .token = token,
         .type = ty,
@@ -291,7 +297,7 @@ pub fn declareSymbol(
                 }
                 break;
             },
-            .definition => if (names[i] == name) {
+            .definition, .constexpr => if (names[i] == name) {
                 const prevTy = self.symbols.items(.type)[i];
                 if (!ty.eql(prevTy, self.p.comp, true)) { // TODO adjusted equality check
                     try self.p.errStr(.redefinition_incompatible, token, self.p.getTokenSlice(token));
@@ -321,7 +327,7 @@ pub fn defineParam(self: *SymbolStack, name: StringId, ty: Type, token: TokenInd
     while (i > end) {
         i -= 1;
         switch (kinds[i]) {
-            .enumeration, .declaration, .definition => if (names[i] == name) {
+            .enumeration, .declaration, .definition, .constexpr => if (names[i] == name) {
                 try self.p.errStr(.redefinition_of_parameter, token, self.p.getTokenSlice(token));
                 try self.p.errToken(.previous_definition, self.symbols.items(.token)[i]);
                 break;
@@ -394,7 +400,7 @@ pub fn defineEnumeration(
                 try self.p.errToken(.previous_definition, self.symbols.items(.token)[i]);
                 return;
             },
-            .declaration, .definition => if (names[i] == name) {
+            .declaration, .definition, .constexpr => if (names[i] == name) {
                 try self.p.errStr(.redefinition_different_sym, token, self.p.getTokenSlice(token));
                 try self.p.errToken(.previous_definition, self.symbols.items(.token)[i]);
                 return;

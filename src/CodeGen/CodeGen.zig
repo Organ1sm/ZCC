@@ -575,6 +575,7 @@ fn genExpr(c: *CodeGen, node: NodeIndex) Error!IR.Ref {
     const tag = c.nodeTag[@intFromEnum(node)];
     switch (tag) {
         .EnumerationRef,
+        .BoolLiteral,
         .IntLiteral,
         .CharLiteral,
         .FloatLiteral,

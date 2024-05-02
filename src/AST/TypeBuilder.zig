@@ -5,6 +5,7 @@ const Parser = @import("../Parser/Parser.zig");
 const Compilation = @import("../Basic/Compilation.zig");
 const Qualifiers = @import("Type.zig").Qualifiers;
 const Target = @import("../Basic/Target.zig");
+const LangOpts = @import("../Basic/LangOpts.zig");
 
 const TypeBuilder = @This();
 
@@ -135,12 +136,12 @@ pub const Specifier = union(enum) {
 
     Attributed: *Type.Attributed,
 
-    pub fn toString(spec: Specifier) ?[]const u8 {
+    pub fn toString(spec: Specifier, langOpts: LangOpts) ?[]const u8 {
         return switch (spec) {
             .None => unreachable,
 
             .Void => "void",
-            .Bool => "_Bool",
+            .Bool => if (langOpts.standard.atLeast(.c2x)) "bool" else "_Bool",
 
             .Char => "char",
             .SChar => "signed char",
@@ -227,7 +228,7 @@ pub const Specifier = union(enum) {
             .ComplexFloat80 => "_Complex __float80",
             .ComplexFloat128 => "_Complex __float128",
 
-            .Attributed => |attr| TypeBuilder.fromType(attr.base).toString(),
+            .Attributed => |attr| TypeBuilder.fromType(attr.base).toString(langOpts),
 
             else => null,
         };
@@ -349,18 +350,18 @@ pub fn finish(b: @This(), p: *Parser) Parser.Error!Type {
             const unsigned = b.specifier == .UBitInt or b.specifier == .ComplexUBitInt;
             if (unsigned) {
                 if (bits < 1) {
-                    try p.errStr(.unsigned_bit_int_too_small, b.bitIntToken.?, b.specifier.toString().?);
+                    try p.errStr(.unsigned_bit_int_too_small, b.bitIntToken.?, b.specifier.toString(p.comp.langOpts).?);
                     return error.ParsingFailed;
                 }
             } else {
                 if (bits < 2) {
-                    try p.errStr(.signed_bit_int_too_small, b.bitIntToken.?, b.specifier.toString().?);
+                    try p.errStr(.signed_bit_int_too_small, b.bitIntToken.?, b.specifier.toString(p.comp.langOpts).?);
                     return error.ParsingFailed;
                 }
             }
 
             if (bits > 128) {
-                try p.errStr(.bit_int_too_big, b.bitIntToken.?, b.specifier.toString().?);
+                try p.errStr(.bit_int_too_big, b.bitIntToken.?, b.specifier.toString(p.comp.langOpts).?);
                 return error.ParsingFailed;
             }
 
@@ -518,12 +519,8 @@ fn cannotCombine(b: @This(), p: *Parser, sourceToken: TokenIndex) !void {
     if (b.errorOnInvalid)
         return error.CannotCombine;
 
-    const tyString = b.specifier.toString() orelse try p.typeStr(try b.finish(p));
-    try p.errExtra(
-        .cannot_combine_spec,
-        sourceToken,
-        .{ .str = tyString },
-    );
+    const tyString = b.specifier.toString(p.comp.langOpts) orelse try p.typeStr(try b.finish(p));
+    try p.errExtra(.cannot_combine_spec, sourceToken, .{ .str = tyString });
 
     if (b.typedef) |some|
         try p.errStr(.spec_from_typedef, some.token, try p.typeStr(some.type));
@@ -539,7 +536,7 @@ fn duplicateSpec(b: *@This(), p: *Parser, sourceToken: TokenIndex, spec: []const
 
 pub fn combineFromTypeof(b: *@This(), p: *Parser, new: Type, sourceToken: TokenIndex) Compilation.Error!void {
     if (b.typeof != null) return p.errStr(.cannot_combine_spec, sourceToken, "typeof");
-    if (b.specifier != .None) return p.errStr(.invalid_typeof, sourceToken, b.specifier.toString().?);
+    if (b.specifier != .None) return p.errStr(.invalid_typeof, sourceToken, b.specifier.toString(p.comp.langOpts).?);
 
     const inner = switch (new.specifier) {
         .TypeofType => new.data.subType.*,
@@ -580,7 +577,7 @@ fn combineExtra(b: *@This(), p: *Parser, new: Specifier, sourceToken: TokenIndex
     if (b.typeof != null) {
         if (b.errorOnInvalid)
             return error.CannotCombine;
-        try p.errStr(.invalid_typeof, sourceToken, new.toString().?);
+        try p.errStr(.invalid_typeof, sourceToken, new.toString(p.comp.langOpts).?);
     }
 
     if (new == .Complex)

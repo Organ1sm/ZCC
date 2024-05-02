@@ -37,9 +37,21 @@ pub const Token = struct {
         return switch (kw) {
             .KeywordInline => if (standard.isGNU() or standard.atLeast(.c99)) kw else .Identifier,
             .KeywordRestrict => if (standard.atLeast(.c99)) kw else .Identifier,
-            .KeywordGccTypeof => if (standard.isGNU()) kw else .Identifier,
+            .KeywordTypeof => if (standard.isGNU() or standard.atLeast(.c2x)) kw else .Identifier,
             .KeywordGccAsm => if (standard.isGNU()) kw else .Identifier,
-            .KeywordDeclSpec => if (comp.langOpts.msExtensions) kw else .Identifier,
+
+            .KeywordC23Alignas,
+            .KeywordC23Alignof,
+            .KeywordC23Bool,
+            .KeywordC23StaticAssert,
+            .KeywordC23ThreadLocal,
+            .KeywordConstexpr,
+            .KeywordTrue,
+            .KeywordFalse,
+            => if (standard.atLeast(.c2x)) kw else .Identifier,
+
+            .KeywordDeclSpec => if (comp.langOpts.declSpecAttrs) kw else .Identifier,
+
             .KeywordMSInt64_,
             .KeywordMSInt64__,
             .KeywordMSInt32_,
@@ -112,6 +124,14 @@ pub const Token = struct {
 
         // ISO C23
         .{ "_BitInt", .KeywordBitInt },
+        .{ "alignas", .KeywordC23Alignas },
+        .{ "alignof", .KeywordC23Alignof },
+        .{ "bool", .KeywordC23Bool },
+        .{ "static_assert", .KeywordC23StaticAssert },
+        .{ "thread_local", .KeywordC23ThreadLocal },
+        .{ "constexpr", .KeywordConstexpr },
+        .{ "true", .KeywordTrue },
+        .{ "false", .KeywordFalse },
 
         // Preprocessor directives
         .{ "include", .KeywordInclude },
@@ -143,7 +163,7 @@ pub const Token = struct {
         .{ "__restrict__", .KeywordGccRestrict2 },
         .{ "__alignof", .KeywordGccAlignof1 },
         .{ "__alignof__", .KeywordGccAlignof2 },
-        .{ "typeof", .KeywordGccTypeof },
+        .{ "typeof", .KeywordTypeof },
         .{ "__extension__", .KeywordGccExtension },
         .{ "asm", .KeywordGccAsm },
         .{ "__asm", .KeywordGccAsm1 },

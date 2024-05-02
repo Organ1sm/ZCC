@@ -1975,3 +1975,9 @@ pub const ptr_arithmetic_incomplete = struct {
     pub const extra = .str;
     pub const kind = .@"error";
 };
+pub const keyword_macro = struct {
+    pub const msg = "keyword is hidden by macro definition";
+    pub const kind = .off;
+    pub const pedantic = true;
+    pub const opt = "keyword-macro";
+};

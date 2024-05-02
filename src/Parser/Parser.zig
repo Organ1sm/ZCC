@@ -389,12 +389,12 @@ pub fn todo(p: *Parser, msg: []const u8) Error {
 }
 
 pub fn typeStr(p: *Parser, ty: Type) ![]const u8 {
-    if (TypeBuilder.fromType(ty).toString()) |str| return str;
+    if (TypeBuilder.fromType(ty).toString(p.comp.langOpts)) |str| return str;
     const stringsTop = p.strings.items.len;
     defer p.strings.items.len = stringsTop;
 
     const mapper = p.comp.stringInterner.getSlowTypeMapper();
-    try ty.print(mapper, p.strings.writer());
+    try ty.print(mapper, p.comp.langOpts, p.strings.writer());
     return try p.comp.diag.arena.allocator().dupe(u8, p.strings.items[stringsTop..]);
 }
 
@@ -408,11 +408,11 @@ pub fn typePairStrExtra(p: *Parser, a: Type, msg: []const u8, b: Type) ![]const 
 
     try p.strings.append('\'');
     const mapper = p.comp.stringInterner.getSlowTypeMapper();
-    try a.print(mapper, p.strings.writer());
+    try a.print(mapper, p.comp.langOpts, p.strings.writer());
     try p.strings.append('\'');
     try p.strings.appendSlice(msg);
     try p.strings.append('\'');
-    try b.print(mapper, p.strings.writer());
+    try b.print(mapper, p.comp.langOpts, p.strings.writer());
     try p.strings.append('\'');
     return try p.comp.diag.arena.allocator().dupe(u8, p.strings.items[stringsTop..]);
 }
@@ -679,9 +679,11 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
 
             if (try p.parseOrNextDecl(parseDeclaration))
                 continue;
+
             switch (p.getCurrToken()) {
                 .Semicolon => p.tokenIdx += 1,
                 .KeywordStaticAssert,
+                .KeywordC23StaticAssert,
                 .KeywordPragma,
                 .KeywordGccExtension,
                 .KeywordGccAsm,
@@ -757,12 +759,14 @@ fn nextExternDecl(p: *Parser) void {
             .KeywordAuto,
             .KeywordRegister,
             .KeywordThreadLocal,
+            .KeywordC23ThreadLocal,
             .KeywordInline,
             .KeywordGccInline1,
             .KeywordGccInline2,
             .KeywordNoreturn,
             .KeywordVoid,
             .KeywordBool,
+            .KeywordC23Bool,
             .KeywordChar,
             .KeywordShort,
             .KeywordInt,
@@ -777,8 +781,9 @@ fn nextExternDecl(p: *Parser) void {
             .KeywordStruct,
             .KeywordUnion,
             .KeywordAlignas,
-            .KeywordGccTypeof,
+            .KeywordC23Alignas,
             .KeywordGccExtension,
+            .KeywordTypeof,
             .KeywordTypeof1,
             .KeywordTypeof2,
             .KeywordBitInt,
@@ -921,7 +926,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
 
         const node = try p.addNode(undefined); // reserve space
         const internedDeclaratorName = try p.getInternString(ID.d.name);
-        try p.symStack.defineSymbol(internedDeclaratorName, ID.d.type, ID.d.name, node, .{});
+        try p.symStack.defineSymbol(internedDeclaratorName, ID.d.type, ID.d.name, node, .{}, false);
 
         const func = p.func;
         defer p.func = func;
@@ -1082,12 +1087,14 @@ fn parseDeclaration(p: *Parser) Error!bool {
         } else if (ID.initializer.node != .none or
             (declSpec.storageClass != .@"extern" and p.func.type != null))
         {
+            // TODO validate global variable/constexpr initializer comptime known
             try p.symStack.defineSymbol(
                 internedName,
                 ID.d.type,
                 ID.d.name,
                 node,
-                if (ID.d.type.isConst()) ID.initializer.value else .{},
+                if (ID.d.type.isConst() or declSpec.constexpr != null) ID.initializer.value else .{},
+                declSpec.constexpr != null,
             );
         } else {
             try p.symStack.declareSymbol(internedName, ID.d.type, ID.d.name, node);
@@ -1109,7 +1116,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
 /// static-assert-declaration
 ///  : (`_Static_assert` | `static_assert`) '(' constExpr ',' StringLiteral+ ')' ';'
 fn parseStaticAssert(p: *Parser) Error!bool {
-    const curToken = p.eat(.KeywordStaticAssert) orelse return false;
+    const curToken = p.eat(.KeywordStaticAssert) orelse p.eat(.KeywordC23StaticAssert) orelse return false;
     const lp = try p.expectToken(.LParen);
     const resToken = p.tokenIdx;
     const res = try p.parseConstExpr(.NoConstDeclFolding);
@@ -1182,7 +1189,7 @@ fn parseStaticAssert(p: *Parser) Error!bool {
 ///   | `typeof` '(' expr ')'
 fn typeof(p: *Parser) Error!?Type {
     switch (p.getCurrToken()) {
-        .KeywordGccTypeof, .KeywordTypeof1, .KeywordTypeof2 => p.tokenIdx += 1,
+        .KeywordTypeof, .KeywordTypeof1, .KeywordTypeof2 => p.tokenIdx += 1,
         else => return null,
     }
 
@@ -1255,19 +1262,25 @@ fn parseDeclSpec(p: *Parser) Error!?DeclSpec {
             => {
                 if (d.storageClass != .none) {
                     try p.errStr(.multiple_storage_class, p.tokenIdx, @tagName(d.storageClass));
-
                     return error.ParsingFailed;
                 }
 
                 if (d.threadLocal != null) {
                     switch (token) {
-                        .KeywordTypedef,
-                        .KeywordAuto,
-                        .KeywordRegister,
-                        => try p.errStr(.cannot_combine_spec, p.tokenIdx, token.getTokenText().?),
-
-                        else => {},
+                        .KeywordExtern, .KeywordStatic => {},
+                        else => try p.errStr(.cannot_combine_spec, p.tokenIdx, token.getTokenText().?),
                     }
+                    if (d.constexpr) |tok|
+                        try p.errStr(.cannot_combine_spec, p.tokenIdx, p.tokenIds[tok].getTokenText().?);
+                }
+
+                if (d.constexpr != null) {
+                    switch (token) {
+                        .KeywordAuto, .KeywordRegister, .KeywordStatic => {},
+                        else => try p.errStr(.cannot_combine_spec, p.tokenIdx, token.getTokenText().?),
+                    }
+                    if (d.threadLocal) |tok|
+                        try p.errStr(.cannot_combine_spec, p.tokenIdx, p.tokenIds[tok].getTokenText().?);
                 }
 
                 switch (token) {
@@ -1280,10 +1293,12 @@ fn parseDeclSpec(p: *Parser) Error!?DeclSpec {
                 }
             },
 
-            .KeywordThreadLocal => {
-                if (d.threadLocal != null) {
-                    try p.errStr(.duplicate_declspec, p.tokenIdx, "_Thread_local");
-                }
+            .KeywordThreadLocal, .KeywordC23ThreadLocal => {
+                if (d.threadLocal != null)
+                    try p.errStr(.duplicate_declspec, p.tokenIdx, token.getTokenText().?);
+
+                if (d.constexpr) |tok|
+                    try p.errStr(.cannot_combine_spec, p.tokenIdx, p.tokenIds[tok].getTokenText().?);
 
                 switch (d.storageClass) {
                     .@"extern", .none, .static => {},
@@ -1291,6 +1306,21 @@ fn parseDeclSpec(p: *Parser) Error!?DeclSpec {
                 }
 
                 d.threadLocal = p.tokenIdx;
+            },
+
+            .KeywordConstexpr => {
+                if (d.constexpr != null)
+                    try p.errStr(.duplicate_declspec, p.tokenIdx, token.getTokenText().?);
+
+                if (d.threadLocal) |tok|
+                    try p.errStr(.cannot_combine_spec, p.tokenIdx, p.tokenIds[tok].getTokenText().?);
+
+                switch (d.storageClass) {
+                    .auto, .register, .none, .static => {},
+                    else => try p.errStr(.cannot_combine_spec, p.tokenIdx, @tagName(d.storageClass)),
+                }
+
+                d.constexpr = p.tokenIdx;
             },
 
             .KeywordInline, .KeywordGccInline1, .KeywordGccInline2 => {
@@ -1614,6 +1644,7 @@ fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec, attrBufferTop: usize) Er
 ///  | `signed`
 ///  | `unsigned`
 ///  | `bool`
+///  | `KeywordC23Bool`
 ///  | `_Complex`
 ///  | atomic-type-specifier
 ///  | record-specifier
@@ -1626,6 +1657,8 @@ fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec, attrBufferTop: usize) Er
 /// align-specifier
 ///   : keyword-alignas '(' typeName ')'
 ///   | keyword-alignas '(' constExpr ')'
+///   | keyword-c23-alignas '(' typeName ')'
+///   | keyword-c23-alignas '(' constExpr ')'
 fn parseTypeSpec(p: *Parser, ty: *TypeBuilder) Error!bool {
     const start = p.tokenIdx;
     while (true) {
@@ -1640,7 +1673,7 @@ fn parseTypeSpec(p: *Parser, ty: *TypeBuilder) Error!bool {
 
         switch (p.getCurrToken()) {
             .KeywordVoid => try ty.combine(p, .Void, p.tokenIdx),
-            .KeywordBool => try ty.combine(p, .Bool, p.tokenIdx),
+            .KeywordBool, .KeywordC23Bool => try ty.combine(p, .Bool, p.tokenIdx),
             .KeywordMSInt8_, .KeywordMSInt8__, .KeywordChar => try ty.combine(p, .Char, p.tokenIdx),
             .KeywordMSInt16_, .KeywordMSInt16__, .KeywordShort => try ty.combine(p, .Short, p.tokenIdx),
             .KeywordMSInt32_, .KeywordMSInt32__, .KeywordInt => try ty.combine(p, .Int, p.tokenIdx),
@@ -1682,7 +1715,7 @@ fn parseTypeSpec(p: *Parser, ty: *TypeBuilder) Error!bool {
                 continue;
             },
 
-            .KeywordAlignas => {
+            .KeywordAlignas, .KeywordC23Alignas => {
                 const alignToken = p.tokenIdx;
                 p.tokenIdx += 1;
                 const lparen = try p.expectToken(.LParen);
@@ -4468,12 +4501,14 @@ fn nextStmt(p: *Parser, lBrace: TokenIndex) !void {
             .KeywordAuto,
             .KeywordRegister,
             .KeywordThreadLocal,
+            .KeywordC23ThreadLocal,
             .KeywordInline,
             .KeywordGccInline1,
             .KeywordGccInline2,
             .KeywordNoreturn,
             .KeywordVoid,
             .KeywordBool,
+            .KeywordC23Bool,
             .KeywordChar,
             .KeywordShort,
             .KeywordInt,
@@ -4488,9 +4523,10 @@ fn nextStmt(p: *Parser, lBrace: TokenIndex) !void {
             .KeywordStruct,
             .KeywordUnion,
             .KeywordAlignas,
+            .KeywordC23Alignas,
+            .KeywordTypeof,
             .KeywordTypeof1,
             .KeywordTypeof2,
-            .KeywordGccTypeof,
             .KeywordGccExtension,
             => if (parens == 0) return,
             .KeywordPragma => p.skipToPragmaSentinel(),
@@ -5303,7 +5339,7 @@ fn offsetofMemberDesignator(p: *Parser, baseType: Type) Error!Result {
 ///  | ('&' | '*' | '+' | '-' | '~' | '!' | '++' | '--' | `__extension__` | `__imag__` | `__real__`) cast-expression
 ///  | `sizeof` unary-expression
 ///  | `sizeof` '(' type-name ')'
-///  | alignof '(' type-name ')'
+///  | (`keyword-alignof` | `keyword-c23-alignof`) '(' type-name ')'
 fn parseUnaryExpr(p: *Parser) Error!Result {
     const token = p.tokenIdx;
     switch (p.tokenIds[token]) {
@@ -5563,7 +5599,11 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
             return res;
         },
 
-        .KeywordAlignof, .KeywordGccAlignof1, .KeywordGccAlignof2 => {
+        .KeywordAlignof,
+        .KeywordGccAlignof1,
+        .KeywordGccAlignof2,
+        .KeywordC23Alignof,
+        => {
             p.tokenIdx += 1;
             const expectedParen = p.tokenIdx;
             var res = Result{};
@@ -5802,7 +5842,7 @@ fn validateFieldAccess(
 
     try p.strings.writer().print("'{s}' in '", .{p.getTokenSlice(fieldNameToken)});
     const mapper = p.comp.stringInterner.getSlowTypeMapper();
-    try exprType.print(mapper, p.strings.writer());
+    try exprType.print(mapper, p.comp.langOpts, p.strings.writer());
     try p.strings.append('\'');
 
     const duped = try p.comp.diag.arena.allocator().dupe(u8, p.strings.items);
@@ -6031,6 +6071,7 @@ fn checkArrayBounds(p: *Parser, index: Result, array: Result, token: TokenIndex)
 
 //// primary-expression
 ////  : identifier
+////  | keywordTrue or keywordFalse
 ////  | integer-literal
 ////  | float-literal
 ////  | imaginary-literal
@@ -6072,6 +6113,19 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
             }
             if (p.symStack.findSymbol(internedName)) |sym| {
                 try p.checkDeprecatedUnavailable(sym.type, nameToken, sym.token);
+
+                if (sym.kind == .constexpr) {
+                    return Result{
+                        .value = sym.value,
+                        .ty = sym.type,
+                        .node = try p.addNode(.{
+                            .tag = .DeclRefExpr,
+                            .type = sym.type,
+                            .data = .{ .declRef = nameToken },
+                        }),
+                    };
+                }
+
                 if (sym.value.tag == .int) {
                     switch (p.constDeclFolding) {
                         .GNUFoldingExtension => try p.errToken(.const_decl_folded, nameToken),
@@ -6119,6 +6173,23 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
             return error.ParsingFailed;
         },
 
+        .KeywordTrue, .KeywordFalse => |id| {
+            p.tokenIdx += 1;
+            const numericValue = @intFromBool(id == .KeywordTrue);
+            const res = Result{
+                .value = Value.int(numericValue),
+                .ty = .{ .specifier = .Bool },
+                .node = try p.addNode(.{
+                    .tag = .BoolLiteral,
+                    .type = .{ .specifier = .Bool },
+                    .data = .{ .int = numericValue },
+                }),
+            };
+            std.debug.assert(!p.inMacro); // Should have been replaced with .one / .zero
+            try p.valueMap.put(res.node, res.value);
+            return res;
+        },
+
         .MacroFunc, .MacroFunction => {
             defer p.tokenIdx += 1;
             var ty: Type = undefined;
@@ -6161,7 +6232,7 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
             } else if (p.func.type) |funcType| {
                 const mapper = p.comp.stringInterner.getSlowTypeMapper();
                 p.strings.items.len = 0;
-                try Type.printNamed(funcType, p.getTokenSlice(p.func.name), mapper, p.strings.writer());
+                try Type.printNamed(funcType, p.getTokenSlice(p.func.name), mapper, p.comp.langOpts, p.strings.writer());
                 try p.strings.append(0);
                 const predef = try p.makePredefinedIdentifier();
                 ty = predef.ty;

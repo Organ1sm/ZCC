@@ -557,7 +557,7 @@ const StmtTypeDumper = struct {
             return;
 
         const ty = tree.nodes.items(.type)[@intFromEnum(node)];
-        ty.dump(mapper, m.buf.writer()) catch {};
+        ty.dump(mapper, tree.comp.langOpts, m.buf.writer()) catch {};
 
         const owned = try m.buf.toOwnedSlice();
         errdefer m.buf.allocator.free(owned);

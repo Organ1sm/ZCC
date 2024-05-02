@@ -7,16 +7,27 @@ const Attribute = @import("../Lexer/Attribute.zig");
 const StringInterner = @import("../Basic/StringInterner.zig");
 const StringId = StringInterner.StringId;
 const Target = @import("../Basic/Target.zig");
+const LangOpts = @import("../Basic/LangOpts.zig");
 
 const Type = @This();
 
 const NodeIndex = Tree.NodeIndex;
 const TokenIndex = Tree.TokenIndex;
 
-data: union { subType: *Type, func: *Function, array: *Array, expr: *Expr, @"enum": *Enum, record: *Record, attributed: *Attributed, none: void, int: struct {
-    bits: u8,
-    signedness: std.builtin.Signedness,
-} } = .{ .none = {} },
+data: union {
+    subType: *Type,
+    func: *Function,
+    array: *Array,
+    expr: *Expr,
+    @"enum": *Enum,
+    record: *Record,
+    attributed: *Attributed,
+    none: void,
+    int: struct {
+        bits: u8,
+        signedness: std.builtin.Signedness,
+    },
+} = .{ .none = {} },
 
 qual: Qualifiers = .{},
 specifier: Specifier,
@@ -1550,32 +1561,33 @@ pub fn hasAttribute(ty: Type, tag: Attribute.Tag) bool {
 }
 
 /// Print type in C style
-pub fn print(ty: Type, mapper: StringInterner.TypeMapper, w: anytype) @TypeOf(w).Error!void {
-    _ = try ty.printPrologue(mapper, w);
-    try ty.printEpilogue(mapper, w);
+pub fn print(ty: Type, mapper: StringInterner.TypeMapper, langOpts: LangOpts, w: anytype) @TypeOf(w).Error!void {
+    _ = try ty.printPrologue(mapper, langOpts, w);
+    try ty.printEpilogue(mapper, langOpts, w);
 }
 
 pub fn printNamed(
     ty: Type,
     name: []const u8,
     mapper: StringInterner.TypeMapper,
+    langOpts: LangOpts,
     w: anytype,
 ) @TypeOf(w).Error!void {
-    const simple = try ty.printPrologue(mapper, w);
+    const simple = try ty.printPrologue(mapper, langOpts, w);
     if (simple) try w.writeByte(' ');
     try w.writeAll(name);
-    try ty.printEpilogue(mapper, w);
+    try ty.printEpilogue(mapper, langOpts, w);
 }
 
 const StringGetter = fn (TokenIndex) []const u8;
 
 /// return true if `ty` is simple
-fn printPrologue(ty: Type, mapper: StringInterner.TypeMapper, w: anytype) @TypeOf(w).Error!bool {
+fn printPrologue(ty: Type, mapper: StringInterner.TypeMapper, langOpts: LangOpts, w: anytype) @TypeOf(w).Error!bool {
     if (ty.qual.atomic) {
         var nonAtomicType = ty;
         nonAtomicType.qual.atomic = false;
         try w.writeAll("_Atomic(");
-        try nonAtomicType.print(mapper, w);
+        try nonAtomicType.print(mapper, langOpts, w);
         try w.writeAll(")");
         return true;
     }
@@ -1591,7 +1603,7 @@ fn printPrologue(ty: Type, mapper: StringInterner.TypeMapper, w: anytype) @TypeO
         .DecayedTypeofExpr,
         => {
             const elemType = ty.getElemType();
-            const simple = try elemType.printPrologue(mapper, w);
+            const simple = try elemType.printPrologue(mapper, langOpts, w);
             if (simple) try w.writeByte(' ');
             if (elemType.isFunc() or elemType.isArray()) try w.writeByte('(');
             try w.writeByte('*');
@@ -1601,7 +1613,7 @@ fn printPrologue(ty: Type, mapper: StringInterner.TypeMapper, w: anytype) @TypeO
 
         .Func, .VarArgsFunc, .OldStyleFunc => {
             const retType = ty.data.func.returnType;
-            const simple = try retType.printPrologue(mapper, w);
+            const simple = try retType.printPrologue(mapper, langOpts, w);
             if (simple) try w.writeByte(' ');
             return false;
         },
@@ -1613,7 +1625,7 @@ fn printPrologue(ty: Type, mapper: StringInterner.TypeMapper, w: anytype) @TypeO
         .VariableLenArray,
         => {
             const elemType = ty.getElemType();
-            const simple = try elemType.printPrologue(mapper, w);
+            const simple = try elemType.printPrologue(mapper, langOpts, w);
             if (simple) try w.writeByte(' ');
             return false;
         },
@@ -1622,12 +1634,12 @@ fn printPrologue(ty: Type, mapper: StringInterner.TypeMapper, w: anytype) @TypeO
         .TypeofExpr,
         => {
             const actual = ty.canonicalize(.standard);
-            return actual.printPrologue(mapper, w);
+            return actual.printPrologue(mapper, langOpts, w);
         },
 
         .Attributed => {
             const actual = ty.canonicalize(.standard);
-            return actual.printPrologue(mapper, w);
+            return actual.printPrologue(mapper, langOpts, w);
         },
 
         else => {},
@@ -1637,7 +1649,7 @@ fn printPrologue(ty: Type, mapper: StringInterner.TypeMapper, w: anytype) @TypeO
     switch (ty.specifier) {
         .Enum => if (ty.data.@"enum".fixed) {
             try w.print("enum {s}: ", .{mapper.lookup(ty.data.@"enum".name)});
-            try ty.data.@"enum".tagType.dump(mapper, w);
+            try ty.data.@"enum".tagType.dump(mapper, langOpts, w);
         } else {
             try w.print("enum {s}", .{mapper.lookup(ty.data.@"enum".name)});
         },
@@ -1649,20 +1661,20 @@ fn printPrologue(ty: Type, mapper: StringInterner.TypeMapper, w: anytype) @TypeO
             const len = ty.data.array.len;
             const elem_ty = ty.data.array.elem;
             try w.print("__attribute__((__vector_size__({d} * sizeof(", .{len});
-            _ = try elem_ty.printPrologue(mapper, w);
+            _ = try elem_ty.printPrologue(mapper, langOpts, w);
             try w.writeAll(")))) ");
-            _ = try elem_ty.printPrologue(mapper, w);
+            _ = try elem_ty.printPrologue(mapper, langOpts, w);
             try w.print(" (vector of {d} '", .{len});
-            _ = try elem_ty.printPrologue(mapper, w);
+            _ = try elem_ty.printPrologue(mapper, langOpts, w);
             try w.writeAll("' values)");
         },
-        else => try w.writeAll(TypeBuilder.fromType(ty).toString().?),
+        else => try w.writeAll(TypeBuilder.fromType(ty).toString(langOpts).?),
     }
 
     return true;
 }
 
-fn printEpilogue(ty: Type, mapper: StringInterner.TypeMapper, w: anytype) @TypeOf(w).Error!void {
+fn printEpilogue(ty: Type, mapper: StringInterner.TypeMapper, langOpts: LangOpts, w: anytype) @TypeOf(w).Error!void {
     if (ty.qual.atomic) return;
     switch (ty.specifier) {
         .Pointer,
@@ -1676,15 +1688,15 @@ fn printEpilogue(ty: Type, mapper: StringInterner.TypeMapper, w: anytype) @TypeO
         => {
             const elemType = ty.getElemType();
             if (elemType.isFunc() or elemType.isArray()) try w.writeByte(')');
-            try elemType.printEpilogue(mapper, w);
+            try elemType.printEpilogue(mapper, langOpts, w);
         },
 
         .Func, .VarArgsFunc, .OldStyleFunc => {
             try w.writeByte('(');
             for (ty.data.func.params, 0..) |param, i| {
                 if (i != 0) try w.writeAll(", ");
-                _ = try param.ty.printPrologue(mapper, w);
-                try param.ty.printEpilogue(mapper, w);
+                _ = try param.ty.printPrologue(mapper, langOpts, w);
+                try param.ty.printEpilogue(mapper, langOpts, w);
             }
             if (!ty.is(.Func)) {
                 if (ty.data.func.params.len != 0) try w.writeAll(", ");
@@ -1693,7 +1705,7 @@ fn printEpilogue(ty: Type, mapper: StringInterner.TypeMapper, w: anytype) @TypeO
                 try w.writeAll("void");
             }
             try w.writeByte(')');
-            try ty.data.func.returnType.printEpilogue(mapper, w);
+            try ty.data.func.returnType.printEpilogue(mapper, langOpts, w);
         },
 
         .Array, .StaticArray => {
@@ -1701,38 +1713,38 @@ fn printEpilogue(ty: Type, mapper: StringInterner.TypeMapper, w: anytype) @TypeO
             if (ty.is(.StaticArray)) try w.writeAll("static ");
             try ty.qual.dump(w);
             try w.print("{d}]", .{ty.data.array.len});
-            try ty.data.array.elem.printEpilogue(mapper, w);
+            try ty.data.array.elem.printEpilogue(mapper, langOpts, w);
         },
 
         .IncompleteArray => {
             try w.writeByte('[');
             try ty.qual.dump(w);
             try w.writeByte(']');
-            try ty.data.array.elem.printEpilogue(mapper, w);
+            try ty.data.array.elem.printEpilogue(mapper, langOpts, w);
         },
 
         .UnspecifiedVariableLenArray => {
             try w.writeByte('[');
             try ty.qual.dump(w);
             try w.writeAll("*]");
-            try ty.data.subType.printEpilogue(mapper, w);
+            try ty.data.subType.printEpilogue(mapper, langOpts, w);
         },
 
         .VariableLenArray => {
             try w.writeByte('[');
             try ty.qual.dump(w);
             try w.writeAll("<expr>]");
-            try ty.data.expr.ty.printEpilogue(mapper, w);
+            try ty.data.expr.ty.printEpilogue(mapper, langOpts, w);
         },
 
         .TypeofType, .TypeofExpr => {
             const actual = ty.canonicalize(.standard);
-            try actual.printEpilogue(mapper, w);
+            try actual.printEpilogue(mapper, langOpts, w);
         },
 
         .Attributed => {
             const actual = ty.canonicalize(.standard);
-            try actual.printEpilogue(mapper, w);
+            try actual.printEpilogue(mapper, langOpts, w);
         },
 
         else => {},
@@ -1742,13 +1754,13 @@ fn printEpilogue(ty: Type, mapper: StringInterner.TypeMapper, w: anytype) @TypeO
 /// Useful for debugging, too noisy to be enabled by default.
 const DumpDetailedContainers = false;
 
-pub fn dump(ty: Type, mapper: StringInterner.TypeMapper, w: anytype) @TypeOf(w).Error!void {
+pub fn dump(ty: Type, mapper: StringInterner.TypeMapper, langOpts: LangOpts, w: anytype) @TypeOf(w).Error!void {
     try ty.qual.dump(w);
 
     switch (ty.specifier) {
         .Pointer => {
             try w.writeAll("*");
-            try ty.data.subType.dump(mapper, w);
+            try ty.data.subType.dump(mapper, langOpts, w);
         },
 
         .Func, .VarArgsFunc, .OldStyleFunc => {
@@ -1758,7 +1770,7 @@ pub fn dump(ty: Type, mapper: StringInterner.TypeMapper, w: anytype) @TypeOf(w).
                     try w.writeAll(", ");
                 if (param.name != .empty)
                     try w.print("{s}: ", .{mapper.lookup(param.name)});
-                try param.ty.dump(mapper, w);
+                try param.ty.dump(mapper, langOpts, w);
             }
 
             if (!ty.isFunc()) {
@@ -1767,7 +1779,7 @@ pub fn dump(ty: Type, mapper: StringInterner.TypeMapper, w: anytype) @TypeOf(w).
             }
 
             try w.writeAll(") ");
-            try ty.data.func.returnType.dump(mapper, w);
+            try ty.data.func.returnType.dump(mapper, langOpts, w);
         },
 
         .Array, .StaticArray, .DecayedArray, .DecayedStaticArray => {
@@ -1775,19 +1787,19 @@ pub fn dump(ty: Type, mapper: StringInterner.TypeMapper, w: anytype) @TypeOf(w).
             try w.writeAll("[");
             if (ty.is(.StaticArray) or ty.is(.DecayedStaticArray)) try w.writeAll("static ");
             try w.print("{d}]", .{ty.data.array.len});
-            try ty.data.array.elem.dump(mapper, w);
+            try ty.data.array.elem.dump(mapper, langOpts, w);
         },
 
         .Vector => {
             try w.print("vector(({d}, ", .{ty.data.array.len});
-            try ty.data.array.elem.dump(mapper, w);
+            try ty.data.array.elem.dump(mapper, langOpts, w);
             try w.writeAll(")");
         },
 
         .IncompleteArray, .DecayedIncompleteArray => {
             if (ty.is(.DecayedIncompleteArray)) try w.writeByte('d');
             try w.writeAll("[]");
-            try ty.data.array.elem.dump(mapper, w);
+            try ty.data.array.elem.dump(mapper, langOpts, w);
         },
 
         .Enum => {
@@ -1796,7 +1808,7 @@ pub fn dump(ty: Type, mapper: StringInterner.TypeMapper, w: anytype) @TypeOf(w).
                 try w.print("enum {s}", .{mapper.lookup(enumTy.name)});
             } else {
                 try w.print("enum {s}: ", .{mapper.lookup(enumTy.name)});
-                try enumTy.tagType.dump(mapper, w);
+                try enumTy.tagType.dump(mapper, langOpts, w);
             }
 
             if (DumpDetailedContainers)
@@ -1806,47 +1818,47 @@ pub fn dump(ty: Type, mapper: StringInterner.TypeMapper, w: anytype) @TypeOf(w).
         .Struct => {
             try w.print("struct {s}", .{mapper.lookup(ty.data.record.name)});
             if (DumpDetailedContainers)
-                try dumpRecord(ty.data.record, mapper, w);
+                try dumpRecord(ty.data.record, mapper, langOpts, w);
         },
 
         .Union => {
             try w.print("union {s}", .{mapper.lookup(ty.data.record.name)});
             if (DumpDetailedContainers)
-                try dumpRecord(ty.data.record, mapper, w);
+                try dumpRecord(ty.data.record, mapper, langOpts, w);
         },
 
         .UnspecifiedVariableLenArray, .DecayedUnspecifiedVariableLenArray => {
             if (ty.is(.DecayedUnspecifiedVariableLenArray)) try w.writeByte('d');
             try w.writeAll("[*]");
-            try ty.data.subType.dump(mapper, w);
+            try ty.data.subType.dump(mapper, langOpts, w);
         },
 
         .VariableLenArray, .DecayedVariableLenArray => {
             if (ty.is(.DecayedVariableLenArray)) try w.writeByte('d');
             try w.writeAll("[<expr>]");
-            try ty.data.expr.ty.dump(mapper, w);
+            try ty.data.expr.ty.dump(mapper, langOpts, w);
         },
 
         .TypeofType, .DecayedTypeofType => {
             try w.writeAll("typeof(");
-            try ty.data.subType.dump(mapper, w);
+            try ty.data.subType.dump(mapper, langOpts, w);
             try w.writeAll(")");
         },
 
         .TypeofExpr, .DecayedTypeofExpr => {
             try w.writeAll("typeof(<expr>: ");
-            try ty.data.expr.ty.dump(mapper, w);
+            try ty.data.expr.ty.dump(mapper, langOpts, w);
             try w.writeAll(")");
         },
 
         .Attributed => {
             try w.writeAll("attributed(");
-            try ty.data.attributed.base.dump(mapper, w);
+            try ty.data.attributed.base.dump(mapper, langOpts, w);
             try w.writeAll(")");
         },
 
         .SpecialVaStart => try w.writeAll("(var start param)"),
-        else => try w.writeAll(TypeBuilder.fromType(ty).toString().?),
+        else => try w.writeAll(TypeBuilder.fromType(ty).toString(langOpts).?),
     }
 }
 
@@ -1858,11 +1870,11 @@ fn dumpEnum(@"enum": *Enum, mapper: StringInterner.TypeMapper, w: anytype) @Type
     try w.writeAll(" }");
 }
 
-fn dumpRecord(record: *Record, mapper: StringInterner.TypeMapper, w: anytype) @TypeOf(w).Error!void {
+fn dumpRecord(record: *Record, mapper: StringInterner.TypeMapper, langOpts: LangOpts, w: anytype) @TypeOf(w).Error!void {
     try w.writeAll(" {");
     for (record.fields) |field| {
         try w.writeByte(' ');
-        try field.ty.dump(mapper, w);
+        try field.ty.dump(mapper, langOpts, w);
         try w.print(" {s}: {d};", .{ mapper.lookup(field.name), field.bitWidth });
     }
     try w.writeAll(" }");

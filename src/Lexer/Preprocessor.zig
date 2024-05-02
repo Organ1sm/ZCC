@@ -694,6 +694,9 @@ fn expr(pp: *Preprocessor, lexer: *Lexer) MacroError!bool {
 
             .MacroWS, .WhiteSpace => continue,
 
+            .KeywordFalse => token.id = .Zero,
+            .KeywordTrue => token.id = .One,
+
             else => if (token.id.isMacroIdentifier()) {
                 if (token.id == .KeywordDefined) {
                     const tokenConsumed = try pp.handleKeywordDefined(&token, items[i + 1 ..], eof);
@@ -2030,6 +2033,15 @@ fn define(pp: *Preprocessor, lexer: *Lexer) Error!void {
     if (!macroName.id.isMacroIdentifier()) {
         try pp.addError(macroName, .macro_name_must_be_identifier);
         return skipToNewLine(lexer);
+    }
+
+    var macroNameTokenID = macroName.id;
+    macroNameTokenID.simplifyMacroKeyword();
+    switch (macroNameTokenID) {
+        .Identifier, .ExtendedIdentifier => {},
+        else => if (macroNameTokenID.isMacroIdentifier()) {
+            try pp.addError(macroName, .keyword_macro);
+        },
     }
 
     var first = lexer.next();
