@@ -293,10 +293,8 @@ fn genStmt(c: *CodeGen, node: NodeIndex) Error!void {
 
             try c.symbols.append(c.comp.gpa, .{ .name = name, .value = alloc });
 
-            if (data.decl.node != .none) {
-                const res = try c.genExpr(data.decl.node);
-                try c.builder.addStore(alloc, res);
-            }
+            if (data.decl.node != .none)
+                try c.genInitializer(alloc, data.decl.node);
         },
 
         .LabeledStmt => {
@@ -970,14 +968,6 @@ fn genExpr(c: *CodeGen, node: NodeIndex) Error!IR.Ref {
         .GenericAssociationExpr,
         .GenericDefaultExpr,
         .StmtExpr,
-        .ArrayInitExprTwo,
-        .ArrayInitExpr,
-        .StructInitExprTwo,
-        .StructInitExpr,
-        .UnionInitExpr,
-        .CompoundLiteralExpr,
-        .ArrayFillerExpr,
-        .DefaultInitExpr,
         => return c.comp.diag.fatalNoSrc("TODO CodeGen.genExpr {}\n", .{c.nodeTag[@intFromEnum(node)]}),
 
         else => unreachable, // Not an expression.
@@ -995,7 +985,12 @@ fn genLval(c: *CodeGen, node: NodeIndex) Error!IR.Ref {
 
             // TODO generate anonymous global
             const name = try std.fmt.allocPrintZ(c.builder.arena.allocator(), "\"{}\"", .{std.fmt.fmtSliceEscapeLower(val)});
-            return c.builder.addInst(.Symbol, .{ .label = name }, .ptr);
+            const ref: IR.Ref = @enumFromInt(c.builder.instructions.len);
+            try c.builder.instructions.append(
+                c.builder.gpa,
+                .{ .tag = .Symbol, .data = .{ .label = name }, .type = .ptr },
+            );
+            return ref;
         },
 
         .ParenExpr => return c.genLval(data.unExpr),
@@ -1012,10 +1007,25 @@ fn genLval(c: *CodeGen, node: NodeIndex) Error!IR.Ref {
             }
 
             const dupedName = try c.builder.arena.allocator().dupeZ(u8, slice);
-            return c.builder.addInst(.Symbol, .{ .label = dupedName }, .ptr);
+            const ref: IR.Ref = @enumFromInt(c.builder.instructions.len);
+            try c.builder.instructions.append(
+                c.builder.gpa,
+                .{ .tag = .Symbol, .data = .{ .label = dupedName }, .type = .ptr },
+            );
+            return ref;
         },
 
         .DerefExpr => return c.genExpr(data.unExpr),
+
+        .CompoundLiteralExpr => {
+            const ty = c.nodeTy[@intFromEnum(node)];
+            const size: u32 = @intCast(ty.sizeof(c.comp).?); // TODO add error in parser
+            const @"align" = ty.alignof(c.comp);
+            const alloc = try c.builder.addAlloc(size, @"align");
+            try c.genInitializer(alloc, data.unExpr);
+            return alloc;
+        },
+
         else => return c.comp.diag.fatalNoSrc("TODO CodeGen.genLval {}\n", .{c.nodeTag[@intFromEnum(node)]}),
     }
 }
@@ -1219,7 +1229,13 @@ fn genCall(c: *CodeGen, fnNode: NodeIndex, argNodes: []const NodeIndex, ty: Type
                     }
                 }
 
-                break :blk try c.builder.addInst(.Symbol, .{ .label = try c.builder.arena.allocator().dupeZ(u8, slice) }, .func);
+                const dupedName = try c.builder.arena.allocator().dupeZ(u8, slice);
+                const ref: IR.Ref = @enumFromInt(c.builder.instructions.len);
+                try c.builder.instructions.append(
+                    c.builder.gpa,
+                    .{ .tag = .Symbol, .data = .{ .label = dupedName }, .type = .ptr },
+                );
+                break :blk ref;
             },
             else => break :blk try c.genExpr(fnNode),
         };
@@ -1278,6 +1294,24 @@ fn genPtrArithmetic(c: *CodeGen, ptr: IR.Ref, offset: IR.Ref, offsetTy: Type, ty
     return c.addBin(.Add, ptr, offsetInst, offsetTy);
 }
 
+fn genInitializer(c: *CodeGen, ptr: IR.Ref, initializer: NodeIndex) Error!void {
+    std.debug.assert(initializer != .none);
+    switch (c.nodeTag[@intFromEnum(initializer)]) {
+        .ArrayInitExprTwo,
+        .ArrayInitExpr,
+        .StructInitExprTwo,
+        .StructInitExpr,
+        .UnionInitExpr,
+        .ArrayFillerExpr,
+        .DefaultInitExpr,
+        => return c.comp.diag.fatalNoSrc("TODO CodeGen.genInitializer {}\n", .{c.nodeTag[@intFromEnum(initializer)]}),
+
+        else => {
+            const res = try c.genExpr(initializer);
+            try c.builder.addStore(ptr, res);
+        },
+    }
+}
 fn genVar(c: *CodeGen, _: NodeIndex) Error!void {
     return c.comp.diag.fatalNoSrc("TODO CodeGen.genVar\n", .{});
 }
