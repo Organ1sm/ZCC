@@ -16,18 +16,12 @@ body: std.ArrayListUnmanaged(Ref),
 arena: std.heap.ArenaAllocator.State,
 
 pub const Builder = struct {
-    pub const Branch = struct {
-        falseLabel: Ref,
-        trueLabel: Ref,
-    };
-
     gpa: Allocator,
     arena: std.heap.ArenaAllocator,
     instructions: std.MultiArrayList(IR.Inst) = .{},
     body: std.ArrayListUnmanaged(Ref) = .{},
     allocCount: u32 = 0,
     pool: Interner = .{},
-    branch: ?Branch = null,
 
     pub fn deinit(b: *Builder) void {
         b.arena.deinit();
@@ -66,12 +60,12 @@ pub const Builder = struct {
         _ = try b.addInst(.Jmp, .{ .un = label }, .noreturn);
     }
 
-    pub fn addBranch(b: *Builder, cond: Ref) Allocator.Error!void {
+    pub fn addBranch(b: *Builder, cond: Ref, trueLabel: Ref, falseLabel: Ref) Allocator.Error!void {
         const branch = try b.arena.allocator().create(IR.Inst.Branch);
         branch.* = .{
             .cond = cond,
-            .then = b.branch.?.trueLabel,
-            .@"else" = b.branch.?.falseLabel,
+            .then = trueLabel,
+            .@"else" = falseLabel,
         };
         _ = try b.addInst(.Branch, .{ .branch = branch }, .noreturn);
     }
@@ -114,6 +108,16 @@ pub const Builder = struct {
         @memcpy(inputRefs[1..], std.mem.bytesAsSlice(Ref, std.mem.sliceAsBytes(inputs)));
 
         return b.addInst(.Phi, .{ .phi = .{ .ptr = inputRefs.ptr } }, ty);
+    }
+
+    pub fn addSelect(b: *Builder, cond: Ref, then: Ref, @"else": Ref, ty: Interner.Ref) Allocator.Error!Ref {
+        const branch = try b.arena.allocator().create(IR.Inst.Branch);
+        branch.* = .{
+            .cond = cond,
+            .then = then,
+            .@"else" = @"else",
+        };
+        return b.addInst(.Select, .{ .branch = branch }, ty);
     }
 };
 
@@ -409,19 +413,19 @@ pub fn dump(ir: IR, name: []const u8, color: bool, w: anytype) !void {
                 if (color) util.setColor(.reset, w);
                 try w.writeAll(" = ");
                 if (color) util.setColor(INST, w);
-                try w.writeAll("phi ");
+                try w.writeAll("phi");
                 if (color) util.setColor(.reset, w);
-                for (data[i].phi.inputs(), 0..) |input, inputIdx| {
-                    if (inputIdx != 0) try w.writeAll(", ");
-                    try w.writeAll("[ ");
-                    try ir.writeRef(input.value, color, w);
-                    if (color) util.setColor(.reset, w);
-                    try w.writeAll(", ");
+                try w.writeAll(" {");
+                for (data[i].phi.inputs()) |input| {
+                    try w.writeAll("\n        ");
                     try ir.writeLabel(input.label, color, w);
                     if (color) util.setColor(.reset, w);
-                    try w.writeAll(" ]");
+                    try w.writeAll(" => ");
+                    try ir.writeRef(input.value, color, w);
+                    if (color) util.setColor(.reset, w);
                 }
-                try w.writeByte('\n');
+                if (color) util.setColor(.reset, w);
+                try w.writeAll("\n    }\n");
             },
 
             .Store => {
