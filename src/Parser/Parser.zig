@@ -6900,6 +6900,7 @@ fn parseNoEval(p: *Parser, comptime func: fn (*Parser) Error!Result) Error!Resul
 fn parseGenericSelection(p: *Parser) Error!Result {
     p.tokenIdx += 1;
     const lp = try p.expectToken(.LParen);
+    const controllingToken = p.tokenIdx;
     const controlling = try p.parseNoEval(parseAssignExpr);
     _ = try p.expectToken(.Comma);
 
@@ -6908,26 +6909,54 @@ fn parseGenericSelection(p: *Parser) Error!Result {
 
     try p.listBuffer.append(controlling.node);
 
+    const declBufferTop = p.declBuffer.items.len;
+    defer p.declBuffer.items.len = declBufferTop;
+
     var defaultToken: ?TokenIndex = null;
+    var default: Result = undefined;
+    var chosenToken: TokenIndex = undefined;
     var chosen: Result = .{};
 
     while (true) {
         const start = p.tokenIdx;
-        if (try p.parseTypeName()) |ty| {
-            if (ty.containAnyQual()) {
+        if (try p.parseTypeName()) |ty| blk: {
+            if (ty.isArray()) {
+                try p.errToken(.generic_array_type, start);
+            } else if (ty.isFunc()) {
+                try p.errToken(.generic_func_type, start);
+            } else if (ty.containAnyQual()) {
                 try p.errToken(.generic_qual_type, start);
             }
 
             _ = try p.expectToken(.Colon);
-            chosen = try p.parseAssignExpr();
-            try chosen.expect(p);
-            try chosen.saveValue(p);
+            const node = try p.parseAssignExpr();
+            try node.expect(p);
+
+            if (ty.eql(controlling.ty, p.comp, false)) {
+                if (chosen.node == .none) {
+                    chosen = node;
+                    chosenToken = start;
+                    break :blk;
+                }
+                try p.errStr(.generic_duplicate, start, try p.typeStr(ty));
+                try p.errStr(.generic_duplicate_here, chosenToken, try p.typeStr(ty));
+            }
+
+            for (p.listBuffer.items[listBufferTop + 1 ..], 0..) |item, i| {
+                const prevTy = p.nodes.items(.type)[@intFromEnum(item)];
+                if (prevTy.eql(ty, p.comp, true)) {
+                    try p.errStr(.generic_duplicate, start, try p.typeStr(ty));
+                    const prevToken = @intFromEnum(p.declBuffer.items[declBufferTop + i]);
+                    try p.errStr(.generic_duplicate_here, prevToken, try p.typeStr(ty));
+                }
+            }
 
             try p.listBuffer.append(try p.addNode(.{
                 .tag = .GenericAssociationExpr,
                 .type = ty,
-                .data = .{ .unExpr = chosen.node },
+                .data = .{ .unExpr = node.node },
             }));
+            try p.declBuffer.append(@enumFromInt(start));
         } else if (p.eat(.KeywordDefault)) |tok| {
             if (defaultToken) |prev| {
                 try p.errToken(.generic_duplicate_default, tok);
@@ -6936,14 +6965,9 @@ fn parseGenericSelection(p: *Parser) Error!Result {
 
             defaultToken = tok;
             _ = try p.expectToken(.Colon);
-            chosen = try p.parseAssignExpr();
-            try chosen.expect(p);
-            try chosen.saveValue(p);
+            default = try p.parseAssignExpr();
+            try default.expect(p);
 
-            try p.listBuffer.append(try p.addNode(.{
-                .tag = .GenericDefaultExpr,
-                .data = .{ .unExpr = chosen.node },
-            }));
         } else {
             if (p.listBuffer.items.len == listBufferTop + 1) {
                 try p.err(.expected_type);
@@ -6957,6 +6981,32 @@ fn parseGenericSelection(p: *Parser) Error!Result {
     }
 
     try p.expectClosing(lp, .RParen);
+    if (chosen.node == .none) {
+        if (defaultToken != null) {
+            try p.listBuffer.insert(listBufferTop + 1, try p.addNode(.{
+                .tag = .GenericDefaultExpr,
+                .data = .{ .unExpr = default.node },
+            }));
+            chosen = default;
+        } else {
+            try p.errStr(.generic_no_match, controllingToken, try p.typeStr(controlling.ty));
+            return error.ParsingFailed;
+        }
+    } else {
+        const node = try p.addNode(.{
+            .tag = .GenericAssociationExpr,
+            .data = .{ .unExpr = chosen.node },
+        });
+        try p.listBuffer.insert(listBufferTop + 1, node);
+
+        if (defaultToken != null) {
+            try p.listBuffer.append(try p.addNode(.{
+                .tag = .GenericDefaultExpr,
+                .data = .{ .unExpr = chosen.node },
+            }));
+        }
+    }
+
     var genericNode: AST.Node = .{
         .tag = .GenericExprOne,
         .type = chosen.ty,

@@ -276,12 +276,30 @@ fn addBoolPhi(c: *CodeGen, value: bool) !void {
 }
 
 fn genStmt(c: *CodeGen, node: NodeIndex) Error!void {
+    _ = try c.genExpr(node);
+}
+
+fn genExpr(c: *CodeGen, node: NodeIndex) Error!IR.Ref {
     std.debug.assert(node != .none);
+
     const ty = c.nodeTy[@intFromEnum(node)];
+    if (c.tree.valueMap.get(node)) |val|
+        return c.builder.addConstant(val, try c.genType(ty));
+
     const data = c.nodeData[@intFromEnum(node)];
     const tag = c.nodeTag[@intFromEnum(node)];
 
     switch (tag) {
+        .EnumerationRef,
+        .BoolLiteral,
+        .IntLiteral,
+        .CharLiteral,
+        .FloatLiteral,
+        .DoubleLiteral,
+        .ImaginaryLiteral,
+        .StringLiteralExpr,
+        => unreachable, // These should have an entry in value_map.
+
         .Invalid,
         .FnDef,
         .StaticFnDef,
@@ -595,30 +613,6 @@ fn genStmt(c: *CodeGen, node: NodeIndex) Error!void {
         .ComputedGotoStmt,
         => return c.comp.diag.fatalNoSrc("TODO CodeGen.genStmt {}\n", .{c.nodeTag[@intFromEnum(node)]}),
 
-        else => _ = try c.genExpr(node),
-    }
-}
-
-fn genExpr(c: *CodeGen, node: NodeIndex) Error!IR.Ref {
-    std.debug.assert(node != .none);
-
-    const ty = c.nodeTy[@intFromEnum(node)];
-    if (c.tree.valueMap.get(node)) |val|
-        return c.builder.addConstant(val, try c.genType(ty));
-
-    const data = c.nodeData[@intFromEnum(node)];
-    const tag = c.nodeTag[@intFromEnum(node)];
-    switch (tag) {
-        .EnumerationRef,
-        .BoolLiteral,
-        .IntLiteral,
-        .CharLiteral,
-        .FloatLiteral,
-        .DoubleLiteral,
-        .ImaginaryLiteral,
-        .StringLiteralExpr,
-        => unreachable, // These should have an entry in value_map.
-
         .CommaExpr => {
             _ = try c.genExpr(data.binExpr.lhs);
             return c.genExpr(data.binExpr.rhs);
@@ -777,7 +771,10 @@ fn genExpr(c: *CodeGen, node: NodeIndex) Error!IR.Ref {
         .DeclRefExpr => unreachable, // Lval expression.
         .ExplicitCast, .ImplicitCast => switch (data.cast.kind) {
             .NoOP => return c.genExpr(data.cast.operand),
-            .ToVoid => unreachable, // Not an expression.
+            .ToVoid => {
+                _ = try c.genExpr(data.cast.operand);
+                return .none;
+            },
 
             .LValToRVal => {
                 const operand = try c.genLval(data.cast.operand);
@@ -985,26 +982,73 @@ fn genExpr(c: *CodeGen, node: NodeIndex) Error!IR.Ref {
             return c.addUn(.Zext, phi, ty);
         },
 
+        .BuiltinChooseExpr => {
+            const cond = c.tree.valueMap.get(data.if3.cond).?;
+            if (cond.getBool())
+                return c.genExpr(c.tree.data[data.if3.body])
+            else
+                return c.genExpr(c.tree.data[data.if3.body + 1]);
+        },
+
+        .GenericExprOne => {
+            const index = @intFromEnum(data.binExpr.rhs);
+            switch (c.nodeTag[index]) {
+                .GenericAssociationExpr, .GenericDefaultExpr => {
+                    return c.genExpr(c.nodeData[index].unExpr);
+                },
+                else => unreachable,
+            }
+        },
+
+        .GenericExpr => {
+            const index = @intFromEnum(c.tree.data[data.range.start + 1]);
+            switch (c.nodeTag[index]) {
+                .GenericAssociationExpr, .GenericDefaultExpr => {
+                    return c.genExpr(c.nodeData[index].unExpr);
+                },
+                else => unreachable,
+            }
+        },
+
+        .GenericAssociationExpr, .GenericDefaultExpr => unreachable,
+
+        .StmtExpr => switch (c.nodeTag[@intFromEnum(data.unExpr)]) {
+            .CompoundStmtTwo => {
+                const oldSymLen = c.symbols.items.len;
+                c.symbols.items.len = oldSymLen;
+
+                const stmtData = c.nodeData[@intFromEnum(data.unExpr)];
+                if (stmtData.binExpr.rhs == .none)
+                    return c.genExpr(stmtData.binExpr.lhs);
+                try c.genStmt(stmtData.binExpr.lhs);
+                return c.genExpr(stmtData.binExpr.rhs);
+            },
+
+            .CompoundStmt => {
+                const oldSymLen = c.symbols.items.len;
+                c.symbols.items.len = oldSymLen;
+
+                const stmtData = c.nodeData[@intFromEnum(data.unExpr)];
+                for (c.tree.data[stmtData.range.start .. stmtData.range.end - 1]) |stmt|
+                    try c.genStmt(stmt);
+                return c.genExpr(c.tree.data[stmtData.range.end]);
+            },
+
+            else => unreachable,
+        },
+
         .AddrOfLabel,
         .ImagExpr,
         .RealExpr,
-        .ArrayAccessExpr,
         .BuiltinCallExprOne,
         .BuiltinCallExpr,
-        .BuiltinChooseExpr,
-        .MemberAccessExpr,
-        .MemberAccessPtrExpr,
         .SizeOfExpr,
-        .AlignOfExpr,
-        .GenericExprOne,
-        .GenericExpr,
-        .GenericAssociationExpr,
-        .GenericDefaultExpr,
-        .StmtExpr,
         => return c.comp.diag.fatalNoSrc("TODO CodeGen.genExpr {}\n", .{c.nodeTag[@intFromEnum(node)]}),
 
         else => unreachable, // Not an expression.
     }
+
+    return .none;
 }
 
 fn genLval(c: *CodeGen, node: NodeIndex) Error!IR.Ref {
@@ -1051,7 +1095,20 @@ fn genLval(c: *CodeGen, node: NodeIndex) Error!IR.Ref {
             return alloc;
         },
 
-        else => return c.comp.diag.fatalNoSrc("TODO CodeGen.genLval {}\n", .{c.nodeTag[@intFromEnum(node)]}),
+        .BuiltinChooseExpr => {
+            const cond = c.tree.valueMap.get(data.if3.cond).?;
+            if (cond.getBool())
+                return c.genLval(c.tree.data[data.if3.body])
+            else
+                return c.genLval(c.tree.data[data.if3.body + 1]);
+        },
+
+        .MemberAccessExpr,
+        .MemberAccessPtrExpr,
+        .ArrayAccessExpr,
+        => return c.comp.diag.fatalNoSrc("TODO CodeGen.genLval {}\n", .{c.nodeTag[@intFromEnum(node)]}),
+
+        else => unreachable, // not an lvalue expression.
     }
 }
 

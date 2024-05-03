@@ -594,10 +594,25 @@ pub const generic_qual_type = struct {
     pub const opt = "generic-qual-type";
     pub const kind = .warning;
 };
+pub const generic_array_type = struct {
+    pub const msg = "generic association array type cannot be matched with";
+    pub const opt = "generic-qual-type";
+    pub const kind = .warning;
+};
+pub const generic_func_type = struct {
+    pub const msg = "generic association function type cannot be matched with";
+    pub const opt = "generic-qual-type";
+    pub const kind = .warning;
+};
 pub const generic_duplicate = struct {
     pub const msg = "type '{s}' in generic association compatible with previously specified type";
     pub const extra = .str;
     pub const kind = .@"error";
+};
+pub const generic_duplicate_here = struct {
+    pub const msg = "compatible type '{s}' specified here";
+    pub const extra = .str;
+    pub const kind = .note;
 };
 pub const generic_duplicate_default = struct {
     pub const msg = "duplicate default generic association";
