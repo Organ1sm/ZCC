@@ -530,6 +530,15 @@ fn writeType(ir: IR, tyRef: Interner.Ref, color: bool, w: anytype) !void {
             try ir.writeType(info.child, false, w);
             try w.writeByte('>');
         },
+        .record => |info| {
+            // TODO collect into buffer and only print once
+            try w.writeAll("{ ");
+            for (info.elements, 0..) |elem, i| {
+                if (i != 0) try w.writeAll(", ");
+                try ir.writeType(elem, color, w);
+            }
+            try w.writeAll(" }");
+        },
     }
 }
 
@@ -547,6 +556,7 @@ fn writeValue(ir: IR, valRe: Interner.Ref, color: bool, w: anytype) !void {
 }
 
 fn writeRef(ir: IR, ref: Ref, color: bool, w: anytype) !void {
+    std.debug.assert(ref != .none);
     const index = @intFromEnum(ref);
     const tyRef = ir.instructions.items(.type)[index];
 
@@ -570,6 +580,7 @@ fn writeRef(ir: IR, ref: Ref, color: bool, w: anytype) !void {
 }
 
 fn writeLabel(ir: IR, ref: Ref, color: bool, w: anytype) !void {
+    std.debug.assert(ref != .none);
     const index = @intFromEnum(ref);
     const label = ir.instructions.items(.data)[index].label;
     if (color) util.setColor(REF, w);
