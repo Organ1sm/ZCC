@@ -20,8 +20,10 @@ pub const Builder = struct {
     arena: std.heap.ArenaAllocator,
     instructions: std.MultiArrayList(IR.Inst) = .{},
     body: std.ArrayListUnmanaged(Ref) = .{},
+    argCount: u32 = 0,
     allocCount: u32 = 0,
     pool: Interner = .{},
+    currentLabel: Ref = undefined,
 
     pub fn deinit(b: *Builder) void {
         b.arena.deinit();
@@ -31,6 +33,29 @@ pub const Builder = struct {
         b.* = undefined;
     }
 
+    pub fn startFn(b: *Builder) Allocator.Error!void {
+        b.allocCount = 0;
+        b.argCount = 0;
+        b.instructions.len = 0;
+        b.body.items.len = 0;
+        const entry = try b.makeLabel("entry");
+        try b.body.append(b.gpa, entry);
+        b.currentLabel = entry;
+    }
+
+    pub fn startBlock(b: *Builder, label: Ref) !void {
+        try b.body.append(b.gpa, label);
+        b.currentLabel = label;
+    }
+
+    pub fn addArg(b: *Builder, ty: Interner.Ref) Allocator.Error!Ref {
+        const ref: Ref = @enumFromInt(b.instructions.len);
+        try b.instructions.append(b.gpa, .{ .tag = .Arg, .data = .{ .none = {} }, .type = ty });
+        try b.body.insert(b.gpa, b.argCount, ref);
+        b.argCount += 1;
+        return ref;
+    }
+
     pub fn addAlloc(b: *Builder, size: u32, @"align": u32) Allocator.Error!Ref {
         const ref: Ref = @enumFromInt(b.instructions.len);
         try b.instructions.append(b.gpa, .{
@@ -38,7 +63,7 @@ pub const Builder = struct {
             .data = .{ .alloc = .{ .size = size, .@"align" = @"align" } },
             .type = .ptr,
         });
-        try b.body.insert(b.gpa, b.allocCount, ref);
+        try b.body.insert(b.gpa, b.allocCount + b.argCount, ref);
         b.allocCount += 1;
         return ref;
     }
@@ -275,15 +300,19 @@ pub fn dump(ir: IR, name: []const u8, color: bool, w: anytype) !void {
     try w.writeAll(name);
     if (color) util.setColor(.reset, w);
     try w.writeAll(" (");
-    for (tags, 0..) |tag, i| {
+
+    var argCount: u32 = 0;
+    while (true) : (argCount += 1) {
+        const ref = ir.body.items[argCount];
+        const tag = tags[@intFromEnum(ref)];
         if (tag != .Arg) break;
-        if (i != 0) try w.writeAll(", ");
-        try ir.writeRef(@enumFromInt(i), color, w);
+        if (argCount != 0) try w.writeAll(", ");
+        try ir.writeRef(ref, color, w);
         if (color) util.setColor(.reset, w);
     }
     try w.writeAll(") {\n");
 
-    for (ir.body.items) |ref| {
+    for (ir.body.items[argCount..]) |ref| {
         const i = @intFromEnum(ref);
         const tag = tags[i];
         switch (tag) {
