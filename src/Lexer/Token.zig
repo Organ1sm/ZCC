@@ -60,6 +60,9 @@ pub const Token = struct {
             .KeywordMSInt16__,
             .KeywordMSInt8_,
             .KeywordMSInt8__,
+            .KeywordStdCall2,
+            .KeywordThisCall2,
+            .KeywordVectorCall2,
             => if (comp.langOpts.msExtensions) kw else .Identifier,
             else => kw,
         };
@@ -191,6 +194,12 @@ pub const Token = struct {
         .{ "__int16", .KeywordMSInt16__ },
         .{ "_int8", .KeywordMSInt8_ },
         .{ "__int8", .KeywordMSInt8__ },
+        .{ "__stdcall", .KeywordStdCall },
+        .{ "_stdcall", .KeywordStdCall2 },
+        .{ "__thiscall", .KeywordThisCall },
+        .{ "_thiscall", .KeywordThisCall2 },
+        .{ "__vectorcall", .KeywordVectorCall },
+        .{ "_vectorcall", .KeywordVectorCall2 },
 
         // gcc builtins
         .{ "__builtin_choose_expr", .BuiltinChooseExpr },

@@ -1754,6 +1754,30 @@ fn parseTypeSpec(p: *Parser, ty: *TypeBuilder) Error!bool {
                 continue;
             },
 
+            .KeywordStdCall,
+            .KeywordStdCall2,
+            .KeywordThisCall,
+            .KeywordThisCall2,
+            .KeywordVectorCall,
+            .KeywordVectorCall2,
+            => try p.attrBuffer.append(p.gpa, .{
+                .attr = .{
+                    .tag = .calling_convention,
+                    .args = .{
+                        .calling_convention = .{
+                            .cc = switch (p.getCurrToken()) {
+                                .KeywordStdCall, .KeywordStdCall2 => .stdcall,
+                                .KeywordThisCall, .KeywordThisCall2 => .thiscall,
+                                .KeywordVectorCall, .KeywordVectorCall2 => .vectorcall,
+                                else => unreachable,
+                            },
+                        },
+                    },
+                    .syntax = .keyword,
+                },
+                .tok = p.tokenIdx,
+            }),
+
             .KeywordEnum => {
                 const tagToken = p.tokenIdx;
                 try ty.combine(p, .{ .Enum = try p.parseEnumSpec() }, tagToken);

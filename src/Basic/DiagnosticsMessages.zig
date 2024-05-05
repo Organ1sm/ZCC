@@ -1996,3 +1996,9 @@ pub const keyword_macro = struct {
     pub const pedantic = true;
     pub const opt = "keyword-macro";
 };
+pub const callconv_not_supported = struct {
+    pub const msg = "'{s}' calling convention is not supported for this target";
+    pub const extra = .str;
+    pub const opt = "ignored-attributes";
+    pub const kind = .warning;
+};

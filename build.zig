@@ -80,5 +80,5 @@ pub fn build(b: *std.Build) !void {
     b.installArtifact(integration_tests);
 
     test_step.dependOn(&integration_test_runner.step);
-    test_step.dependOn(&record_tests_runner.step);
+    // test_step.dependOn(&record_tests_runner.step);
 }

@@ -18,3 +18,9 @@ pub const TypeMapper = @import("Basic/StringInterner.zig").TypeMapper;
 pub const TargetUtil = @import("Basic/Target.zig");
 
 pub const version = std.SemanticVersion.parse(VersionStr) catch unreachable;
+pub const CallingConvention = enum {
+    C,
+    stdcall,
+    thiscall,
+    vectorcall,
+};
