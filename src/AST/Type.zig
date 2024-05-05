@@ -1122,6 +1122,9 @@ pub fn alignof(ty: Type, comp: *const Compilation) u29 {
 
             const computed: u29 = @intCast(@divExact(rec.typeLayout.fieldAlignmentBits, 8));
             return @max(requested, computed);
+        } else if (comp.langOpts.emulate == .msvc) {
+            const typeAlign = ty.data.attributed.base.alignof(comp);
+            return @max(requested, typeAlign);
         }
         return requested;
     }

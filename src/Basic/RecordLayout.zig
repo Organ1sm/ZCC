@@ -454,6 +454,10 @@ const MsvcContext = struct {
         if (self.maxFieldAlignBits) |maxAlign|
             fieldAlignBits = @min(fieldAlignBits, maxAlign);
 
+        // check the requested alignment of the field type.
+        if (field.ty.requestedAlignment(self.comp)) |typeReqAlign|
+            fieldAlignBits = @max(fieldAlignBits, typeReqAlign * 8);
+
         if (isPacked(fieldAttrs)) {
             // __attribute__((packed)) on a field is a clang extension. It behaves as if #pragma
             // pack(1) had been applied only to this field. See test case 0057.
@@ -535,6 +539,8 @@ const MsvcContext = struct {
     ) FieldLayout {
         self.containsNonBitField = true;
         self.ongoingBitField = null;
+        // The alignment of the field affects both the pointer alignment and the field
+        // alignment of the record. See test case 0032.
         self.pointerAlignBits = @max(self.pointerAlignBits, fieldAlign);
         self.fieldAlignBits = @max(self.fieldAlignBits, fieldAlign);
         const offsetBits = switch (self.isUnion) {
@@ -602,6 +608,9 @@ pub fn compute(ty: Type, comp: *const Compilation, pragmaPack: ?u8) void {
                 // ensure that there are no zero-sized records.
                 context.handleZeroSizedRecord();
             }
+
+            context.sizeBits = std.mem.alignForward(u64, context.sizeBits, context.pointerAlignBits);
+
             rec.typeLayout = TypeLayout{
                 .sizeBits = context.sizeBits,
                 .fieldAlignmentBits = context.fieldAlignBits,
