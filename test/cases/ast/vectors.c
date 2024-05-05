@@ -1,4 +1,4 @@
-TypeDef: '*float'
+TypeDef: 'invalid'
  name: invalid1
 
 TypeDef: 'float'

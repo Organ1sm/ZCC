@@ -1324,8 +1324,11 @@ fn applyTransparentUnion(attr: Attribute, p: *Parser, token: TokenIndex, ty: Typ
 }
 
 fn applyVectorSize(attr: Attribute, p: *Parser, tok: TokenIndex, ty: *Type) !void {
-    if (!(ty.isInt() or ty.isFloat()) or !ty.isReal())
-        return p.errStr(.invalid_vec_elem_ty, tok, try p.typeStr(ty.*));
+    if (!(ty.isInt() or ty.isFloat()) or !ty.isReal()) {
+        const originTy = try p.typeStr(ty.*);
+        ty.* = Type.Invalid;
+        return p.errStr(.invalid_vec_elem_ty, tok, originTy);
+    }
 
     const vecBytes = attr.args.vector_size.bytes;
     const tySize = ty.sizeof(p.comp).?;

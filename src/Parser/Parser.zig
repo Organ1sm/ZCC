@@ -2471,6 +2471,7 @@ const Enumerator = struct {
 
     /// Set enumerator value to specified value.
     fn set(e: *Enumerator, p: *Parser, res: Result, token: TokenIndex) !void {
+        if (res.ty.specifier == .Invalid) return;
         if (e.fixed and !res.ty.eql(e.res.ty, p.comp, false)) {
             if (!res.intFitsInType(p, e.res.ty)) {
                 try p.errStr(.enum_not_representable_fixed, token, try p.typeStr(e.res.ty));
@@ -4999,7 +5000,6 @@ fn parseAddExpr(p: *Parser) Error!Result {
         var rhs = try p.parseMulExpr();
         try rhs.expect(p);
 
-        const errors = p.comp.diag.errors;
         const lhsTy = lhs.ty;
         if (try lhs.adjustTypes(minus.?, &rhs, p, if (plus != null) .add else .sub)) {
             if (plus != null) {
@@ -5011,8 +5011,10 @@ fn parseAddExpr(p: *Parser) Error!Result {
             }
         }
 
-        if (errors == p.comp.diag.errors and lhsTy.isPointer() and !lhsTy.isVoidStar() and lhsTy.getElemType().hasIncompleteSize())
+        if (lhs.ty.specifier != .Invalid and lhsTy.isPointer() and !lhsTy.isVoidStar() and lhsTy.getElemType().hasIncompleteSize()) {
             try p.errStr(.ptr_arithmetic_incomplete, minus.?, try p.typeStr(lhsTy.getElemType()));
+            lhs.ty = Type.Invalid;
+        }
 
         try lhs.bin(p, tag, rhs);
     }

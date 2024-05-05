@@ -667,6 +667,7 @@ fn invalidBinTy(a: *Result, tok: TokenIndex, b: *Result, p: *Parser) Error!bool 
     try p.errStr(.invalid_bin_types, tok, try p.typePairStr(a.ty, b.ty));
     a.value.tag = .unavailable;
     a.value.tag = .unavailable;
+    a.ty = Type.Invalid;
     return false;
 }
 
@@ -905,6 +906,10 @@ const CoerceContext = union(enum) {
 
 /// Perform assignment-like coercion to `dest_ty`.
 pub fn coerce(res: *Result, p: *Parser, destTy: Type, tok: TokenIndex, ctx: CoerceContext) !void {
+    if (res.ty.specifier == .Invalid or destTy.specifier == .Invalid) {
+        res.ty = Type.Invalid;
+        return;
+    }
     return res.coerceExtra(p, destTy, tok, ctx) catch |er| switch (er) {
         error.CoercionFailed => unreachable,
         else => |e| return e,

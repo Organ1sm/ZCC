@@ -32,6 +32,7 @@ data: union {
 qual: Qualifiers = .{},
 specifier: Specifier,
 
+pub const Invalid = create(.Invalid);
 pub const Void = create(.Void);
 pub const Pointer = create(.Pointer);
 
@@ -302,6 +303,9 @@ pub const Record = struct {
 };
 
 pub const Specifier = enum {
+    /// A NaN-like poison value
+    Invalid,
+
     Void,
     Bool,
 
@@ -766,6 +770,7 @@ pub fn getElemType(ty: Type) Type {
 
         .Attributed => ty.data.attributed.base,
 
+        .Invalid => Type.Invalid,
         else => unreachable,
     };
 }
@@ -776,6 +781,7 @@ pub fn getReturnType(ty: Type) Type {
         .TypeofType, .DecayedTypeofType => ty.data.subType.getReturnType(),
         .TypeofExpr, .DecayedTypeofExpr => ty.data.expr.ty.getReturnType(),
         .Attributed => ty.data.attributed.base.getReturnType(),
+        .Invalid => Type.Invalid,
         else => unreachable,
     };
 }
@@ -792,6 +798,7 @@ pub fn getParams(ty: Type) []Function.Param {
         .TypeofType, .DecayedTypeofType => ty.data.subType.getParams(),
         .TypeofExpr, .DecayedTypeofExpr => ty.data.expr.ty.getParams(),
         .Attributed => ty.data.attributed.base.getParams(),
+        .Invalid => &.{},
         else => unreachable,
     };
 }
@@ -862,6 +869,7 @@ pub fn integerPromotion(ty: Type, comp: *Compilation) Type {
             .TypeofExpr => return ty.data.expr.ty.integerPromotion(comp),
             .Attributed => return ty.data.attributed.base.integerPromotion(comp),
 
+            .Invalid => .Invalid,
             else => unreachable, // not an integer type
         },
     };
@@ -962,6 +970,7 @@ pub fn hasField(ty: Type, name: StringId) bool {
         .TypeofType => return ty.data.subType.hasField(name),
         .TypeofExpr => return ty.data.expr.ty.hasField(name),
         .Attributed => return ty.data.attributed.base.hasField(name),
+        .Invalid => return false,
         else => unreachable,
     }
     return false;
@@ -1075,6 +1084,7 @@ pub fn sizeof(ty: Type, comp: *const Compilation) ?u64 {
         .TypeofExpr => ty.data.expr.ty.sizeof(comp),
 
         .Attributed => ty.data.attributed.base.sizeof(comp),
+        .Invalid => null,
         else => unreachable,
     };
 }
@@ -1758,6 +1768,7 @@ pub fn dump(ty: Type, mapper: StringInterner.TypeMapper, langOpts: LangOpts, w: 
     try ty.qual.dump(w);
 
     switch (ty.specifier) {
+        .Invalid => try w.writeAll("invalid"),
         .Pointer => {
             try w.writeAll("*");
             try ty.data.subType.dump(mapper, langOpts, w);
