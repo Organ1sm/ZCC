@@ -881,10 +881,10 @@ fn parseDeclaration(p: *Parser) Error!bool {
             const specifier = declSpec.type.canonicalize(.standard).specifier;
             const attrs = p.attrBuffer.items(.attr)[attrBufferTop..];
             const toks = p.attrBuffer.items(.tok)[attrBufferTop..];
-            for (attrs, 0..) |attr, i| {
+            for (attrs, toks) |attr, tok| {
                 try p.errExtra(
                     .ignored_record_attr,
-                    toks[i],
+                    tok,
                     .{
                         .ignoredRecordAttr = .{
                             .tag = attr.tag,
@@ -6942,12 +6942,11 @@ fn parseGenericSelection(p: *Parser) Error!Result {
                 try p.errStr(.generic_duplicate_here, chosenToken, try p.typeStr(ty));
             }
 
-            for (p.listBuffer.items[listBufferTop + 1 ..], 0..) |item, i| {
+            for (p.listBuffer.items[listBufferTop + 1 ..], p.declBuffer.items[declBufferTop..]) |item, prevToken| {
                 const prevTy = p.nodes.items(.type)[@intFromEnum(item)];
                 if (prevTy.eql(ty, p.comp, true)) {
                     try p.errStr(.generic_duplicate, start, try p.typeStr(ty));
-                    const prevToken = @intFromEnum(p.declBuffer.items[declBufferTop + i]);
-                    try p.errStr(.generic_duplicate_here, prevToken, try p.typeStr(ty));
+                    try p.errStr(.generic_duplicate_here, @intFromEnum(prevToken), try p.typeStr(ty));
                 }
             }
 
@@ -6967,7 +6966,6 @@ fn parseGenericSelection(p: *Parser) Error!Result {
             _ = try p.expectToken(.Colon);
             default = try p.parseAssignExpr();
             try default.expect(p);
-
         } else {
             if (p.listBuffer.items.len == listBufferTop + 1) {
                 try p.err(.expected_type);

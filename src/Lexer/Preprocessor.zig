@@ -46,15 +46,15 @@ const Macro = struct {
         if (a.isBuiltin != b.isBuiltin)
             return false;
 
-        for (a.tokens, 0..) |t, i|
-            if (!tokEql(pp, t, b.tokens[i]))
+        for (a.tokens, b.tokens) |aToken, bToken|
+            if (!tokEql(pp, aToken, bToken))
                 return false;
 
         if (a.isFunc and b.isFunc) {
             if (a.varArgs != b.varArgs) return false;
             if (a.params.len != b.params.len) return false;
-            for (a.params, 0..) |p, i|
-                if (!std.mem.eql(u8, p, b.params[i]))
+            for (a.params, b.params) |aParam, bParam|
+                if (!std.mem.eql(u8, aParam, bParam))
                     return false;
         }
 

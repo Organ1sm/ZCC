@@ -1291,12 +1291,12 @@ pub fn eql(aParam: Type, bParam: Type, comp: *const Compilation, checkQualifiers
             if (!a.data.func.returnType.eql(b.data.func.returnType, comp, false))
                 return false;
 
-            for (a.data.func.params, 0..) |param, i| {
+            for (a.data.func.params, b.data.func.params) |param, bQual| {
                 var aUnqual = param.ty;
                 aUnqual.qual.@"const" = false;
                 aUnqual.qual.@"volatile" = false;
 
-                var bUnqual = b.data.func.params[i].ty;
+                var bUnqual = bQual.ty;
                 bUnqual.qual.@"const" = false;
                 bUnqual.qual.@"volatile" = false;
 
