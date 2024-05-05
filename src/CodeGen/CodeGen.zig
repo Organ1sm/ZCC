@@ -207,13 +207,15 @@ fn genFn(c: *CodeGen, decl: NodeIndex) Error!void {
     try c.genStmt(c.nodeData[@intFromEnum(decl)].decl.node);
 
     // Relocate returns
+    if (c.retNodes.items.len != 1)
+        try c.builder.startBlock(c.returnLabel);
+    // try c.builder.body.append(c.builder.gpa, c.returnLabel);
     if (c.retNodes.items.len == 0) {
         _ = try c.builder.addInst(.Ret, .{ .un = .none }, .noreturn);
     } else if (c.retNodes.items.len == 1) {
         c.builder.body.items.len -= 1;
         _ = try c.builder.addInst(.Ret, .{ .un = c.retNodes.items[0].value }, .noreturn);
     } else {
-        try c.builder.startBlock(c.returnLabel);
         const phi = try c.builder.addPhi(c.retNodes.items, try c.genType(funcTy.getReturnType()));
         _ = try c.builder.addInst(.Ret, .{ .un = phi }, .noreturn);
     }
@@ -225,7 +227,7 @@ fn genFn(c: *CodeGen, decl: NodeIndex) Error!void {
         .body = c.builder.body,
     };
 
-    res.dump(name, c.comp.diag.color, std.io.getStdOut().writer()) catch {};
+    res.dump(c.builder.gpa, name, c.comp.diag.color, std.io.getStdOut().writer()) catch {};
 }
 
 fn addUn(c: *CodeGen, tag: Inst.Tag, operand: IR.Ref, ty: Type) !IR.Ref {

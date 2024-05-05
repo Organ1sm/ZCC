@@ -291,15 +291,28 @@ const REF = util.Color.blue;
 const LITERAL = util.Color.green;
 const ATTRIBUTE = util.Color.yellow;
 
-pub fn dump(ir: IR, name: []const u8, color: bool, w: anytype) !void {
+const RefMap = std.AutoArrayHashMap(Ref, void);
+
+pub fn dump(ir: IR, gpa: Allocator, name: []const u8, color: bool, w: anytype) !void {
     const tags = ir.instructions.items(.tag);
     const data = ir.instructions.items(.data);
 
+    var refMap = RefMap.init(gpa);
+    var labelMap = RefMap.init(gpa);
+
+    defer {
+        refMap.deinit();
+        labelMap.deinit();
+    }
+
+    const retInst = ir.body.items[ir.body.items.len - 1];
+    const retOperand = data[@intFromEnum(retInst)].un;
+    const retTy = if (retOperand == .none) .void else ir.instructions.items(.type)[@intFromEnum(retOperand)];
+    try ir.writeType(retTy, color, w);
     if (color) util.setColor(REF, w);
-    try w.writeAll("define ");
-    try w.writeAll(name);
+    try w.print(" @{s}", .{name});
     if (color) util.setColor(.reset, w);
-    try w.writeAll(" (");
+    try w.writeAll("(");
 
     var argCount: u32 = 0;
     while (true) : (argCount += 1) {
@@ -307,10 +320,35 @@ pub fn dump(ir: IR, name: []const u8, color: bool, w: anytype) !void {
         const tag = tags[@intFromEnum(ref)];
         if (tag != .Arg) break;
         if (argCount != 0) try w.writeAll(", ");
-        try ir.writeRef(ref, color, w);
+        try refMap.put(ref, {});
+        try ir.writeRef(&refMap, ref, color, w);
         if (color) util.setColor(.reset, w);
     }
     try w.writeAll(") {\n");
+
+    for (tags, 0..) |tag, i| {
+        std.debug.print("{s}({d}) ", .{ @tagName(tag), i });
+    }
+    std.debug.print("\n", .{});
+
+    for (ir.body.items) |ref| {
+        const val = @intFromEnum(ref);
+        std.debug.print("{s}({d}) ", .{ @tagName(tags[val]), val });
+    }
+    std.debug.print("\n", .{});
+
+    for (ir.body.items[argCount..]) |ref| {
+        switch (tags[@intFromEnum(ref)]) {
+            .Label => try labelMap.put(ref, {}),
+            else => {},
+        }
+    }
+
+    var it = labelMap.iterator();
+    while (it.next()) |entry| {
+        std.debug.print("Label: {d} ", .{@intFromEnum(entry.key_ptr.*)});
+    }
+    std.debug.print("\n", .{});
 
     for (ir.body.items[argCount..]) |ref| {
         const i = @intFromEnum(ref);
@@ -319,8 +357,9 @@ pub fn dump(ir: IR, name: []const u8, color: bool, w: anytype) !void {
             .Arg, .Constant, .Symbol => unreachable,
 
             .Label => {
+                const labelIdx = labelMap.getIndex(ref).?;
                 if (color) util.setColor(REF, w);
-                try w.print("{s}.{d}:\n", .{ data[i].label, i });
+                try w.print("{s}.{d}:\n", .{ data[i].label, labelIdx });
             },
 
             // .label_val => {
@@ -332,7 +371,7 @@ pub fn dump(ir: IR, name: []const u8, color: bool, w: anytype) !void {
                 const un = data[i].un;
                 if (color) util.setColor(INST, w);
                 try w.writeAll("    Jmp ");
-                try ir.writeLabel(un, color, w);
+                try ir.writeLabel(&labelMap, un, color, w);
                 try w.writeByte('\n');
             },
 
@@ -340,31 +379,27 @@ pub fn dump(ir: IR, name: []const u8, color: bool, w: anytype) !void {
                 const br = data[i].branch;
                 if (color) util.setColor(INST, w);
                 try w.writeAll("    Branch ");
-                try ir.writeRef(br.cond, color, w);
+                try ir.writeRef(&refMap, br.cond, color, w);
                 if (color) util.setColor(.reset, w);
                 try w.writeAll(", ");
-                try ir.writeLabel(br.then, color, w);
+                try ir.writeLabel(&labelMap, br.then, color, w);
                 if (color) util.setColor(.reset, w);
                 try w.writeAll(", ");
-                try ir.writeLabel(br.@"else", color, w);
+                try ir.writeLabel(&labelMap, br.@"else", color, w);
                 try w.writeByte('\n');
             },
 
             .Select => {
                 const br = data[i].branch;
-                try w.writeAll("    ");
-                try ir.writeRef(@enumFromInt(i), color, w);
-                if (color) util.setColor(.reset, w);
-                try w.writeAll(" = ");
-                if (color) util.setColor(INST, w);
+                try ir.writeNewRef(&refMap, ref, color, w);
                 try w.writeAll("Select ");
-                try ir.writeRef(br.cond, color, w);
+                try ir.writeRef(&refMap, br.cond, color, w);
                 if (color) util.setColor(.reset, w);
                 try w.writeAll(", ");
-                try ir.writeRef(br.then, color, w);
+                try ir.writeRef(&refMap, br.then, color, w);
                 if (color) util.setColor(.reset, w);
                 try w.writeAll(", ");
-                try ir.writeRef(br.@"else", color, w);
+                try ir.writeRef(&refMap, br.@"else", color, w);
                 try w.writeByte('\n');
             },
 
@@ -377,7 +412,7 @@ pub fn dump(ir: IR, name: []const u8, color: bool, w: anytype) !void {
                 const @"switch" = data[i].@"switch";
                 if (color) util.setColor(INST, w);
                 try w.writeAll("    Switch ");
-                try ir.writeRef(@"switch".target, color, w);
+                try ir.writeRef(&refMap, @"switch".target, color, w);
                 if (color) util.setColor(.reset, w);
                 try w.writeAll(" {");
                 for (@"switch".caseVals[0..@"switch".casesLen], 0..) |valRef, caseIdx| {
@@ -385,33 +420,29 @@ pub fn dump(ir: IR, name: []const u8, color: bool, w: anytype) !void {
                     try ir.writeValue(valRef, color, w);
                     if (color) util.setColor(.reset, w);
                     try w.writeAll(" => ");
-                    try ir.writeLabel(@"switch".caseLabels[caseIdx], color, w);
+                    try ir.writeLabel(&labelMap, @"switch".caseLabels[caseIdx], color, w);
                     if (color) util.setColor(.reset, w);
                 }
                 if (color) util.setColor(LITERAL, w);
                 try w.writeAll("\n        default ");
                 if (color) util.setColor(.reset, w);
                 try w.writeAll("=> ");
-                try ir.writeLabel(@"switch".default, color, w);
+                try ir.writeLabel(&labelMap, @"switch".default, color, w);
                 if (color) util.setColor(.reset, w);
                 try w.writeAll("\n    }\n");
             },
 
             .Call => {
                 const call = data[i].call;
-                try w.writeAll("    ");
-                try ir.writeRef(@enumFromInt(i), color, w);
-                if (color) util.setColor(.reset, w);
-                try w.writeAll(" = ");
-                if (color) util.setColor(INST, w);
+                try ir.writeNewRef(&refMap, ref, color, w);
                 try w.writeAll("Call ");
-                try ir.writeRef(call.func, color, w);
+                try ir.writeRef(&refMap, call.func, color, w);
                 if (color) util.setColor(.reset, w);
-                try w.writeAll(" (");
+                try w.writeAll("(");
 
                 for (call.args(), 0..) |arg, argIdx| {
                     if (argIdx != 0) try w.writeAll(", ");
-                    try ir.writeRef(arg, color, w);
+                    try ir.writeRef(&refMap, arg, color, w);
                     if (color) util.setColor(.reset, w);
                 }
                 try w.writeAll(")\n");
@@ -419,38 +450,30 @@ pub fn dump(ir: IR, name: []const u8, color: bool, w: anytype) !void {
 
             .Alloc => {
                 const alloc = data[i].alloc;
-                try w.writeAll("    ");
-                try ir.writeRef(@enumFromInt(i), color, w);
-                if (color) util.setColor(.reset, w);
-                try w.writeAll(" = ");
-                if (color) util.setColor(INST, w);
+                try ir.writeNewRef(&refMap, ref, color, w);
                 try w.writeAll("Alloc ");
                 if (color) util.setColor(ATTRIBUTE, w);
                 try w.writeAll("size ");
                 if (color) util.setColor(LITERAL, w);
                 try w.print("{d}", .{alloc.size});
                 if (color) util.setColor(ATTRIBUTE, w);
-                try w.writeAll(" Algin ");
+                try w.writeAll(" Align ");
                 if (color) util.setColor(LITERAL, w);
                 try w.print("{d}", .{alloc.@"align"});
                 try w.writeByte('\n');
             },
 
             .Phi => {
-                try w.writeAll("    ");
-                try ir.writeRef(@enumFromInt(i), color, w);
-                if (color) util.setColor(.reset, w);
-                try w.writeAll(" = ");
-                if (color) util.setColor(INST, w);
+                try ir.writeNewRef(&refMap, ref, color, w);
                 try w.writeAll("phi");
                 if (color) util.setColor(.reset, w);
                 try w.writeAll(" {");
                 for (data[i].phi.inputs()) |input| {
                     try w.writeAll("\n        ");
-                    try ir.writeLabel(input.label, color, w);
+                    try ir.writeLabel(&labelMap, input.label, color, w);
                     if (color) util.setColor(.reset, w);
                     try w.writeAll(" => ");
-                    try ir.writeRef(input.value, color, w);
+                    try ir.writeRef(&refMap, input.value, color, w);
                     if (color) util.setColor(.reset, w);
                 }
                 if (color) util.setColor(.reset, w);
@@ -461,28 +484,25 @@ pub fn dump(ir: IR, name: []const u8, color: bool, w: anytype) !void {
                 const bin = data[i].bin;
                 if (color) util.setColor(INST, w);
                 try w.writeAll("    Store ");
-                try ir.writeRef(bin.lhs, color, w);
+                try ir.writeRef(&refMap, bin.lhs, color, w);
                 if (color) util.setColor(.reset, w);
                 try w.writeAll(", ");
-                try ir.writeRef(bin.rhs, color, w);
+                try ir.writeRef(&refMap, bin.rhs, color, w);
                 try w.writeByte('\n');
             },
 
             .Ret => {
                 if (color) util.setColor(INST, w);
-                try w.writeAll("    Ret\n");
+                try w.writeAll("    Ret ");
                 if (data[i].un != .none)
-                    try ir.writeRef(data[i].un, color, w);
+                    try ir.writeRef(&refMap, data[i].un, color, w);
                 try w.writeByte('\n');
             },
 
             .Load => {
-                try w.writeAll("    ");
-                try ir.writeRef(@enumFromInt(i), color, w);
-                try w.writeAll(" = ");
-                if (color) util.setColor(INST, w);
+                try ir.writeNewRef(&refMap, ref, color, w);
                 try w.writeAll("Load ");
-                try ir.writeRef(data[i].un, color, w);
+                try ir.writeRef(&refMap, data[i].un, color, w);
                 try w.writeByte('\n');
             },
 
@@ -504,16 +524,12 @@ pub fn dump(ir: IR, name: []const u8, color: bool, w: anytype) !void {
             .Mod,
             => {
                 const bin = data[i].bin;
-                try w.writeAll("    ");
-                try ir.writeRef(@enumFromInt(i), color, w);
-                if (color) util.setColor(.reset, w);
-                try w.writeAll(" = ");
-                if (color) util.setColor(INST, w);
+                try ir.writeNewRef(&refMap, ref, color, w);
                 try w.print("{s} ", .{@tagName(tag)});
-                try ir.writeRef(bin.lhs, color, w);
+                try ir.writeRef(&refMap, bin.lhs, color, w);
                 if (color) util.setColor(.reset, w);
                 try w.writeAll(", ");
-                try ir.writeRef(bin.rhs, color, w);
+                try ir.writeRef(&refMap, bin.rhs, color, w);
                 try w.writeByte('\n');
             },
 
@@ -524,13 +540,9 @@ pub fn dump(ir: IR, name: []const u8, color: bool, w: anytype) !void {
             .Sext,
             => {
                 const un = data[i].un;
-                try w.writeAll("    ");
-                try ir.writeRef(@enumFromInt(i), color, w);
-                if (color) util.setColor(.reset, w);
-                try w.writeAll(" = ");
-                if (color) util.setColor(INST, w);
+                try ir.writeNewRef(&refMap, ref, color, w);
                 try w.print("{s} ", .{@tagName(tag)});
-                try ir.writeRef(un, color, w);
+                try ir.writeRef(&refMap, un, color, w);
                 try w.writeByte('\n');
             },
 
@@ -584,7 +596,7 @@ fn writeValue(ir: IR, valRe: Interner.Ref, color: bool, w: anytype) !void {
     }
 }
 
-fn writeRef(ir: IR, ref: Ref, color: bool, w: anytype) !void {
+fn writeRef(ir: IR, refMap: *RefMap, ref: Ref, color: bool, w: anytype) !void {
     std.debug.assert(ref != .none);
     const index = @intFromEnum(ref);
     const tyRef = ir.instructions.items(.type)[index];
@@ -605,13 +617,25 @@ fn writeRef(ir: IR, ref: Ref, color: bool, w: anytype) !void {
 
     try ir.writeType(tyRef, color, w);
     if (color) util.setColor(REF, w);
-    try w.print(" %{d}", .{index});
+    const refIndex = refMap.getIndex(ref).?;
+    try w.print(" %{d}", .{refIndex});
 }
 
-fn writeLabel(ir: IR, ref: Ref, color: bool, w: anytype) !void {
+fn writeNewRef(ir: IR, refMap: *RefMap, ref: Ref, color: bool, w: anytype) !void {
+    try refMap.put(ref, {});
+    try w.writeAll("    ");
+    try ir.writeRef(refMap, ref, color, w);
+    if (color) util.setColor(.reset, w);
+    try w.writeAll(" = ");
+    if (color) util.setColor(INST, w);
+}
+
+fn writeLabel(ir: IR, labelMap: *RefMap, ref: Ref, color: bool, w: anytype) !void {
     std.debug.assert(ref != .none);
     const index = @intFromEnum(ref);
     const label = ir.instructions.items(.data)[index].label;
+
     if (color) util.setColor(REF, w);
-    try w.print("{s}.{d}", .{ label, index });
+    const labelIndex = labelMap.getIndex(ref).?;
+    try w.print("{s}.{d}", .{ label, labelIndex });
 }
