@@ -1034,8 +1034,10 @@ fn dumpNode(
             try w.writeAll("controlling:\n");
             try tree.dumpNode(data.binExpr.lhs, level + delta, mapper, color, w);
             try w.writeByteNTimes(' ', level + 1);
-            try w.writeAll("chosen:\n");
-            try tree.dumpNode(data.binExpr.rhs, level + delta, mapper, color, w);
+            if (data.binExpr.rhs != .none) {
+                try w.writeAll("chosen:\n");
+                try tree.dumpNode(data.binExpr.rhs, level + delta, mapper, color, w);
+            }
         },
 
         .GenericExpr => {

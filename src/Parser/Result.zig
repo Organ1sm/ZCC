@@ -41,9 +41,8 @@ pub fn maybeWarnUnused(res: Result, p: *Parser, exprStart: TokenIndex, errStart:
         return;
 
     // don't warn about unused result if the expression contained errors besides other unused results
-    var i = errStart;
-    while (i < p.comp.diag.list.items.len) : (i += 1) {
-        if (p.comp.diag.list.items[i].tag != .unused_value) return;
+    for (p.comp.diag.list.items[errStart..]) |errItem| {
+        if (errItem.tag != .unused_value) return;
     }
 
     var curNode = res.node;

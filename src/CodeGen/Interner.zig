@@ -34,6 +34,12 @@ pub const Key = union(enum) {
     },
     value: Value,
 
+    record: struct {
+        /// Pointer to user data, value used for hash and equality check.
+        userPtr: *anyopaque,
+        elements: []const Ref,
+    },
+
     pub fn hash(key: Key) u32 {
         var hasher = std.hash.Wyhash.init(0);
         switch (key) {
@@ -46,6 +52,9 @@ pub const Key = union(enum) {
                     .array => @panic("TODO"),
                     .bytes => std.hash.autoHashStrat(&hasher, val.data.bytes, .Shallow),
                 }
+            },
+            .record => |info| {
+                std.hash.autoHash(&hasher, @intFromPtr(info.userPtr));
             },
             inline else => |a_info| {
                 std.hash.autoHash(&hasher, a_info);
@@ -71,11 +80,44 @@ pub const Key = union(enum) {
                     .bytes => return std.mem.eql(u8, lhsInfo.data.bytes, rhsInfo.data.bytes),
                 }
             },
-            inline else => |a_info, tag| {
-                const b_info = @field(rhs, @tagName(tag));
-                return std.meta.eql(a_info, b_info);
+
+            .record => |lhsInfo| {
+                return lhsInfo.userPtr == rhs.record.userPtr;
+            },
+
+            inline else => |lhsInfo, tag| {
+                const rhsInfo = @field(rhs, @tagName(tag));
+                return std.meta.eql(lhsInfo, rhsInfo);
             },
         }
+    }
+
+    fn toRef(key: Key) ?Ref {
+        switch (key) {
+            .int => |bits| switch (bits) {
+                1 => return .i1,
+                8 => return .i8,
+                16 => return .i16,
+                32 => return .i32,
+                64 => return .i64,
+                128 => return .i128,
+                else => {},
+            },
+            .float => |bits| switch (bits) {
+                16 => return .f16,
+                32 => return .f32,
+                64 => return .f64,
+                80 => return .f80,
+                128 => return .f128,
+                else => unreachable,
+            },
+            .ptr => return .ptr,
+            .func => return .func,
+            .noreturn => return .noreturn,
+            .void => return .void,
+            else => {},
+        }
+        return null;
     }
 };
 
@@ -100,37 +142,25 @@ pub const Ref = enum(u32) {
     _,
 };
 
-pub fn deinit(ip: *Interner, gpa: Allocator) void {
-    ip.map.deinit(gpa);
+pub fn deinit(self: *Interner, gpa: Allocator) void {
+    self.map.deinit(gpa);
 }
 
-pub fn put(ip: *Interner, gpa: Allocator, key: Key) !Ref {
-    switch (key) {
-        .int => |bits| switch (bits) {
-            1 => return .i1,
-            8 => return .i8,
-            16 => return .i16,
-            32 => return .i32,
-            64 => return .i64,
-            128 => return .i128,
-            else => {},
-        },
-        .float => |bits| switch (bits) {
-            16 => return .f16,
-            32 => return .f32,
-            64 => return .f64,
-            80 => return .f80,
-            128 => return .f128,
-            else => unreachable,
-        },
-        .ptr => return .ptr,
-        .func => return .func,
-        .noreturn => return .noreturn,
-        .void => return .void,
-        else => {},
-    }
-    const gop = try ip.map.getOrPut(gpa, key);
+pub fn put(self: *Interner, gpa: Allocator, key: Key) !Ref {
+    if (key.toRef()) |some|
+        return some;
+    const gop = try self.map.getOrPut(gpa, key);
     return @enumFromInt(gop.index);
+}
+
+pub fn has(self: *Interner, key: Key) ?Ref {
+    if (key.toRef()) |some|
+        return some;
+
+    if (self.map.getIndex(key)) |index|
+        return @enumFromInt(index);
+
+    return null;
 }
 
 pub fn get(ip: Interner, ref: Ref) Key {

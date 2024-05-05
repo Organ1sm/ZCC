@@ -818,13 +818,13 @@ pub const IncludeDirIterator = struct {
         }
 
         // Iterate over the include directories and return the next one if available.
-        while (self.includeDirsIndex < self.comp.includeDirs.items.len) {
+        if (self.includeDirsIndex < self.comp.includeDirs.items.len) {
             defer self.includeDirsIndex += 1;
             return self.comp.includeDirs.items[self.includeDirsIndex];
         }
 
         // Iterate over the system include directories and return the next one if available.
-        while (self.sysIncludeDirsIndex < self.comp.systemIncludeDirs.items.len) {
+        if (self.sysIncludeDirsIndex < self.comp.systemIncludeDirs.items.len) {
             defer self.sysIncludeDirsIndex += 1;
             return self.comp.systemIncludeDirs.items[self.sysIncludeDirsIndex];
         }
