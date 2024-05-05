@@ -13,8 +13,8 @@ int main() {
     printf("Hello, world!\n");
     return 0;
 }
-$ zig build run -- hello.c -c
-$ zig run hello.o -lc
+$ zig build run -- hello.c -o hello
+$ ./hello
 Hello, world!
 $
 ```
