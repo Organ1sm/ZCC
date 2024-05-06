@@ -2002,3 +2002,16 @@ pub const callconv_not_supported = struct {
     pub const opt = "ignored-attributes";
     pub const kind = .warning;
 };
+pub const pointer_arith_void = struct {
+    pub const msg = "invalid application of '{s}' to a void type";
+    pub const extra = .str;
+    pub const kind = .off;
+    pub const pedantic = true;
+    pub const opt = "pointer-arith";
+};
+pub const sizeof_array_arg = struct {
+    pub const msg = "sizeof on array function parameter will return size of {s}";
+    pub const extra = .str;
+    pub const kind = .warning;
+    pub const opt = "sizeof-array-argument";
+};

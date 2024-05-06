@@ -152,6 +152,8 @@ pub const Options = packed struct {
     @"main-return-type": Kind = .default,
     @"bit-int-extension": Kind = .default,
     @"keyword-macro": Kind = .default,
+    @"pointer-arith": Kind = .default,
+    @"sizeof-array-argument": Kind = .default,
 };
 
 list: std.ArrayListUnmanaged(Message) = .{},

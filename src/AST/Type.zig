@@ -479,6 +479,23 @@ pub fn isScalar(ty: Type) bool {
     return ty.isInt() or ty.isFloat() or ty.isPointer();
 }
 
+pub fn isDecayed(ty: Type) bool {
+    const decayed = switch (ty.specifier) {
+        .DecayedArray,
+        .DecayedIncompleteArray,
+        .DecayedStaticArray,
+        .DecayedVariableLenArray,
+        .DecayedUnspecifiedVariableLenArray,
+        .DecayedTypeofExpr,
+        .DecayedTypeofType,
+        => true,
+        else => false,
+    };
+
+    std.debug.assert(decayed or !std.mem.startsWith(u8, @tagName(ty.specifier), "Decayed"));
+    return decayed;
+}
+
 pub fn isChar(ty: Type) bool {
     return switch (ty.specifier) {
         .Char, .SChar, .UChar => true,
@@ -879,6 +896,7 @@ pub fn hasIncompleteSize(ty: Type) bool {
     return switch (ty.specifier) {
         .Void,
         .IncompleteArray,
+        .Invalid,
         => true,
 
         .Enum => ty.data.@"enum".isIncomplete() and !ty.data.@"enum".fixed,
@@ -1103,7 +1121,7 @@ pub fn bitSizeof(ty: Type, comp: *const Compilation) ?u64 {
 }
 
 pub fn alignable(ty: Type) bool {
-    return ty.isArray() or !ty.hasIncompleteSize();
+    return ty.isArray() or !ty.hasIncompleteSize() or ty.is(.Void);
 }
 
 /// Get the alignment of a type
@@ -1342,6 +1360,13 @@ pub fn eql(aParam: Type, bParam: Type, comp: *const Compilation, checkQualifiers
 
 pub fn decayArray(ty: *Type) void {
     ty.specifier = @as(Type.Specifier, @enumFromInt(@intFromEnum(ty.specifier) + 1));
+}
+
+pub fn originalTypeOfDecayedArray(ty: Type) Type {
+    std.debug.assert(ty.isDecayed());
+    var copy = ty;
+    copy.specifier = @enumFromInt(@intFromEnum(ty.specifier) - 1);
+    return copy;
 }
 
 pub fn makeReal(ty: Type) Type {
