@@ -496,6 +496,10 @@ pub fn isDecayed(ty: Type) bool {
     return decayed;
 }
 
+pub fn isInvalid(ty: Type) bool {
+    return ty.specifier == .Invalid;
+}
+
 pub fn isChar(ty: Type) bool {
     return switch (ty.specifier) {
         .Char, .SChar, .UChar => true,

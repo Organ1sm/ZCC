@@ -1144,7 +1144,8 @@ fn parseStaticAssert(p: *Parser) Error!bool {
         try p.errToken(.static_assert_missing_message, curToken);
 
     if (res.value.tag == .unavailable) {
-        try p.errToken(.static_assert_not_constant, resToken);
+        if (!res.ty.isInvalid())
+            try p.errToken(.static_assert_not_constant, resToken);
     } else if (!res.value.getBool()) {
         if (str.node != .none) {
             var buffer = std.ArrayList(u8).init(p.gpa);
@@ -2491,7 +2492,7 @@ const Enumerator = struct {
 
     /// Set enumerator value to specified value.
     fn set(e: *Enumerator, p: *Parser, res: Result, token: TokenIndex) !void {
-        if (res.ty.specifier == .Invalid) return;
+        if (res.ty.isInvalid()) return;
         if (e.fixed and !res.ty.eql(e.res.ty, p.comp, false)) {
             if (!res.intFitsInType(p, e.res.ty)) {
                 try p.errStr(.enum_not_representable_fixed, token, try p.typeStr(e.res.ty));
@@ -4730,7 +4731,7 @@ fn parseConstExpr(p: *Parser, declFolding: ConstDeclFoldingMode) Error!Result {
     const res = try p.parseCondExpr();
     try res.expect(p);
 
-    if (!res.ty.isInt()) {
+    if (!res.ty.isInt() and !res.ty.isInvalid()) {
         try p.errToken(.expected_integer_constant_expr, start);
         return error.ParsingFailed;
     }
@@ -4832,8 +4833,7 @@ fn logicalOrExpr(p: *Parser) Error!Result {
             lhs.value = Value.int(res);
         }
 
-        lhs.ty = Type.Int;
-        try lhs.bin(p, .BoolOrExpr, rhs);
+        try lhs.boolRes(p, .BoolOrExpr, rhs);
     }
 
     return lhs;
@@ -4860,8 +4860,7 @@ fn logicalAndExpr(p: *Parser) Error!Result {
             lhs.value = Value.int(res);
         }
 
-        lhs.ty = Type.Int;
-        try lhs.bin(p, .BoolAndExpr, rhs);
+        try lhs.boolRes(p, .BoolAndExpr, rhs);
     }
     return lhs;
 }
@@ -4940,8 +4939,7 @@ fn parseEqExpr(p: *Parser) Error!Result {
             lhs.value = Value.int(@intFromBool(res));
         }
 
-        lhs.ty = Type.Int;
-        try lhs.bin(p, tag, rhs);
+        try lhs.boolRes(p, tag, rhs);
     }
     return lhs;
 }
@@ -5031,7 +5029,7 @@ fn parseAddExpr(p: *Parser) Error!Result {
             }
         }
 
-        if (lhs.ty.specifier != .Invalid and lhsTy.isPointer() and !lhsTy.isVoidStar() and lhsTy.getElemType().hasIncompleteSize()) {
+        if (!lhs.ty.isInvalid() and lhsTy.isPointer() and !lhsTy.isVoidStar() and lhsTy.getElemType().hasIncompleteSize()) {
             try p.errStr(.ptr_arithmetic_incomplete, minus.?, try p.typeStr(lhsTy.getElemType()));
             lhs.ty = Type.Invalid;
         }
@@ -5612,16 +5610,17 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
 
             if (res.ty.sizeof(p.comp)) |size| {
                 if (size == 0) try p.errToken(.sizeof_returns_zero, token);
-                res.value = .{ .tag = .int, .data = .{ .int = size } };
+                res.value = Value.int(size);
+                res.ty = p.comp.types.size;
             } else {
                 res.value.tag = .unavailable;
                 if (res.ty.hasIncompleteSize()) {
                     try p.errStr(.invalid_sizeof, expectedParen - 1, try p.typeStr(res.ty));
-                    return error.ParsingFailed;
+                    res.ty = Type.Invalid;
+                } else {
+                    res.ty = p.comp.types.size;
                 }
             }
-
-            res.ty = p.comp.types.size;
             try res.un(p, .SizeOfExpr);
             return res;
         },
@@ -5654,13 +5653,13 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
             if (res.ty.is(.Void))
                 try p.errStr(.pointer_arith_void, token, "alignof");
 
-            if (!res.ty.alignable()) {
+            if (res.ty.alignable()) {
+                res.value = Value.int(res.ty.alignof(p.comp));
+                res.ty = p.comp.types.size;
+            } else {
                 try p.errStr(.invalid_alignof, expectedParen, try p.typeStr(res.ty));
                 return error.ParsingFailed;
             }
-
-            res.value = Value.int(res.ty.alignof(p.comp));
-            res.ty = p.comp.types.size;
             try res.un(p, .AlignOfExpr);
             return res;
         },

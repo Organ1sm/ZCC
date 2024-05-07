@@ -106,6 +106,12 @@ pub fn maybeWarnUnused(res: Result, p: *Parser, exprStart: TokenIndex, errStart:
     try p.errToken(.unused_value, exprStart);
 }
 
+pub fn boolRes(lhs: *Result, p: *Parser, tag: AstTag, rhs: Result) !void {
+    if (!lhs.ty.isInvalid())
+        lhs.ty = Type.Int;
+    return lhs.bin(p, tag, rhs);
+}
+
 pub fn bin(lhs: *Result, p: *Parser, tag: AstTag, rhs: Result) !void {
     lhs.node = try p.addNode(.{
         .tag = tag,
@@ -185,6 +191,14 @@ pub fn adjustTypes(a: *Result, token: TokenIndex, b: *Result, p: *Parser, kind: 
     add,
     sub,
 }) !bool {
+    if (b.ty.isInvalid()) {
+        try a.saveValue(p);
+        a.ty = Type.Invalid;
+    }
+
+    if (a.ty.isInvalid())
+        return false;
+
     try a.lvalConversion(p);
     try b.lvalConversion(p);
 
@@ -906,7 +920,7 @@ const CoerceContext = union(enum) {
 
 /// Perform assignment-like coercion to `dest_ty`.
 pub fn coerce(res: *Result, p: *Parser, destTy: Type, tok: TokenIndex, ctx: CoerceContext) !void {
-    if (res.ty.specifier == .Invalid or destTy.specifier == .Invalid) {
+    if (res.ty.isInvalid() or destTy.isInvalid()) {
         res.ty = Type.Invalid;
         return;
     }
