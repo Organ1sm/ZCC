@@ -1114,12 +1114,12 @@ fn parseDeclaration(p: *Parser) Error!bool {
 }
 
 /// static-assert-declaration
-///  : (`_Static_assert` | `static_assert`) '(' constExpr ',' StringLiteral+ ')' ';'
+///  : (`_Static_assert` | `static_assert`) '(' integer-const-expression ',' StringLiteral+ ')' ';'
 fn parseStaticAssert(p: *Parser) Error!bool {
     const curToken = p.eat(.KeywordStaticAssert) orelse p.eat(.KeywordC23StaticAssert) orelse return false;
     const lp = try p.expectToken(.LParen);
     const resToken = p.tokenIdx;
-    const res = try p.parseConstExpr(.NoConstDeclFolding);
+    const res = try p.parseIntegerConstExpr(.NoConstDeclFolding);
 
     const str = if (p.eat(.Comma) != null)
         switch (p.getCurrToken()) {
@@ -1648,14 +1648,14 @@ fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec, attrBufferTop: usize) Er
 ///  | enum-sepcifier
 ///  | typedef-name
 ///  | typeof-specifier
-///  | `_BitInt`  '(' constExpr ')'
+///  | `_BitInt`  '(' integer-const-expression ')'
 /// atomic-type-specifier
 ///   : keyword-atomic '(' typeName ')'
 /// align-specifier
 ///   : keyword-alignas '(' typeName ')'
-///   | keyword-alignas '(' constExpr ')'
+///   | keyword-alignas '(' integer-const-expression ')'
 ///   | keyword-c23-alignas '(' typeName ')'
-///   | keyword-c23-alignas '(' constExpr ')'
+///   | keyword-c23-alignas '(' integer-const-expression ')'
 fn parseTypeSpec(p: *Parser, ty: *TypeBuilder) Error!bool {
     const start = p.tokenIdx;
     while (true) {
@@ -1732,7 +1732,7 @@ fn parseTypeSpec(p: *Parser, ty: *TypeBuilder) Error!bool {
                     });
                 } else {
                     const argStart = p.tokenIdx;
-                    const res = try p.parseConstExpr(.NoConstDeclFolding);
+                    const res = try p.parseIntegerConstExpr(.NoConstDeclFolding);
                     if (!res.value.isZero()) {
                         var args = Attribute.initArguments(.aligned, alignToken);
                         if (p.diagnose(.aligned, &args, 0, res)) |msg| {
@@ -1819,7 +1819,7 @@ fn parseTypeSpec(p: *Parser, ty: *TypeBuilder) Error!bool {
                 p.tokenIdx += 1;
 
                 const lparen = try p.expectToken(.LParen);
-                const res = try p.parseConstExpr(.GNUFoldingExtension);
+                const res = try p.parseIntegerConstExpr(.GNUFoldingExtension);
                 try p.expectClosing(lparen, .RParen);
 
                 var bits: i16 = undefined;
@@ -2085,7 +2085,7 @@ fn parseRecordDecls(p: *Parser) Error!void {
     }
 }
 
-/// record-declarator : declarator (':' constant-expression)?
+/// record-declarator : declarator (':' integer-constant-expression)?
 fn parseRecordDeclarator(p: *Parser) Error!bool {
     const attrBufferTop = p.attrBuffer.len;
     defer p.attrBuffer.len = attrBufferTop;
@@ -2110,7 +2110,7 @@ fn parseRecordDeclarator(p: *Parser) Error!bool {
 
         if (p.eat(.Colon)) |_| bits: {
             const bitsToken = p.tokenIdx;
-            const res = try p.parseConstExpr(.GNUFoldingExtension);
+            const res = try p.parseIntegerConstExpr(.GNUFoldingExtension);
             if (!ty.isInt()) {
                 try p.errStr(.non_int_bitfield, firstToken, try p.typeStr(ty));
                 break :bits;
@@ -2549,7 +2549,7 @@ const Enumerator = struct {
 
 const EnumFieldAndNode = struct { field: Type.Enum.Field, node: NodeIndex };
 
-/// enumerator : identifier ('=' constant-expression)
+/// enumerator : identifier ('=' integer-constant-expression)
 fn enumerator(p: *Parser, e: *Enumerator) Error!?EnumFieldAndNode {
     _ = try p.pragma();
     const nameToken = try p.eatIdentifier() orelse {
@@ -2566,7 +2566,7 @@ fn enumerator(p: *Parser, e: *Enumerator) Error!?EnumFieldAndNode {
 
     const errStart = p.comp.diag.list.items.len;
     if (p.eat(.Equal)) |_| {
-        const specified = try p.parseConstExpr(.GNUFoldingExtension);
+        const specified = try p.parseIntegerConstExpr(.GNUFoldingExtension);
         if (specified.value.tag == .unavailable) {
             try p.errToken(.enum_val_unavailable, nameToken + 2);
             try e.incr(p, nameToken);
@@ -3110,7 +3110,7 @@ pub fn initializer(p: *Parser, initType: Type) Error!Result {
 /// designator-list:
 ///  : designator designator-list designator
 /// designator
-///  : '[' constant-expression ']'
+///  : '[' integer-constant-expression ']'
 ///  | '.' identifier
 pub fn initializerItem(p: *Parser, il: *InitList, initType: Type) Error!bool {
     const lb = p.eat(.LBrace) orelse {
@@ -3166,7 +3166,7 @@ pub fn initializerItem(p: *Parser, il: *InitList, initType: Type) Error!bool {
                 }
 
                 const exprToken = p.tokenIdx;
-                const indexRes = try p.parseConstExpr(.GNUFoldingExtension);
+                const indexRes = try p.parseIntegerConstExpr(.GNUFoldingExtension);
                 try p.expectClosing(lbr, .RBracket);
 
                 if (indexRes.value.tag == .unavailable) {
@@ -4141,13 +4141,13 @@ fn parseSwitchStmt(p: *Parser) Error!NodeIndex {
     });
 }
 
-/// case-statement : case constant-expression ':'
+/// case-statement : `case` integer-constant-expression ':'
 fn parseCaseStmt(p: *Parser, caseToken: u32) Error!?NodeIndex {
-    const firstItem = try p.parseConstExpr(.GNUFoldingExtension);
+    const firstItem = try p.parseIntegerConstExpr(.GNUFoldingExtension);
     const ellipsis = p.tokenIdx; // `...`
     const secondItem = if (p.eat(.Ellipsis) != null) blk: {
         try p.errToken(.gnu_switch_range, ellipsis);
-        break :blk try p.parseConstExpr(.GNUFoldingExtension);
+        break :blk try p.parseIntegerConstExpr(.GNUFoldingExtension);
     } else null;
 
     _ = try p.expectToken(.Colon);
@@ -4719,8 +4719,8 @@ fn parseAssignExpr(p: *Parser) Error!Result {
     return lhs;
 }
 
-/// const-expression : conditional-expression
-fn parseConstExpr(p: *Parser, declFolding: ConstDeclFoldingMode) Error!Result {
+/// integer-const-expression : const-expression
+fn parseIntegerConstExpr(p: *Parser, declFolding: ConstDeclFoldingMode) Error!Result {
     const start = p.tokenIdx;
 
     const constDeclFolding = p.constDeclFolding;
@@ -5110,7 +5110,7 @@ fn removeUnusedWarningForTok(p: *Parser, lastExprToken: TokenIndex) void {
 ///  : '(' compoundStmt ')'
 ///  | '(' typeName ')' cast-expression
 ///  | '(' typeName ')' '{' initializerItems '}'
-///  | __builtin_choose_expr '(' const-expression ',' assign-expression ',' assign-expression ')'
+///  | __builtin_choose_expr '(' intger-const-expression ',' assign-expression ',' assign-expression ')'
 ///  | __builtin_va_arg '(' assign-expression ',' typeName ')'
 ///  | __builtin_offsetof '(' type-name ',' offsetofMemberDesignator ')'
 ///  | __builtin_bitoffsetof '(' type-name ',' offsetofMemberDesignator ')'
@@ -5185,7 +5185,7 @@ fn parseBuiltinChooseExpr(p: *Parser) Error!Result {
     p.tokenIdx += 1;
     const lp = try p.expectToken(.LParen);
     const condToken = p.tokenIdx;
-    var cond = try p.parseConstExpr(.NoConstDeclFolding);
+    var cond = try p.parseIntegerConstExpr(.NoConstDeclFolding);
     if (cond.value.tag == .unavailable) {
         try p.errToken(.builtin_choose_cond, condToken);
         return error.ParsingFailed;
