@@ -1119,7 +1119,7 @@ fn parseStaticAssert(p: *Parser) Error!bool {
     const curToken = p.eat(.KeywordStaticAssert) orelse p.eat(.KeywordC23StaticAssert) orelse return false;
     const lp = try p.expectToken(.LParen);
     const resToken = p.tokenIdx;
-    const res = try p.parseIntegerConstExpr(.NoConstDeclFolding);
+    var res = try p.constExpr(.GNUFoldingExtension);
 
     const str = if (p.eat(.Comma) != null)
         switch (p.getCurrToken()) {
@@ -1140,31 +1140,46 @@ fn parseStaticAssert(p: *Parser) Error!bool {
 
     try p.expectClosing(lp, .RParen);
     _ = try p.expectToken(.Semicolon);
-    if (str.node == .none)
+    if (str.node == .none) {
         try p.errToken(.static_assert_missing_message, curToken);
+        try p.errStr(.static_assert_missing_message_c2x_compat, curToken, "'_Static_assert' with no message");
+    }
 
+    // Array will never be zero; a value of zero for a pointer is a null pointer constant
+    if ((res.ty.isArray() or res.ty.isPointer()) and !res.value.isZero()) {
+        const errStart = p.comp.diag.list.items.len;
+        try p.errToken(.const_decl_folded, resToken);
+        if (res.ty.isPointer() and errStart != p.comp.diag.list.items.len) {
+            // Don't show the note if the .const_decl_folded diagnostic was not added
+            try p.errToken(.constant_expression_conversion_not_allowed, resToken);
+        }
+    }
+
+    try res.boolCast(p, .{ .specifier = .Bool }, resToken);
     if (res.value.tag == .unavailable) {
         if (!res.ty.isInvalid())
             try p.errToken(.static_assert_not_constant, resToken);
-    } else if (!res.value.getBool()) {
-        if (str.node != .none) {
-            var buffer = std.ArrayList(u8).init(p.gpa);
-            defer buffer.deinit();
+    } else {
+        if (!res.value.getBool()) {
+            if (str.node != .none) {
+                var buffer = std.ArrayList(u8).init(p.gpa);
+                defer buffer.deinit();
 
-            const data = str.value.data.bytes;
-            try buffer.ensureUnusedCapacity(data.len);
-            try AST.dumpString(
-                data,
-                p.nodes.items(.tag)[@intFromEnum(str.node)],
-                buffer.writer(),
-            );
+                const data = str.value.data.bytes;
+                try buffer.ensureUnusedCapacity(data.len);
+                try AST.dumpString(
+                    data,
+                    p.nodes.items(.tag)[@intFromEnum(str.node)],
+                    buffer.writer(),
+                );
 
-            try p.errStr(
-                .static_assert_failure_message,
-                curToken,
-                try p.comp.diag.arena.allocator().dupe(u8, buffer.items),
-            );
-        } else try p.errToken(.static_assert_failure, curToken);
+                try p.errStr(
+                    .static_assert_failure_message,
+                    curToken,
+                    try p.comp.diag.arena.allocator().dupe(u8, buffer.items),
+                );
+            } else try p.errToken(.static_assert_failure, curToken);
+        }
     }
 
     const node = try p.addNode(.{
@@ -4722,7 +4737,17 @@ fn parseAssignExpr(p: *Parser) Error!Result {
 /// integer-const-expression : const-expression
 fn parseIntegerConstExpr(p: *Parser, declFolding: ConstDeclFoldingMode) Error!Result {
     const start = p.tokenIdx;
+    const res = try p.constExpr(declFolding);
+    if (!res.ty.isInt() and !res.ty.isInvalid()) {
+        try p.errToken(.expected_integer_constant_expr, start);
+        return error.ParsingFailed;
+    }
+    return res;
+}
 
+// Caller is responsible for issuing a diagnostic if result is invalid/unavailable
+// constExpr : condExpr
+fn constExpr(p: *Parser, declFolding: ConstDeclFoldingMode) Error!Result {
     const constDeclFolding = p.constDeclFolding;
     defer p.constDeclFolding = constDeclFolding;
 
@@ -4730,11 +4755,9 @@ fn parseIntegerConstExpr(p: *Parser, declFolding: ConstDeclFoldingMode) Error!Re
 
     const res = try p.parseCondExpr();
     try res.expect(p);
+    if (res.ty.isInvalid() or res.value.tag == .unavailable)
+        return res;
 
-    if (!res.ty.isInt() and !res.ty.isInvalid()) {
-        try p.errToken(.expected_integer_constant_expr, start);
-        return error.ParsingFailed;
-    }
     // saveValue sets val to unavailable
     var copy = res;
     try copy.saveValue(p);
@@ -5573,7 +5596,10 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
                 const res = Value.int(@intFromBool(!operand.value.getBool()));
                 operand.value = res;
             } else {
-                operand.value.tag = .unavailable;
+                if (operand.ty.isDecayed())
+                    operand.value = Value.int(0)
+                else
+                    operand.value.tag = .unavailable;
             }
 
             operand.ty = Type.Int;

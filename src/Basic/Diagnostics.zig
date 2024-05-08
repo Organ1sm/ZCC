@@ -154,6 +154,9 @@ pub const Options = packed struct {
     @"keyword-macro": Kind = .default,
     @"pointer-arith": Kind = .default,
     @"sizeof-array-argument": Kind = .default,
+    @"pre-c2x-compat": Kind = .default,
+    @"pointer-bool-conversion": Kind = .default,
+    @"string-conversion": Kind = .default,
 };
 
 list: std.ArrayListUnmanaged(Message) = .{},
@@ -458,6 +461,10 @@ fn tagKind(diag: *Diagnostics, tag: Tag) Kind {
 
             if (@hasDecl(info, "suppress_version"))
                 if (comp.langOpts.standard.atLeast(info.suppress_version))
+                    return .off;
+
+            if (@hasDecl(info, "suppress_unless_version"))
+                if (!comp.langOpts.standard.atLeast(info.suppress_unless_version))
                     return .off;
 
             if (@hasDecl(info, "suppress_gnu"))

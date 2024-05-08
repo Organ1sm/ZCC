@@ -384,7 +384,17 @@ pub fn lvalConversion(res: *Result, p: *Parser) Error!void {
 }
 
 pub fn boolCast(res: *Result, p: *Parser, boolType: Type, tok: TokenIndex) Error!void {
-    if (res.ty.isPointer()) {
+    if (res.ty.isArray()) {
+        if (res.value.tag == .bytes)
+            try p.errStr(.string_literal_to_bool, tok, try p.typePairStrExtra(res.ty, " to ", boolType))
+        else
+            try p.errStr(.array_address_to_bool, tok, p.getTokenSlice(tok));
+
+        try res.lvalConversion(p);
+        res.value = Value.int(1);
+        res.ty = boolType;
+        try res.implicitCast(p, .PointerToBool);
+    } else if (res.ty.isPointer()) {
         res.value.toBool();
         res.ty = boolType;
         try res.implicitCast(p, .PointerToBool);
