@@ -48,6 +48,7 @@ pub const Token = struct {
             .KeywordConstexpr,
             .KeywordTrue,
             .KeywordFalse,
+            .KeywordNullptr,
             => if (standard.atLeast(.c2x)) kw else .Identifier,
 
             .KeywordDeclSpec => if (comp.langOpts.declSpecAttrs) kw else .Identifier,
@@ -135,6 +136,7 @@ pub const Token = struct {
         .{ "constexpr", .KeywordConstexpr },
         .{ "true", .KeywordTrue },
         .{ "false", .KeywordFalse },
+        .{ "nullptr", .KeywordNullptr },
 
         // Preprocessor directives
         .{ "include", .KeywordInclude },
