@@ -106,6 +106,12 @@ pub fn maybeWarnUnused(res: Result, p: *Parser, exprStart: TokenIndex, errStart:
     try p.errToken(.unused_value, exprStart);
 }
 
+pub fn boolRes(lhs: *Result, p: *Parser, tag: AstTag, rhs: Result) !void {
+    if (!lhs.ty.isInvalid())
+        lhs.ty = Type.Int;
+    return lhs.bin(p, tag, rhs);
+}
+
 pub fn bin(lhs: *Result, p: *Parser, tag: AstTag, rhs: Result) !void {
     lhs.node = try p.addNode(.{
         .tag = tag,
@@ -185,6 +191,14 @@ pub fn adjustTypes(a: *Result, token: TokenIndex, b: *Result, p: *Parser, kind: 
     add,
     sub,
 }) !bool {
+    if (b.ty.isInvalid()) {
+        try a.saveValue(p);
+        a.ty = Type.Invalid;
+    }
+
+    if (a.ty.isInvalid())
+        return false;
+
     try a.lvalConversion(p);
     try b.lvalConversion(p);
 
@@ -370,7 +384,17 @@ pub fn lvalConversion(res: *Result, p: *Parser) Error!void {
 }
 
 pub fn boolCast(res: *Result, p: *Parser, boolType: Type, tok: TokenIndex) Error!void {
-    if (res.ty.isPointer()) {
+    if (res.ty.isArray()) {
+        if (res.value.tag == .bytes)
+            try p.errStr(.string_literal_to_bool, tok, try p.typePairStrExtra(res.ty, " to ", boolType))
+        else
+            try p.errStr(.array_address_to_bool, tok, p.getTokenSlice(tok));
+
+        try res.lvalConversion(p);
+        res.value = Value.int(1);
+        res.ty = boolType;
+        try res.implicitCast(p, .PointerToBool);
+    } else if (res.ty.isPointer()) {
         res.value.toBool();
         res.ty = boolType;
         try res.implicitCast(p, .PointerToBool);
@@ -667,6 +691,7 @@ fn invalidBinTy(a: *Result, tok: TokenIndex, b: *Result, p: *Parser) Error!bool 
     try p.errStr(.invalid_bin_types, tok, try p.typePairStr(a.ty, b.ty));
     a.value.tag = .unavailable;
     a.value.tag = .unavailable;
+    a.ty = Type.Invalid;
     return false;
 }
 
@@ -905,6 +930,10 @@ const CoerceContext = union(enum) {
 
 /// Perform assignment-like coercion to `dest_ty`.
 pub fn coerce(res: *Result, p: *Parser, destTy: Type, tok: TokenIndex, ctx: CoerceContext) !void {
+    if (res.ty.isInvalid() or destTy.isInvalid()) {
+        res.ty = Type.Invalid;
+        return;
+    }
     return res.coerceExtra(p, destTy, tok, ctx) catch |er| switch (er) {
         error.CoercionFailed => unreachable,
         else => |e| return e,

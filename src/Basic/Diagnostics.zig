@@ -152,6 +152,11 @@ pub const Options = packed struct {
     @"main-return-type": Kind = .default,
     @"bit-int-extension": Kind = .default,
     @"keyword-macro": Kind = .default,
+    @"pointer-arith": Kind = .default,
+    @"sizeof-array-argument": Kind = .default,
+    @"pre-c2x-compat": Kind = .default,
+    @"pointer-bool-conversion": Kind = .default,
+    @"string-conversion": Kind = .default,
 };
 
 list: std.ArrayListUnmanaged(Message) = .{},
@@ -273,7 +278,6 @@ pub fn fatal(
     m.end(line, col, false);
 
     diag.errors += 1;
-
     return error.FatalError;
 }
 
@@ -288,6 +292,7 @@ pub fn fatalNoSrc(diag: *Diagnostics, comptime fmt: []const u8, args: anytype) e
         std_err.print(fmt ++ "\n", args) catch {};
         util.setColor(.reset, std_err);
     }
+    diag.errors += 1;
     return error.FatalError;
 }
 
@@ -456,6 +461,10 @@ fn tagKind(diag: *Diagnostics, tag: Tag) Kind {
 
             if (@hasDecl(info, "suppress_version"))
                 if (comp.langOpts.standard.atLeast(info.suppress_version))
+                    return .off;
+
+            if (@hasDecl(info, "suppress_unless_version"))
+                if (!comp.langOpts.standard.atLeast(info.suppress_unless_version))
                     return .off;
 
             if (@hasDecl(info, "suppress_gnu"))

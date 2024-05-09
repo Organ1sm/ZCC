@@ -902,6 +902,13 @@ pub const static_assert_missing_message = struct {
     pub const kind = .warning;
     pub const suppress_version = .c2x;
 };
+pub const static_assert_missing_message_c2x_compat = struct {
+    pub const msg = "{s} is incompatible with C standards before C2x";
+    pub const extra = .str;
+    pub const kind = .off;
+    pub const suppress_unless_version = .c2x;
+    pub const opt = "pre-c2x-compat";
+};
 pub const unbound_vla = struct {
     pub const msg = "variable length array must be bound in function definition";
     pub const kind = .@"error";
@@ -1995,4 +2002,39 @@ pub const keyword_macro = struct {
     pub const kind = .off;
     pub const pedantic = true;
     pub const opt = "keyword-macro";
+};
+pub const callconv_not_supported = struct {
+    pub const msg = "'{s}' calling convention is not supported for this target";
+    pub const extra = .str;
+    pub const opt = "ignored-attributes";
+    pub const kind = .warning;
+};
+pub const pointer_arith_void = struct {
+    pub const msg = "invalid application of '{s}' to a void type";
+    pub const extra = .str;
+    pub const kind = .off;
+    pub const pedantic = true;
+    pub const opt = "pointer-arith";
+};
+pub const sizeof_array_arg = struct {
+    pub const msg = "sizeof on array function parameter will return size of {s}";
+    pub const extra = .str;
+    pub const kind = .warning;
+    pub const opt = "sizeof-array-argument";
+};
+pub const array_address_to_bool = struct {
+    pub const msg = "address of array '{s}' will always evaluate to 'true'";
+    pub const extra = .str;
+    pub const kind = .warning;
+    pub const opt = "pointer-bool-conversion";
+};
+pub const string_literal_to_bool = struct {
+    pub const msg = "implicit conversion turns string literal into bool: {s}";
+    pub const extra = .str;
+    pub const kind = .off;
+    pub const opt = "string-conversion";
+};
+pub const constant_expression_conversion_not_allowed = struct {
+    pub const msg = "this conversion is not allowed in a constant expression";
+    pub const kind = .note;
 };
