@@ -571,11 +571,10 @@ const MsvcContext = struct {
     }
 };
 
-pub fn compute(ty: Type, comp: *const Compilation, pragmaPack: ?u8) void {
+pub fn compute(rec: *Type.Record, ty: Type, comp: *const Compilation, pragmaPack: ?u8) void {
     // const mapper = comp.string_interner.getSlowTypeMapper();
     // const name = mapper.lookup(ty.getRecord().?.name);
     // std.debug.print("struct {s}\n", .{name});
-    const rec = getMutableRecord(ty);
     switch (comp.langOpts.emulate) {
         .gcc, .clang => {
             var context = SysVContext.init(ty, comp, pragmaPack);
@@ -583,7 +582,7 @@ pub fn compute(ty: Type, comp: *const Compilation, pragmaPack: ?u8) void {
             context.layoutFields(rec);
             context.sizeBits = std.mem.alignForward(u64, context.sizeBits, context.alignedBits);
 
-            rec.typeLayout = TypeLayout{
+            rec.typeLayout = .{
                 .sizeBits = context.sizeBits,
                 .fieldAlignmentBits = context.alignedBits,
                 .pointerAlignmentBits = context.alignedBits,
@@ -611,7 +610,7 @@ pub fn compute(ty: Type, comp: *const Compilation, pragmaPack: ?u8) void {
 
             context.sizeBits = std.mem.alignForward(u64, context.sizeBits, context.pointerAlignBits);
 
-            rec.typeLayout = TypeLayout{
+            rec.typeLayout = .{
                 .sizeBits = context.sizeBits,
                 .fieldAlignmentBits = context.fieldAlignBits,
                 .pointerAlignmentBits = context.pointerAlignBits,
@@ -639,16 +638,6 @@ pub fn computeLayout(ty: Type, comp: *const Compilation) TypeLayout {
             .requiredAlignmentBits = BITS_PER_BYTE,
         };
     }
-}
-
-pub fn getMutableRecord(ty: Type) *Type.Record {
-    return switch (ty.specifier) {
-        .Attributed => getMutableRecord(ty.data.attributed.base),
-        .TypeofType, .DecayedTypeofType => getMutableRecord(ty.data.subType.*),
-        .TypeofExpr, .DecayedTypeofExpr => getMutableRecord(ty.data.expr.ty),
-        .Struct, .Union => ty.data.record,
-        else => unreachable,
-    };
 }
 
 fn isPacked(attrs: ?[]const Attribute) bool {

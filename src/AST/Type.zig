@@ -297,7 +297,12 @@ pub const Record = struct {
         r.name = name;
         r.fields.len = std.math.maxInt(usize);
         r.fieldAttributes = null;
-        r.typeLayout = undefined;
+        r.typeLayout = .{
+            .sizeBits = 8,
+            .fieldAlignmentBits = 8,
+            .pointerAlignmentBits = 8,
+            .requiredAlignmentBits = 8,
+        };
         return r;
     }
 };

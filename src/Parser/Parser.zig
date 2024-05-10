@@ -2050,7 +2050,7 @@ fn parseRecordSpec(p: *Parser) Error!Type {
             .gcc => p.pragmaPack,
             .msvc => p.pragmaPack,
         };
-        RecordLayout.compute(ty, p.comp, pragmaPackValue);
+        RecordLayout.compute(recordType, ty, p.comp, pragmaPackValue);
     }
 
     // finish by creating a node
