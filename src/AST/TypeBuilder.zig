@@ -26,6 +26,7 @@ errorOnInvalid: bool = false,
 pub const Specifier = union(enum) {
     None,
     Void,
+    NullPtrTy,
     Bool,
     Char,
     SChar,
@@ -141,6 +142,7 @@ pub const Specifier = union(enum) {
             .None => unreachable,
 
             .Void => "void",
+            .NullPtrTy => "nullptr_t",
             .Bool => if (langOpts.standard.atLeast(.c2x)) "bool" else "_Bool",
 
             .Char => "char",
@@ -279,6 +281,9 @@ pub fn finish(b: @This(), p: *Parser) Parser.Error!Type {
                 try p.err(.missing_type_specifier);
             }
         },
+
+        // nullptr_t can only be accessed via typeof(nullptr)
+        Specifier.NullPtrTy => unreachable,
 
         Specifier.Void => ty.specifier = .Void,
         Specifier.Bool => ty.specifier = .Bool,
@@ -541,6 +546,7 @@ pub fn combineFromTypeof(b: *@This(), p: *Parser, new: Type, sourceToken: TokenI
     const inner = switch (new.specifier) {
         .TypeofType => new.data.subType.*,
         .TypeofExpr => new.data.expr.ty,
+        .NullPtrTy => new, // typeof(nullptr) is special-cased to be an unwrapped typeof-expr
         else => unreachable,
     };
 
@@ -907,6 +913,7 @@ fn combineExtra(b: *@This(), p: *Parser, new: Specifier, sourceToken: TokenIndex
 pub fn fromType(ty: Type) Specifier {
     return switch (ty.specifier) {
         .Void => Specifier.Void,
+        .NullPtrTy => Specifier.NullPtrTy,
         .Bool => Specifier.Bool,
         .Char => Specifier.Char,
         .SChar => Specifier.SChar,

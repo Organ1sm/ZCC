@@ -403,6 +403,8 @@ pub const Specifier = enum {
     Attributed,
     /// special type used to implement __builtin_va_start
     SpecialVaStart,
+    /// C23 nullptr_t
+    NullPtrTy,
 };
 
 /// Determine if type matches the given specifier, recursing into typeof
@@ -476,7 +478,12 @@ pub fn isVector(ty: Type) bool {
 }
 
 pub fn isScalar(ty: Type) bool {
-    return ty.isInt() or ty.isFloat() or ty.isPointer();
+    return ty.isInt() or isScalarNonInt(ty);
+}
+
+/// To avoid calling isInt() twice for allowable loop/if controlling expressions
+pub fn isScalarNonInt(ty: Type) bool {
+    return ty.isFloat() or ty.isPointer() or ty.is(.NullPtrTy);
 }
 
 pub fn isDecayed(ty: Type) bool {
@@ -1083,6 +1090,7 @@ pub fn sizeof(ty: Type, comp: *const Compilation) ?u64 {
         .DecayedUnspecifiedVariableLenArray,
         .DecayedTypeofType,
         .DecayedTypeofExpr,
+        .NullPtrTy,
         => comp.target.ptrBitWidth() >> 3,
 
         .Array, .Vector => {
@@ -1218,6 +1226,7 @@ pub fn alignof(ty: Type, comp: *const Compilation) u29 {
         .DecayedIncompleteArray,
         .DecayedVariableLenArray,
         .DecayedUnspecifiedVariableLenArray,
+        .NullPtrTy,
         => switch (comp.target.cpu.arch) {
             .avr => 1,
             else => comp.target.ptrBitWidth() / 8,

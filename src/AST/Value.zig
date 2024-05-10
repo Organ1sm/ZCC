@@ -20,8 +20,8 @@ data: union {
 /// Defines the possible types of values that the `Value` can be tagged as.
 const Tag = enum {
     unavailable, // Value is not available or uninitialized.
-    /// `int` is used to store integer, boolean and pointer values.
-    int,
+    nullptrTy,
+    int, // `int` is used to store integer, boolean and pointer values.
     float, // For floating-point values.
     array, // For arrays of values.
     bytes, // For raw byte data.
@@ -334,6 +334,7 @@ pub fn toBool(v: *Value) void {
 pub fn isZero(v: Value) bool {
     return switch (v.tag) {
         .unavailable => false,
+        .nullptrTy => false,
         .int => v.data.int == 0,
         .float => v.data.float == 0,
         .array => false,
@@ -344,6 +345,7 @@ pub fn isZero(v: Value) bool {
 pub fn getBool(v: Value) bool {
     return switch (v.tag) {
         .unavailable => unreachable,
+        .nullptrTy => false,
         .int => v.data.int != 0,
         .float => v.data.float != 0,
         .array => false,
@@ -589,6 +591,13 @@ pub fn bitNot(v: Value, ty: Type, comp: *Compilation) Value {
 
 pub fn compare(a: Value, op: std.math.CompareOperator, b: Value, ty: Type, comp: *const Compilation) bool {
     assert(a.tag == b.tag);
+    if (a.tag == .nullptrTy) {
+        return switch (op) {
+            .eq => true,
+            .neq => false,
+            else => unreachable,
+        };
+    }
     const S = struct {
         inline fn doICompare(comptime T: type, aa: Value, opp: std.math.CompareOperator, bb: Value) bool {
             const a_val = aa.getInt(T);

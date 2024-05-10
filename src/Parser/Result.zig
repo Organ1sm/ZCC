@@ -107,8 +107,12 @@ pub fn maybeWarnUnused(res: Result, p: *Parser, exprStart: TokenIndex, errStart:
 }
 
 pub fn boolRes(lhs: *Result, p: *Parser, tag: AstTag, rhs: Result) !void {
+    if (lhs.value.tag == .nullptrTy)
+        lhs.value = Value.int(0);
+
     if (!lhs.ty.isInvalid())
         lhs.ty = Type.Int;
+
     return lhs.bin(p, tag, rhs);
 }
 
@@ -255,13 +259,16 @@ pub fn adjustTypes(a: *Result, token: TokenIndex, b: *Result, p: *Parser, kind: 
     if (kind == .arithmetic)
         return a.invalidBinTy(token, b, p);
 
+    const aIsNullptr = a.ty.is(.NullPtrTy);
+    const bIsNullptr = b.ty.is(.NullPtrTy);
     const aIsPtr = a.ty.isPointer();
     const bIsPtr = b.ty.isPointer();
     const aIsScalar = aIsArithmetic or aIsPtr;
     const bIsScalar = bIsArithmetic or bIsPtr;
     switch (kind) {
         .booleanLogic => {
-            if (!aIsScalar or !bIsScalar) return a.invalidBinTy(token, b, p);
+            if (!(aIsScalar or aIsNullptr) or !(bIsScalar or bIsNullptr))
+                return a.invalidBinTy(token, b, p);
 
             // Do integer promotions but nothing else
             if (aIsInt) try a.intCast(p, a.ty.integerPromotion(p.comp), token);
@@ -270,6 +277,23 @@ pub fn adjustTypes(a: *Result, token: TokenIndex, b: *Result, p: *Parser, kind: 
         },
 
         .relational, .equality => {
+            if (kind == .equality and (aIsNullptr or bIsNullptr)) {
+                if (aIsNullptr and bIsNullptr)
+                    return a.shouldEval(b, p);
+
+                const nullPtrRes = if (aIsNullptr) a else b;
+                const otherRes = if (aIsNullptr) b else a;
+                if (otherRes.ty.isPointer()) {
+                    try nullPtrRes.nullCast(p, otherRes.ty);
+                    return otherRes.shouldEval(nullPtrRes, p);
+                } else if (otherRes.value.isZero()) {
+                    otherRes.value = .{ .tag = .nullptrTy };
+                    try otherRes.nullCast(p, nullPtrRes.ty);
+                    return otherRes.shouldEval(nullPtrRes, p);
+                }
+                return a.invalidBinTy(token, b, p);
+            }
+
             // comparisons between floats and pointes not allowed
             if (!aIsScalar or !bIsScalar or (aIsFloat and bIsPtr) or (bIsFloat and aIsPtr))
                 return a.invalidBinTy(token, b, p);
@@ -297,6 +321,9 @@ pub fn adjustTypes(a: *Result, token: TokenIndex, b: *Result, p: *Parser, kind: 
                 return true;
             }
 
+            if (aIsNullptr and bIsNullptr)
+                return true;
+
             if ((aIsPtr and bIsInt) or (aIsInt and bIsPtr)) {
                 if (a.value.isZero() or b.value.isZero()) {
                     try a.nullCast(p, b.ty);
@@ -314,6 +341,13 @@ pub fn adjustTypes(a: *Result, token: TokenIndex, b: *Result, p: *Parser, kind: 
 
             if (aIsPtr and bIsPtr)
                 return a.adjustCondExprPtrs(token, b, p);
+
+            if ((aIsPtr and bIsNullptr) or (aIsNullptr and bIsPtr)) {
+                const nullPtrRes = if (aIsNullptr) a else b;
+                const ptrRes = if (aIsNullptr) b else a;
+                try nullPtrRes.nullCast(p, ptrRes.ty);
+                return true;
+            }
 
             if (a.ty.isRecord() and b.ty.isRecord() and a.ty.eql(b.ty, p.comp, false))
                 return true;
@@ -585,7 +619,7 @@ pub fn toVoid(res: *Result, p: *Parser) Error!void {
 }
 
 pub fn nullCast(res: *Result, p: *Parser, ptrType: Type) Error!void {
-    if (!res.value.isZero()) return;
+    if (!res.value.isZero() and !res.ty.is(.NullPtrTy)) return;
     res.ty = ptrType;
     try res.implicitCast(p, .NullToPointer);
 }
@@ -708,7 +742,7 @@ fn shouldEval(a: *Result, b: *Result, p: *Parser) Error!bool {
 /// Saves value and replaces it with `.unavailable`.
 pub fn saveValue(res: *Result, p: *Parser) !void {
     std.debug.assert(!p.inMacro);
-    if (res.value.tag == .unavailable) return;
+    if (res.value.tag == .unavailable or res.value.tag == .nullptrTy) return;
 
     if (!p.inMacro)
         try p.valueMap.put(res.node, res.value);
@@ -721,6 +755,27 @@ pub fn castType(res: *Result, p: *Parser, to: Type, tok: TokenIndex) !void {
         // everything can cast to void
         castKind = .ToVoid;
         res.value.tag = .unavailable;
+    } else if (to.is(.NullPtrTy)) {
+        if (res.ty.is(.NullPtrTy)) {
+            castKind = .NoOP;
+        } else {
+            try p.errStr(.invalid_object_cast, tok, try p.typePairStrExtra(res.ty, " to ", to));
+            return error.ParsingFailed;
+        }
+    } else if (res.ty.is(.NullPtrTy)) {
+        if (to.is(.Bool)) {
+            try res.nullCast(p, res.ty);
+            res.value.toBool();
+            res.ty = .{ .specifier = .Bool };
+            try res.implicitCast(p, .PointerToBool);
+            try res.saveValue(p);
+        } else if (to.isPointer()) {
+            try res.nullCast(p, to);
+        } else {
+            try p.errStr(.invalid_object_cast, tok, try p.typePairStrExtra(res.ty, " to ", to));
+            return error.ParsingFailed;
+        }
+        castKind = .NoOP;
     } else if (res.value.isZero() and to.isPointer()) {
         castKind = .NullToPointer;
     } else if (to.isScalar()) cast: {
@@ -946,8 +1001,10 @@ fn coerceExtra(res: *Result, p: *Parser, destTy: Type, tok: TokenIndex, ctx: Coe
     // Subject of the coercion does not need to be qualified.
     var unqualTy = destTy.canonicalize(.standard);
     unqualTy.qual = .{};
-    if (unqualTy.is(.Bool)) {
-        if (res.ty.isScalar()) {
+    if (unqualTy.is(.NullPtrTy)) {
+        if (res.ty.is(.NullPtrTy)) return;
+    } else if (unqualTy.is(.Bool)) {
+        if (res.ty.isScalar() and !res.ty.is(.NullPtrTy)) {
             // this is ridiculous but it's what clang does
             try res.boolCast(p, unqualTy, tok);
             return;
@@ -970,7 +1027,7 @@ fn coerceExtra(res: *Result, p: *Parser, destTy: Type, tok: TokenIndex, ctx: Coe
             return;
         }
     } else if (unqualTy.isPointer()) {
-        if (res.value.isZero()) {
+        if (res.value.isZero() or res.ty.is(.NullPtrTy)) {
             try res.nullCast(p, destTy);
             return;
         } else if (res.ty.isInt()) {
