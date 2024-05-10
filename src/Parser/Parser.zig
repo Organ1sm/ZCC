@@ -1142,7 +1142,7 @@ fn parseStaticAssert(p: *Parser) Error!bool {
     _ = try p.expectToken(.Semicolon);
     if (str.node == .none) {
         try p.errToken(.static_assert_missing_message, curToken);
-        try p.errStr(.static_assert_missing_message_c2x_compat, curToken, "'_Static_assert' with no message");
+        try p.errStr(.pre_c2x_compat, curToken, "'_Static_assert' with no message");
     }
 
     // Array will never be zero; a value of zero for a pointer is a null pointer constant
@@ -1224,6 +1224,9 @@ fn typeof(p: *Parser) Error!?Type {
     const typeofExpr = try p.parseNoEval(parseExpr);
     try typeofExpr.expect(p);
     try p.expectClosing(lp, .RParen);
+
+    if (typeofExpr.ty.is(.NullPtrTy))
+        return Type{ .specifier = .NullPtrTy, .qual = typeofExpr.ty.qual.inheritFromTypeof() };
 
     const inner = try p.arena.create(Type.Expr);
     inner.* = .{
@@ -3910,7 +3913,7 @@ fn parseIfStmt(p: *Parser) Error!NodeIndex {
     try cond.lvalConversion(p);
     if (cond.ty.isInt())
         try cond.intCast(p, cond.ty.integerPromotion(p.comp), condToken)
-    else if (!cond.ty.isFloat() and !cond.ty.isPointer())
+    else if (!cond.ty.isScalarNonInt())
         try p.errStr(.statement_scalar, lp + 1, try p.typeStr(cond.ty));
 
     try cond.saveValue(p);
@@ -3967,7 +3970,7 @@ fn parseForStmt(p: *Parser) Error!NodeIndex {
         try cond.lvalConversion(p);
         if (cond.ty.isInt())
             try cond.intCast(p, cond.ty.integerPromotion(p.comp), condToken)
-        else if (!cond.ty.isFloat() and !cond.ty.isPointer())
+        else if (!cond.ty.isScalarNonInt())
             try p.errStr(.statement_scalar, lp + 1, try p.typeStr(cond.ty));
     }
     try cond.saveValue(p);
@@ -4024,7 +4027,7 @@ fn parseWhileStmt(p: *Parser) Error!NodeIndex {
     try cond.lvalConversion(p);
     if (cond.ty.isInt())
         try cond.intCast(p, cond.ty.integerPromotion(p.comp), condToken)
-    else if (!cond.ty.isFloat() and !cond.ty.isPointer())
+    else if (!cond.ty.isScalarNonInt())
         try p.errStr(.statement_scalar, lp + 1, try p.typeStr(cond.ty));
 
     try cond.saveValue(p);
@@ -4059,7 +4062,7 @@ fn parseDoWhileStmt(p: *Parser) Error!NodeIndex {
 
     try cond.expect(p);
     try cond.lvalConversion(p);
-    if (cond.ty.isInt())
+    if (!cond.ty.isScalarNonInt())
         try cond.intCast(p, cond.ty.integerPromotion(p.comp), condToken)
     else if (!cond.ty.isFloat() and !cond.ty.isPointer())
         try p.errStr(.statement_scalar, lp + 1, try p.typeStr(cond.ty));
@@ -5595,6 +5598,8 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
             if (operand.value.tag == .int) {
                 const res = Value.int(@intFromBool(!operand.value.getBool()));
                 operand.value = res;
+            } else if (operand.value.tag == .nullptrTy) {
+                operand.value = Value.int(1);
             } else {
                 if (operand.ty.isDecayed())
                     operand.value = Value.int(0)
@@ -6126,16 +6131,17 @@ fn checkArrayBounds(p: *Parser, index: Result, array: Result, token: TokenIndex)
     }
 }
 
-//// primary-expression
-////  : identifier
-////  | keywordTrue or keywordFalse
-////  | integer-literal
-////  | float-literal
-////  | imaginary-literal
-////  | char-literal
-////  | string-literal
-////  | '(' expression ')'
-////  | generic-selection
+/// primary-expression
+///  : identifier
+///  | keywordTrue or keywordFalse
+///  | keywordNullptr
+///  | integer-literal
+///  | float-literal
+///  | imaginary-literal
+///  | char-literal
+///  | string-literal
+///  | '(' expression ')'
+///  | generic-selection
 fn parsePrimaryExpr(p: *Parser) Error!Result {
     if (p.eat(.LParen)) |lp| {
         var e = try p.parseExpr();
@@ -6245,6 +6251,21 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
             std.debug.assert(!p.inMacro); // Should have been replaced with .one / .zero
             try p.valueMap.put(res.node, res.value);
             return res;
+        },
+
+        .KeywordNullptr => {
+            defer p.tokenIdx += 1;
+            try p.errStr(.pre_c2x_compat, p.tokenIdx, "'nullptr'");
+
+            return Result{
+                .value = .{ .tag = .nullptrTy },
+                .ty = .{ .specifier = .NullPtrTy },
+                .node = try p.addNode(.{
+                    .tag = .NullPtrLiteral,
+                    .type = .{ .specifier = .NullPtrTy },
+                    .data = undefined,
+                }),
+            };
         },
 
         .MacroFunc, .MacroFunction => {

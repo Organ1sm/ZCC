@@ -902,7 +902,7 @@ pub const static_assert_missing_message = struct {
     pub const kind = .warning;
     pub const suppress_version = .c2x;
 };
-pub const static_assert_missing_message_c2x_compat = struct {
+pub const pre_c2x_compat = struct {
     pub const msg = "{s} is incompatible with C standards before C2x";
     pub const extra = .str;
     pub const kind = .off;
@@ -2037,4 +2037,9 @@ pub const string_literal_to_bool = struct {
 pub const constant_expression_conversion_not_allowed = struct {
     pub const msg = "this conversion is not allowed in a constant expression";
     pub const kind = .note;
+};
+pub const invalid_object_cast = struct {
+    pub const msg = "cannot cast an object of type {s}";
+    pub const extra = .str;
+    pub const kind = .@"error";
 };

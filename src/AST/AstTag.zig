@@ -232,6 +232,8 @@ pub const Tag = enum(u8) {
     EnumerationRef,
     /// C23 bool literal `true` / `false`
     BoolLiteral,
+    /// C23 nullptr literal
+    NullPtrLiteral,
     /// integer literal, always unsigned
     IntLiteral,
     /// Same as IntLiteral

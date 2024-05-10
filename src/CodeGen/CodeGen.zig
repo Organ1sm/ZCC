@@ -177,6 +177,8 @@ fn genType(c: *CodeGen, baseTy: Type) !Interner.Ref {
     } else if (ty.isVector()) {
         const elem = try c.genType(ty.getElemType());
         key = .{ .vector = .{ .child = elem, .len = @intCast(ty.data.array.len) } };
+    } else if (ty.is(.NullPtrTy)) {
+        return c.comp.diag.fatalNoSrc("TODO lower nullptr_t", .{});
     }
 
     return c.builder.pool.put(c.builder.gpa, key);
@@ -601,6 +603,7 @@ fn genExpr(c: *CodeGen, node: NodeIndex) Error!IR.Ref {
         .CaseRangeStmt,
         .GotoStmt,
         .ComputedGotoStmt,
+        .NullPtrLiteral,
         => return c.comp.diag.fatalNoSrc("TODO CodeGen.genStmt {}\n", .{c.nodeTag[@intFromEnum(node)]}),
 
         .CommaExpr => {

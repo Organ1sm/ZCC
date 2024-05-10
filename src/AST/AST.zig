@@ -983,6 +983,7 @@ fn dumpNode(
         },
 
         .BoolLiteral,
+        .NullPtrLiteral,
         .CharLiteral,
         .IntLiteral,
         .FloatLiteral,
