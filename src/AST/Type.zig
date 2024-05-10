@@ -1466,23 +1466,23 @@ pub fn makeComplex(ty: Type) Type {
 }
 
 /// Combines types recursively in the order they were parsed, uses `.void` specifier as a sentinel value.
-pub fn combine(inner: *Type, outer: Type, p: *Parser, sourceToken: TokenIndex) Parser.Error!void {
+pub fn combine(inner: *Type, outer: Type) Parser.Error!void {
     switch (inner.specifier) {
-        .Pointer => return inner.data.subType.combine(outer, p, sourceToken),
+        .Pointer => return inner.data.subType.combine(outer),
 
-        .UnspecifiedVariableLenArray => try inner.data.subType.combine(outer, p, sourceToken),
+        .UnspecifiedVariableLenArray => try inner.data.subType.combine(outer),
 
         .Array,
         .StaticArray,
         .IncompleteArray,
-        => try inner.data.array.elem.combine(outer, p, sourceToken),
+        => try inner.data.array.elem.combine(outer),
 
-        .VariableLenArray => try inner.data.expr.ty.combine(outer, p, sourceToken),
+        .VariableLenArray => try inner.data.expr.ty.combine(outer),
 
         .Func,
         .VarArgsFunc,
         .OldStyleFunc,
-        => try inner.data.func.returnType.combine(outer, p, sourceToken),
+        => try inner.data.func.returnType.combine(outer),
 
         // type should not be able to decay before combine
         .DecayedArray,

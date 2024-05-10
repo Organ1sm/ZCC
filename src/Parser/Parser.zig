@@ -2737,7 +2737,7 @@ fn declarator(p: *Parser, baseType: Type, kind: DeclaratorKind) Error!?Declarato
         const suffixStart = p.tokenIdx;
         const outer = try p.directDeclarator(d.type, &d, kind);
 
-        try res.type.combine(outer, p, res.funcDeclarator orelse suffixStart);
+        try res.type.combine(outer);
         try res.type.validateCombinedType(p, suffixStart);
         res.oldTypeFunc = d.oldTypeFunc;
         return res;
@@ -2901,7 +2901,7 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: Declarator
             resType.specifier = .Array;
         }
 
-        try resType.combine(outer, p, lb);
+        try resType.combine(outer);
         return resType;
     } else if (p.eat(.LParen)) |lp| {
         d.funcDeclarator = lp;
@@ -2917,7 +2917,7 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: Declarator
             var resType = Type{ .specifier = .Func, .data = .{ .func = funcType } };
 
             const outer = try p.directDeclarator(baseType, d, kind);
-            try resType.combine(outer, p, lp);
+            try resType.combine(outer);
             return resType;
         }
 
@@ -2964,7 +2964,7 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: Declarator
         };
 
         const outer = try p.directDeclarator(baseType, d, kind);
-        try resType.combine(outer, p, lp);
+        try resType.combine(outer);
         return resType;
     } else {
         return baseType;
