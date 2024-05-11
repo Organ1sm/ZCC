@@ -117,4 +117,3 @@ __attribute__(()) // test attribute at eof
     "attributes.c:40:20: error: 'noreturn' attribute cannot be applied to a statement" \
     "attributes.c:76:6: error: cannot call non function type 'int'" \
     "attributes.c:107:18: error: expected identifier or '('" \
-

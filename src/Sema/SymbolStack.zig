@@ -100,7 +100,7 @@ pub fn findTypedef(self: *SymbolStack, name: StringId, nameToken: TokenIndex, no
                     .@"union" => .must_use_union,
                     .@"enum" => .must_use_enum,
                     else => unreachable,
-                }, nameToken, self.p.getTokenSlice(nameToken));
+                }, nameToken, self.p.getTokenText(nameToken));
                 return self.symbols.get(i);
             },
 
@@ -179,7 +179,7 @@ pub fn findTag(
     if (i < self.scopeEnd()) return null;
 
     // If we've reached this point, the symbol was found but did not match the kind. Report an error.
-    try self.p.errStr(.wrong_tag, nameToken, self.p.getTokenSlice(nameToken));
+    try self.p.errStr(.wrong_tag, nameToken, self.p.getTokenText(nameToken));
     try self.p.errToken(.previous_definition, self.symbols.items(.token)[i]);
 
     // Return null as no matching symbol was found.
@@ -240,20 +240,20 @@ pub fn defineSymbol(
         i -= 1;
         switch (kinds[i]) {
             .enumeration => if (names[i] == name) {
-                try self.p.errStr(.redefinition_different_sym, token, self.p.getTokenSlice(token));
+                try self.p.errStr(.redefinition_different_sym, token, self.p.getTokenText(token));
                 try self.p.errToken(.previous_definition, self.symbols.items(.token)[i]);
                 break;
             },
             .declaration => if (names[i] == name) {
                 const prevTy = self.symbols.items(.type)[i];
                 if (!ty.eql(prevTy, self.p.comp, true)) { // TODO adjusted equality check
-                    try self.p.errStr(.redefinition_incompatible, token, self.p.getTokenSlice(token));
+                    try self.p.errStr(.redefinition_incompatible, token, self.p.getTokenText(token));
                     try self.p.errToken(.previous_definition, self.symbols.items(.token)[i]);
                 }
                 break;
             },
             .definition, .constexpr => if (names[i] == name) {
-                try self.p.errStr(.redefinition, token, self.p.getTokenSlice(token));
+                try self.p.errStr(.redefinition, token, self.p.getTokenText(token));
                 try self.p.errToken(.previous_definition, self.symbols.items(.token)[i]);
                 break;
             },
@@ -285,14 +285,14 @@ pub fn declareSymbol(
         i -= 1;
         switch (kinds[i]) {
             .enumeration => if (names[i] == name) {
-                try self.p.errStr(.redefinition_different_sym, token, self.p.getTokenSlice(token));
+                try self.p.errStr(.redefinition_different_sym, token, self.p.getTokenText(token));
                 try self.p.errToken(.previous_definition, self.symbols.items(.token)[i]);
                 break;
             },
             .declaration => if (names[i] == name) {
                 const prevTy = self.symbols.items(.type)[i];
                 if (!ty.eql(prevTy, self.p.comp, true)) { // TODO adjusted equality check
-                    try self.p.errStr(.redefinition_incompatible, token, self.p.getTokenSlice(token));
+                    try self.p.errStr(.redefinition_incompatible, token, self.p.getTokenText(token));
                     try self.p.errToken(.previous_definition, self.symbols.items(.token)[i]);
                 }
                 break;
@@ -300,7 +300,7 @@ pub fn declareSymbol(
             .definition, .constexpr => if (names[i] == name) {
                 const prevTy = self.symbols.items(.type)[i];
                 if (!ty.eql(prevTy, self.p.comp, true)) { // TODO adjusted equality check
-                    try self.p.errStr(.redefinition_incompatible, token, self.p.getTokenSlice(token));
+                    try self.p.errStr(.redefinition_incompatible, token, self.p.getTokenText(token));
                     try self.p.errToken(.previous_definition, self.symbols.items(.token)[i]);
                     break;
                 }
@@ -328,7 +328,7 @@ pub fn defineParam(self: *SymbolStack, name: StringId, ty: Type, token: TokenInd
         i -= 1;
         switch (kinds[i]) {
             .enumeration, .declaration, .definition, .constexpr => if (names[i] == name) {
-                try self.p.errStr(.redefinition_of_parameter, token, self.p.getTokenSlice(token));
+                try self.p.errStr(.redefinition_of_parameter, token, self.p.getTokenText(token));
                 try self.p.errToken(.previous_definition, self.symbols.items(.token)[i]);
                 break;
             },
@@ -359,19 +359,19 @@ pub fn defineTag(
         switch (kinds[i]) {
             .@"enum" => if (names[i] == name) {
                 if (kind == .KeywordEnum) return self.symbols.get(i);
-                try self.p.errStr(.wrong_tag, token, self.p.getTokenSlice(token));
+                try self.p.errStr(.wrong_tag, token, self.p.getTokenText(token));
                 try self.p.errToken(.previous_definition, self.symbols.items(.token)[i]);
                 return null;
             },
             .@"struct" => if (names[i] == name) {
                 if (kind == .KeywordStruct) return self.symbols.get(i);
-                try self.p.errStr(.wrong_tag, token, self.p.getTokenSlice(token));
+                try self.p.errStr(.wrong_tag, token, self.p.getTokenText(token));
                 try self.p.errToken(.previous_definition, self.symbols.items(.token)[i]);
                 return null;
             },
             .@"union" => if (names[i] == name) {
                 if (kind == .KeywordUnion) return self.symbols.get(i);
-                try self.p.errStr(.wrong_tag, token, self.p.getTokenSlice(token));
+                try self.p.errStr(.wrong_tag, token, self.p.getTokenText(token));
                 try self.p.errToken(.previous_definition, self.symbols.items(.token)[i]);
                 return null;
             },
@@ -396,12 +396,12 @@ pub fn defineEnumeration(
         i -= 1;
         switch (kinds[i]) {
             .enumeration => if (names[i] == name) {
-                try self.p.errStr(.redefinition, token, self.p.getTokenSlice(token));
+                try self.p.errStr(.redefinition, token, self.p.getTokenText(token));
                 try self.p.errToken(.previous_definition, self.symbols.items(.token)[i]);
                 return;
             },
             .declaration, .definition, .constexpr => if (names[i] == name) {
-                try self.p.errStr(.redefinition_different_sym, token, self.p.getTokenSlice(token));
+                try self.p.errStr(.redefinition_different_sym, token, self.p.getTokenText(token));
                 try self.p.errToken(.previous_definition, self.symbols.items(.token)[i]);
                 return;
             },

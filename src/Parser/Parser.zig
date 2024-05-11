@@ -112,7 +112,7 @@ record: struct {
         while (i > r.start) {
             i -= 1;
             if (p.recordMembers.items[i].name == name) {
-                try p.errStr(.duplicate_member, token, p.getTokenSlice(token));
+                try p.errStr(.duplicate_member, token, p.getTokenText(token));
                 try p.errToken(.previous_definition, p.recordMembers.items[i].token);
                 break;
             }
@@ -181,7 +181,7 @@ fn checkIdentifierCodepointWarnings(comp: *Compilation, codepoint: u21, loc: Sou
 fn validateExtendedIdentifier(p: *Parser) !bool {
     std.debug.assert(p.getCurrToken() == .ExtendedIdentifier);
 
-    const slice = p.getTokenSlice(p.tokenIdx);
+    const slice = p.getTokenText(p.tokenIdx);
     const view = std.unicode.Utf8View.init(slice) catch {
         try p.errToken(.invalid_utf8, p.tokenIdx);
         return error.FatalError;
@@ -249,7 +249,7 @@ fn eatIdentifier(p: *Parser) !?TokenIndex {
 
     // Handle illegal '$' characters in identifiers
     if (!p.comp.langOpts.dollarsInIdentifiers) {
-        if (p.getCurrToken() == .Invalid and p.getTokenSlice(p.tokenIdx)[0] == '$') {
+        if (p.getCurrToken() == .Invalid and p.getTokenText(p.tokenIdx)[0] == '$') {
             try p.err(.dollars_in_identifiers);
             p.tokenIdx += 1;
             return error.ParsingFailed;
@@ -316,7 +316,7 @@ fn errOverflow(p: *Parser, op_tok: TokenIndex, res: Result) !void {
     }
 }
 
-pub fn getTokenSlice(p: *Parser, index: TokenIndex) []const u8 {
+pub fn getTokenText(p: *Parser, index: TokenIndex) []const u8 {
     if (p.tokenIds[index].getTokenText()) |some|
         return some;
 
@@ -363,7 +363,7 @@ pub fn errExtra(p: *Parser, tag: Diagnostics.Tag, index: TokenIndex, extra: Diag
     if (index != 0 and token.id == .Eof) {
         const prev = p.pp.tokens.get(index - 1);
         loc = prev.loc;
-        loc.byteOffset += @intCast(p.getTokenSlice(index - 1).len);
+        loc.byteOffset += @intCast(p.getTokenText(index - 1).len);
     }
 
     try p.comp.diag.add(.{
@@ -454,7 +454,7 @@ fn checkDeprecatedUnavailable(p: *Parser, ty: Type, usageToken: TokenIndex, decl
         defer p.strings.items.len = stringsTop;
 
         const w = p.strings.writer();
-        try w.print("call to '{s}' declared with attribute error: {s}", .{ p.getTokenSlice(@"error".__name_token), @"error".msg });
+        try w.print("call to '{s}' declared with attribute error: {s}", .{ p.getTokenText(@"error".__name_token), @"error".msg });
         const str = try p.comp.diag.arena.allocator().dupe(u8, p.strings.items[stringsTop..]);
         try p.errStr(.error_attribute, usageToken, str);
     }
@@ -464,7 +464,7 @@ fn checkDeprecatedUnavailable(p: *Parser, ty: Type, usageToken: TokenIndex, decl
         defer p.strings.items.len = stringsTop;
 
         const w = p.strings.writer();
-        try w.print("call to '{s}' declared with attribute warning: {s}", .{ p.getTokenSlice(warning.__name_token), warning.msg });
+        try w.print("call to '{s}' declared with attribute warning: {s}", .{ p.getTokenText(warning.__name_token), warning.msg });
         const str = try p.comp.diag.arena.allocator().dupe(u8, p.strings.items[stringsTop..]);
         try p.errStr(.warning_attribute, usageToken, str);
     }
@@ -472,14 +472,14 @@ fn checkDeprecatedUnavailable(p: *Parser, ty: Type, usageToken: TokenIndex, decl
     // Check if the type has an 'unavailable' attribute and report it
     if (ty.getAttribute(.unavailable)) |unavailable| {
         try p.errDeprecated(.unavailable, usageToken, unavailable.msg);
-        try p.errStr(.unavailable_note, unavailable.__name_token, p.getTokenSlice(declToken));
+        try p.errStr(.unavailable_note, unavailable.__name_token, p.getTokenText(declToken));
         return error.ParsingFailed; // Abort parsing due to 'unavailable' type
     }
 
     // Check if the type has a 'deprecated' attribute and report it
     else if (ty.getAttribute(.deprecated)) |deprecated| {
         try p.errDeprecated(.deprecated_declarations, usageToken, deprecated.msg);
-        try p.errStr(.deprecated_note, deprecated.__name_token, p.getTokenSlice(declToken));
+        try p.errStr(.deprecated_note, deprecated.__name_token, p.getTokenText(declToken));
     }
 }
 
@@ -496,7 +496,7 @@ fn errDeprecated(p: *Parser, tag: Diagnostics.Tag, tokenIdx: TokenIndex, msg: ?[
     defer p.strings.items.len = stringsTop;
 
     const w = p.strings.writer();
-    try w.print("'{s}' is ", .{p.getTokenSlice(tokenIdx)});
+    try w.print("'{s}' is ", .{p.getTokenText(tokenIdx)});
     // Determine the reason for deprecation based on the provided tag.
     const reason: []const u8 = switch (tag) {
         .unavailable => "unavailable", // The feature is not available.
@@ -540,7 +540,7 @@ fn addList(p: *Parser, nodes: []const NodeIndex) Allocator.Error!AST.Range {
 fn findLabel(p: *Parser, name: []const u8) ?TokenIndex {
     for (p.labels.items) |item| {
         switch (item) {
-            .label => |l| if (std.mem.eql(u8, p.getTokenSlice(l), name)) return l,
+            .label => |l| if (std.mem.eql(u8, p.getTokenText(l), name)) return l,
             .unresolvedGoto => {},
         }
     }
@@ -568,7 +568,7 @@ fn getNode(p: *Parser, node: NodeIndex, tag: AstTag) ?NodeIndex {
 }
 
 fn getInternString(p: *Parser, tokenIdx: TokenIndex) !StringId {
-    const name = p.getTokenSlice(tokenIdx);
+    const name = p.getTokenText(tokenIdx);
     return p.comp.intern(name);
 }
 
@@ -577,7 +577,7 @@ fn pragma(p: *Parser) Compilation.Error!bool {
     while (p.eat(.KeywordPragma)) |_| {
         foundPragma = true;
         const nameToken = p.tokenIdx;
-        const name = p.getTokenSlice(nameToken);
+        const name = p.getTokenText(nameToken);
         const endIdx = std.mem.indexOfScalarPos(TokenType, p.tokenIds, p.tokenIdx, .NewLine).?;
         const pragmaLen = @as(TokenIndex, @intCast(endIdx)) - p.tokenIdx;
         defer p.tokenIdx += pragmaLen + 1; // skip past .nl as well
@@ -643,6 +643,7 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
         p.valueMap.deinit();
     }
 
+    // NodeIndex 0 must be invalid
     _ = try p.addNode(.{ .tag = .Invalid, .type = undefined, .data = undefined });
     {
         try p.symStack.defineTypedef(try p.comp.intern("__int128_t"), Type.Int128, 0, .none);
@@ -744,6 +745,7 @@ fn parseOrNextDecl(p: *Parser, comptime func: fn (*Parser) Error!bool) Compilati
     };
 }
 
+/// external-declaration : function-definition | declaration
 fn nextExternDecl(p: *Parser) void {
     var parens: u32 = 0;
     while (true) : (p.tokenIdx += 1) {
@@ -834,9 +836,18 @@ fn skipTo(p: *Parser, id: TokenType) void {
 
 /// declaration
 ///  : declaration-specifiers init-declarator-list? ';'
-///  | attribute-specifier declaration-specifiers init-declarator-list? ';'
+///  | attribute-specifier-sequence declaration-specifiers init-declarator-list ';'
 ///  | static-assert-declaration
-///  | declaration-specifiers declarator decl* compoundStmt
+///  | attribute-declaration
+///
+/// declaration-specifiers
+///  : declaration-specifier attribute-specifier-sequence?
+///  | declaration-specifier declaration-sepcifiers
+///
+/// declaration-specifier
+///  : storage-class-specifier
+///  | type-specifier-qualifier
+///  | function-specifier
 ///
 /// init-declarator-list
 ///  : init-declarator (',' init-declarator)*
@@ -987,7 +998,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
 
                     // find and correct parameter types
                     // TODO check for missing declaration and redefinition
-                    const name = p.getTokenSlice(d.name);
+                    const name = p.getTokenText(d.name);
                     const internedName = try p.comp.intern(name);
                     for (ID.d.type.getParams()) |*param| {
                         if (param.name == internedName) {
@@ -1051,7 +1062,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
         if (func.type == null) {
             for (p.labels.items) |item| {
                 if (item == .unresolvedGoto)
-                    try p.errStr(.undeclared_label, item.unresolvedGoto, p.getTokenSlice(item.unresolvedGoto));
+                    try p.errStr(.undeclared_label, item.unresolvedGoto, p.getTokenText(item.unresolvedGoto));
 
                 if (p.computedGotoTok) |gotoToken| {
                     if (!p.containsAddresssOfLabel)
@@ -1244,20 +1255,21 @@ fn typeof(p: *Parser) Error!?Type {
     };
 }
 
-/// declaration-Specifier
-///  : storageClass-specifier
+/// declaration-specifier
+///  : storage-class-specifier
 ///  | type-specifier
 ///  | type-qualifier
 ///  | func-specifier
 ///  | align-specifier
 ///
-/// storageClass-specifier:
-///  : `typedef`
+/// storage-class-specifier:
+///  | `auto`
+///  | `constexpr`
 ///  | `extern`
+///  | `register`
 ///  | `static`
 ///  | `threadlocal`
-///  | `auto`
-///  | `register`
+///  : `typedef`
 fn parseDeclSpec(p: *Parser) Error!?DeclSpec {
     var d: DeclSpec = .{ .type = .{ .specifier = undefined } };
     var spec: TypeBuilder = .{};
@@ -1378,7 +1390,7 @@ fn attribute(p: *Parser, kind: Attribute.Kind, namespace: ?[]const u8) Error!?Te
         else => _ = try p.expectIdentifier(),
     }
 
-    const name = p.getTokenSlice(nameToken);
+    const name = p.getTokenText(nameToken);
     const attr = Attribute.fromString(kind, namespace, name) orelse {
         const tag: Diagnostics.Tag = if (kind == .declspec) .declspec_attr_not_supported else .unknown_attribute;
         try p.errStr(tag, nameToken, name);
@@ -1399,7 +1411,7 @@ fn attribute(p: *Parser, kind: Attribute.Kind, namespace: ?[]const u8) Error!?Te
 
             if (Attribute.wantsIdentEnum(attr)) {
                 if (try p.eatIdentifier()) |ident| {
-                    if (Attribute.diagnoseIdent(attr, &arguments, p.getTokenSlice(ident))) |msg| {
+                    if (Attribute.diagnoseIdent(attr, &arguments, p.getTokenText(ident))) |msg| {
                         try p.errExtra(msg.tag, ident, msg.extra);
                         p.skipTo(.RParen);
                         return error.ParsingFailed;
@@ -1453,20 +1465,20 @@ fn diagnose(p: *Parser, attr: Attribute.Tag, arguments: *Attribute.Arguments, ar
     return Attribute.diagnose(attr, arguments, argIdx, res.value, node);
 }
 
+fn handleAttr(p: *Parser, format: Attribute.Kind, namespace: ?[]const u8) Error!void {
+    if (try p.attribute(format, namespace)) |attr|
+        try p.attrBuffer.append(p.gpa, attr);
+}
+
 /// attribute-list : (attribute (',' attribute)*)?
 fn parseGNUAttrList(p: *Parser) Error!void {
     if (p.getCurrToken() == .RParen)
         return;
 
-    if (try p.attribute(.gnu, null)) |attr| {
-        try p.attrBuffer.append(p.gpa, attr);
-    }
-
+    try p.handleAttr(.gnu, null);
     while (p.getCurrToken() != .RParen) {
         _ = try p.expectToken(.Comma);
-        if (try p.attribute(.gnu, null)) |attr| {
-            try p.attrBuffer.append(p.gpa, attr);
-        }
+        try p.handleAttr(.gnu, null);
     }
 }
 
@@ -1474,25 +1486,24 @@ fn parseC23AttrList(p: *Parser) Error!void {
     while (p.getCurrToken() != .RBracket) { // ']'
         const namespaceTok = try p.expectIdentifier();
         var namespace: ?[]const u8 = null;
-        if (p.eat(.ColonColon)) |_| {
-            namespace = p.getTokenSlice(namespaceTok);
-        } else {
+        if (p.eat(.ColonColon)) |_| // '::'
+            namespace = p.getTokenText(namespaceTok)
+        else
             p.tokenIdx -= 1;
-        }
-        if (try p.attribute(.c23, namespace)) |attr|
-            try p.attrBuffer.append(p.gpa, attr);
+
+        try p.handleAttr(.c23, namespace);
         _ = p.eat(.Comma);
     }
 }
 
 fn parseMSVCAttrList(p: *Parser) Error!void {
     while (p.getCurrToken() != .RParen) {
-        if (try p.attribute(.declspec, null)) |attr|
-            try p.attrBuffer.append(p.gpa, attr);
-        _ = p.eat(.Comma);
+        try p.handleAttr(.declspec, null);
+        _ = p.eat(.Comma); // ','
     }
 }
 
+/// '[[' c23-attribute-list  ']]'
 fn c23Attribute(p: *Parser) !bool {
     if (!p.comp.langOpts.standard.atLeast(.c2x)) return false;
     const bracket1 = p.eat(.LBracket) orelse return false;
@@ -1518,6 +1529,7 @@ fn msvcAttribute(p: *Parser) !bool {
     return true;
 }
 
+/// (__attribute | __attribute__) '((' gnu-attribute-list  '))'
 fn gnuAttribute(p: *Parser) !bool {
     switch (p.getCurrToken()) {
         .KeywordAttribute1, .KeywordAttribute2 => p.tokenIdx += 1,
@@ -1533,11 +1545,11 @@ fn gnuAttribute(p: *Parser) !bool {
     return true;
 }
 
-/// attribute-specifier : (keyword_attrbute '( '(' attribute-list ')' ')')*
 fn parseAttrSpec(p: *Parser) Error!void {
     try p.attributeSpecifier(null);
 }
 
+/// attribute-specifier : (KW-attribute '( '(' attribute-list ')' ')')*
 fn attributeSpecifier(p: *Parser, declaratorName: ?TokenIndex) Error!void {
     while (true) {
         if (try p.gnuAttribute()) continue;
@@ -1873,7 +1885,7 @@ fn getAnonymousName(p: *Parser, kindToken: TokenIndex) !StringId {
         .KeywordStruct,
         .KeywordUnion,
         .KeywordEnum,
-        => p.getTokenSlice(kindToken),
+        => p.getTokenText(kindToken),
         else => "record field",
     };
 
@@ -1947,7 +1959,7 @@ fn parseRecordSpec(p: *Parser) Error!Type {
     // Get forward declared type or create a new one
     var defined = false;
     const recordType: *Type.Record = if (maybeIdent) |ident| recordTy: {
-        const identStr = p.getTokenSlice(ident);
+        const identStr = p.getTokenText(ident);
         const internedName = try p.comp.intern(identStr);
         if (try p.symStack.defineTag(internedName, p.tokenIds[kindToken], ident)) |prev| {
             if (!prev.type.hasIncompleteSize()) {
@@ -2026,8 +2038,8 @@ fn parseRecordSpec(p: *Parser) Error!Type {
     }
 
     if (p.recordBuffer.items.len == recordBufferTop) {
-        try p.errStr(.empty_record, kindToken, p.getTokenSlice(kindToken));
-        try p.errStr(.empty_record_size, kindToken, p.getTokenSlice(kindToken));
+        try p.errStr(.empty_record, kindToken, p.getTokenText(kindToken));
+        try p.errStr(.empty_record_size, kindToken, p.getTokenText(kindToken));
     }
 
     try p.expectClosing(lb, .RBrace);
@@ -2337,7 +2349,7 @@ fn parseEnumSpec(p: *Parser) Error!*Type.Enum {
     // Get forward declared type or create a new one
     var defined = false;
     const enumType: *Type.Enum = if (maybeID) |ident| enumTy: {
-        const identStr = p.getTokenSlice(ident);
+        const identStr = p.getTokenText(ident);
         const internedName = try p.comp.intern(identStr);
         if (try p.symStack.defineTag(internedName, .KeywordEnum, ident)) |prev| {
             const enumTy = prev.type.get(.Enum).?.data.@"enum";
@@ -3211,7 +3223,7 @@ pub fn initializerItem(p: *Parser, il: *InitList, initType: Type) Error!bool {
                 designation = true;
             } else if (p.eat(.Period)) |period| {
                 const fieldToken = try p.expectIdentifier();
-                const fieldStr = p.getTokenSlice(fieldToken);
+                const fieldStr = p.getTokenText(fieldToken);
                 const fieldName = try p.comp.intern(fieldStr);
                 curType = curType.canonicalize(.standard);
                 if (!curType.isRecord()) {
@@ -4112,7 +4124,7 @@ fn parseGotoStmt(p: *Parser, gotoToken: TokenIndex) Error!NodeIndex {
     }
 
     const nameToken = try p.expectIdentifier();
-    const str = p.getTokenSlice(nameToken);
+    const str = p.getTokenText(nameToken);
     if (p.findLabel(str) == null) {
         try p.labels.append(.{ .unresolvedGoto = nameToken });
     }
@@ -4259,7 +4271,7 @@ fn parseLabeledStmt(p: *Parser) Error!?NodeIndex {
         p.lookAhead(1) == .Colon)
     {
         const nameToken = p.expectIdentifier() catch unreachable;
-        const str = p.getTokenSlice(nameToken);
+        const str = p.getTokenText(nameToken);
         if (p.findLabel(str)) |some| {
             try p.errStr(.duplicate_label, nameToken, str);
             try p.errStr(.previous_label, some, str);
@@ -4270,7 +4282,7 @@ fn parseLabeledStmt(p: *Parser) Error!?NodeIndex {
             var i: usize = 0;
             while (i < p.labels.items.len) {
                 if (p.labels.items[i] == .unresolvedGoto and
-                    std.mem.eql(u8, p.getTokenSlice(p.labels.items[i].unresolvedGoto), str))
+                    std.mem.eql(u8, p.getTokenText(p.labels.items[i].unresolvedGoto), str))
                     _ = p.labels.swapRemove(i)
                 else
                     i += 1;
@@ -4390,7 +4402,7 @@ fn parseCompoundStmt(p: *Parser, isFnBody: bool, stmtExprState: ?*StmtExprState)
             const retTy = p.func.type.?.getReturnType();
             var returnZero = false;
             if (lastNoreturn == .no and !retTy.is(.Void) and !retTy.isArray() and !retTy.isFunc()) {
-                const funcName = p.getTokenSlice(p.func.name);
+                const funcName = p.getTokenText(p.func.name);
                 const internerName = try p.comp.intern(funcName);
                 if (internerName == p.stringsIds.mainId and retTy.is(.Int))
                     returnZero = true
@@ -4437,15 +4449,15 @@ fn parseReturnStmt(p: *Parser) Error!?NodeIndex {
     const returnType = p.func.type.?.getReturnType();
 
     if (p.func.type.?.hasAttribute(.noreturn)) {
-        try p.errStr(.invalid_noreturn, eToken, p.getTokenSlice(p.func.name));
+        try p.errStr(.invalid_noreturn, eToken, p.getTokenText(p.func.name));
     }
 
     if (expr.node == .none) {
         if (!returnType.is(.Void))
-            try p.errStr(.func_should_return, retToken, p.getTokenSlice(p.func.name));
+            try p.errStr(.func_should_return, retToken, p.getTokenText(p.func.name));
         return try p.addNode(.{ .tag = .ReturnStmt, .data = .{ .unExpr = expr.node } });
     } else if (returnType.is((.Void))) {
-        try p.errStr(.void_func_returns_value, eToken, p.getTokenSlice(p.func.name));
+        try p.errStr(.void_func_returns_value, eToken, p.getTokenText(p.func.name));
         return try p.addNode(.{ .tag = .ReturnStmt, .data = .{ .unExpr = expr.node } });
     }
 
@@ -5431,7 +5443,7 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
             try p.errToken(.gnu_label_as_value, addressToken);
             p.containsAddresssOfLabel = true;
 
-            const str = p.getTokenSlice(nameToken);
+            const str = p.getTokenText(nameToken);
             if (p.findLabel(str) == null)
                 try p.labels.append(.{ .unresolvedGoto = nameToken });
 
@@ -5902,7 +5914,7 @@ fn validateFieldAccess(
 
     p.strings.items.len = 0;
 
-    try p.strings.writer().print("'{s}' in '", .{p.getTokenSlice(fieldNameToken)});
+    try p.strings.writer().print("'{s}' in '", .{p.getTokenText(fieldNameToken)});
     const mapper = p.comp.stringInterner.getSlowTypeMapper();
     try exprType.print(mapper, p.comp.langOpts, p.strings.writer());
     try p.strings.append('\'');
@@ -6154,7 +6166,7 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
     switch (p.getCurrToken()) {
         .Identifier, .ExtendedIdentifier => {
             const nameToken = p.expectIdentifier() catch unreachable;
-            const name = p.getTokenSlice(nameToken);
+            const name = p.getTokenText(nameToken);
             const internedName = try p.comp.intern(name);
             if (p.comp.builtins.get(name)) |some| {
                 for (p.tokenIds[p.tokenIdx..]) |id| switch (id) {
@@ -6232,7 +6244,7 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
                     .node = try p.addNode(.{ .tag = .DeclRefExpr, .type = ty, .data = .{ .declRef = nameToken } }),
                 };
             }
-            try p.errStr(.undeclared_identifier, nameToken, p.getTokenSlice(nameToken));
+            try p.errStr(.undeclared_identifier, nameToken, p.getTokenText(nameToken));
             return error.ParsingFailed;
         },
 
@@ -6277,7 +6289,7 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
                 tok = p.nodes.items(.data)[@intFromEnum(some.node)].decl.name;
             } else if (p.func.type) |_| {
                 p.strings.items.len = 0;
-                try p.strings.appendSlice(p.getTokenSlice(p.func.name));
+                try p.strings.appendSlice(p.getTokenText(p.func.name));
                 try p.strings.append(0);
                 const predef = try p.makePredefinedIdentifier();
                 ty = predef.ty;
@@ -6310,7 +6322,7 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
             } else if (p.func.type) |funcType| {
                 const mapper = p.comp.stringInterner.getSlowTypeMapper();
                 p.strings.items.len = 0;
-                try Type.printNamed(funcType, p.getTokenSlice(p.func.name), mapper, p.comp.langOpts, p.strings.writer());
+                try Type.printNamed(funcType, p.getTokenText(p.func.name), mapper, p.comp.langOpts, p.strings.writer());
                 try p.strings.append(0);
                 const predef = try p.makePredefinedIdentifier();
                 ty = predef.ty;
@@ -6653,7 +6665,7 @@ fn getExponent(p: *Parser, buffer: []const u8, prefix: NumberPrefix, tokenIdx: T
 /// Using an explicit `tok_i` parameter instead of `p.tok_i` makes it easier
 /// to parse numbers in pragma handlers.
 pub fn parseNumberToken(p: *Parser, tokenIdx: TokenIndex) !Result {
-    const buffer = p.getTokenSlice(tokenIdx);
+    const buffer = p.getTokenText(tokenIdx);
     const prefix = NumberPrefix.fromString(buffer);
     const afterPrefix = buffer[prefix.stringLen()..];
 
@@ -6730,7 +6742,7 @@ fn parseCharLiteral(p: *Parser) Error!Result {
 
     var val: u32 = 0;
     var overflowReported = false;
-    var slice = p.getTokenSlice(p.tokenIdx);
+    var slice = p.getTokenText(p.tokenIdx);
     slice = slice[0 .. slice.len - 1];
     var i = std.mem.indexOf(u8, slice, "\'").? + 1;
     while (i < slice.len) : (i += 1) {
@@ -6872,7 +6884,7 @@ fn parseStringLiteral(p: *Parser) Error!Result {
 
     p.strings.items.len = 0;
     while (start < p.tokenIdx) : (start += 1) {
-        var slice = p.getTokenSlice(start);
+        var slice = p.getTokenText(start);
         slice = slice[0 .. slice.len - 1];
         var i = std.mem.indexOf(u8, slice, "\"").? + 1;
 

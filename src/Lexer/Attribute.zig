@@ -897,7 +897,12 @@ const attributes = struct {
 
 pub const Tag = std.meta.DeclEnum(attributes);
 
+/// Generate a union type with fields based on the attributes' "Args" declarations.
+/// This block introspects `attributes` to discover any "Args" fields within its
+/// declarations and constructs a union type accordingly. Each union field corresponds
+/// to an attribute declaration that contains "Args".
 pub const Arguments = blk: {
+    // Retrieve the declarations from the attributes type.
     const decls = @typeInfo(attributes).Struct.decls;
     var union_fields: [decls.len]std.builtin.Type.UnionField = undefined;
     for (decls, &union_fields) |decl, *field| {
@@ -908,12 +913,13 @@ pub const Arguments = blk: {
         };
     }
 
+    // Construct and return the union type with the fields we've just populated.
     break :blk @Type(.{
         .Union = .{
-            .layout = .auto,
-            .tag_type = null,
-            .fields = &union_fields,
-            .decls = &.{},
+            .layout = .auto,         // The layout of the union is automatically determined.
+            .tag_type = null,        // The union is untagged (no explicit tag type).
+            .fields = &union_fields, // Specify the fields of the union.
+            .decls = &.{},           // No additional declarations are provided.
         },
     });
 };
@@ -989,6 +995,12 @@ fn fromStringDeclspec(name: []const u8) ?Tag {
     return null;
 }
 
+/// Normalize an attribute name by removing the leading and trailing double underscores.
+/// This function is typically used to process compiler-specific or language-specific
+/// attribute names that are conventionally surrounded by double underscores.
+/// @param name The attribute name to normalize.
+/// @return     A slice of the original name without the leading and trailing double underscores,
+///             or the original name if it does not have such underscores.
 fn normalize(name: []const u8) []const u8 {
     if (name.len >= 4 and mem.startsWith(u8, name, "__") and mem.endsWith(u8, name, "__")) {
         return name[2 .. name.len - 2];

@@ -422,7 +422,7 @@ pub fn boolCast(res: *Result, p: *Parser, boolType: Type, tok: TokenIndex) Error
         if (res.value.tag == .bytes)
             try p.errStr(.string_literal_to_bool, tok, try p.typePairStrExtra(res.ty, " to ", boolType))
         else
-            try p.errStr(.array_address_to_bool, tok, p.getTokenSlice(tok));
+            try p.errStr(.array_address_to_bool, tok, p.getTokenText(tok));
 
         try res.lvalConversion(p);
         res.value = Value.int(1);

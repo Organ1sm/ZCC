@@ -53,7 +53,7 @@ fn parserHandler(pragma: *Pragma, p: *Parser, startIdx: TokenIndex) Compilation.
                 push,
                 pop,
             };
-            const action = std.meta.stringToEnum(Action, p.getTokenSlice(arg)) orelse {
+            const action = std.meta.stringToEnum(Action, p.getTokenText(arg)) orelse {
                 return p.errToken(.pragma_pack_unknown_action, arg);
             };
             switch (action) {
@@ -69,7 +69,7 @@ fn parserHandler(pragma: *Pragma, p: *Parser, startIdx: TokenIndex) Compilation.
                         switch (tokenIds[next]) {
                             .PPNumber => newVal = (try packInt(p, next)) orelse return,
                             .Identifier => {
-                                label = p.getTokenSlice(next);
+                                label = p.getTokenText(next);
                                 if (tokenIds[idx] == .Comma) {
                                     idx += 1;
                                     const int = idx;
