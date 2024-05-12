@@ -844,11 +844,6 @@ fn skipTo(p: *Parser, id: TokenType) void {
 ///  : declaration-specifier attribute-specifier-sequence?
 ///  | declaration-specifier declaration-sepcifiers
 ///
-/// declaration-specifier
-///  : storage-class-specifier
-///  | type-specifier-qualifier
-///  | function-specifier
-///
 /// init-declarator-list
 ///  : init-declarator (',' init-declarator)*
 fn parseDeclaration(p: *Parser) Error!bool {
@@ -882,7 +877,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
         try p.attrBuffer.append(p.gpa, .{ .attr = attr, .tok = token });
     }
 
-    var ID = (try p.parseInitDeclarator(&declSpec, attrBufferTop)) orelse {
+    var initDeclarator = (try p.parseInitDeclarator(&declSpec, attrBufferTop)) orelse {
         _ = try p.expectToken(.Semicolon); // eat ';'
         if (declSpec.type.is(.Enum) or
             (declSpec.type.isRecord() and
@@ -917,15 +912,15 @@ fn parseDeclaration(p: *Parser) Error!bool {
     };
 
     // check for funtion definition
-    if (ID.d.funcDeclarator != null and
-        ID.initializer.node == .none and
-        ID.d.type.isFunc())
+    if (initDeclarator.d.funcDeclarator != null and
+        initDeclarator.initializer.node == .none and
+        initDeclarator.d.type.isFunc())
     fndef: {
         switch (p.getCurrToken()) {
             .Comma, .Semicolon => break :fndef,
             .LBrace => {},
             else => {
-                if (ID.d.oldTypeFunc == null) {
+                if (initDeclarator.d.oldTypeFunc == null) {
                     try p.err(.expected_fn_body);
                     return true;
                 }
@@ -936,29 +931,29 @@ fn parseDeclaration(p: *Parser) Error!bool {
             try p.err(.func_not_in_root);
 
         const node = try p.addNode(undefined); // reserve space
-        const internedDeclaratorName = try p.getInternString(ID.d.name);
-        try p.symStack.defineSymbol(internedDeclaratorName, ID.d.type, ID.d.name, node, .{}, false);
+        const internedDeclaratorName = try p.getInternString(initDeclarator.d.name);
+        try p.symStack.defineSymbol(internedDeclaratorName, initDeclarator.d.type, initDeclarator.d.name, node, .{}, false);
 
         const func = p.func;
         defer p.func = func;
-        p.func = .{ .type = ID.d.type, .name = ID.d.name };
-        if (internedDeclaratorName == p.stringsIds.mainId and !ID.d.type.getReturnType().is(.Int)) {
-            try p.errToken(.main_return_type, ID.d.name);
+        p.func = .{ .type = initDeclarator.d.type, .name = initDeclarator.d.name };
+        if (internedDeclaratorName == p.stringsIds.mainId and !initDeclarator.d.type.getReturnType().is(.Int)) {
+            try p.errToken(.main_return_type, initDeclarator.d.name);
         }
 
         try p.symStack.pushScope();
         defer p.symStack.popScope();
 
         // collect old style parameters
-        if (ID.d.oldTypeFunc != null) {
+        if (initDeclarator.d.oldTypeFunc != null) {
             const paramBufferTop = p.paramBuffer.items.len;
             defer p.paramBuffer.items.len = paramBufferTop;
 
             // ensure attributed specifier is not lost for old-style functions
-            const attrs = ID.d.type.getAttributes();
-            var baseTy = if (ID.d.type.specifier == .Attributed) ID.d.type.getElemType() else ID.d.type;
+            const attrs = initDeclarator.d.type.getAttributes();
+            var baseTy = if (initDeclarator.d.type.specifier == .Attributed) initDeclarator.d.type.getElemType() else initDeclarator.d.type;
             baseTy.specifier = .Func;
-            ID.d.type = try baseTy.withAttributes(p.arena, attrs);
+            initDeclarator.d.type = try baseTy.withAttributes(p.arena, attrs);
 
             paramLoop: while (true) {
                 const paramDeclSpec = (try p.parseDeclSpec()) orelse break;
@@ -1000,7 +995,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
                     // TODO check for missing declaration and redefinition
                     const name = p.getTokenText(d.name);
                     const internedName = try p.comp.intern(name);
-                    for (ID.d.type.getParams()) |*param| {
+                    for (initDeclarator.d.type.getParams()) |*param| {
                         if (param.name == internedName) {
                             param.ty = d.type;
                             break;
@@ -1025,7 +1020,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
                 _ = try p.expectToken(.Semicolon);
             }
         } else {
-            for (ID.d.type.getParams()) |param| {
+            for (initDeclarator.d.type.getParams()) |param| {
                 if (param.ty.hasUnboundVLA())
                     try p.errToken(.unbound_vla, param.nameToken);
                 if (param.ty.hasIncompleteSize() and !param.ty.is(.Void))
@@ -1047,14 +1042,14 @@ fn parseDeclaration(p: *Parser) Error!bool {
         }
 
         const body = (try p.parseCompoundStmt(true, null)) orelse {
-            std.debug.assert(ID.d.oldTypeFunc != null);
+            std.debug.assert(initDeclarator.d.oldTypeFunc != null);
             try p.err(.expected_fn_body);
             return true;
         };
         p.nodes.set(@intFromEnum(node), .{
-            .type = ID.d.type,
+            .type = initDeclarator.d.type,
             .tag = try declSpec.validateFnDef(p),
-            .data = .{ .decl = .{ .name = ID.d.name, .node = body } },
+            .data = .{ .decl = .{ .name = initDeclarator.d.name, .node = body } },
         });
         try p.declBuffer.append(node);
 
@@ -1081,40 +1076,40 @@ fn parseDeclaration(p: *Parser) Error!bool {
 
     // Declare all variable/typedef declarators.
     while (true) {
-        if (ID.d.oldTypeFunc) |tokenIdx|
+        if (initDeclarator.d.oldTypeFunc) |tokenIdx|
             try p.errToken(.invalid_old_style_params, tokenIdx);
 
-        const tag = try declSpec.validate(p, &ID.d.type, ID.initializer.node != .none);
+        const tag = try declSpec.validate(p, &initDeclarator.d.type, initDeclarator.initializer.node != .none);
         const node = try p.addNode(.{
-            .type = ID.d.type,
+            .type = initDeclarator.d.type,
             .tag = tag,
-            .data = .{ .decl = .{ .name = ID.d.name, .node = ID.initializer.node } },
+            .data = .{ .decl = .{ .name = initDeclarator.d.name, .node = initDeclarator.initializer.node } },
         });
         try p.declBuffer.append(node);
 
-        const internedName = try p.getInternString(ID.d.name);
+        const internedName = try p.getInternString(initDeclarator.d.name);
         if (declSpec.storageClass == .typedef) {
-            try p.symStack.defineTypedef(internedName, ID.d.type, ID.d.name, node);
-        } else if (ID.initializer.node != .none or
+            try p.symStack.defineTypedef(internedName, initDeclarator.d.type, initDeclarator.d.name, node);
+        } else if (initDeclarator.initializer.node != .none or
             (declSpec.storageClass != .@"extern" and p.func.type != null))
         {
             // TODO validate global variable/constexpr initializer comptime known
             try p.symStack.defineSymbol(
                 internedName,
-                ID.d.type,
-                ID.d.name,
+                initDeclarator.d.type,
+                initDeclarator.d.name,
                 node,
-                if (ID.d.type.isConst() or declSpec.constexpr != null) ID.initializer.value else .{},
+                if (initDeclarator.d.type.isConst() or declSpec.constexpr != null) initDeclarator.initializer.value else .{},
                 declSpec.constexpr != null,
             );
         } else {
-            try p.symStack.declareSymbol(internedName, ID.d.type, ID.d.name, node);
+            try p.symStack.declareSymbol(internedName, initDeclarator.d.type, initDeclarator.d.name, node);
         }
 
         if (p.eat(.Comma) == null)
             break;
 
-        ID = (try p.parseInitDeclarator(&declSpec, attrBufferTop)) orelse {
+        initDeclarator = (try p.parseInitDeclarator(&declSpec, attrBufferTop)) orelse {
             try p.err(.expected_ident_or_l_paren);
             continue;
         };
@@ -1255,6 +1250,11 @@ fn typeof(p: *Parser) Error!?Type {
     };
 }
 
+/// declaration-specifier
+///  : storage-class-specifier
+///  | type-specifier-qualifier
+///  | function-specifier
+///
 /// declaration-specifier
 ///  : storage-class-specifier
 ///  | type-specifier
@@ -1673,14 +1673,16 @@ fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec, attrBufferTop: usize) Er
 ///  | `bool`
 ///  | `KeywordC23Bool`
 ///  | `_Complex`
+///  | `_BitInt`  '(' integer-const-expression ')'
 ///  | atomic-type-specifier
 ///  | record-specifier
 ///  | enum-sepcifier
 ///  | typedef-name
 ///  | typeof-specifier
-///  | `_BitInt`  '(' integer-const-expression ')'
+///
 /// atomic-type-specifier
 ///   : keyword-atomic '(' typeName ')'
+///
 /// align-specifier
 ///   : keyword-alignas '(' typeName ')'
 ///   | keyword-alignas '(' integer-const-expression ')'
@@ -1690,6 +1692,7 @@ fn parseTypeSpec(p: *Parser, ty: *TypeBuilder) Error!bool {
     const start = p.tokenIdx;
     while (true) {
         try p.parseAttrSpec();
+
         if (try p.typeof()) |innerType| {
             try ty.combineFromTypeof(p, innerType, start);
             continue;
@@ -2253,10 +2256,8 @@ fn parseRecordDeclarator(p: *Parser) Error!bool {
 // specifier-qualifier-list : (type-specifier | type-qualifier | align-specifier)+
 fn parseSpecQuals(p: *Parser) Error!?Type {
     var spec: TypeBuilder = .{};
-    if (try p.parseTypeSpec(&spec)) {
+    if (try p.parseTypeSpec(&spec))
         return try spec.finish(p);
-    }
-
     return null;
 }
 
@@ -2661,13 +2662,12 @@ fn enumerator(p: *Parser, e: *Enumerator) Error!?EnumFieldAndNode {
 
 /// atomic-type-specifier : keyword_atomic '(' type-name ')'
 /// type-qualifier
-/// : keyword_const
-/// | keyword_restrict
-/// | keyword_volatile
-/// | keyword_atomic
+/// : keyword-const
+/// | keyword-restrict
+/// | keyword-volatile
+/// | keyword-atomic
 fn parseTypeQual(p: *Parser, b: *Type.Qualifiers.Builder) Error!bool {
     var any = false;
-
     while (true) {
         switch (p.getCurrToken()) {
             .KeywordRestrict,
@@ -2699,7 +2699,7 @@ fn parseTypeQual(p: *Parser, b: *Type.Qualifiers.Builder) Error!bool {
 
             .KeywordAtomic => {
                 // _Atomic(typeName) instead of just _Atomic
-                if (p.tokenIds[p.tokenIdx + 1] == .LParen) break;
+                if (p.lookAhead(1) == .LParen) break;
                 if (b.atomic != null)
                     try p.errStr(.duplicate_declspec, p.tokenIdx, "atomic")
                 else

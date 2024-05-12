@@ -124,6 +124,8 @@ pub const Qualifiers = packed struct {
             if (!ty.is(.Pointer) and b.restrict != null) {
                 try p.errStr(.restrict_non_pointer, b.restrict.?, try p.typeStr(ty.*));
             }
+            
+            // validate atomic
             if (b.atomic) |some| {
                 if (ty.isArray()) try p.errStr(.atomic_array, some, try p.typeStr(ty.*));
                 if (ty.isFunc()) try p.errStr(.atomic_func, some, try p.typeStr(ty.*));

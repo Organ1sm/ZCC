@@ -237,6 +237,17 @@ pub const Specifier = union(enum) {
     }
 };
 
+/// Finishes the parsing of a type and constructs the corresponding `Type` structure.
+/// This function is called when the parsing of a type is to be completed,
+/// with potential handling of typedefs, qualifiers, and array types.
+///
+/// Arguments:
+/// - `b`: The builder context containing information gathered during parsing.
+/// - `p`: The parser context to report errors and allocate memory.
+///
+/// Returns:
+/// - `Type` structure representing the parsed type on success.
+/// - `Parser.Error` indicating the type of parsing error on failure.
 pub fn finish(b: @This(), p: *Parser) Parser.Error!Type {
     var ty = Type{ .specifier = undefined };
     if (b.typedef) |typedef| {
@@ -272,6 +283,7 @@ pub fn finish(b: @This(), p: *Parser) Parser.Error!Type {
         try b.qual.finish(p, &ty);
         return ty;
     }
+
     switch (b.specifier) {
         Specifier.None => {
             if (b.typeof) |typeof| {
