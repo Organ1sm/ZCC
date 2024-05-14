@@ -618,13 +618,16 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
         },
     };
 
-    //bind p to the symbol stack for simplify symbol stack api
-    p.symStack.p = &p;
+    errdefer {
+        p.nodes.deinit(pp.comp.gpa);
+        p.valueMap.deinit();
+    }
 
     defer {
-        p.symStack.deinit(pp.comp.gpa);
         p.data.deinit();
         p.labels.deinit();
+        p.strings.deinit();
+        p.symStack.deinit(pp.comp.gpa);
         p.listBuffer.deinit();
         p.declBuffer.deinit();
         p.paramBuffer.deinit();
@@ -637,11 +640,10 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
         p.fieldAttrBuffer.deinit();
     }
 
-    errdefer {
-        p.nodes.deinit(pp.comp.gpa);
-        p.strings.deinit();
-        p.valueMap.deinit();
-    }
+    //bind p to the symbol stack for simplify symbol stack api
+    p.symStack.p = &p;
+    try p.symStack.pushScope();
+    defer p.symStack.popScope();
 
     // NodeIndex 0 must be invalid
     _ = try p.addNode(.{ .tag = .Invalid, .type = undefined, .data = undefined });
@@ -714,6 +716,7 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
     }
 
     const rootDecls = try p.declBuffer.toOwnedSlice();
+    errdefer pp.comp.gpa.free(rootDecls);
     if (rootDecls.len == 0)
         try p.errToken(.empty_translation_unit, p.tokenIdx - 1);
 
@@ -730,7 +733,6 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
         .nodes = p.nodes.toOwnedSlice(),
         .data = data,
         .rootDecls = rootDecls,
-        .strings = try p.strings.toOwnedSlice(),
         .valueMap = p.valueMap,
     };
 }
@@ -1007,7 +1009,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
                     d.type = try Attribute.applyParameterAttributes(p, d.type, attrBufferTop, .alignas_on_param);
 
                     // bypass redefinition check to avoid duplicate errors
-                    try p.symStack.appendSymbol(.{
+                    try p.symStack.define(.{
                         .kind = .definition,
                         .name = internedName,
                         .token = d.name,
@@ -1031,7 +1033,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
                 }
 
                 // bypass redefinition check to avoid duplicate errors
-                try p.symStack.appendSymbol(.{
+                try p.symStack.define(.{
                     .kind = .definition,
                     .name = param.name,
                     .token = param.nameToken,
@@ -1939,7 +1941,7 @@ fn parseRecordSpec(p: *Parser) Error!Type {
             };
             ty = try Attribute.applyTypeAttributes(p, ty, attrBufferTop, null);
 
-            try p.symStack.symbols.append(p.gpa, .{
+            try p.symStack.define(.{
                 .kind = if (isStruct) .@"struct" else .@"union",
                 .name = internedName,
                 .token = ident,
@@ -1985,10 +1987,8 @@ fn parseRecordSpec(p: *Parser) Error!Type {
     };
 
     // declare a symbol for the type
-    var symbolIndex: ?usize = null; // We need to replace the symbol's type if it has attributes
     if (maybeIdent != null and !defined) {
-        symbolIndex = p.symStack.symbols.len;
-        try p.symStack.appendSymbol(.{
+        try p.symStack.define(.{
             .kind = if (isStruct) .@"struct" else .@"union",
             .name = recordType.name,
             .token = maybeIdent.?,
@@ -2055,8 +2055,11 @@ fn parseRecordSpec(p: *Parser) Error!Type {
     };
     ty = try Attribute.applyTypeAttributes(p, t, attrBufferTop, null);
 
-    if (ty.specifier == .Attributed and symbolIndex != null) {
-        p.symStack.symbols.items(.type)[symbolIndex.?] = ty;
+    if (ty.specifier == .Attributed and maybeIdent != null) {
+        const identStr = p.getTokenText(maybeIdent.?);
+        const internedName = try p.comp.intern(identStr);
+        const ptr = p.symStack.getPtr(internedName, .tags);
+        ptr.type = ty;
     }
 
     if (!ty.hasIncompleteSize()) {
@@ -2328,7 +2331,7 @@ fn parseEnumSpec(p: *Parser) Error!*Type.Enum {
             var ty = Type{ .specifier = .Enum, .data = .{ .@"enum" = enumType } };
             ty = try Attribute.applyTypeAttributes(p, ty, attrBufferTop, null);
 
-            try p.symStack.appendSymbol(.{
+            try p.symStack.define(.{
                 .kind = .@"enum",
                 .name = internedName,
                 .token = ident,
@@ -2380,7 +2383,6 @@ fn parseEnumSpec(p: *Parser) Error!*Type.Enum {
         p.enumBuffer.items.len = enumBufferTop;
     }
 
-    const symstackTop = p.symStack.symbols.len;
     var e = Enumerator.init(fixedTy);
     while (try p.enumerator(&e)) |fieldAndNode| {
         try p.enumBuffer.append(fieldAndNode.field);
@@ -2410,13 +2412,11 @@ fn parseEnumSpec(p: *Parser) Error!*Type.Enum {
     const fieldNodes = p.listBuffer.items[listBufferTop..];
 
     if (fixedTy == null) {
-        const values = p.symStack.symbols.items(.value)[symstackTop..];
-        const types = p.symStack.symbols.items(.type)[symstackTop..];
-
         for (enumFields, 0..) |*field, i| {
             if (field.ty.eql(Type.Int, p.comp, false)) continue;
 
-            var res = Result{ .node = field.node, .ty = field.ty, .value = values[i] };
+            const sym = p.symStack.get(field.name, .vars) orelse continue;
+            var res = Result{ .node = field.node, .ty = field.ty, .value = sym.value };
             const destTy = if (p.comp.fixedEnumTagSpecifier()) |some|
                 Type{ .specifier = some }
             else if (res.intFitsInType(p, Type.Int))
@@ -2426,8 +2426,9 @@ fn parseEnumSpec(p: *Parser) Error!*Type.Enum {
             else
                 continue;
 
-            values[i].intCast(field.ty, destTy, p.comp);
-            types[i] = destTy;
+            const symbol = p.symStack.getPtr(field.name, .vars);
+            symbol.value.intCast(field.ty, destTy, p.comp);
+            symbol.type = destTy;
             p.nodes.items(.type)[@intFromEnum(fieldNodes[i])] = destTy;
             field.ty = destTy;
             res.ty = destTy;
@@ -2443,7 +2444,7 @@ fn parseEnumSpec(p: *Parser) Error!*Type.Enum {
     enumType.fields = try p.arena.dupe(Type.Enum.Field, enumFields);
     // declare a symbol for the type
     if (maybeID != null and !defined) {
-        try p.symStack.appendSymbol(.{
+        try p.symStack.define(.{
             .kind = .@"enum",
             .name = enumType.name,
             .type = ty,
@@ -2715,10 +2716,15 @@ fn parseTypeQual(p: *Parser, b: *Type.Qualifiers.Builder) Error!bool {
     return any;
 }
 
+/// A Declarator represents the information extracted when parsing a declarator.
 const Declarator = struct {
-    name: TokenIndex, //
+    /// the name of the entity.
+    name: TokenIndex,
+    /// the parsed Type of the declarator.
     type: Type,
+    /// This is used to retain additional information needed for function declarations.
     funcDeclarator: ?TokenIndex = null,
+    /// for c89 old style function
     oldTypeFunc: ?TokenIndex = null,
 };
 

@@ -42,7 +42,7 @@ TypeDef: '[2]int'
  name: I
 
 FnDef: 'fn (a: d[2]const int, b: d[2]const int) void'
- name: baz
+ name: qux
  body:
   CompoundStmt: 'void'
     AddAssignExpr: 'd[2]const int'
@@ -65,13 +65,13 @@ FnDef: 'fn (a: d[2]const int, b: d[2]const int) void'
 
 EnumDeclTwo: 'enum E: unsigned int'
   EnumFieldDecl: 'int'
-   name: A
+   name: D
    value:
     ImplicitCast: (IntCast) 'int'
       ExplicitCast: (IntCast) 'char' (value: 2)
         IntLiteral: 'int' (value: 2)
   EnumFieldDecl: 'int'
-   name: B
+   name: E
    value:
     ImplicitCast: (IntCast) 'int'
       ExplicitCast: (IntCast) 'long' (value: 3)

@@ -44,32 +44,48 @@ pub const Kind = enum {
 };
 // zig fmt: on
 
-symbols: std.MultiArrayList(Symbol) = .{},
-scopes: std.ArrayListUnmanaged(u32) = .{},
+const Scope = struct {
+    vars: std.AutoHashMapUnmanaged(StringId, Symbol) = .{},
+    tags: std.AutoHashMapUnmanaged(StringId, Symbol) = .{},
+
+    fn deinit(self: *Scope, allocator: Allocator) void {
+        self.vars.deinit(allocator);
+        self.tags.deinit(allocator);
+    }
+
+    fn clearRetainingCapacity(self: *Scope) void {
+        self.vars.clearRetainingCapacity();
+        self.tags.clearRetainingCapacity();
+    }
+};
+
+/// allocations from nested scopes are retained after popping;
+/// `activeLen` is the number of currently-active items in `scopes`.
+activeLen: usize = 0,
+scopes: std.ArrayListUnmanaged(Scope) = .{},
 p: *Parser = undefined,
 
 pub fn deinit(self: *SymbolStack, gpa: Allocator) void {
-    self.symbols.deinit(gpa);
+    std.debug.assert(self.activeLen == 0); // all scopes should be popped at end
+    for (self.scopes.items) |*scope|
+        scope.deinit(gpa);
     self.scopes.deinit(gpa);
     self.p = undefined;
     self.* = undefined;
 }
 
-pub fn scopeEnd(self: SymbolStack) u32 {
-    if (self.scopes.items.len == 0) return 0;
-    return self.scopes.items[self.scopes.items.len - 1];
-}
-
 pub fn pushScope(self: *SymbolStack) !void {
-    try self.scopes.append(self.p.comp.gpa, @intCast(self.symbols.len));
+    if (self.activeLen + 1 > self.scopes.items.len) {
+        try self.scopes.append(self.p.gpa, .{});
+        self.activeLen = self.scopes.items.len;
+    } else {
+        self.scopes.items[self.activeLen].clearRetainingCapacity();
+        self.activeLen += 1;
+    }
 }
 
 pub fn popScope(self: *SymbolStack) void {
-    self.symbols.len = self.scopes.pop();
-}
-
-pub fn appendSymbol(self: *SymbolStack, symbol: Symbol) !void {
-    try self.symbols.append(self.p.comp.gpa, symbol);
+    self.activeLen -= 1;
 }
 
 /// findTypedef searches for a typedef symbol with the given name within the symbol stack.
@@ -82,59 +98,29 @@ pub fn appendSymbol(self: *SymbolStack, symbol: Symbol) !void {
 /// @param noTypeYet   A boolean indicating whether the type should not have been defined yet.
 /// @return            A nullable Symbol if found, or null if not found or if it is a definition or declaration.
 pub fn findTypedef(self: *SymbolStack, name: StringId, nameToken: TokenIndex, noTypeYet: bool) !?Symbol {
-    const kinds = self.symbols.items(.kind);
-    const names = self.symbols.items(.name);
-    var i = self.symbols.len;
-    while (i > 0) {
-        i -= 1;
-        switch (kinds[i]) {
-            // If it's a typedef and names match, return the symbol.
-            .typedef => if (names[i] == name) return self.symbols.get(i),
-
-            // For struct, union, and enum, check if the type should not be defined yet.
-            // If it should, report an error. Otherwise, return null or the symbol.
-            .@"struct", .@"union", .@"enum" => if (names[i] == name) {
-                if (noTypeYet) return null;
-                try self.p.errStr(switch (kinds[i]) {
-                    .@"struct" => .must_use_struct,
-                    .@"union" => .must_use_union,
-                    .@"enum" => .must_use_enum,
-                    else => unreachable,
-                }, nameToken, self.p.getTokenText(nameToken));
-                return self.symbols.get(i);
-            },
-
-            // If it's a definition or declaration, constexpr , return null.
-            .definition, .declaration, .constexpr => if (names[i] == name) return null,
-            else => {},
-        }
+    const prev = self.lookup(name, .vars) orelse self.lookup(name, .tags) orelse return null;
+    switch (prev.kind) {
+        .typedef => return prev,
+        .@"struct", .@"union", .@"enum" => {
+            if (noTypeYet) return null;
+            try self.p.errStr(switch (prev.kind) {
+                .@"struct" => .must_use_struct,
+                .@"union" => .must_use_union,
+                .@"enum" => .must_use_enum,
+                else => unreachable,
+            }, nameToken, self.p.getTokenText(nameToken));
+            return prev;
+        },
+        else => return null,
     }
-    return null;
 }
 
-/// Find a symbol by its name token within the current symbol stack.
+/// Find a symbol by its name within the current symbol stack.
 /// @param  self       The SymbolStack instance.
-/// @param  nameToken  The token index used to identify the symbol's name.
+/// @param  name       The Symbol's name.
 /// @return            A nullable Symbol if found, or null if not found.
 pub fn findSymbol(self: *SymbolStack, name: StringId) ?Symbol {
-    const kinds = self.symbols.items(.kind);
-    const names = self.symbols.items(.name);
-
-    var i = self.symbols.len;
-    while (i > 0) {
-        i -= 1;
-
-        switch (kinds[i]) {
-            .definition,
-            .declaration,
-            .enumeration,
-            .constexpr,
-            => if (names[i] == name) return self.symbols.get(i),
-            else => {},
-        }
-    }
-
-    return null;
+    return self.lookup(name, .vars);
 }
 
 /// Find a tag symbol within the symbol stack by its kind and name.
@@ -149,41 +135,62 @@ pub fn findTag(
     nameToken: TokenIndex,
     nextTokenID: TokenType,
 ) !?Symbol {
-    const kinds = self.symbols.items(.kind);
-    const names = self.symbols.items(.name);
-
     // `tag Name;` should always result in a new type if in a new scope.
-    const end = if (nextTokenID == .Semicolon) self.scopeEnd() else 0;
+    const prev = (if (nextTokenID == .Semicolon) self.get(name, .tags) else self.lookup(name, .tags)) orelse return null;
+    switch (prev.kind) {
+        .@"enum" => if (kind == .KeywordEnum) return prev,
+        .@"struct" => if (kind == .KeywordStruct) return prev,
+        .@"union" => if (kind == .KeywordUnion) return prev,
+        else => unreachable,
+    }
 
-    var i = self.symbols.len;
-    while (i > end) {
-        i -= 1;
-        switch (kinds[i]) {
-            .@"enum" => if (names[i] == name) {
-                if (kind == .KeywordEnum) return self.symbols.get(i);
-                break;
-            },
-            .@"struct" => if (names[i] == name) {
-                if (kind == .KeywordStruct) return self.symbols.get(i);
-                break;
-            },
-            .@"union" => if (names[i] == name) {
-                if (kind == .KeywordUnion) return self.symbols.get(i);
-                break;
-            },
-            else => {},
-        }
-    } else return null;
-
-    // If we've exited the loop because i reached 0, return null indicating no symbol was found.
-    if (i < self.scopeEnd()) return null;
-
-    // If we've reached this point, the symbol was found but did not match the kind. Report an error.
+    if (self.get(name, .tags) == null) return null;
     try self.p.errStr(.wrong_tag, nameToken, self.p.getTokenText(nameToken));
-    try self.p.errToken(.previous_definition, self.symbols.items(.token)[i]);
+    try self.p.errToken(.previous_definition, prev.token);
 
-    // Return null as no matching symbol was found.
     return null;
+}
+
+const ScopeKind = enum {
+    /// structs, enums, unions
+    tags,
+    /// variables
+    vars,
+};
+
+/// Return the Symbol for `name` (or null if not found) in the innermost scope
+pub fn get(s: *SymbolStack, name: StringId, kind: ScopeKind) ?Symbol {
+    return switch (kind) {
+        .vars => s.scopes.items[s.activeLen - 1].vars.get(name),
+        .tags => s.scopes.items[s.activeLen - 1].tags.get(name),
+    };
+}
+
+/// Return the Symbol for `name` (or null if not found) in the nearest active scope,
+/// starting at the innermost.
+fn lookup(s: *SymbolStack, name: StringId, kind: ScopeKind) ?Symbol {
+    var i = s.activeLen;
+    while (i > 0) {
+        i -= 1;
+        switch (kind) {
+            .vars => if (s.scopes.items[i].vars.get(name)) |sym| return sym,
+            .tags => if (s.scopes.items[i].tags.get(name)) |sym| return sym,
+        }
+    }
+    return null;
+}
+
+/// Define a symbol in the innermost scope. Does not issue diagnostics or check correctness
+/// with regard to the C standard.
+pub fn define(self: *SymbolStack, symbol: Symbol) !void {
+    switch (symbol.kind) {
+        .constexpr, .definition, .declaration, .enumeration, .typedef => {
+            try self.scopes.items[self.activeLen - 1].vars.put(self.p.gpa, symbol.name, symbol);
+        },
+        .@"struct", .@"union", .@"enum" => {
+            try self.scopes.items[self.activeLen - 1].tags.put(self.p.gpa, symbol.name, symbol);
+        },
+    }
 }
 
 pub fn defineTypedef(
@@ -193,27 +200,25 @@ pub fn defineTypedef(
     token: TokenIndex,
     node: NodeIndex,
 ) !void {
-    const kinds = self.symbols.items(.kind);
-    const names = self.symbols.items(.name);
-    const end = self.scopeEnd();
-    var i = self.symbols.len;
-    while (i > end) {
-        i -= 1;
-        switch (kinds[i]) {
-            .typedef => if (names[i] == name) {
-                const prevTy = self.symbols.items(.type)[i];
-                if (ty.eql(prevTy, self.p.comp, true))
-                    break;
-                try self.p.errStr(.redefinition_of_typedef, token, try self.p.typePairStrExtra(ty, " vs ", prevTy));
-                const prevToken = self.symbols.items(.token)[i];
-                if (prevToken != 0)
-                    try self.p.errToken(.previous_definition, prevToken);
-                break;
+    if (self.get(name, .vars)) |prev| {
+        switch (prev.kind) {
+            .typedef => {
+                if (!ty.eql(prev.type, self.p.comp, true)) {
+                    try self.p.errStr(.redefinition_of_typedef, token, try self.p.typePairStrExtra(ty, " vs ", prev.type));
+                    if (prev.token != 0)
+                        try self.p.errToken(.previous_definition, prev.token);
+                }
             },
-            else => {},
+
+            .enumeration, .declaration, .definition, .constexpr => {
+                try self.p.errStr(.redefinition_different_sym, token, self.p.getTokenText(token));
+                try self.p.errToken(.previous_definition, prev.token);
+            },
+
+            else => unreachable,
         }
     }
-    try self.appendSymbol(.{
+    try self.define(.{
         .kind = .typedef,
         .name = name,
         .token = token,
@@ -223,6 +228,21 @@ pub fn defineTypedef(
     });
 }
 
+/// Define a symbol in the symbol stack.
+///
+/// This function checks if the symbol to be defined already exists in the current scope,
+/// and if it does, it reports appropriate redefinition errors.
+/// The symbol is then appended to the symbol stack with its type, token, and associated value.
+///
+/// If it's a constexpr, it's marked as such.
+/// @param self The SymbolStack instance.
+/// @param name The symbol's name.
+/// @param ty The Type of the symbol.
+/// @param token The TokenIndex representing the symbol.
+/// @param node The NodeIndex in the AST (Abstract Syntax Tree) that represents this symbol.
+/// @param val The Value of the symbol, if it has one.
+/// @param constexpr Indicates whether the symbol is a compile-time constant.
+/// @return An error if any symbol redefinition is detected or if appending the symbol fails.
 pub fn defineSymbol(
     self: *SymbolStack,
     name: StringId,
@@ -232,35 +252,30 @@ pub fn defineSymbol(
     val: Value,
     constexpr: bool,
 ) !void {
-    const kinds = self.symbols.items(.kind);
-    const names = self.symbols.items(.name);
-    const end = self.scopeEnd();
-    var i = self.symbols.len;
-    while (i > end) {
-        i -= 1;
-        switch (kinds[i]) {
-            .enumeration => if (names[i] == name) {
+    if (self.get(name, .vars)) |prev| {
+        switch (prev.kind) {
+            .enumeration => {
                 try self.p.errStr(.redefinition_different_sym, token, self.p.getTokenText(token));
-                try self.p.errToken(.previous_definition, self.symbols.items(.token)[i]);
-                break;
+                try self.p.errToken(.previous_definition, prev.token);
             },
-            .declaration => if (names[i] == name) {
-                const prevTy = self.symbols.items(.type)[i];
-                if (!ty.eql(prevTy, self.p.comp, true)) { // TODO adjusted equality check
+            .declaration => {
+                if (!ty.eql(prev.type, self.p.comp, true)) {
                     try self.p.errStr(.redefinition_incompatible, token, self.p.getTokenText(token));
-                    try self.p.errToken(.previous_definition, self.symbols.items(.token)[i]);
+                    try self.p.errToken(.previous_definition, prev.token);
                 }
-                break;
             },
-            .definition, .constexpr => if (names[i] == name) {
+            .definition, .constexpr => {
                 try self.p.errStr(.redefinition, token, self.p.getTokenText(token));
-                try self.p.errToken(.previous_definition, self.symbols.items(.token)[i]);
-                break;
+                try self.p.errToken(.previous_definition, prev.token);
             },
-            else => {},
+            .typedef => {
+                try self.p.errStr(.redefinition_different_sym, token, self.p.getTokenText(token));
+                try self.p.errToken(.previous_definition, prev.token);
+            },
+            else => unreachable,
         }
     }
-    try self.appendSymbol(.{
+    try self.define(.{
         .kind = if (constexpr) .constexpr else .definition,
         .name = name,
         .token = token,
@@ -270,6 +285,15 @@ pub fn defineSymbol(
     });
 }
 
+/// Get a pointer to the named symbol in the innermost scope.
+/// Asserts that a symbol with the name exists.
+pub fn getPtr(s: *SymbolStack, name: StringId, kind: ScopeKind) *Symbol {
+    return switch (kind) {
+        .tags => s.scopes.items[s.activeLen - 1].tags.getPtr(name).?,
+        .vars => s.scopes.items[s.activeLen - 1].vars.getPtr(name).?,
+    };
+}
+
 pub fn declareSymbol(
     self: *SymbolStack,
     name: StringId,
@@ -277,39 +301,34 @@ pub fn declareSymbol(
     token: TokenIndex,
     node: NodeIndex,
 ) !void {
-    const kinds = self.symbols.items(.kind);
-    const names = self.symbols.items(.name);
-    const end = self.scopeEnd();
-    var i = self.symbols.len;
-    while (i > end) {
-        i -= 1;
-        switch (kinds[i]) {
-            .enumeration => if (names[i] == name) {
+    if (self.get(name, .vars)) |prev| {
+        switch (prev.kind) {
+            .enumeration => {
                 try self.p.errStr(.redefinition_different_sym, token, self.p.getTokenText(token));
-                try self.p.errToken(.previous_definition, self.symbols.items(.token)[i]);
-                break;
+                try self.p.errToken(.previous_definition, prev.token);
             },
-            .declaration => if (names[i] == name) {
-                const prevTy = self.symbols.items(.type)[i];
-                if (!ty.eql(prevTy, self.p.comp, true)) { // TODO adjusted equality check
+            .declaration => {
+                if (!ty.eql(prev.type, self.p.comp, true)) {
                     try self.p.errStr(.redefinition_incompatible, token, self.p.getTokenText(token));
-                    try self.p.errToken(.previous_definition, self.symbols.items(.token)[i]);
+                    try self.p.errToken(.previous_definition, prev.token);
                 }
-                break;
             },
-            .definition, .constexpr => if (names[i] == name) {
-                const prevTy = self.symbols.items(.type)[i];
-                if (!ty.eql(prevTy, self.p.comp, true)) { // TODO adjusted equality check
+            .definition, .constexpr => {
+                if (!ty.eql(prev.type, self.p.comp, true)) {
                     try self.p.errStr(.redefinition_incompatible, token, self.p.getTokenText(token));
-                    try self.p.errToken(.previous_definition, self.symbols.items(.token)[i]);
-                    break;
+                    try self.p.errToken(.previous_definition, prev.token);
+                } else {
+                    return;
                 }
-                return;
             },
-            else => {},
+            .typedef => {
+                try self.p.errStr(.redefinition_different_sym, token, self.p.getTokenText(token));
+                try self.p.errToken(.previous_definition, prev.token);
+            },
+            else => unreachable,
         }
     }
-    try self.appendSymbol(.{
+    try self.define(.{
         .kind = .declaration,
         .name = name,
         .token = token,
@@ -320,22 +339,20 @@ pub fn declareSymbol(
 }
 
 pub fn defineParam(self: *SymbolStack, name: StringId, ty: Type, token: TokenIndex) !void {
-    const kinds = self.symbols.items(.kind);
-    const names = self.symbols.items(.name);
-    const end = self.scopeEnd();
-    var i = self.symbols.len;
-    while (i > end) {
-        i -= 1;
-        switch (kinds[i]) {
-            .enumeration, .declaration, .definition, .constexpr => if (names[i] == name) {
+    if (self.get(name, .vars)) |prev| {
+        switch (prev.kind) {
+            .enumeration, .declaration, .definition, .constexpr => {
                 try self.p.errStr(.redefinition_of_parameter, token, self.p.getTokenText(token));
-                try self.p.errToken(.previous_definition, self.symbols.items(.token)[i]);
-                break;
+                try self.p.errToken(.previous_definition, prev.token);
             },
-            else => {},
+            .typedef => {
+                try self.p.errStr(.redefinition_different_sym, token, self.p.getTokenText(token));
+                try self.p.errToken(.previous_definition, prev.token);
+            },
+            else => unreachable,
         }
     }
-    try self.appendSymbol(.{
+    try self.define(.{
         .kind = .definition,
         .name = name,
         .token = token,
@@ -350,35 +367,28 @@ pub fn defineTag(
     kind: TokenType,
     token: TokenIndex,
 ) !?Symbol {
-    const kinds = self.symbols.items(.kind);
-    const names = self.symbols.items(.name);
-    const end = self.scopeEnd();
-    var i = self.symbols.len;
-    while (i > end) {
-        i -= 1;
-        switch (kinds[i]) {
-            .@"enum" => if (names[i] == name) {
-                if (kind == .KeywordEnum) return self.symbols.get(i);
-                try self.p.errStr(.wrong_tag, token, self.p.getTokenText(token));
-                try self.p.errToken(.previous_definition, self.symbols.items(.token)[i]);
-                return null;
-            },
-            .@"struct" => if (names[i] == name) {
-                if (kind == .KeywordStruct) return self.symbols.get(i);
-                try self.p.errStr(.wrong_tag, token, self.p.getTokenText(token));
-                try self.p.errToken(.previous_definition, self.symbols.items(.token)[i]);
-                return null;
-            },
-            .@"union" => if (names[i] == name) {
-                if (kind == .KeywordUnion) return self.symbols.get(i);
-                try self.p.errStr(.wrong_tag, token, self.p.getTokenText(token));
-                try self.p.errToken(.previous_definition, self.symbols.items(.token)[i]);
-                return null;
-            },
-            else => {},
-        }
+    const prev = self.get(name, .tags) orelse return null;
+    switch (prev.kind) {
+        .@"enum" => {
+            if (kind == .KeywordEnum) return prev;
+            try self.p.errStr(.wrong_tag, token, self.p.getTokenText(token));
+            try self.p.errToken(.previous_definition, prev.token);
+            return null;
+        },
+        .@"struct" => {
+            if (kind == .KeywordStruct) return prev;
+            try self.p.errStr(.wrong_tag, token, self.p.getTokenText(token));
+            try self.p.errToken(.previous_definition, prev.token);
+            return null;
+        },
+        .@"union" => {
+            if (kind == .KeywordUnion) return prev;
+            try self.p.errStr(.wrong_tag, token, self.p.getTokenText(token));
+            try self.p.errToken(.previous_definition, prev.token);
+            return null;
+        },
+        else => unreachable,
     }
-    return null;
 }
 
 pub fn defineEnumeration(
@@ -388,27 +398,27 @@ pub fn defineEnumeration(
     token: TokenIndex,
     value: Value,
 ) !void {
-    const kinds = self.symbols.items(.kind);
-    const names = self.symbols.items(.name);
-    const end = self.scopeEnd();
-    var i = self.symbols.len;
-    while (i > end) {
-        i -= 1;
-        switch (kinds[i]) {
-            .enumeration => if (names[i] == name) {
+    if (self.get(name, .vars)) |prev| {
+        switch (prev.kind) {
+            .enumeration => {
                 try self.p.errStr(.redefinition, token, self.p.getTokenText(token));
-                try self.p.errToken(.previous_definition, self.symbols.items(.token)[i]);
+                try self.p.errToken(.previous_definition, prev.token);
                 return;
             },
-            .declaration, .definition, .constexpr => if (names[i] == name) {
+            .declaration, .definition, .constexpr => {
                 try self.p.errStr(.redefinition_different_sym, token, self.p.getTokenText(token));
-                try self.p.errToken(.previous_definition, self.symbols.items(.token)[i]);
+                try self.p.errToken(.previous_definition, prev.token);
                 return;
             },
-            else => {},
+            .typedef => {
+                try self.p.errStr(.redefinition_different_sym, token, self.p.getTokenText(token));
+                try self.p.errToken(.previous_definition, prev.token);
+                return;
+            },
+            else => unreachable,
         }
     }
-    try self.appendSymbol(.{
+    try self.define(.{
         .kind = .enumeration,
         .name = name,
         .token = token,

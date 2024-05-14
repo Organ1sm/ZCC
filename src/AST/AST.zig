@@ -22,13 +22,11 @@ tokens: Token.List.Slice,
 nodes: Node.List.Slice,
 data: []const NodeIndex,
 rootDecls: []const NodeIndex,
-strings: []const u8,
 valueMap: ValueMap,
 
 pub fn deinit(tree: *AST) void {
     tree.comp.gpa.free(tree.rootDecls);
     tree.comp.gpa.free(tree.data);
-    tree.comp.gpa.free(tree.strings);
     tree.nodes.deinit(tree.comp.gpa);
     tree.arena.deinit();
     tree.valueMap.deinit();
