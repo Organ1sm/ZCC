@@ -1405,7 +1405,6 @@ fn attribute(p: *Parser, kind: Attribute.Kind, namespace: ?[]const u8) Error!?Te
 
     switch (p.getCurrToken()) {
         .Comma, .RParen => {}, // will be consumed in attributeList
-
         .LParen => blk: {
             p.tokenIdx += 1;
             if (p.eat(.RParen)) |_|
@@ -1448,6 +1447,7 @@ fn attribute(p: *Parser, kind: Attribute.Kind, namespace: ?[]const u8) Error!?Te
         },
         else => {},
     }
+
     if (argIdx < requiredCount) {
         try p.errExtra(
             .attribute_not_enough_args,

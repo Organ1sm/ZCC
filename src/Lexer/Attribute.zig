@@ -97,8 +97,8 @@ pub fn requiredArgCount(attr: Tag) u32 {
             comptime var needed = 0;
             comptime {
                 const fields = getArguments(@field(attributes, @tagName(tag)));
-                for (fields) |arg_field| {
-                    if (!mem.eql(u8, arg_field.name, "__name_token") and @typeInfo(arg_field.type) != .Optional)
+                for (fields) |argField| {
+                    if (!mem.eql(u8, argField.name, "__name_token") and @typeInfo(argField.type) != .Optional)
                         needed += 1;
                 }
             }
@@ -114,8 +114,8 @@ pub fn maxArgCount(attr: Tag) u32 {
             comptime var max = 0;
             comptime {
                 const fields = getArguments(@field(attributes, @tagName(tag)));
-                for (fields) |arg_field| {
-                    if (!mem.eql(u8, arg_field.name, "__name_token"))
+                for (fields) |argField| {
+                    if (!mem.eql(u8, argField.name, "__name_token"))
                         max += 1;
                 }
             }
@@ -140,8 +140,8 @@ pub const Formatting = struct {
             .calling_convention => unreachable,
             inline else => |tag| {
                 const fields = getArguments((@field(attributes, @tagName(tag))));
-
                 if (fields.len == 0) unreachable;
+
                 const Unwrapped = UnwrapOptional(fields[0].type);
                 if (@typeInfo(Unwrapped) != .Enum) unreachable;
 
@@ -162,13 +162,13 @@ pub const Formatting = struct {
                 const Unwrapped = UnwrapOptional(fields[0].type);
                 if (@typeInfo(Unwrapped) != .Enum) unreachable;
 
-                const enum_fields = @typeInfo(Unwrapped).Enum.fields;
+                const enumFields = @typeInfo(Unwrapped).Enum.fields;
                 @setEvalBranchQuota(3000);
                 const quote = comptime quoteChar(@enumFromInt(@intFromEnum(tag)));
-                comptime var values: []const u8 = quote ++ enum_fields[0].name ++ quote;
-                inline for (enum_fields[1..]) |enum_field| {
+                comptime var values: []const u8 = quote ++ enumFields[0].name ++ quote;
+                inline for (enumFields[1..]) |enumField| {
                     values = values ++ ", ";
-                    values = values ++ quote ++ enum_field.name ++ quote;
+                    values = values ++ quote ++ enumField.name ++ quote;
                 }
                 return values;
             },
@@ -201,8 +201,8 @@ pub fn diagnoseIdent(attr: Tag, arguments: *Arguments, ident: []const u8) ?Diagn
 
             const Unwrapped = UnwrapOptional(fields[0].type);
             if (@typeInfo(Unwrapped) != .Enum) unreachable;
-            if (std.meta.stringToEnum(Unwrapped, normalize(ident))) |enum_val| {
-                @field(@field(arguments, @tagName(tag)), fields[0].name) = enum_val;
+            if (std.meta.stringToEnum(Unwrapped, normalize(ident))) |enumVal| {
+                @field(@field(arguments, @tagName(tag)), fields[0].name) = enumVal;
                 return null;
             }
 
@@ -228,26 +228,31 @@ pub fn wantsAlignment(attr: Tag, idx: usize) bool {
     }
 }
 
-pub fn diagnoseAlignment(attr: Tag, arguments: *Arguments, arg_idx: u32, val: Value, ty: Type, comp: *Compilation) ?Diagnostics.Message {
+pub fn diagnoseAlignment(attr: Tag, arguments: *Arguments, argIdx: u32, val: Value, ty: Type, comp: *Compilation) ?Diagnostics.Message {
     switch (attr) {
         inline else => |tag| {
-            const arg_fields = getArguments(@field(attributes, @tagName(tag)));
-            if (arg_fields.len == 0) unreachable;
+            const argFields = getArguments(@field(attributes, @tagName(tag)));
+            if (argFields.len == 0) unreachable;
 
-            switch (arg_idx) {
-                inline 0...arg_fields.len - 1 => |arg_i| {
-                    if (UnwrapOptional(arg_fields[arg_i].type) != Alignment) unreachable;
+            switch (argIdx) {
+                inline 0...argFields.len - 1 => |argI| {
+                    if (UnwrapOptional(argFields[argI].type) != Alignment) unreachable;
 
-                    if (val.tag != .int) return Diagnostics.Message{ .tag = .alignas_unavailable };
-                    if (val.compare(.lt, Value.int(0), ty, comp)) {
-                        return Diagnostics.Message{ .tag = .negative_alignment, .extra = .{ .signed = val.signExtend(ty, comp) } };
-                    }
+                    if (val.tag != .int)
+                        return Diagnostics.Message{ .tag = .alignas_unavailable };
+                    if (val.compare(.lt, Value.int(0), ty, comp))
+                        return Diagnostics.Message{
+                            .tag = .negative_alignment,
+                            .extra = .{ .signed = val.signExtend(ty, comp) },
+                        };
+
                     const requested = std.math.cast(u29, val.data.int) orelse {
                         return Diagnostics.Message{ .tag = .maximum_alignment, .extra = .{ .unsigned = val.data.int } };
                     };
-                    if (!std.mem.isValidAlign(requested)) return Diagnostics.Message{ .tag = .non_pow2_align };
+                    if (!std.mem.isValidAlign(requested))
+                        return Diagnostics.Message{ .tag = .non_pow2_align };
 
-                    @field(@field(arguments, @tagName(tag)), arg_fields[arg_i].name) = Alignment{ .requested = requested };
+                    @field(@field(arguments, @tagName(tag)), argFields[argI].name) = Alignment{ .requested = requested };
                     return null;
                 },
                 else => unreachable,
@@ -308,12 +313,12 @@ fn diagnoseField(
     };
 }
 
-pub fn diagnose(attr: Tag, arguments: *Arguments, arg_idx: u32, val: Value, node: Tree.Node) ?Diagnostics.Message {
+pub fn diagnose(attr: Tag, arguments: *Arguments, argIdx: u32, val: Value, node: Tree.Node) ?Diagnostics.Message {
     switch (attr) {
         inline else => |tag| {
             const decl = @typeInfo(attributes).Struct.decls[@intFromEnum(tag)];
             const max_arg_count = comptime maxArgCount(tag);
-            if (arg_idx >= max_arg_count)
+            if (argIdx >= max_arg_count)
                 return Diagnostics.Message{
                     .tag = .attribute_too_many_args,
                     .extra = .{
@@ -324,10 +329,10 @@ pub fn diagnose(attr: Tag, arguments: *Arguments, arg_idx: u32, val: Value, node
                     },
                 };
 
-            const arg_fields = getArguments(@field(attributes, decl.name));
-            switch (arg_idx) {
-                inline 0...arg_fields.len - 1 => |arg_i| {
-                    return diagnoseField(decl, arg_fields[arg_i], UnwrapOptional(arg_fields[arg_i].type), arguments, val, node);
+            const argFields = getArguments(@field(attributes, decl.name));
+            switch (argIdx) {
+                inline 0...argFields.len - 1 => |argI| {
+                    return diagnoseField(decl, argFields[argI], UnwrapOptional(argFields[argI].type), arguments, val, node);
                 },
                 else => unreachable,
             }
@@ -916,10 +921,10 @@ pub const Arguments = blk: {
     // Construct and return the union type with the fields we've just populated.
     break :blk @Type(.{
         .Union = .{
-            .layout = .auto,         // The layout of the union is automatically determined.
-            .tag_type = null,        // The union is untagged (no explicit tag type).
+            .layout = .auto, // The layout of the union is automatically determined.
+            .tag_type = null, // The union is untagged (no explicit tag type).
             .fields = &union_fields, // Specify the fields of the union.
-            .decls = &.{},           // No additional declarations are provided.
+            .decls = &.{}, // No additional declarations are provided.
         },
     });
 };
@@ -931,10 +936,10 @@ pub fn ArgumentsForTag(comptime tag: Tag) type {
 
 pub fn initArguments(tag: Tag, nameToken: TokenIndex) Arguments {
     switch (tag) {
-        inline else => |arg_tag| {
-            var args = @unionInit(Arguments, @tagName(arg_tag), undefined);
-            if (@hasDecl(@field(attributes, @tagName(arg_tag)), "Args") and @hasField(@field(attributes, @tagName(arg_tag)).Args, "__name_token")) {
-                @field(args, @tagName(arg_tag)).__name_token = nameToken;
+        inline else => |argTag| {
+            var args = @unionInit(Arguments, @tagName(argTag), undefined);
+            if (@hasDecl(@field(attributes, @tagName(argTag)), "Args") and @hasField(@field(attributes, @tagName(argTag)).Args, "__name_token")) {
+                @field(args, @tagName(argTag)).__name_token = nameToken;
             }
             return args;
         },
@@ -966,12 +971,13 @@ fn fromStringGnu(name: []const u8) ?Tag {
 fn fromStringC23(namespace: ?[]const u8, name: []const u8) ?Tag {
     const normalized = normalize(name);
     if (namespace) |ns| {
-        const normalized_ns = normalize(ns);
-        if (mem.eql(u8, normalized_ns, "gnu")) {
+        const normalizedNS = normalize(ns);
+        if (mem.eql(u8, normalizedNS, "gnu")) {
             return fromStringGnu(normalized);
         }
         return null;
     }
+
     const decls = @typeInfo(attributes).Struct.decls;
     inline for (decls, 0..) |decl, i| {
         if (@hasDecl(@field(attributes, decl.name), "c23")) {
