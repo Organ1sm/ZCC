@@ -86,6 +86,8 @@ pub const ArgumentType = enum {
     }
 };
 
+/// representing the fields of the `Args` struct declaration within the `descriptor` type.
+/// otherwise, returns an empty slice.
 fn getArguments(comptime descriptor: type) []const ZigType.StructField {
     return if (@hasDecl(descriptor, "Args")) std.meta.fields(descriptor.Args) else &.{};
 }
@@ -98,6 +100,7 @@ pub fn requiredArgCount(attr: Tag) u32 {
             comptime {
                 const fields = getArguments(@field(attributes, @tagName(tag)));
                 for (fields) |argField| {
+                    // filter the `__name_token` and nullable field
                     if (!mem.eql(u8, argField.name, "__name_token") and @typeInfo(argField.type) != .Optional)
                         needed += 1;
                 }
@@ -240,6 +243,7 @@ pub fn diagnoseAlignment(attr: Tag, arguments: *Arguments, argIdx: u32, val: Val
 
                     if (val.tag != .int)
                         return Diagnostics.Message{ .tag = .alignas_unavailable };
+
                     if (val.compare(.lt, Value.int(0), ty, comp))
                         return Diagnostics.Message{
                             .tag = .negative_alignment,
@@ -900,6 +904,7 @@ const attributes = struct {
     };
 };
 
+/// The Attributes enum tag
 pub const Tag = std.meta.DeclEnum(attributes);
 
 /// Generate a union type with fields based on the attributes' "Args" declarations.
@@ -937,9 +942,11 @@ pub fn ArgumentsForTag(comptime tag: Tag) type {
 pub fn initArguments(tag: Tag, nameToken: TokenIndex) Arguments {
     switch (tag) {
         inline else => |argTag| {
-            var args = @unionInit(Arguments, @tagName(argTag), undefined);
-            if (@hasDecl(@field(attributes, @tagName(argTag)), "Args") and @hasField(@field(attributes, @tagName(argTag)).Args, "__name_token")) {
-                @field(args, @tagName(argTag)).__name_token = nameToken;
+            const tagName = @tagName(argTag);
+            const field = @field(attributes, tagName); // get nested field
+            var args = @unionInit(Arguments, tagName, undefined);
+            if (@hasDecl(field, "Args") and @hasField(field.Args, "__name_token")) {
+                @field(args, tagName).__name_token = nameToken;
             }
             return args;
         },
