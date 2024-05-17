@@ -936,7 +936,8 @@ pub const Arguments = blk: {
 
 pub fn ArgumentsForTag(comptime tag: Tag) type {
     const decl = @typeInfo(attributes).Struct.decls[@intFromEnum(tag)];
-    return if (@hasDecl(@field(attributes, decl.name), "Args")) @field(attributes, decl.name).Args else void;
+    const field = @field(attributes, decl.name);
+    return if (@hasDecl(field, "Args")) field.Args else void;
 }
 
 pub fn initArguments(tag: Tag, nameToken: TokenIndex) Arguments {
@@ -966,8 +967,9 @@ fn fromStringGnu(name: []const u8) ?Tag {
     const decls = @typeInfo(attributes).Struct.decls;
     @setEvalBranchQuota(3000);
     inline for (decls, 0..) |decl, i| {
-        if (@hasDecl(@field(attributes, decl.name), "gnu")) {
-            if (mem.eql(u8, @field(attributes, decl.name).gnu, normalized)) {
+        const field = @field(attributes, decl.name);
+        if (@hasDecl(field, "gnu")) {
+            if (mem.eql(u8, field.gnu, normalized)) {
                 return @enumFromInt(i);
             }
         }
@@ -987,8 +989,9 @@ fn fromStringC23(namespace: ?[]const u8, name: []const u8) ?Tag {
 
     const decls = @typeInfo(attributes).Struct.decls;
     inline for (decls, 0..) |decl, i| {
-        if (@hasDecl(@field(attributes, decl.name), "c23")) {
-            if (mem.eql(u8, @field(attributes, decl.name).c23, normalized)) {
+        const field = @field(attributes, decl.name);
+        if (@hasDecl(field, "c23")) {
+            if (mem.eql(u8, field.c23, normalized)) {
                 return @enumFromInt(i);
             }
         }
@@ -999,8 +1002,9 @@ fn fromStringC23(namespace: ?[]const u8, name: []const u8) ?Tag {
 fn fromStringDeclspec(name: []const u8) ?Tag {
     const decls = @typeInfo(attributes).Struct.decls;
     inline for (decls, 0..) |decl, i| {
-        if (@hasDecl(@field(attributes, decl.name), "declspec")) {
-            if (mem.eql(u8, @field(attributes, decl.name).declspec, name)) {
+        const field = @field(attributes, decl.name);
+        if (@hasDecl(field, "declspec")) {
+            if (mem.eql(u8, field.declspec, name)) {
                 return @enumFromInt(i);
             }
         }
