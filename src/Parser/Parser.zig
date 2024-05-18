@@ -1422,27 +1422,15 @@ fn attribute(p: *Parser, kind: Attribute.Kind, namespace: ?[]const u8) Error!?Te
                     return error.ParsingFailed;
                 }
             } else {
-                const argStart = p.tokenIdx;
-                var firstExpr = try p.parseAssignExpr();
-                try firstExpr.expect(p);
-                if (p.diagnose(attr, &arguments, argIdx, firstExpr)) |msg| {
-                    try p.errExtra(msg.tag, argStart, msg.extra);
-                    p.skipTo(.RParen);
-                    return error.ParsingFailed;
-                }
+                // handle first argument
+                try p.handleAttrParam(attr, &arguments, argIdx);
             }
+
             argIdx += 1;
             while (p.eat(.RParen) == null) : (argIdx += 1) {
+                // handle next argument
                 _ = try p.expectToken(.Comma);
-
-                const argStart = p.tokenIdx;
-                var argExpr = try p.parseAssignExpr();
-                try argExpr.expect(p);
-                if (p.diagnose(attr, &arguments, argIdx, argExpr)) |msg| {
-                    try p.errExtra(msg.tag, argStart, msg.extra);
-                    p.skipTo(.RParen);
-                    return error.ParsingFailed;
-                }
+                try p.handleAttrParam(attr, &arguments, argIdx);
             }
         },
         else => {},
@@ -1457,6 +1445,17 @@ fn attribute(p: *Parser, kind: Attribute.Kind, namespace: ?[]const u8) Error!?Te
         return error.ParsingFailed;
     }
     return TentativeAttribute{ .attr = .{ .tag = attr, .args = arguments, .syntax = kind.toSyntax() }, .tok = nameToken };
+}
+
+fn handleAttrParam(p: *Parser, attr: Attribute.Tag, arguments: *Attribute.Arguments, argIdx: u32) Error!void {
+    const argStart = p.tokenIdx;
+    var argExpr = try p.parseAssignExpr();
+    try argExpr.expect(p);
+    if (p.diagnose(attr, arguments, argIdx, argExpr)) |msg| {
+        try p.errExtra(msg.tag, argStart, msg.extra);
+        p.skipTo(.RParen);
+        return error.ParsingFailed;
+    }
 }
 
 fn diagnose(p: *Parser, attr: Attribute.Tag, arguments: *Attribute.Arguments, argIdx: u32, res: Result) ?Diagnostics.Message {

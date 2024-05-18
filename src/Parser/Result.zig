@@ -15,6 +15,7 @@ node: NodeIndex = .none,
 ty: Type = Type.Int,
 value: Value = .{},
 
+// validate result is valid
 pub fn expect(res: Result, p: *Parser) Error!void {
     if (p.inMacro) {
         if (res.value.tag == .unavailable) {

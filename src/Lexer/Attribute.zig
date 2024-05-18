@@ -198,6 +198,7 @@ pub fn wantsIdentEnum(attr: Tag) bool {
 pub fn diagnoseIdent(attr: Tag, arguments: *Arguments, ident: []const u8) ?Diagnostics.Message {
     switch (attr) {
         inline else => |tag| {
+            // Get the fields of the Args struct corresponding to the given tag
             const fields = getArguments(@field(attributes, @tagName(tag)));
             if (fields.len == 0)
                 unreachable;
@@ -217,6 +218,7 @@ pub fn diagnoseIdent(attr: Tag, arguments: *Arguments, ident: []const u8) ?Diagn
     }
 }
 
+/// Returns whether the given attribute's argument at the given index wants an Alignment value.
 pub fn wantsAlignment(attr: Tag, idx: usize) bool {
     switch (attr) {
         inline else => |tag| {
@@ -231,6 +233,12 @@ pub fn wantsAlignment(attr: Tag, idx: usize) bool {
     }
 }
 
+/// Diagnoses an alignment attribute argument.
+///
+/// This function takes the attribute tag, the arguments for the attribute, the index of the
+/// argument to diagnose, the value of the argument, the type of the argument, and the compilation
+/// object. It returns a diagnostics message if the alignment argument is invalid, and null if it is
+/// valid.
 pub fn diagnoseAlignment(attr: Tag, arguments: *Arguments, argIdx: u32, val: Value, ty: Type, comp: *Compilation) ?Diagnostics.Message {
     switch (attr) {
         inline else => |tag| {
@@ -256,6 +264,7 @@ pub fn diagnoseAlignment(attr: Tag, arguments: *Arguments, argIdx: u32, val: Val
                     if (!std.mem.isValidAlign(requested))
                         return Diagnostics.Message{ .tag = .non_pow2_align };
 
+                    // Set the alignment of the argument to the requested value
                     @field(@field(arguments, @tagName(tag)), argFields[argI].name) = Alignment{ .requested = requested };
                     return null;
                 },
