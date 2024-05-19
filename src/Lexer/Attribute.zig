@@ -1309,7 +1309,7 @@ pub fn applyLabelAttributes(p: *Parser, ty: Type, attrBufferStart: usize) !Type 
     return ty.withAttributes(p.arena, p.attrApplicationBuffer.items);
 }
 
-pub fn applyStatementAttributes(p: *Parser, ty: Type, expr_start: TokenIndex, attrBufferStart: usize) !Type {
+pub fn applyStatementAttributes(p: *Parser, ty: Type, exprStart: TokenIndex, attrBufferStart: usize) !Type {
     const attrs = p.attrBuffer.items(.attr)[attrBufferStart..];
     const toks = p.attrBuffer.items(.tok)[attrBufferStart..];
     p.attrApplicationBuffer.items.len = 0;
@@ -1319,7 +1319,7 @@ pub fn applyStatementAttributes(p: *Parser, ty: Type, expr_start: TokenIndex, at
             // TODO: this condition is not completely correct; the last statement of a compound
             // statement is also valid if it precedes a switch label (so intervening '}' are ok,
             // but only if they close a compound statement)
-            try p.errToken(.invalid_fallthrough, expr_start);
+            try p.errToken(.invalid_fallthrough, exprStart);
         } else {
             try p.attrApplicationBuffer.append(p.gpa, attr);
         },

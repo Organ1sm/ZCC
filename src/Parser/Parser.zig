@@ -1886,10 +1886,7 @@ fn getAnonymousName(p: *Parser, kindToken: TokenIndex) !StringId {
     const lineAndCol = source.getLineCol(loc);
 
     const kindStr = switch (p.tokenIds[kindToken]) {
-        .KeywordStruct,
-        .KeywordUnion,
-        .KeywordEnum,
-        => p.getTokenText(kindToken),
+        .KeywordStruct, .KeywordUnion, .KeywordEnum => p.getTokenText(kindToken),
         else => "record field",
     };
 
@@ -2022,13 +2019,15 @@ fn parseRecordSpec(p: *Parser) Error!Type {
     };
 
     try p.parseRecordDecls();
+
     if (p.record.flexibleField) |some| {
         if (p.recordBuffer.items[recordBufferTop..].len == 1 and isStruct)
             try p.errToken(.flexible_in_empty, some);
     }
 
     for (p.recordBuffer.items[recordBufferTop..]) |field| {
-        if (field.ty.hasIncompleteSize() and !field.ty.is(.IncompleteArray)) break;
+        if (field.ty.hasIncompleteSize() and !field.ty.is(.IncompleteArray))
+            break;
     } else {
         recordType.fields = try p.arena.dupe(Type.Record.Field, p.recordBuffer.items[recordBufferTop..]);
     }
@@ -2185,9 +2184,8 @@ fn parseRecordDeclarator(p: *Parser) Error!bool {
         } else {
             if (toAppend.len > 0) {
                 const preceding = p.recordMembers.items.len - p.record.start;
-                if (preceding > 0) {
+                if (preceding > 0)
                     try p.fieldAttrBuffer.appendNTimes(&.{}, preceding);
-                }
                 try p.fieldAttrBuffer.append(toAppend);
             }
         }
@@ -2222,6 +2220,7 @@ fn parseRecordDeclarator(p: *Parser) Error!bool {
 
             if (nameToken != 0)
                 try p.record.addField(p, internedName, nameToken);
+
             const node = try p.addNode(.{
                 .tag = .RecordFieldDecl,
                 .type = ty,
