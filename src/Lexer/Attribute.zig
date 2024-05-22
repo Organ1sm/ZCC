@@ -1115,7 +1115,7 @@ pub fn applyVariableAttributes(p: *Parser, ty: Type, attrBufferStart: usize, tag
     return Type{ .specifier = .Attributed, .data = .{ .attributed = attributedTy } };
 }
 
-pub fn applyFieldAttributes(p: *Parser, field_ty: *Type, attrBufferStart: usize) ![]const Attribute {
+pub fn applyFieldAttributes(p: *Parser, fieldTy: *Type, attrBufferStart: usize) ![]const Attribute {
     const attrs = p.attrBuffer.items(.attr)[attrBufferStart..];
     const toks = p.attrBuffer.items(.tok)[attrBufferStart..];
     p.attrApplicationBuffer.items.len = 0;
@@ -1126,10 +1126,11 @@ pub fn applyFieldAttributes(p: *Parser, field_ty: *Type, attrBufferStart: usize)
         => try p.attrApplicationBuffer.append(p.gpa, attr),
         // zig fmt: on
 
-        .vector_size => try attr.applyVectorSize(p, tok, field_ty),
-        .aligned => try attr.applyAligned(p, field_ty.*, null),
+        .vector_size => try attr.applyVectorSize(p, tok, fieldTy),
+        .aligned => try attr.applyAligned(p, fieldTy.*, null),
         else => try ignoredAttrErr(p, tok, attr.tag, "fields"),
     };
+
     if (p.attrApplicationBuffer.items.len == 0) return &[0]Attribute{};
     return p.arena.dupe(Attribute, p.attrApplicationBuffer.items);
 }

@@ -234,21 +234,18 @@ const SysVContext = struct {
 
         // If the struct or the field is packed, then the alignment of the underlying type is
         // ignored. See test case 0084.
-        if (self.attrPacked or isPacked(fieldAttrs)) {
+        if (self.attrPacked or isPacked(fieldAttrs))
             fieldAlignBits = BITS_PER_BYTE;
-        }
 
         // The field alignment can be increased by __attribute__((aligned)) annotations on the
         // field. See test case 0085.
-        if (Type.annotationAlignment(self.comp, fieldAttrs)) |anno| {
+        if (Type.annotationAlignment(self.comp, fieldAttrs)) |anno|
             fieldAlignBits = @max(fieldAlignBits, anno * BITS_PER_BYTE);
-        }
 
         // #pragma pack takes precedence over all other attributes. See test cases 0084 and
         // 0085.
-        if (self.maxFieldAlignBits) |req_bits| {
+        if (self.maxFieldAlignBits) |req_bits|
             fieldAlignBits = @min(fieldAlignBits, req_bits);
-        }
 
         // A struct field starts at the next offset in the struct that is properly
         // aligned with respect to the start of the struct.
