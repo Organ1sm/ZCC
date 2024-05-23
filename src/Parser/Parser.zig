@@ -2125,9 +2125,10 @@ fn parseRecordDecls(p: *Parser) Error!void {
 fn parseRecordDeclarator(p: *Parser) Error!bool {
     const attrBufferTop = p.attrBuffer.len;
     defer p.attrBuffer.len = attrBufferTop;
-    const baseType = (try p.parseSpecQuals()) orelse return false;
 
+    const baseType = (try p.parseSpecQuals()) orelse return false;
     try p.parseAttrSpec(); // .record
+
     while (true) {
         const thisDeclTop = p.attrBuffer.len;
         defer p.attrBuffer.len = thisDeclTop;
@@ -2178,9 +2179,9 @@ fn parseRecordDeclarator(p: *Parser) Error!bool {
 
         try p.parseAttrSpec(); // .record
         const toAppend = try Attribute.applyFieldAttributes(p, &ty, attrBufferTop);
-        const anyFieldsHaveAttrs = p.fieldAttrBuffer.items.len > p.record.fieldAttrStart;
         errdefer p.arena.free(toAppend);
 
+        const anyFieldsHaveAttrs = p.fieldAttrBuffer.items.len > p.record.fieldAttrStart;
         if (anyFieldsHaveAttrs) {
             try p.fieldAttrBuffer.append(toAppend);
         } else {
@@ -2242,7 +2243,6 @@ fn parseRecordDeclarator(p: *Parser) Error!bool {
                 if (p.record.kind == .KeywordStruct)
                     try p.errToken(.flexible_non_final, some);
             }
-
             p.record.flexibleField = firstToken;
         } else if (ty.hasIncompleteSize()) {
             try p.errStr(.field_incomplete_ty, firstToken, try p.typeStr(ty));

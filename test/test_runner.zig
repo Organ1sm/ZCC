@@ -17,7 +17,7 @@ fn addCommandLineArgs(comp: *zcc.Compilation, file: zcc.Source, macroBuffer: any
         defer testArgs.deinit();
 
         const nl = std.mem.indexOfAny(u8, file.buffer, "\n\r") orelse file.buffer.len;
-        var it = std.mem.tokenize(u8, file.buffer[0..nl], " ");
+        var it = std.mem.tokenizeScalar(u8, file.buffer[0..nl], ' ');
         while (it.next()) |some| try testArgs.append(some);
 
         var driver = zcc.Driver{ .comp = comp };
@@ -382,7 +382,7 @@ pub fn main() !void {
 
                 try obj.finish(outFile);
             }
-            var child = std.ChildProcess.init(&.{ args[2], "run", "-lc", objName }, gpa);
+            var child = std.process.Child.init(&.{ args[2], "run", "-lc", objName }, gpa);
             child.stdout_behavior = .Pipe;
 
             try child.spawn();

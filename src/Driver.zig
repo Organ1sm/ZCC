@@ -572,7 +572,7 @@ fn invokeLinker(d: *Driver) !void {
     argv.appendAssumeCapacity("/usr/lib/Scrt1.o"); // TODO very bad
     argv.appendSliceAssumeCapacity(d.linkObjects.items);
 
-    var child = std.ChildProcess.init(argv.items, d.comp.gpa);
+    var child = std.process.Child.init(argv.items, d.comp.gpa);
     // TODO handle better
     child.stdin_behavior = .Inherit;
     child.stdout_behavior = .Inherit;
@@ -593,7 +593,6 @@ fn invokeLinker(d: *Driver) !void {
 fn exitWithCleanup(d: *Driver, code: u8) noreturn {
     for (d.linkObjects.items[d.linkObjects.items.len - d.tempFileCount ..]) |obj|
         std.fs.deleteFileAbsolute(obj) catch {};
-
     std.process.exit(code);
 }
 

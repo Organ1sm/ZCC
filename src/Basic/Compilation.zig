@@ -515,6 +515,29 @@ pub fn nextLargestIntSameSign(comp: *const Compilation, ty: Type) ?Type {
     return null;
 }
 
+/// Smallest integer type with at least N bits
+pub fn intLeastN(comp: *const Compilation, bits: usize, signedness: std.builtin.Signedness) Type {
+    if (bits == 64 and (comp.target.isDarwin() or comp.target.isWasm())) {
+        // WebAssembly and Darwin use `long long` for `int_least64_t` and `int_fast64_t`.
+        return .{ .specifier = if (signedness == .signed) .LongLong else .ULongLong };
+    }
+
+    if (bits == 16 and comp.target.cpu.arch == .avr) {
+        // AVR uses int for int_least16_t and int_fast16_t.
+        return .{ .specifier = if (signedness == .signed) .Int else .UInt };
+    }
+
+    const candidates = switch (signedness) {
+        .signed => &[_]Type.Specifier{ .SChar, .Short, .Int, .Long, .LongLong },
+        .unsigned => &[_]Type.Specifier{ .UChar, .UShort, .UInt, .ULong, .ULongLong },
+    };
+
+    for (candidates) |specifier| {
+        const ty: Type = .{ .specifier = specifier };
+        if (ty.sizeof(comp).? * 8 >= bits) return ty;
+    } else unreachable;
+}
+
 /// If `enum E { ... }` syntax has a fixed underlying integer type regardless of the presence of
 /// __attribute__((packed)) or the range of values of the corresponding enumerator constants,
 /// specify it here.
@@ -545,7 +568,7 @@ pub fn fixedEnumTagSpecifier(comp: *const Compilation) ?Type.Specifier {
 /// - SelfExeNotFound: Failed to obtain self executable path
 /// - ZccIncludeNotFound: Did not find system include directory
 pub fn defineSystemIncludes(comp: *Compilation) !void {
-    var buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+    var buf: [std.fs.max_path_bytes]u8 = undefined;
     var searchPath: []const u8 = std.fs.selfExePath(&buf) catch return error.SelfExeNotFound;
 
     while (std.fs.path.dirname(searchPath)) |dirname| : (searchPath = dirname) {
@@ -879,7 +902,7 @@ pub fn hasInclude(
     }
 
     const cwdSourceID = getCwdSourceID(includerTokenSource, includeType, which);
-    var pathBuffer: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+    var pathBuffer: [std.fs.max_path_bytes]u8 = undefined;
     var it = IncludeDirIterator{
         .comp = comp,
         .cwdSourceID = cwdSourceID,
@@ -912,7 +935,7 @@ pub fn findInclude(
     includeType: IncludeType, // angle bracket or quotes
     which: WhichInclude, // include or include_next
 ) !?Source {
-    var pathBuffer: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+    var pathBuffer: [std.fs.max_path_bytes]u8 = undefined;
 
     if (std.fs.path.isAbsolute(filename)) {
         if (which == .Next) return null;
