@@ -7,9 +7,9 @@ pub fn build(b: *std.Build) !void {
     const TestAllAllocationFailures = b.option(bool, "test-all-allocation-failures", "Test all allocation failures") orelse false;
     const LinkLibc = b.option(bool, "link-libc", "Force self-hosted compile to link libc") orelse (mode != .Debug);
 
-    const depsModule = b.createModule(.{ .root_source_file = .{ .path = "deps/lib.zig" } });
+    const depsModule = b.createModule(.{ .root_source_file = b.path("deps/lib.zig") });
     const zccModule = b.addModule("zcc", .{
-        .root_source_file = .{ .path = "src/zcc.zig" },
+        .root_source_file = b.path("src/zcc.zig"),
         .imports = &.{.{
             .name = "deps",
             .module = depsModule,
@@ -18,7 +18,7 @@ pub fn build(b: *std.Build) !void {
 
     const exe = b.addExecutable(.{
         .name = "Zcc",
-        .root_source_file = .{ .path = "src/main.zig" },
+        .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = .Debug,
     });
@@ -43,7 +43,7 @@ pub fn build(b: *std.Build) !void {
     test_step.dependOn(&exe.step);
 
     const unit_tests = b.addTest(.{
-        .root_source_file = .{ .path = "src/main.zig" },
+        .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = mode,
     });
@@ -53,7 +53,7 @@ pub fn build(b: *std.Build) !void {
 
     const integration_tests = b.addExecutable(.{
         .name = "test-runner",
-        .root_source_file = .{ .path = "test/test_runner.zig" },
+        .root_source_file = b.path("test/test_runner.zig"),
         .target = target,
         .optimize = mode,
     });
@@ -68,7 +68,7 @@ pub fn build(b: *std.Build) !void {
 
     const record_tests = b.addExecutable(.{
         .name = "record-runner",
-        .root_source_file = .{ .path = "test/record_runner.zig" },
+        .root_source_file = b.path("test/record_runner.zig"),
         .optimize = mode,
         .target = target,
     });
