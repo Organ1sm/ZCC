@@ -38,15 +38,8 @@ pub fn validateParam(d: DeclSpec, p: *Parser, ty: *Type) Error!void {
 
 pub fn validateFnDef(d: DeclSpec, p: *Parser) Error!AstTag {
     switch (d.storageClass) {
-        .none, //
-        .@"extern",
-        .static,
-        => {},
-
-        .auto, //
-        .register,
-        .typedef,
-        => |index| try p.errToken(.illegal_storage_on_func, index),
+        .none, .@"extern", .static => {},
+        .auto, .register, .typedef => |index| try p.errToken(.illegal_storage_on_func, index),
     }
 
     if (d.threadLocal) |tokenIdx|
@@ -57,15 +50,10 @@ pub fn validateFnDef(d: DeclSpec, p: *Parser) Error!AstTag {
 
     const isStatic = d.storageClass == .static;
     const isInline = d.@"inline" != null;
-
     if (isStatic) {
-        if (isInline)
-            return AstTag.InlineStaticFnDef;
-        return AstTag.StaticFnDef;
+        return if (isInline) AstTag.InlineStaticFnDef else AstTag.StaticFnDef;
     } else {
-        if (isInline)
-            return AstTag.InlineFnDef;
-        return AstTag.FnDef;
+        return if (isInline) AstTag.InlineFnDef else AstTag.FnDef;
     }
 }
 
@@ -73,15 +61,10 @@ pub fn validate(d: DeclSpec, p: *Parser, ty: *Type, hasInit: bool) Error!AstTag 
     const isStatic = d.storageClass == .static;
     if (ty.isFunc() and d.storageClass != .typedef) {
         switch (d.storageClass) {
-            .none, //
-            .@"extern",
-            => {},
+            .none, .@"extern" => {},
             .static => |tokenIdx| if (p.func.type != null) try p.errToken(.static_func_not_global, tokenIdx),
             .typedef => unreachable,
-
-            .auto, //
-            .register,
-            => |tokenIndex| try p.errToken(.illegal_storage_on_func, tokenIndex),
+            .auto, .register => |tokenIndex| try p.errToken(.illegal_storage_on_func, tokenIndex),
         }
 
         if (d.threadLocal) |tokenIndex|
@@ -91,36 +74,29 @@ pub fn validate(d: DeclSpec, p: *Parser, ty: *Type, hasInit: bool) Error!AstTag 
             try p.errToken(.illegal_storage_on_func, tokenIdx);
 
         const isInline = d.@"inline" != null;
-
-        if (isStatic) {
-            if (isInline)
-                return AstTag.InlineStaticFnProto;
-            return AstTag.StaticFnProto;
-        } else {
-            if (isInline)
-                return AstTag.InlineFnProto;
-            return AstTag.FnProto;
-        }
+        if (isStatic)
+            return if (isInline) AstTag.InlineStaticFnProto else AstTag.StaticFnProto
+        else
+            return if (isInline) AstTag.InlineFnProto else AstTag.FnProto;
     } else {
         if (d.@"inline") |tokenIndex|
             try p.errStr(.func_spec_non_func, tokenIndex, "inline");
+
         if (d.noreturn) |tokenIndex|
             try p.errStr(.func_spec_non_func, tokenIndex, "_Noreturn");
+
         switch (d.storageClass) {
             .auto, .register => if (p.func.type == null) try p.err(.illegal_storage_on_global),
             .typedef => return AstTag.TypeDef,
             else => {},
         }
 
-        ty.qual.register = d.storageClass == .register;
+        ty.qual.register = (d.storageClass == .register);
 
         const isExtern = d.storageClass == .@"extern" and !hasInit;
         if (d.threadLocal != null) {
-            if (isStatic)
-                return AstTag.ThreadlocalStaticVar;
-            if (isExtern)
-                return AstTag.ThreadlocalExternVar;
-
+            if (isStatic) return AstTag.ThreadlocalStaticVar;
+            if (isExtern) return AstTag.ThreadlocalExternVar;
             return AstTag.ThreadlocalVar;
         } else {
             if (isStatic) return AstTag.StaticVar;

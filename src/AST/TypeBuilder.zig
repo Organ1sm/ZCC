@@ -528,7 +528,6 @@ pub fn finish(b: @This(), p: *Parser) Parser.Error!Type {
         try p.errToken(.complex_int, b.complexToken.?);
 
     try b.qual.finish(p, &ty);
-
     return ty;
 }
 

@@ -159,12 +159,11 @@ pub fn adjustCondExprPtrs(a: *Result, tok: TokenIndex, b: *Result, p: *Parser) !
     if (!pointersCompatible or hasVoidStarBranch) {
         if (!pointersCompatible)
             try p.errStr(.pointer_mismatch, tok, try p.typePairStrExtra(a.ty, " and ", b.ty));
-
         adjustedElemType.* = Type.Void;
     }
-    if (pointersCompatible) {
+
+    if (pointersCompatible)
         adjustedElemType.qual = aElem.qual.mergeCVQualifiers(bElem.qual);
-    }
 
     if (!adjustedElemType.eql(aElem, p.comp, true)) {
         a.ty = .{
@@ -558,17 +557,17 @@ pub fn floatCast(res: *Result, p: *Parser, floatType: Type) Error!void {
         }
     } else if (res.ty.isInt()) {
         res.value.intToFloat(res.ty, floatType, p.comp);
-        const old_real = res.ty.isReal();
-        const new_real = floatType.isReal();
-        if (old_real and new_real) {
+        const oldReal = res.ty.isReal();
+        const newReal = floatType.isReal();
+        if (oldReal and newReal) {
             res.ty = floatType;
             try res.implicitCast(p, .IntToFloat);
-        } else if (old_real) {
+        } else if (oldReal) {
             res.ty = floatType.makeReal();
             try res.implicitCast(p, .IntToFloat);
             res.ty = floatType;
             try res.implicitCast(p, .RealToComplexFloat);
-        } else if (new_real) {
+        } else if (newReal) {
             res.ty = res.ty.makeReal();
             try res.implicitCast(p, .ComplexIntToReal);
             res.ty = floatType;

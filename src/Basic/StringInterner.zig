@@ -75,9 +75,10 @@ pub fn getSlowTypeMapper(self: *const StringInterner) TypeMapper {
 pub fn getFastTypeMapper(self: *const StringInterner, allocator: mem.Allocator) !TypeMapper {
     var strings = try allocator.alloc([]const u8, @intFromEnum(self.nextId));
     var it = self.stringTable.iterator();
+
     strings[0] = "";
-    while (it.next()) |entry| {
+    while (it.next()) |entry|
         strings[@intFromEnum(entry.value_ptr.*)] = entry.key_ptr.*;
-    }
+
     return TypeMapper{ .data = .{ .fast = strings } };
 }

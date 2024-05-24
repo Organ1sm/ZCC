@@ -293,20 +293,18 @@ const SysVContext = struct {
         // field. See test case 0067.
         const attrPacked = self.attrPacked or isPacked(fieldAttrs);
         const hasPackingAnnotation = attrPacked or self.maxFieldAlignBits != null;
-
         const annotationAlignment: u32 = if (Type.annotationAlignment(self.comp, fieldAttrs)) |anno| anno * BITS_PER_BYTE else 1;
-
         const firstUnusedBit: u64 = if (self.isUnion) 0 else self.sizeBits;
-        var fieldAlignBits: u64 = 1;
 
+        var fieldAlignBits: u64 = 1;
         if (bitWidth == 0) {
             fieldAlignBits = @max(tyFieldAlignBits, annotationAlignment);
         } else if (self.comp.langOpts.emulate == .gcc) {
             // On GCC, the field alignment is at least the alignment requested by annotations
             // except as restricted by #pragma pack. See test case 0083.
             fieldAlignBits = annotationAlignment;
-            if (self.maxFieldAlignBits) |max_bits|
-                fieldAlignBits = @min(annotationAlignment, max_bits);
+            if (self.maxFieldAlignBits) |maxBits|
+                fieldAlignBits = @min(annotationAlignment, maxBits);
 
             // On GCC, if there are no packing annotations and
             // - the field would otherwise start at an offset such that it would cross a
@@ -333,7 +331,6 @@ const SysVContext = struct {
             // it is aligned to the type's field alignment. See test case 0083.
             if (!hasPackingAnnotation) {
                 const doesFieldCrossBoundary = firstUnusedBit % tyFieldAlignBits + bitWidth > tySizeBits;
-
                 if (doesFieldCrossBoundary)
                     fieldAlignBits = @max(fieldAlignBits, tyFieldAlignBits);
             }
@@ -409,9 +406,9 @@ const MsvcContext = struct {
         // The required alignment can be increased by adding a __declspec(align)
         // annotation. See test case 0023.
         var mustAlign: u29 = BITS_PER_BYTE;
-        if (ty.requestedAlignment(comp)) |req_align| {
-            mustAlign = req_align * BITS_PER_BYTE;
-        }
+        if (ty.requestedAlignment(comp)) |reqAlign|
+            mustAlign = reqAlign * BITS_PER_BYTE;
+
         return MsvcContext{
             .reqAlignBits = mustAlign,
             .pointerAlignBits = mustAlign,
@@ -460,6 +457,7 @@ const MsvcContext = struct {
             // pack(1) had been applied only to this field. See test case 0057.
             fieldAlignBits = BITS_PER_BYTE;
         }
+
         // __attribute__((packed)) on a field is a clang extension. It behaves as if #pragma
         // pack(1) had been applied only to this field. See test case 0057.
         fieldAlignBits = @max(fieldAlignBits, reqAlign);
@@ -513,6 +511,7 @@ const MsvcContext = struct {
                 @min(maxFieldAlign, fieldAlign)
             else
                 fieldAlign;
+
             self.pointerAlignBits = @max(self.pointerAlignBits, pAlign);
             self.fieldAlignBits = @max(self.fieldAlignBits, fieldAlign);
 
@@ -554,11 +553,10 @@ const MsvcContext = struct {
             // - its field alignment if it contains at least one non-bitfield
             // - 4 bytes if it contains only bitfields
             // See test case 0025.
-            if (self.containsNonBitField) {
-                self.sizeBits = self.fieldAlignBits;
-            } else {
+            if (self.containsNonBitField)
+                self.sizeBits = self.fieldAlignBits
+            else
                 self.sizeBits = 4 * BITS_PER_BYTE;
-            }
         } else {
             // If all fields in a struct have size 0, its size is set to its required alignment
             // but at least to 4 bytes. See test case 0026.

@@ -137,9 +137,9 @@ fn genType(c: *CodeGen, baseTy: Type) !Interner.Ref {
             defer c.recordElemBuffer.items.len = elemBufferTop;
 
             for (ty.data.record.fields) |field| {
-                if (!field.isRegularField()) {
+                if (!field.isRegularField())
                     return c.comp.diag.fatalNoSrc("TODO lower struct bitfields", .{});
-                }
+
                 // TODO handle padding bits
                 const fieldRef = try c.genType(field.ty);
                 try c.recordElemBuffer.append(c.builder.gpa, fieldRef);

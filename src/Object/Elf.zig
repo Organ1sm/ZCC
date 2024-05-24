@@ -49,7 +49,6 @@ pub fn create(comp: *Compilation) !*Object {
         .obj = .{ .format = .elf, .comp = comp },
         .arena = std.heap.ArenaAllocator.init(comp.gpa),
     };
-
     return &elf.obj;
 }
 

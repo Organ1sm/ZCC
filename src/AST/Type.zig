@@ -67,9 +67,11 @@ pub const Qualifiers = packed struct {
     // for function parameters only, stored here since it fits in the padding
     register: bool = false,
     restrict: bool = false,
+
     pub fn any(quals: Qualifiers) bool {
         return quals.@"const" or quals.restrict or quals.@"volatile" or quals.atomic;
     }
+
     pub fn dump(quals: Qualifiers, w: anytype) !void {
         if (quals.@"const") try w.writeAll("const ");
         if (quals.atomic) try w.writeAll("_Atomic ");
@@ -121,9 +123,8 @@ pub const Qualifiers = packed struct {
         restrict: ?TokenIndex = null,
 
         pub fn finish(b: Qualifiers.Builder, p: *Parser, ty: *Type) !void {
-            if (!ty.is(.Pointer) and b.restrict != null) {
+            if (!ty.is(.Pointer) and b.restrict != null)
                 try p.errStr(.restrict_non_pointer, b.restrict.?, try p.typeStr(ty.*));
-            }
 
             // validate atomic
             if (b.atomic) |some| {
@@ -238,11 +239,9 @@ pub const FieldLayout = struct {
     /// there should be no way to observe these values. If it is used, this value will
     /// maximize the chance that a safety-checked overflow will occur.
     const INVALID = std.math.maxInt(u64);
-
     /// The offset of the struct, in bits, from the start of the struct.
     offsetBits: u64 = INVALID,
     /// The size, in bits, of the field.
-    ///
     /// For bit-fields, this is the width of the field.
     sizeBits: u64 = INVALID,
 
@@ -755,7 +754,6 @@ pub fn canonicalize(ty: Type, qualHandling: enum { standard, preserve_quals }) T
         cur.qual = .{}
     else
         cur.qual = qual;
-
     return cur;
 }
 
@@ -846,6 +844,7 @@ pub fn arrayLen(ty: Type) ?u64 {
         .TypeofType, .DecayedTypeofType => ty.data.subType.arrayLen(),
         .TypeofExpr, .DecayedTypeofExpr => ty.data.expr.ty.arrayLen(),
         .Attributed => ty.data.attributed.base.arrayLen(),
+
         else => null,
     };
 }
@@ -986,14 +985,7 @@ pub fn minInt(ty: Type, comp: *const Compilation) i64 {
 /// Check if the given type `ty` has a field with the specified `name`
 pub fn hasField(ty: Type, name: StringId) bool {
     switch (ty.specifier) {
-        .Struct => {
-            std.debug.assert(!ty.data.record.isIncomplete());
-            for (ty.data.record.fields) |f| {
-                if (f.isAnonymousRecord() and f.ty.hasField(name)) return true;
-                if (name == f.name) return true;
-            }
-        },
-        .Union => {
+        .Struct, .Union => {
             std.debug.assert(!ty.data.record.isIncomplete());
             for (ty.data.record.fields) |f| {
                 if (f.isAnonymousRecord() and f.ty.hasField(name)) return true;
@@ -1146,14 +1138,11 @@ pub fn alignof(ty: Type, comp: *const Compilation) u29 {
     // layout has already accounted for requested alignment
     if (ty.requestedAlignment(comp)) |requested| {
         // gcc does not respect alignment on enums
-        if (ty.get(.Enum)) |ty_enum| {
-            if (comp.langOpts.emulate == .gcc) {
-                return ty_enum.alignof(comp);
-            }
+        if (ty.get(.Enum)) |tyEnum| {
+            if (comp.langOpts.emulate == .gcc)
+                return tyEnum.alignof(comp);
         } else if (ty.getRecord()) |rec| {
-            if (ty.hasIncompleteSize())
-                return 0;
-
+            if (ty.hasIncompleteSize()) return 0;
             const computed: u29 = @intCast(@divExact(rec.typeLayout.fieldAlignmentBits, 8));
             return @max(requested, computed);
         } else if (comp.langOpts.emulate == .msvc) {
@@ -1292,45 +1281,45 @@ pub fn annotationAlignment(comp: *const Compilation, attrs: ?[]const Attribute) 
         else
             Target.defaultAlignment(comp.target);
 
-        if (maxRequested == null or maxRequested.? < requested) {
+        if (maxRequested == null or maxRequested.? < requested)
             maxRequested = requested;
-        }
     }
 
     return maxRequested;
 }
 
-pub fn eql(aParam: Type, bParam: Type, comp: *const Compilation, checkQualifiers: bool) bool {
-    const a = aParam.canonicalize(.standard);
-    const b = bParam.canonicalize(.standard);
+pub fn eql(lhsParam: Type, rhsParam: Type, comp: *const Compilation, checkQualifiers: bool) bool {
+    const lhs = lhsParam.canonicalize(.standard);
+    const rhs = rhsParam.canonicalize(.standard);
 
-    if (a.alignof(comp) != b.alignof(comp))
+    if (lhs.alignof(comp) != rhs.alignof(comp))
         return false;
 
-    if (a.isPointer()) {
-        if (!b.isPointer()) return false;
-    } else if (a.isFunc()) {
-        if (!b.isFunc()) return false;
-    } else if (a.isArray()) {
-        if (!b.isArray()) return false;
-    } else if (a.specifier != b.specifier) return false;
+    if (lhs.isPointer()) {
+        if (!rhs.isPointer()) return false;
+    } else if (lhs.isFunc()) {
+        if (!rhs.isFunc()) return false;
+    } else if (lhs.isArray()) {
+        if (!rhs.isArray()) return false;
+    } else if (lhs.specifier != rhs.specifier)
+        return false;
 
-    if (a.qual.atomic != b.qual.atomic)
+    if (lhs.qual.atomic != rhs.qual.atomic)
         return false;
 
     if (checkQualifiers) {
-        if (a.qual.@"const" != b.qual.@"const") return false;
-        if (a.qual.@"volatile" != b.qual.@"volatile") return false;
+        if (lhs.qual.@"const" != rhs.qual.@"const") return false;
+        if (lhs.qual.@"volatile" != rhs.qual.@"volatile") return false;
     }
 
-    switch (a.specifier) {
+    switch (lhs.specifier) {
         .Pointer,
         .DecayedArray,
         .DecayedIncompleteArray,
         .DecayedVariableLenArray,
         .DecayedStaticArray,
         .DecayedUnspecifiedVariableLenArray,
-        => if (!aParam.getElemType().eql(bParam.getElemType(), comp, checkQualifiers))
+        => if (!lhsParam.getElemType().eql(rhsParam.getElemType(), comp, checkQualifiers))
             return false,
 
         .Func,
@@ -1338,13 +1327,14 @@ pub fn eql(aParam: Type, bParam: Type, comp: *const Compilation, checkQualifiers
         .OldStyleFunc,
         => {
             // TODO validate this
-            if (a.data.func.params.len != b.data.func.params.len) return false;
-
-            // return type cannot have qualifiers
-            if (!a.data.func.returnType.eql(b.data.func.returnType, comp, false))
+            if (lhs.data.func.params.len != rhs.data.func.params.len)
                 return false;
 
-            for (a.data.func.params, b.data.func.params) |param, bQual| {
+            // return type cannot have qualifiers
+            if (!lhs.data.func.returnType.eql(rhs.data.func.returnType, comp, false))
+                return false;
+
+            for (lhs.data.func.params, rhs.data.func.params) |param, bQual| {
                 var aUnqual = param.ty;
                 aUnqual.qual.@"const" = false;
                 aUnqual.qual.@"volatile" = false;
@@ -1363,16 +1353,16 @@ pub fn eql(aParam: Type, bParam: Type, comp: *const Compilation, checkQualifiers
         .IncompleteArray,
         .Vector,
         => {
-            if (!std.meta.eql(a.arrayLen(), b.arrayLen()))
+            if (!std.meta.eql(lhs.arrayLen(), rhs.arrayLen()))
                 return false;
-            if (!a.getElemType().eql(b.getElemType(), comp, checkQualifiers))
+            if (!lhs.getElemType().eql(rhs.getElemType(), comp, checkQualifiers))
                 return false;
         },
 
-        .VariableLenArray => if (!a.getElemType().eql(b.getElemType(), comp, checkQualifiers)) return false,
+        .VariableLenArray => if (!lhs.getElemType().eql(rhs.getElemType(), comp, checkQualifiers)) return false,
 
-        .Union, .Struct => if (a.data.record != b.data.record) return false,
-        .Enum => if (a.data.@"enum" != b.data.@"enum") return false,
+        .Union, .Struct => if (lhs.data.record != rhs.data.record) return false,
+        .Enum => if (lhs.data.@"enum" != rhs.data.@"enum") return false,
 
         else => {},
     }
@@ -1428,6 +1418,7 @@ pub fn makeReal(ty: Type) Type {
             base.specifier = @enumFromInt(@intFromEnum(base.specifier) - 13);
             return base;
         },
+
         else => return ty,
     }
 }
@@ -1925,9 +1916,8 @@ pub fn dump(ty: Type, mapper: StringInterner.TypeMapper, langOpts: LangOpts, w: 
 
 fn dumpEnum(@"enum": *Enum, mapper: StringInterner.TypeMapper, w: anytype) @TypeOf(w).Error!void {
     try w.writeAll(" {");
-    for (@"enum".fields) |field| {
+    for (@"enum".fields) |field|
         try w.print(" {s} = {d},", .{ mapper.lookup(field.name), field.value });
-    }
     try w.writeAll(" }");
 }
 

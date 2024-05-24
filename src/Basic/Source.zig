@@ -41,9 +41,8 @@ spliceLocs: []const u32,
 
 /// Todo: binary search instead of scanning entire `spliceLocs`.
 pub fn numSplicesBefore(source: Source, byteOffset: u32) u32 {
-    for (source.spliceLocs, 0..) |spliceOffset, i| {
+    for (source.spliceLocs, 0..) |spliceOffset, i|
         if (spliceOffset > byteOffset) return @intCast(i);
-    }
     return @intCast(source.spliceLocs.len);
 }
 
@@ -171,7 +170,6 @@ fn offsetOfInvalidUtf8(buffer: []const u8) ?u32 {
 }
 
 pub fn checkUtf8(source: *Source) void {
-    if (offsetOfInvalidUtf8(source.buffer)) |offset| {
+    if (offsetOfInvalidUtf8(source.buffer)) |offset|
         source.invalidUTF8Loc = Location{ .id = source.id, .byteOffset = offset };
-    }
 }

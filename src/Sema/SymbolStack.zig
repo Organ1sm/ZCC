@@ -97,7 +97,12 @@ pub fn popScope(self: *SymbolStack) void {
 /// @param nameToken   The index of the token representing the symbol's name.
 /// @param noTypeYet   A boolean indicating whether the type should not have been defined yet.
 /// @return            A nullable Symbol if found, or null if not found or if it is a definition or declaration.
-pub fn findTypedef(self: *SymbolStack, name: StringId, nameToken: TokenIndex, noTypeYet: bool) !?Symbol {
+pub fn findTypedef(
+    self: *SymbolStack,
+    name: StringId,
+    nameToken: TokenIndex,
+    noTypeYet: bool,
+) !?Symbol {
     const prev = self.lookup(name, .vars) orelse self.lookup(name, .tags) orelse return null;
     switch (prev.kind) {
         .typedef => return prev,

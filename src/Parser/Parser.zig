@@ -940,9 +940,9 @@ fn parseDeclaration(p: *Parser) Error!bool {
         const func = p.func;
         defer p.func = func;
         p.func = .{ .type = initDeclarator.d.type, .name = initDeclarator.d.name };
-        if (internedDeclaratorName == p.stringsIds.mainId and !initDeclarator.d.type.getReturnType().is(.Int)) {
+        if (internedDeclaratorName == p.stringsIds.mainId and
+            !initDeclarator.d.type.getReturnType().is(.Int))
             try p.errToken(.main_return_type, initDeclarator.d.name);
-        }
 
         try p.symStack.pushScope();
         defer p.symStack.popScope();
@@ -1206,7 +1206,7 @@ fn parseStaticAssert(p: *Parser) Error!bool {
 }
 
 /// typeof
-///   : `typeof` '(' typeName ')'
+///   : `typeof` '(' type-name ')'
 ///   | `typeof` '(' expr ')'
 fn typeof(p: *Parser) Error!?Type {
     switch (p.getCurrToken()) {
@@ -1224,10 +1224,7 @@ fn typeof(p: *Parser) Error!?Type {
             .specifier = ty.specifier,
         };
 
-        return Type{
-            .data = .{ .subType = typeofType },
-            .specifier = .TypeofType,
-        };
+        return Type{ .data = .{ .subType = typeofType }, .specifier = .TypeofType };
     }
 
     const typeofExpr = try p.parseNoEval(parseExpr);
@@ -1673,7 +1670,7 @@ fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec, attrBufferTop: usize) Er
 ///  | `signed`
 ///  | `unsigned`
 ///  | `bool`
-///  | `KeywordC23Bool`
+///  | `keyword-c23-Bool`
 ///  | `_Complex`
 ///  | `_BitInt`  '(' integer-const-expression ')'
 ///  | atomic-type-specifier
@@ -2338,11 +2335,13 @@ fn parseEnumSpec(p: *Parser) Error!*Type.Enum {
                 .type = ty,
                 .value = .{},
             });
-            try p.declBuffer.append(try p.addNode(.{
+
+            const node = try p.addNode(.{
                 .tag = .EnumForwardDecl,
                 .type = ty,
                 .data = undefined,
-            }));
+            });
+            try p.declBuffer.append(node);
             return enumType;
         }
     };
@@ -2484,11 +2483,8 @@ const Enumerator = struct {
 
     fn init(fixedTy: ?Type) Enumerator {
         return .{
-            .res = .{
-                .ty = fixedTy orelse Type.Int,
-                .value = .{ .tag = .unavailable },
-            },
-            .fixed = fixedTy != null,
+            .res = .{ .ty = fixedTy orelse Type.Int, .value = .{ .tag = .unavailable } },
+            .fixed = (fixedTy != null),
         };
     }
 
@@ -2612,28 +2608,21 @@ fn enumerator(p: *Parser, e: *Enumerator) Error!?EnumFieldAndNode {
     var res = e.res;
     res.ty = try Attribute.applyEnumeratorAttributes(p, res.ty, attrBufferTop);
 
-    if (res.ty.isUnsignedInt(p.comp) or res.value.compare(.gte, Value.int(0), res.ty, p.comp)) {
-        e.numPositiveBits = @max(e.numPositiveBits, res.value.minUnsignedBits(res.ty, p.comp));
-    } else {
+    if (res.ty.isUnsignedInt(p.comp) or res.value.compare(.gte, Value.int(0), res.ty, p.comp))
+        e.numPositiveBits = @max(e.numPositiveBits, res.value.minUnsignedBits(res.ty, p.comp))
+    else
         e.numNegativeBits = @max(e.numNegativeBits, res.value.minSignedBits(res.ty, p.comp));
-    }
 
     if (errStart == p.comp.diag.list.items.len) {
         // only do these warnings if we didn't already warn about overflow or non-representable values
         if (e.res.value.compare(.lt, Value.int(0), e.res.ty, p.comp)) {
             const value = e.res.value.getInt(i64);
-            if (value < Type.Int.minInt(p.comp)) {
-                try p.errExtra(.enumerator_too_small, nameToken, .{
-                    .signed = value,
-                });
-            }
+            if (value < Type.Int.minInt(p.comp))
+                try p.errExtra(.enumerator_too_small, nameToken, .{ .signed = value });
         } else {
             const value = e.res.value.getInt(u64);
-            if (value > Type.Int.maxInt(p.comp)) {
-                try p.errExtra(.enumerator_too_large, nameToken, .{
-                    .unsigned = value,
-                });
-            }
+            if (value > Type.Int.maxInt(p.comp))
+                try p.errExtra(.enumerator_too_large, nameToken, .{ .unsigned = value });
         }
     }
 
