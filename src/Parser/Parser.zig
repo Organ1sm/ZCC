@@ -310,11 +310,10 @@ fn expectClosing(p: *Parser, opening: TokenIndex, id: TokenType) Error!void {
 }
 
 fn errOverflow(p: *Parser, op_tok: TokenIndex, res: Result) !void {
-    if (res.ty.isUnsignedInt(p.comp)) {
-        try p.errExtra(.overflow_unsigned, op_tok, .{ .unsigned = res.value.data.int });
-    } else {
+    if (res.ty.isUnsignedInt(p.comp))
+        try p.errExtra(.overflow_unsigned, op_tok, .{ .unsigned = res.value.data.int })
+    else
         try p.errExtra(.overflow_signed, op_tok, .{ .signed = res.value.signExtend(res.ty, p.comp) });
-    }
 }
 
 pub fn getTokenText(p: *Parser, index: TokenIndex) []const u8 {
@@ -337,16 +336,12 @@ pub fn errExpectedToken(p: *Parser, expected: TokenType, actual: TokenType) Erro
     switch (actual) {
         .Invalid => try p.errExtra(.expected_invalid, p.tokenIdx, .{ .expectedTokenId = expected }),
         .Eof => try p.errExtra(.expected_eof, p.tokenIdx, .{ .expectedTokenId = expected }),
-        else => try p.errExtra(
-            .expected_token,
-            p.tokenIdx,
-            .{
-                .tokenId = .{
-                    .expected = expected,
-                    .actual = actual,
-                },
+        else => try p.errExtra(.expected_token, p.tokenIdx, .{
+            .tokenId = .{
+                .expected = expected,
+                .actual = actual,
             },
-        ),
+        }),
     }
     return error.ParsingFailed;
 }
@@ -367,11 +362,7 @@ pub fn errExtra(p: *Parser, tag: Diagnostics.Tag, index: TokenIndex, extra: Diag
         loc.byteOffset += @intCast(p.getTokenText(index - 1).len);
     }
 
-    try p.comp.diag.add(.{
-        .tag = tag,
-        .loc = loc,
-        .extra = extra,
-    }, token.expansionSlice());
+    try p.comp.diag.add(.{ .tag = tag, .loc = loc, .extra = extra }, token.expansionSlice());
 }
 
 pub fn errToken(p: *Parser, tag: Diagnostics.Tag, index: TokenIndex) Compilation.Error!void {
@@ -1165,7 +1156,7 @@ fn parseStaticAssert(p: *Parser) Error!bool {
     }
 
     try res.boolCast(p, .{ .specifier = .Bool }, resToken);
-    if (res.value.tag == .unavailable) {
+    if (res.value.isUnavailable()) {
         if (!res.ty.isInvalid())
             try p.errToken(.static_assert_not_constant, resToken);
     } else {
@@ -1193,14 +1184,8 @@ fn parseStaticAssert(p: *Parser) Error!bool {
 
     const node = try p.addNode(.{
         .tag = .StaticAssert,
-        .data = .{
-            .binExpr = .{
-                .lhs = res.node,
-                .rhs = str.node,
-            },
-        },
+        .data = .{ .binExpr = .{ .lhs = res.node, .rhs = str.node } },
     });
-
     try p.declBuffer.append(node);
     return true;
 }
@@ -1351,18 +1336,14 @@ fn parseDeclSpec(p: *Parser) Error!?DeclSpec {
             },
 
             .KeywordInline, .KeywordGccInline1, .KeywordGccInline2 => {
-                if (d.@"inline" != null) {
+                if (d.@"inline" != null)
                     try p.errStr(.duplicate_declspec, p.tokenIdx, "inline");
-                }
-
                 d.@"inline" = p.tokenIdx;
             },
 
             .KeywordNoreturn => {
-                if (d.noreturn != null) {
+                if (d.noreturn != null)
                     try p.errStr(.duplicate_declspec, p.tokenIdx, "_Noreturn");
-                }
-
                 d.noreturn = p.tokenIdx;
             },
             else => break,
@@ -1435,11 +1416,9 @@ fn attribute(p: *Parser, kind: Attribute.Kind, namespace: ?[]const u8) Error!?Te
     }
 
     if (argIdx < requiredCount) {
-        try p.errExtra(
-            .attribute_not_enough_args,
-            nameToken,
-            .{ .attrArgCount = .{ .attribute = attr, .expected = requiredCount } },
-        );
+        try p.errExtra(.attribute_not_enough_args, nameToken, .{
+            .attrArgCount = .{ .attribute = attr, .expected = requiredCount },
+        });
         return error.ParsingFailed;
     }
     return TentativeAttribute{ .attr = .{ .tag = attr, .args = arguments, .syntax = kind.toSyntax() }, .tok = nameToken };
@@ -1855,7 +1834,7 @@ fn parseTypeSpec(p: *Parser, ty: *TypeBuilder) Error!bool {
                 try p.expectClosing(lparen, .RParen);
 
                 var bits: i16 = undefined;
-                if (res.value.tag == .unavailable) {
+                if (res.value.isUnavailable()) {
                     try p.errToken(.expected_integer_constant_expr, bitIntToken);
                     return error.ParsingFailed;
                 } else if (res.value.compare(.lte, Value.int(0), res.ty, p.comp)) {
@@ -2150,7 +2129,7 @@ fn parseRecordDeclarator(p: *Parser) Error!bool {
                 break :bits;
             }
 
-            if (res.value.tag == .unavailable) {
+            if (res.value.isUnavailable()) {
                 try p.errToken(.expected_integer_constant_expr, bitsToken);
                 break :bits;
             } else if (res.value.compare(.lt, Value.int(0), res.ty, p.comp)) {
@@ -2492,11 +2471,12 @@ const Enumerator = struct {
     fn incr(e: *Enumerator, p: *Parser, token: TokenIndex) !void {
         e.res.node = .none;
         const oldVal = e.res.value;
-        if (oldVal.tag == .unavailable) {
+        if (oldVal.isUnavailable()) {
             // First enumerator, set to 0 fits in all types.
             e.res.value = Value.int(0);
             return;
         }
+
         if (e.res.value.add(e.res.value, Value.int(1), e.res.ty, p.comp)) {
             const byteSize = e.res.ty.sizeof(p.comp).?;
             const bitSize: u8 = @intCast(if (e.res.ty.isUnsignedInt(p.comp)) byteSize * 8 else byteSize * 8 - 1);
@@ -2595,7 +2575,7 @@ fn enumerator(p: *Parser, e: *Enumerator) Error!?EnumFieldAndNode {
     const errStart = p.comp.diag.list.items.len;
     if (p.eat(.Equal)) |_| {
         const specified = try p.parseIntegerConstExpr(.GNUFoldingExtension);
-        if (specified.value.tag == .unavailable) {
+        if (specified.value.isUnavailable()) {
             try p.errToken(.enum_val_unavailable, nameToken + 2);
             try e.incr(p, nameToken);
         } else {
@@ -2859,7 +2839,7 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: Declarator
             return error.ParsingFailed;
         }
 
-        if (size.value.tag == .unavailable) {
+        if (size.value.isUnavailable()) {
             if (size.node != .none) {
                 try p.errToken(.vla, sizeToken);
                 if (p.func.type == null and kind != .param and p.record.kind == .Invalid)
@@ -3194,7 +3174,7 @@ pub fn initializerItem(p: *Parser, il: *InitList, initType: Type) Error!bool {
                 const indexRes = try p.parseIntegerConstExpr(.GNUFoldingExtension);
                 try p.expectClosing(lbr, .RBracket);
 
-                if (indexRes.value.tag == .unavailable) {
+                if (indexRes.value.isUnavailable()) {
                     try p.errToken(.expected_integer_constant_expr, exprToken);
                     return error.ParsingFailed;
                 } else if (indexRes.value.compare(.lt, indexRes.value.zero(), indexRes.ty, p.comp)) {
@@ -4183,10 +4163,10 @@ fn parseCaseStmt(p: *Parser, caseToken: u32) Error!?NodeIndex {
 
         const first = firstItem.value;
         const last = if (secondItem) |second| second.value else first;
-        if (first.tag == .unavailable) {
+        if (first.isUnavailable()) {
             try p.errToken(.case_val_unavailable, caseToken + 1);
             break :check;
-        } else if (last.tag == .unavailable) {
+        } else if (last.isUnavailable()) {
             try p.errToken(.case_val_unavailable, ellipsis + 1);
             break :check;
         } else if (last.compare(.lt, first, some.type, p.comp)) {
@@ -4596,7 +4576,7 @@ pub fn macroExpr(p: *Parser) Compilation.Error!bool {
         error.ParsingFailed => return false,
     };
 
-    if (res.value.tag == .unavailable) {
+    if (res.value.isUnavailable()) {
         try p.errToken(.expected_expr, p.tokenIdx);
         return false;
     }
@@ -4765,7 +4745,7 @@ fn constExpr(p: *Parser, declFolding: ConstDeclFoldingMode) Error!Result {
 
     const res = try p.parseCondExpr();
     try res.expect(p);
-    if (res.ty.isInvalid() or res.value.tag == .unavailable)
+    if (res.ty.isInvalid() or res.value.isUnavailable())
         return res;
 
     // saveValue sets val to unavailable
@@ -4795,7 +4775,7 @@ fn parseCondExpr(p: *Parser) Error!Result {
     // Depending on the value of the condition, avoid  evaluating unreachable
     var thenExpr = blk: {
         defer p.noEval = savedEval;
-        if (cond.value.tag != .unavailable and !cond.value.getBool())
+        if (!cond.value.isUnavailable() and !cond.value.getBool())
             p.noEval = true;
 
         break :blk try p.parseExpr();
@@ -4820,7 +4800,7 @@ fn parseCondExpr(p: *Parser) Error!Result {
 
     var elseExpr = blk: {
         defer p.noEval = savedEval;
-        if (cond.value.tag != .unavailable and cond.value.getBool())
+        if (!cond.value.isUnavailable() and cond.value.getBool())
             p.noEval = true;
 
         break :blk try p.parseCondExpr();
@@ -4829,7 +4809,7 @@ fn parseCondExpr(p: *Parser) Error!Result {
 
     _ = try thenExpr.adjustTypes(colon, &elseExpr, p, .conditional);
 
-    if (cond.value.tag != .unavailable) {
+    if (!cond.value.isUnavailable()) {
         cond.value = if (cond.value.getBool()) thenExpr.value else elseExpr.value;
     } else {
         try thenExpr.saveValue(p);
@@ -4855,7 +4835,7 @@ fn logicalOrExpr(p: *Parser) Error!Result {
     defer p.noEval = savedEval;
 
     while (p.eat(.PipePipe)) |token| {
-        if (lhs.value.tag != .unavailable and lhs.value.getBool())
+        if (!lhs.value.isUnavailable() and lhs.value.getBool())
             p.noEval = true;
 
         var rhs = try p.logicalAndExpr();
@@ -4882,7 +4862,7 @@ fn logicalAndExpr(p: *Parser) Error!Result {
     defer p.noEval = savedEval;
 
     while (p.eat(.AmpersandAmpersand)) |token| {
-        if (lhs.value.tag != .unavailable and !lhs.value.getBool())
+        if (!lhs.value.isUnavailable() and !lhs.value.getBool())
             p.noEval = true;
 
         var rhs = try p.parseOrExpr();
@@ -5089,11 +5069,10 @@ fn parseMulExpr(p: *Parser) Error!Result {
         if (rhs.value.isZero() and mul == null and !p.noEval and lhs.ty.isInt() and rhs.ty.isInt()) {
             const errTag: Diagnostics.Tag = if (p.inMacro) .division_by_zero_macro else .division_by_zero;
             lhs.value.tag = .unavailable;
-            if (div != null) {
-                try p.errStr(errTag, div.?, "division");
-            } else {
+            if (div != null)
+                try p.errStr(errTag, div.?, "division")
+            else
                 try p.errStr(errTag, percent.?, "remainder");
-            }
 
             if (p.inMacro)
                 return error.ParsingFailed;
@@ -5107,7 +5086,7 @@ fn parseMulExpr(p: *Parser) Error!Result {
                 lhs.value = Value.div(lhs.value, rhs.value, lhs.ty, p.comp);
             } else {
                 var res = Value.rem(lhs.value, rhs.value, lhs.ty, p.comp);
-                if (res.tag == .unavailable) {
+                if (res.isUnavailable()) {
                     if (p.inMacro) {
                         // match clang behavior by defining invalid remainder to be zero in macros
                         res = Value.int(0);
@@ -5219,7 +5198,7 @@ fn parseBuiltinChooseExpr(p: *Parser) Error!Result {
     const lp = try p.expectToken(.LParen);
     const condToken = p.tokenIdx;
     var cond = try p.parseIntegerConstExpr(.NoConstDeclFolding);
-    if (cond.value.tag == .unavailable) {
+    if (cond.value.isUnavailable()) {
         try p.errToken(.builtin_choose_cond, condToken);
         return error.ParsingFailed;
     }
@@ -6098,7 +6077,7 @@ fn parseCallExpr(p: *Parser, lhs: Result) Error!Result {
 }
 
 fn checkArrayBounds(p: *Parser, index: Result, array: Result, token: TokenIndex) !void {
-    if (index.value.tag == .unavailable) return;
+    if (index.value.isUnavailable()) return;
     const arrayLen = array.ty.arrayLen() orelse return;
     if (arrayLen == 0) return;
 
@@ -6675,11 +6654,10 @@ pub fn parseNumberToken(p: *Parser, tokenIdx: TokenIndex) !Result {
     const suffixStr = afterFrac[exponent.len..];
     const isFloat = (exponent.len > 0 or frac.len > 0);
     const suffix = NumberSuffix.fromString(suffixStr, if (isFloat) .float else .int) orelse {
-        if (isFloat) {
-            try p.errStr(.invalid_float_suffix, tokenIdx, suffixStr);
-        } else {
+        if (isFloat)
+            try p.errStr(.invalid_float_suffix, tokenIdx, suffixStr)
+        else
             try p.errStr(.invalid_int_suffix, tokenIdx, suffixStr);
-        }
         return error.ParsingFailed;
     };
 

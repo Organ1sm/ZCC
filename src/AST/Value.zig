@@ -27,6 +27,10 @@ const Tag = enum {
     bytes, // For raw byte data.
 };
 
+pub fn isUnavailable(v: Value) bool {
+    return v.tag == .unavailable;
+}
+
 pub fn isNumeric(v: Value) bool {
     return switch (v.tag) {
         .int, .float => true,
@@ -235,7 +239,7 @@ fn floatToIntExtra(comptime FloatTy: type, intTySignedness: std.builtin.Signedne
 /// `.unavailable` value remains unchanged.
 pub fn floatToInt(v: *Value, oldTy: Type, newTy: Type, comp: *Compilation) FloatToIntChangeKind {
     assert(oldTy.isFloat());
-    if (v.tag == .unavailable)
+    if (v.isUnavailable())
         return FloatToIntChangeKind.none;
 
     if (newTy.is(.Bool)) {
@@ -278,7 +282,8 @@ pub fn floatToInt(v: *Value, oldTy: Type, newTy: Type, comp: *Compilation) Float
 /// `.unavailable` value remains unchanged.
 pub fn intToFloat(v: *Value, oldTy: Type, newTy: Type, comp: *Compilation) void {
     assert(oldTy.isInt());
-    if (v.tag == .unavailable) return;
+    if (v.isUnavailable()) return;
+
     if (!newTy.isReal() or newTy.sizeof(comp).? > 8) {
         v.tag = .unavailable;
     } else if (oldTy.isUnsignedInt(comp)) {
@@ -294,7 +299,7 @@ pub fn intToFloat(v: *Value, oldTy: Type, newTy: Type, comp: *Compilation) void 
 /// Truncates or extends bits based on type.
 /// oldTy is only used for size.
 pub fn intCast(v: *Value, oldTy: Type, newTy: Type, comp: *Compilation) void {
-    if (v.tag == .unavailable) return;
+    if (v.isUnavailable()) return;
 
     if (newTy.is(.Bool))
         return v.toBool();
@@ -315,7 +320,8 @@ pub fn intCast(v: *Value, oldTy: Type, newTy: Type, comp: *Compilation) void {
 /// `.unavailable` value remains unchanged.
 pub fn floatCast(v: *Value, oldTy: Type, newTy: Type, comp: *Compilation) void {
     assert(oldTy.isFloat() and newTy.isFloat());
-    if (v.tag == .unavailable) return;
+    if (v.isUnavailable()) return;
+
     const size = newTy.sizeof(comp).?;
     if (!newTy.isReal() or size > 8) {
         v.tag = .unavailable;
@@ -326,7 +332,7 @@ pub fn floatCast(v: *Value, oldTy: Type, newTy: Type, comp: *Compilation) void {
 
 /// Truncates data.int to one bit
 pub fn toBool(v: *Value) void {
-    if (v.tag == .unavailable) return;
+    if (v.isUnavailable()) return;
     const res = v.getBool();
     v.* = int(@intFromBool(res));
 }
@@ -353,6 +359,16 @@ pub fn getBool(v: Value) bool {
     };
 }
 
+/// Returns the integer value of `v` as type `T`.
+///
+/// If `T` is `u64`, this function simply returns the stored integer value.
+/// If `T` is an unsigned integer type, this function truncates the stored value to the target type.
+/// If `T` is a signed integer type, this function sign-extends the stored value to the target type.
+///
+/// @param v  The `Value` to get the integer value from.
+/// @param T  The type to cast the value to.
+///
+/// @return   The value of `v` as type `T`.
 pub fn getInt(v: Value, comptime T: type) T {
     if (T == u64) return v.data.int;
     return if (@typeInfo(T).Int.signedness == .unsigned)

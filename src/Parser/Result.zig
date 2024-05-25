@@ -18,7 +18,7 @@ value: Value = .{},
 // validate result is valid
 pub fn expect(res: Result, p: *Parser) Error!void {
     if (p.inMacro) {
-        if (res.value.tag == .unavailable) {
+        if (res.value.isUnavailable()) {
             try p.errToken(.expected_expr, p.tokenIdx);
             return error.ParsingFailed;
         }
@@ -33,7 +33,7 @@ pub fn expect(res: Result, p: *Parser) Error!void {
 
 pub fn empty(res: Result, p: *Parser) bool {
     if (p.inMacro)
-        return res.value.tag == .unavailable;
+        return res.value.isUnavailable();
     return res.node == .none;
 }
 
@@ -721,31 +721,33 @@ fn floatConversion(
     return false;
 }
 
-fn invalidBinTy(a: *Result, tok: TokenIndex, b: *Result, p: *Parser) Error!bool {
-    try p.errStr(.invalid_bin_types, tok, try p.typePairStr(a.ty, b.ty));
-    a.value.tag = .unavailable;
-    a.value.tag = .unavailable;
-    a.ty = Type.Invalid;
+fn invalidBinTy(lhs: *Result, tok: TokenIndex, rhs: *Result, p: *Parser) Error!bool {
+    try p.errStr(.invalid_bin_types, tok, try p.typePairStr(lhs.ty, rhs.ty));
+    lhs.value.tag = .unavailable;
+    lhs.value.tag = .unavailable;
+    lhs.ty = Type.Invalid;
     return false;
 }
 
-fn shouldEval(a: *Result, b: *Result, p: *Parser) Error!bool {
+fn shouldEval(lhs: *Result, rhs: *Result, p: *Parser) Error!bool {
     if (p.noEval) return false;
-    if (a.value.tag != .unavailable and b.value.tag != .unavailable)
+    if (!lhs.value.isUnavailable() and !rhs.value.isUnavailable())
         return true;
 
-    try a.saveValue(p);
-    try b.saveValue(p);
+    try lhs.saveValue(p);
+    try rhs.saveValue(p);
     return p.noEval;
 }
 
 /// Saves value and replaces it with `.unavailable`.
 pub fn saveValue(res: *Result, p: *Parser) !void {
     std.debug.assert(!p.inMacro);
-    if (res.value.tag == .unavailable or res.value.tag == .nullptrTy) return;
+    if (res.value.isUnavailable() or res.value.tag == .nullptrTy)
+        return;
 
     if (!p.inMacro)
         try p.valueMap.put(res.node, res.value);
+
     res.value.tag = .unavailable;
 }
 
@@ -908,7 +910,7 @@ pub fn castType(res: *Result, p: *Parser, to: Type, tok: TokenIndex) !void {
             }
         }
 
-        if (res.value.tag == .unavailable) break :cast;
+        if (res.value.isUnavailable()) break :cast;
 
         const oldInt = res.ty.isInt() or res.ty.isPointer();
         const newInt = to.isInt() or to.isPointer();

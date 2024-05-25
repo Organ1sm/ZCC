@@ -417,6 +417,7 @@ pub fn is(ty: Type, specifier: Specifier) bool {
     return ty.get(specifier) != null;
 }
 
+/// create a new type by applying the specified attributes to the given type.
 pub fn withAttributes(self: Type, allocator: std.mem.Allocator, attributes: []const Attribute) !Type {
     if (attributes.len == 0)
         return self;
@@ -857,6 +858,7 @@ pub fn containAnyQual(ty: Type) bool {
     };
 }
 
+/// Promote an integer type to the smallest type that can represent it without loss.
 pub fn integerPromotion(ty: Type, comp: *Compilation) Type {
     var specifier = ty.specifier;
     if (specifier == .Enum) {
@@ -869,7 +871,7 @@ pub fn integerPromotion(ty: Type, comp: *Compilation) Type {
     return .{
         .specifier = switch (specifier) {
             .Bool, .Char, .SChar, .UChar, .Short => .Int,
-            .UShort => if (ty.sizeof(comp).? == sizeof(Type.Int, comp)) Specifier.UInt else Specifier.Int,
+            .UShort => if (ty.sizeof(comp).? == sizeof(Type.Int, comp)) .UInt else .Int,
 
             .Int,
             .UInt,
