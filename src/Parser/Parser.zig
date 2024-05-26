@@ -6134,28 +6134,22 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
                         return error.ParsingFailed;
                     },
                 };
-                return Result{
-                    .ty = some,
-                    .node = try p.addNode(.{
-                        .tag = .BuiltinCallExprOne,
-                        .type = some,
-                        .data = .{ .decl = .{ .name = nameToken, .node = .none } },
-                    }),
-                };
+                const node = try p.addNode(.{
+                    .tag = .BuiltinCallExprOne,
+                    .type = some,
+                    .data = .{ .decl = .{ .name = nameToken, .node = .none } },
+                });
+                return Result{ .ty = some, .node = node };
             }
             if (p.symStack.findSymbol(internedName)) |sym| {
                 try p.checkDeprecatedUnavailable(sym.type, nameToken, sym.token);
-
                 if (sym.kind == .constexpr) {
-                    return Result{
-                        .value = sym.value,
-                        .ty = sym.type,
-                        .node = try p.addNode(.{
-                            .tag = .DeclRefExpr,
-                            .type = sym.type,
-                            .data = .{ .declRef = nameToken },
-                        }),
-                    };
+                    const node = try p.addNode(.{
+                        .tag = .DeclRefExpr,
+                        .type = sym.type,
+                        .data = .{ .declRef = nameToken },
+                    });
+                    return Result{ .value = sym.value, .ty = sym.type, .node = node };
                 }
 
                 if (sym.value.tag == .int) {
@@ -6165,14 +6159,16 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
                         else => {},
                     }
                 }
+
+                const node = try p.addNode(.{
+                    .tag = if (sym.kind == .enumeration) .EnumerationRef else .DeclRefExpr,
+                    .type = sym.type,
+                    .data = .{ .declRef = nameToken },
+                });
                 return Result{
                     .value = if (p.constDeclFolding == .NoConstDeclFolding and sym.kind != .enumeration) Value{} else sym.value,
                     .ty = sym.type,
-                    .node = try p.addNode(.{
-                        .tag = if (sym.kind == .enumeration) .EnumerationRef else .DeclRefExpr,
-                        .type = sym.type,
-                        .data = .{ .declRef = nameToken },
-                    }),
+                    .node = node,
                 };
             }
 
@@ -6624,7 +6620,7 @@ fn getExponent(p: *Parser, buffer: []const u8, prefix: NumberPrefix, tokenIdx: T
     return exponent;
 }
 
-/// Using an explicit `tok_i` parameter instead of `p.tok_i` makes it easier
+/// Using an explicit `tokenIdx` parameter instead of `p.tokenIdx` makes it easier
 /// to parse numbers in pragma handlers.
 pub fn parseNumberToken(p: *Parser, tokenIdx: TokenIndex) !Result {
     const buffer = p.getTokenText(tokenIdx);

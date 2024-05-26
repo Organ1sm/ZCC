@@ -523,6 +523,10 @@ pub fn isChar(ty: Type) bool {
     };
 }
 
+pub fn isArithmetic(ty: Type) bool {
+    return ty.isInt() or ty.isFloat();
+}
+
 pub fn isInt(ty: Type) bool {
     return switch (ty.specifier) {
         .Enum,

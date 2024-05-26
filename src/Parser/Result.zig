@@ -185,7 +185,7 @@ pub fn adjustCondExprPtrs(a: *Result, tok: TokenIndex, b: *Result, p: *Parser) !
 
 /// Return true if both are same type
 /// Adjust types for binary operation, returns true if the result can and should be evaluated.
-pub fn adjustTypes(a: *Result, token: TokenIndex, b: *Result, p: *Parser, kind: enum {
+pub fn adjustTypes(lhs: *Result, token: TokenIndex, rhs: *Result, p: *Parser, kind: enum {
     integer,
     arithmetic,
     booleanLogic,
@@ -195,94 +195,93 @@ pub fn adjustTypes(a: *Result, token: TokenIndex, b: *Result, p: *Parser, kind: 
     add,
     sub,
 }) !bool {
-    if (b.ty.isInvalid()) {
-        try a.saveValue(p);
-        a.ty = Type.Invalid;
+    if (rhs.ty.isInvalid()) {
+        try lhs.saveValue(p);
+        lhs.ty = Type.Invalid;
     }
 
-    if (a.ty.isInvalid())
+    if (lhs.ty.isInvalid())
         return false;
 
-    try a.lvalConversion(p);
-    try b.lvalConversion(p);
+    try lhs.lvalConversion(p);
+    try rhs.lvalConversion(p);
 
-    const aVec = a.ty.is(.Vector);
-    const bVec = b.ty.is(.Vector);
-    if (aVec and bVec) {
-        if (a.ty.eql(b.ty, p.comp, false))
-            return a.shouldEval(b, p);
-        return a.invalidBinTy(token, b, p);
-    } else if (aVec) {
-        if (b.coerceExtra(p, a.ty.getElemType(), token, .testCoerce)) {
-            try b.saveValue(p);
-            try b.implicitCast(p, .VectorSplat);
-            return a.shouldEval(b, p);
+    const lhsIsVec = lhs.ty.is(.Vector);
+    const rhsIsVec = rhs.ty.is(.Vector);
+    if (lhsIsVec and rhsIsVec) {
+        if (lhs.ty.eql(rhs.ty, p.comp, false))
+            return lhs.shouldEval(rhs, p);
+        return lhs.invalidBinTy(token, rhs, p);
+    } else if (lhsIsVec) {
+        if (rhs.coerceExtra(p, lhs.ty.getElemType(), token, .testCoerce)) {
+            try rhs.saveValue(p);
+            try rhs.implicitCast(p, .VectorSplat);
+            return lhs.shouldEval(rhs, p);
         } else |err| switch (err) {
-            error.CoercionFailed => return a.invalidBinTy(token, b, p),
+            error.CoercionFailed => return lhs.invalidBinTy(token, rhs, p),
             else => |e| return e,
         }
-    } else if (bVec) {
-        if (a.coerceExtra(p, b.ty.getElemType(), token, .testCoerce)) {
-            try a.saveValue(p);
-            try a.implicitCast(p, .VectorSplat);
-            return a.shouldEval(b, p);
+    } else if (rhsIsVec) {
+        if (lhs.coerceExtra(p, rhs.ty.getElemType(), token, .testCoerce)) {
+            try lhs.saveValue(p);
+            try lhs.implicitCast(p, .VectorSplat);
+            return lhs.shouldEval(rhs, p);
         } else |err| switch (err) {
-            error.CoercionFailed => return a.invalidBinTy(token, b, p),
+            error.CoercionFailed => return lhs.invalidBinTy(token, rhs, p),
             else => |e| return e,
         }
     }
 
-    const aIsInt = a.ty.isInt();
-    const bIsInt = b.ty.isInt();
-
-    if (aIsInt and bIsInt) {
-        try a.usualArithmeticConversion(b, p, token);
-        return a.shouldEval(b, p);
+    const lhsIsInt = lhs.ty.isInt();
+    const rhsIsInt = rhs.ty.isInt();
+    if (lhsIsInt and rhsIsInt) {
+        try lhs.usualArithmeticConversion(rhs, p, token);
+        return lhs.shouldEval(rhs, p);
     }
 
     if (kind == .integer)
-        return a.invalidBinTy(token, b, p);
+        return lhs.invalidBinTy(token, rhs, p);
 
-    const aIsFloat = a.ty.isFloat();
-    const bIsFloat = b.ty.isFloat();
-    const aIsArithmetic = aIsInt or aIsFloat;
-    const bIsArithmetic = bIsInt or bIsFloat;
-    if (aIsArithmetic and bIsArithmetic) {
+    const lhsIsFloat = lhs.ty.isFloat();
+    const rhsIsFloat = rhs.ty.isFloat();
+    const lhsIsArithmetic = lhsIsInt or lhsIsFloat;
+    const rhsIsArithmetic = rhsIsInt or rhsIsFloat;
+    if (lhsIsArithmetic and rhsIsArithmetic) {
         // <, <=, >, >= only work on real types
-        if (kind == .relational and (!a.ty.isReal() or !b.ty.isReal()))
-            return a.invalidBinTy(token, b, p);
+        if (kind == .relational and (!lhs.ty.isReal() or !rhs.ty.isReal()))
+            return lhs.invalidBinTy(token, rhs, p);
 
-        try a.usualArithmeticConversion(b, p, token);
-        return a.shouldEval(b, p);
+        try lhs.usualArithmeticConversion(rhs, p, token);
+        return lhs.shouldEval(rhs, p);
     }
 
     if (kind == .arithmetic)
-        return a.invalidBinTy(token, b, p);
+        return lhs.invalidBinTy(token, rhs, p);
 
-    const aIsNullptr = a.ty.is(.NullPtrTy);
-    const bIsNullptr = b.ty.is(.NullPtrTy);
-    const aIsPtr = a.ty.isPointer();
-    const bIsPtr = b.ty.isPointer();
-    const aIsScalar = aIsArithmetic or aIsPtr;
-    const bIsScalar = bIsArithmetic or bIsPtr;
+    const lhsIsNullptr = lhs.ty.is(.NullPtrTy);
+    const rhsIsNullptr = rhs.ty.is(.NullPtrTy);
+    const lhsIsPtr = lhs.ty.isPointer();
+    const rhsIsPtr = rhs.ty.isPointer();
+    const lhsIsScalar = lhsIsArithmetic or lhsIsPtr;
+    const rhsIsScalar = rhsIsArithmetic or rhsIsPtr;
     switch (kind) {
         .booleanLogic => {
-            if (!(aIsScalar or aIsNullptr) or !(bIsScalar or bIsNullptr))
-                return a.invalidBinTy(token, b, p);
+            if (!(lhsIsScalar or lhsIsNullptr) or !(rhsIsScalar or rhsIsNullptr))
+                return lhs.invalidBinTy(token, rhs, p);
 
             // Do integer promotions but nothing else
-            if (aIsInt) try a.intCast(p, a.ty.integerPromotion(p.comp), token);
-            if (bIsInt) try b.intCast(p, b.ty.integerPromotion(p.comp), token);
-            return a.shouldEval(b, p);
+            if (lhsIsInt) try lhs.intCast(p, lhs.ty.integerPromotion(p.comp), token);
+            if (rhsIsInt) try rhs.intCast(p, rhs.ty.integerPromotion(p.comp), token);
+            return lhs.shouldEval(rhs, p);
         },
 
         .relational, .equality => {
-            if (kind == .equality and (aIsNullptr or bIsNullptr)) {
-                if (aIsNullptr and bIsNullptr)
-                    return a.shouldEval(b, p);
+            if (kind == .equality and (lhsIsNullptr or rhsIsNullptr)) {
+                if (lhsIsNullptr and rhsIsNullptr)
+                    return lhs.shouldEval(rhs, p);
 
-                const nullPtrRes = if (aIsNullptr) a else b;
-                const otherRes = if (aIsNullptr) b else a;
+                const nullPtrRes = if (lhsIsNullptr) lhs else rhs;
+                const otherRes = if (lhsIsNullptr) rhs else lhs;
                 if (otherRes.ty.isPointer()) {
                     try nullPtrRes.nullCast(p, otherRes.ty);
                     return otherRes.shouldEval(nullPtrRes, p);
@@ -291,103 +290,103 @@ pub fn adjustTypes(a: *Result, token: TokenIndex, b: *Result, p: *Parser, kind: 
                     try otherRes.nullCast(p, nullPtrRes.ty);
                     return otherRes.shouldEval(nullPtrRes, p);
                 }
-                return a.invalidBinTy(token, b, p);
+                return lhs.invalidBinTy(token, rhs, p);
             }
 
             // comparisons between floats and pointes not allowed
-            if (!aIsScalar or !bIsScalar or (aIsFloat and bIsPtr) or (bIsFloat and aIsPtr))
-                return a.invalidBinTy(token, b, p);
+            if (!lhsIsScalar or !rhsIsScalar or (lhsIsFloat and rhsIsPtr) or (rhsIsFloat and lhsIsPtr))
+                return lhs.invalidBinTy(token, rhs, p);
 
-            if ((aIsInt or bIsInt) and !(a.value.isZero() or b.value.isZero())) {
-                try p.errStr(.comparison_ptr_int, token, try p.typePairStr(a.ty, b.ty));
-            } else if (aIsPtr and bIsPtr) {
-                if (!a.ty.isVoidStar() and !b.ty.isVoidStar() and !a.ty.eql(b.ty, p.comp, false))
-                    try p.errStr(.comparison_distinct_ptr, token, try p.typePairStr(a.ty, b.ty));
-            } else if (aIsPtr) {
-                try b.ptrCast(p, a.ty);
+            if ((lhsIsInt or rhsIsInt) and !(lhs.value.isZero() or rhs.value.isZero())) {
+                try p.errStr(.comparison_ptr_int, token, try p.typePairStr(lhs.ty, rhs.ty));
+            } else if (lhsIsPtr and rhsIsPtr) {
+                if (!lhs.ty.isVoidStar() and !rhs.ty.isVoidStar() and !lhs.ty.eql(rhs.ty, p.comp, false))
+                    try p.errStr(.comparison_distinct_ptr, token, try p.typePairStr(lhs.ty, rhs.ty));
+            } else if (lhsIsPtr) {
+                try rhs.ptrCast(p, lhs.ty);
             } else {
-                std.debug.assert(bIsPtr);
-                try a.ptrCast(p, b.ty);
+                std.debug.assert(rhsIsPtr);
+                try lhs.ptrCast(p, rhs.ty);
             }
 
-            return a.shouldEval(b, p);
+            return lhs.shouldEval(rhs, p);
         },
 
         .conditional => {
             // doesn't matter what we return here, as the result is ignored
-            if (a.ty.is(.Void) or b.ty.is(.Void)) {
-                try a.toVoid(p);
-                try b.toVoid(p);
+            if (lhs.ty.is(.Void) or rhs.ty.is(.Void)) {
+                try lhs.toVoid(p);
+                try rhs.toVoid(p);
                 return true;
             }
 
-            if (aIsNullptr and bIsNullptr)
+            if (lhsIsNullptr and rhsIsNullptr)
                 return true;
 
-            if ((aIsPtr and bIsInt) or (aIsInt and bIsPtr)) {
-                if (a.value.isZero() or b.value.isZero()) {
-                    try a.nullCast(p, b.ty);
-                    try b.nullCast(p, a.ty);
+            if ((lhsIsPtr and rhsIsInt) or (lhsIsInt and rhsIsPtr)) {
+                if (lhs.value.isZero() or rhs.value.isZero()) {
+                    try lhs.nullCast(p, rhs.ty);
+                    try rhs.nullCast(p, lhs.ty);
                     return true;
                 }
 
-                const intType = if (aIsInt) a else b;
-                const ptrType = if (aIsPtr) a else b;
+                const intType = if (lhsIsInt) lhs else rhs;
+                const ptrType = if (lhsIsPtr) lhs else rhs;
 
                 try p.errStr(.implicit_int_to_ptr, token, try p.typePairStrExtra(intType.ty, " to ", ptrType.ty));
                 try intType.ptrCast(p, ptrType.ty);
                 return true;
             }
 
-            if (aIsPtr and bIsPtr)
-                return a.adjustCondExprPtrs(token, b, p);
+            if (lhsIsPtr and rhsIsPtr)
+                return lhs.adjustCondExprPtrs(token, rhs, p);
 
-            if ((aIsPtr and bIsNullptr) or (aIsNullptr and bIsPtr)) {
-                const nullPtrRes = if (aIsNullptr) a else b;
-                const ptrRes = if (aIsNullptr) b else a;
+            if ((lhsIsPtr and rhsIsNullptr) or (lhsIsNullptr and rhsIsPtr)) {
+                const nullPtrRes = if (lhsIsNullptr) lhs else rhs;
+                const ptrRes = if (lhsIsNullptr) rhs else lhs;
                 try nullPtrRes.nullCast(p, ptrRes.ty);
                 return true;
             }
 
-            if (a.ty.isRecord() and b.ty.isRecord() and a.ty.eql(b.ty, p.comp, false))
+            if (lhs.ty.isRecord() and rhs.ty.isRecord() and lhs.ty.eql(rhs.ty, p.comp, false))
                 return true;
 
-            return a.invalidBinTy(token, b, p);
+            return lhs.invalidBinTy(token, rhs, p);
         },
 
         .add => {
             // if both aren't arithmetic one should be pointer and the other an integer
-            if (aIsPtr == bIsPtr or aIsInt == bIsInt)
-                return a.invalidBinTy(token, b, p);
+            if (lhsIsPtr == rhsIsPtr or lhsIsInt == rhsIsInt)
+                return lhs.invalidBinTy(token, rhs, p);
 
             // Do integer promotions but nothing else
-            if (aIsInt) try a.intCast(p, a.ty.integerPromotion(p.comp), token);
-            if (bIsInt) try b.intCast(p, b.ty.integerPromotion(p.comp), token);
+            if (lhsIsInt) try lhs.intCast(p, lhs.ty.integerPromotion(p.comp), token);
+            if (rhsIsInt) try rhs.intCast(p, rhs.ty.integerPromotion(p.comp), token);
 
             // The result type is the type of the pointer operand
-            if (aIsInt) a.ty = b.ty else b.ty = a.ty;
-            return a.shouldEval(b, p);
+            if (lhsIsInt) lhs.ty = rhs.ty else rhs.ty = lhs.ty;
+            return lhs.shouldEval(rhs, p);
         },
 
         .sub => {
             // if both aren't arithmetic then either both should be pointers or just a
-            if (!aIsPtr or !(bIsPtr or bIsInt)) return a.invalidBinTy(token, b, p);
+            if (!lhsIsPtr or !(rhsIsPtr or rhsIsInt)) return lhs.invalidBinTy(token, rhs, p);
 
-            if (aIsPtr and bIsPtr) {
-                if (!a.ty.eql(b.ty, p.comp, false))
-                    try p.errStr(.incompatible_pointers, token, try p.typePairStr(a.ty, b.ty));
-                a.ty = p.comp.types.ptrdiff;
+            if (lhsIsPtr and rhsIsPtr) {
+                if (!lhs.ty.eql(rhs.ty, p.comp, false))
+                    try p.errStr(.incompatible_pointers, token, try p.typePairStr(lhs.ty, rhs.ty));
+                lhs.ty = p.comp.types.ptrdiff;
             }
 
             // Do integer promotion on b if needed
-            if (bIsInt) try b.intCast(p, b.ty.integerPromotion(p.comp), token);
-            return a.shouldEval(b, p);
+            if (rhsIsInt) try rhs.intCast(p, rhs.ty.integerPromotion(p.comp), token);
+            return lhs.shouldEval(rhs, p);
         },
 
-        else => return a.invalidBinTy(token, b, p),
+        else => return lhs.invalidBinTy(token, rhs, p),
     }
 
-    return a.shouldEval(b, p);
+    return lhs.shouldEval(rhs, p);
 }
 
 /// Perform l-value to r-value conversion and decay functions and arrays to pointers.
