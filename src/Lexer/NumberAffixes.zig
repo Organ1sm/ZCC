@@ -7,6 +7,7 @@ pub const Prefix = enum(u8) {
     decimal = 10,
     hex = 16,
 
+    /// Checks if a given character `c` is allowed as a digit for the specified `prefix`.
     pub fn digitAllowed(prefix: Prefix, c: u8) bool {
         return switch (c) {
             '0', '1' => true,
@@ -19,12 +20,14 @@ pub const Prefix = enum(u8) {
 
     pub fn fromString(buf: []const u8) Prefix {
         if (buf.len == 1) return .decimal;
+
         // tokenizer enforces that first byte is a decimal digit or period
         switch (buf[0]) {
             '.', '1'...'9' => return .decimal,
             '0' => {},
             else => unreachable,
         }
+
         switch (buf[1]) {
             'x', 'X' => return if (buf.len == 2) .decimal else .hex,
             'b', 'B' => return if (buf.len == 2) .decimal else .binary,
@@ -120,7 +123,8 @@ pub const Suffix = enum {
 
             for (parts) |part| {
                 const lower = std.ascii.lowerString(&scratch, part);
-                if (mem.indexOf(u8, buf, part) == null and mem.indexOf(u8, buf, lower) == null) continue :top;
+                if (mem.indexOf(u8, buf, part) == null and mem.indexOf(u8, buf, lower) == null)
+                    continue :top;
             }
             return tag;
         }

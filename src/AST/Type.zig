@@ -35,7 +35,9 @@ specifier: Specifier,
 pub const Invalid = create(.Invalid);
 pub const Void = create(.Void);
 pub const Pointer = create(.Pointer);
+pub const NullptrTy = create(.NullPtrTy);
 
+pub const Bool = create(.Bool);
 pub const Char = create(.Char);
 pub const UChar = create(.UChar);
 pub const SChar = create(.SChar);

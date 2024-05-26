@@ -1155,7 +1155,7 @@ fn parseStaticAssert(p: *Parser) Error!bool {
         }
     }
 
-    try res.boolCast(p, .{ .specifier = .Bool }, resToken);
+    try res.boolCast(p, Type.Bool, resToken);
     if (res.value.isUnavailable()) {
         if (!res.ty.isInvalid())
             try p.errToken(.static_assert_not_constant, resToken);
@@ -3761,7 +3761,8 @@ fn parseAssembly(p: *Parser, kind: enum { global, declLable, stmt }) Error!?Node
     switch (kind) {
         .declLable => {
             const str = (try p.parseAsmString()).value.data.bytes;
-            const attr = Attribute{ .tag = .asm_label, .args = .{ .asm_label = .{ .name = str[0 .. str.len - 1] } }, .syntax = .keyword };
+            const args = Attribute.Arguments{ .asm_label = .{ .name = str[0 .. str.len - 1] } };
+            const attr = Attribute{ .tag = .asm_label, .args = args, .syntax = .keyword };
             try p.attrBuffer.append(p.gpa, .{ .attr = attr, .tok = asmToken });
         },
         .global => _ = try p.parseAsmString(),
@@ -3987,10 +3988,7 @@ fn parseForStmt(p: *Parser) Error!NodeIndex {
             .data = .{ .range = .{ .start = start, .end = end } },
         });
     } else if (init.node == .none and cond.node == .none and incr.node == .none) {
-        return try p.addNode(.{
-            .tag = .ForEverStmt,
-            .data = .{ .unExpr = body },
-        });
+        return try p.addNode(.{ .tag = .ForEverStmt, .data = .{ .unExpr = body } });
     } else {
         return try p.addNode(.{
             .tag = .ForStmt,
@@ -4058,10 +4056,7 @@ fn parseDoWhileStmt(p: *Parser) Error!NodeIndex {
     try p.expectClosing(lp, .RParen);
 
     _ = try p.expectToken(.Semicolon);
-    return try p.addNode(.{
-        .tag = .WhileStmt,
-        .data = .{ .binExpr = .{ .rhs = cond.node, .lhs = body } },
-    });
+    return try p.addNode(.{ .tag = .WhileStmt, .data = .{ .binExpr = .{ .rhs = cond.node, .lhs = body } } });
 }
 
 /// goto-statement : `goto` ( identifier | ( '*' expr)) ';'
@@ -4104,10 +4099,7 @@ fn parseGotoStmt(p: *Parser, gotoToken: TokenIndex) Error!NodeIndex {
         try p.labels.append(.{ .unresolvedGoto = nameToken });
     }
     _ = try p.expectToken(.Semicolon);
-    return try p.addNode(.{
-        .tag = .GotoStmt,
-        .data = .{ .declRef = nameToken },
-    });
+    return try p.addNode(.{ .tag = .GotoStmt, .data = .{ .declRef = nameToken } });
 }
 
 /// switch-statement : `switch` '(' expression ')' statement
@@ -4182,9 +4174,8 @@ fn parseCaseStmt(p: *Parser, caseToken: u32) Error!?NodeIndex {
                 .unsigned = first.data.int,
             });
         } else {
-            try p.errExtra(.duplicate_switch_case_signed, caseToken + 1, .{
-                .signed = first.signExtend(some.type, p.comp),
-            });
+            const signed: i64 = first.signExtend(some.type, p.comp);
+            try p.errExtra(.duplicate_switch_case_signed, caseToken + 1, .{ .signed = signed });
         }
         try p.errToken(.previous_case, prev.token);
     } else {
@@ -4202,12 +4193,7 @@ fn parseCaseStmt(p: *Parser, caseToken: u32) Error!?NodeIndex {
         },
     }) else return try p.addNode(.{
         .tag = .CaseStmt,
-        .data = .{
-            .binExpr = .{
-                .lhs = firstItem.node,
-                .rhs = s,
-            },
-        },
+        .data = .{ .binExpr = .{ .lhs = firstItem.node, .rhs = s } },
     });
 }
 
@@ -4423,9 +4409,8 @@ fn parseReturnStmt(p: *Parser) Error!?NodeIndex {
     _ = try p.expectToken(.Semicolon);
     const returnType = p.func.type.?.getReturnType();
 
-    if (p.func.type.?.hasAttribute(.noreturn)) {
+    if (p.func.type.?.hasAttribute(.noreturn))
         try p.errStr(.invalid_noreturn, eToken, p.getTokenText(p.func.name));
-    }
 
     if (expr.node == .none) {
         if (!returnType.is(.Void))
@@ -4438,8 +4423,8 @@ fn parseReturnStmt(p: *Parser) Error!?NodeIndex {
 
     try expr.lvalConversion(p);
     try expr.coerce(p, returnType, eToken, .ret);
-
     try expr.saveValue(p);
+
     return try p.addNode(.{ .tag = .ReturnStmt, .data = .{ .unExpr = expr.node } });
 }
 
@@ -4719,7 +4704,6 @@ fn parseAssignExpr(p: *Parser) Error!Result {
     }
 
     try rhs.coerce(p, lhs.ty, token, .assign);
-
     try lhs.bin(p, tag, rhs);
     return lhs;
 }
@@ -4948,7 +4932,6 @@ fn parseEqExpr(p: *Parser) Error!Result {
         if (try lhs.adjustTypes(ne.?, &rhs, p, .equality)) {
             const op: std.math.CompareOperator = if (tag == .EqualExpr) .eq else .neq;
             const res = lhs.value.compare(op, rhs.value, lhs.ty, p.comp);
-
             lhs.value = Value.int(@intFromBool(res));
         }
 
@@ -5006,11 +4989,10 @@ fn parseShiftExpr(p: *Parser) Error!Result {
         try rhs.expect(p);
 
         if (try lhs.adjustTypes(shr.?, &rhs, p, .integer)) {
-            if (shl != null) {
-                lhs.value = lhs.value.shl(rhs.value, lhs.ty, p.comp);
-            } else {
+            if (shl != null)
+                lhs.value = lhs.value.shl(rhs.value, lhs.ty, p.comp)
+            else
                 lhs.value = lhs.value.shr(rhs.value, lhs.ty, p.comp);
-            }
         }
 
         try lhs.bin(p, tag, rhs);
@@ -5113,9 +5095,8 @@ fn removeUnusedWarningForTok(p: *Parser, lastExprToken: TokenIndex) void {
     const lastExprLoc = p.pp.tokens.items(.loc)[lastExprToken];
     const lastMessage = p.comp.diag.list.items[p.comp.diag.list.items.len - 1];
 
-    if (lastMessage.tag == .unused_value and lastMessage.loc.eql(lastExprLoc)) {
+    if (lastMessage.tag == .unused_value and lastMessage.loc.eql(lastExprLoc))
         p.comp.diag.list.items.len = p.comp.diag.list.items.len - 1;
-    }
 }
 
 /// cast-expression
@@ -5247,6 +5228,7 @@ fn builtinVaArg(p: *Parser) Error!Result {
         try p.err(.expected_type);
         return error.ParsingFailed;
     };
+
     try p.expectClosing(lp, .RParen);
 
     if (!vaList.ty.eql(p.comp.types.vaList, p.comp, true)) {
@@ -5254,11 +5236,14 @@ fn builtinVaArg(p: *Parser) Error!Result {
         return error.ParsingFailed;
     }
 
-    return Result{ .ty = ty, .node = try p.addNode(.{
-        .tag = .BuiltinCallExprOne,
-        .type = ty,
-        .data = .{ .decl = .{ .name = builtinToken, .node = vaList.node } },
-    }) };
+    return Result{
+        .ty = ty,
+        .node = try p.addNode(.{
+            .tag = .BuiltinCallExprOne,
+            .type = ty,
+            .data = .{ .decl = .{ .name = builtinToken, .node = vaList.node } },
+        }),
+    };
 }
 
 fn builtinOffsetof(p: *Parser, wantsBits: bool) Error!Result {
@@ -5374,7 +5359,7 @@ fn offsetofMemberDesignator(p: *Parser, baseType: Type) Error!Result {
 ///  | (`keyword-alignof` | `keyword-c23-alignof`) '(' type-name ')'
 fn parseUnaryExpr(p: *Parser) Error!Result {
     const token = p.tokenIdx;
-    switch (p.tokenIds[token]) {
+    switch (p.getCurrToken()) {
         .Ampersand => {
             if (p.inMacro) {
                 try p.err(.invalid_preproc_operator);
@@ -5391,9 +5376,8 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
                     try p.errToken(.addr_of_bitfield, token);
             }
 
-            if (!AST.isLValue(slice, p.data.items, p.valueMap, operand.node)) {
+            if (!AST.isLValue(slice, p.data.items, p.valueMap, operand.node))
                 try p.errToken(.addr_of_rvalue, token);
-            }
 
             if (operand.ty.qual.register)
                 try p.errToken(.addr_of_register, token);
@@ -5483,11 +5467,10 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
             if (operand.ty.isInt())
                 try operand.intCast(p, operand.ty.integerPromotion(p.comp), token);
 
-            if (operand.value.isNumeric()) {
-                _ = operand.value.sub(operand.value.zero(), operand.value, operand.ty, p.comp);
-            } else {
+            if (operand.value.isNumeric())
+                _ = operand.value.sub(operand.value.zero(), operand.value, operand.ty, p.comp)
+            else
                 operand.value.tag = .unavailable;
-            }
 
             try operand.un(p, .NegateExpr);
             return operand;
@@ -5929,6 +5912,7 @@ fn fieldAccessExtra(
             offsetBits.* += f.layout.offsetBits;
             return res;
         }
+
         if (fieldName == f.name) {
             offsetBits.* = f.layout.offsetBits;
             return Result{
@@ -6085,9 +6069,9 @@ fn checkArrayBounds(p: *Parser, index: Result, array: Result, token: TokenIndex)
         if (p.getNode(array.node, .MemberAccessExpr) orelse p.getNode(array.node, .MemberAccessPtrExpr)) |node| {
             const data = p.nodes.items(.data)[@intFromEnum(node)];
             var lhs = p.nodes.items(.type)[@intFromEnum(data.member.lhs)];
-            if (lhs.get(.Pointer)) |ptr| {
+            if (lhs.get(.Pointer)) |ptr|
                 lhs = ptr.data.subType.*;
-            }
+
             if (lhs.is(.Struct)) {
                 const record = lhs.getRecord().?;
                 if (data.member.index + 1 == record.fields.len) {
@@ -6108,9 +6092,8 @@ fn checkArrayBounds(p: *Parser, index: Result, array: Result, token: TokenIndex)
             try p.errExtra(.array_after, token, .{ .unsigned = index.value.data.int });
     } else {
         if (index.value.compare(.lt, Value.int(0), index.ty, p.comp)) {
-            try p.errExtra(.array_before, token, .{
-                .signed = index.value.signExtend(index.ty, p.comp),
-            });
+            const signed: i64 = index.value.signExtend(index.ty, p.comp);
+            try p.errExtra(.array_before, token, .{ .signed = signed });
         } else if (index.value.compare(.gte, len, p.comp.types.size, p.comp)) {
             try p.errExtra(.array_after, token, .{ .unsigned = index.value.data.int });
         }
@@ -6227,10 +6210,10 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
             const numericValue = @intFromBool(id == .KeywordTrue);
             const res = Result{
                 .value = Value.int(numericValue),
-                .ty = .{ .specifier = .Bool },
+                .ty = Type.Bool,
                 .node = try p.addNode(.{
                     .tag = .BoolLiteral,
-                    .type = .{ .specifier = .Bool },
+                    .type = Type.Bool,
                     .data = .{ .int = numericValue },
                 }),
             };
@@ -6245,10 +6228,10 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
 
             return Result{
                 .value = .{ .tag = .nullptrTy },
-                .ty = .{ .specifier = .NullPtrTy },
+                .ty = Type.NullptrTy,
                 .node = try p.addNode(.{
                     .tag = .NullPtrLiteral,
-                    .type = .{ .specifier = .NullPtrTy },
+                    .type = Type.NullptrTy,
                     .data = undefined,
                 }),
             };
@@ -6276,8 +6259,10 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
                 p.func.ident = predef;
                 try p.declBuffer.append(predef.node);
             }
+
             if (p.func.type == null)
                 try p.err(.predefined_top_level);
+
             return Result{
                 .ty = ty,
                 .node = try p.addNode(.{
@@ -6312,6 +6297,7 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
 
             if (p.func.type == null)
                 try p.err(.predefined_top_level);
+
             return Result{
                 .ty = ty,
                 .node = try p.addNode(.{
@@ -6369,18 +6355,15 @@ fn makePredefinedIdentifier(p: *Parser) !Result {
 
     const val = Value.bytes(try p.arena.dupe(u8, slice));
     const strLit = try p.addNode(.{ .tag = .StringLiteralExpr, .type = ty, .data = undefined });
+
     if (!p.inMacro) try p.valueMap.put(strLit, val);
+
     return Result{
         .ty = ty,
         .node = try p.addNode(.{
             .tag = .ImplicitStaticVar,
             .type = ty,
-            .data = .{
-                .decl = .{
-                    .name = p.tokenIdx,
-                    .node = strLit,
-                },
-            },
+            .data = .{ .decl = .{ .name = p.tokenIdx, .node = strLit } },
         }),
     };
 }
@@ -6450,10 +6433,12 @@ fn getIntegerPart(p: *Parser, buffer: []const u8, prefix: NumberPrefix, tokenIdx
         if (idx == 0) continue;
         switch (c) {
             '.' => return buffer[0..idx],
+
             'p', 'P' => return if (prefix == .hex) buffer[0..idx] else {
                 try p.errStr(.invalid_int_suffix, tokenIdx, buffer[idx..]);
                 return error.ParsingFailed;
             },
+
             'e', 'E' => {
                 switch (prefix) {
                     .hex => continue,
@@ -6463,6 +6448,7 @@ fn getIntegerPart(p: *Parser, buffer: []const u8, prefix: NumberPrefix, tokenIdx
                 }
                 return error.ParsingFailed;
             },
+
             '0'...'9', 'a'...'d', 'A'...'D', 'f', 'F' => {
                 if (!prefix.digitAllowed(c)) {
                     switch (prefix) {
@@ -6473,6 +6459,7 @@ fn getIntegerPart(p: *Parser, buffer: []const u8, prefix: NumberPrefix, tokenIdx
                     return error.ParsingFailed;
                 }
             },
+
             '\'' => {},
             else => return buffer[0..idx],
         }
@@ -6536,11 +6523,10 @@ fn parseInt(
         };
 
         if (value != 0) {
-            const mulOV = @mulWithOverflow(value, base);
-            if (mulOV[1] != 0)
+            const product, const overflowed = @mulWithOverflow(value, base);
+            if (overflowed != 0)
                 overflow = true;
-
-            value = mulOV[0];
+            value = product;
         }
 
         const sum, const overflowed = @addWithOverflow(value, digit);
@@ -6558,11 +6544,8 @@ fn parseInt(
         return res;
     }
 
-    if (suffix.isSignedInteger()) {
-        if (value > std.math.maxInt(i64)) {
-            try p.errToken(.implicitly_unsigned_literal, tokenIdx);
-        }
-    }
+    if (suffix.isSignedInteger() and value > std.math.maxInt(i64))
+        try p.errToken(.implicitly_unsigned_literal, tokenIdx);
 
     var res = try if (base == 10)
         switch (suffix) {
@@ -6596,15 +6579,18 @@ fn parseInt(
 fn getFracPart(p: *Parser, buffer: []const u8, prefix: NumberPrefix, tokenIdx: TokenIndex) ![]const u8 {
     if (buffer.len == 0 or buffer[0] != '.') return "";
     std.debug.assert(prefix != .octal);
+
     if (prefix == .binary) {
         try p.errStr(.invalid_int_suffix, tokenIdx, buffer);
         return error.ParsingFailed;
     }
+
     for (buffer, 0..) |c, idx| {
         if (idx == 0) continue;
         if (c == '\'') continue;
         if (!prefix.digitAllowed(c)) return buffer[0..idx];
     }
+
     return buffer;
 }
 
@@ -6619,6 +6605,7 @@ fn getExponent(p: *Parser, buffer: []const u8, prefix: NumberPrefix, tokenIdx: T
         },
         else => return "",
     }
+
     const end = for (buffer, 0..) |c, idx| {
         if (idx == 0) continue;
         if (idx == 1 and (c == '+' or c == '-')) continue;
@@ -6628,6 +6615,7 @@ fn getExponent(p: *Parser, buffer: []const u8, prefix: NumberPrefix, tokenIdx: T
             else => break idx,
         }
     } else buffer.len;
+
     const exponent = buffer[0..end];
     if (std.mem.indexOfAny(u8, exponent, "0123456789") == null) {
         try p.errToken(.exponent_has_no_digits, tokenIdx);
@@ -6644,7 +6632,6 @@ pub fn parseNumberToken(p: *Parser, tokenIdx: TokenIndex) !Result {
     const afterPrefix = buffer[prefix.stringLen()..];
 
     const intPart = try p.getIntegerPart(afterPrefix, prefix, tokenIdx);
-
     const afterInt = afterPrefix[intPart.len..];
 
     const frac = try p.getFracPart(afterInt, prefix, tokenIdx);
@@ -6793,12 +6780,13 @@ fn parseCharLiteral(p: *Parser) Error!Result {
             6 => val = 0,
             else => {},
         }
-        const mulOV = @mulWithOverflow(val, max);
-        if (mulOV[1] != 0 and !overflowReported) {
+
+        const product, const overflowed = @mulWithOverflow(val, max);
+        if (overflowed != 0 and !overflowReported) {
             try p.errExtra(.char_lit_too_wide, p.tokenIdx, .{ .unsigned = i });
             overflowReported = true;
         }
-        val = mulOV[0] + c;
+        val = product + c;
     }
 
     const res = Result{
@@ -6901,10 +6889,7 @@ fn parseStringLiteral(p: *Parser) Error!Result {
     arrayType.* = .{ .elem = Type.Char, .len = slice.len };
 
     var res: Result = .{
-        .ty = .{
-            .specifier = .Array,
-            .data = .{ .array = arrayType },
-        },
+        .ty = .{ .specifier = .Array, .data = .{ .array = arrayType } },
         .value = Value.bytes(try p.arena.dupe(u8, slice)),
     };
 
@@ -6923,17 +6908,15 @@ fn parseNumberEscape(p: *Parser, tok: TokenIndex, base: u8, slice: []const u8, i
 
     while (i.* < slice.len) : (i.* += 1) {
         const val = std.fmt.charToDigit(slice[i.*], base) catch break; // validated by Tokenizer
-        const mulOV = @mulWithOverflow(char, base);
-
-        if (mulOV[1] != 0 and !reported) {
+        const product, const overflowed = @mulWithOverflow(char, base);
+        if (overflowed != 0 and !reported) {
             try p.errExtra(.escape_sequence_overflow, tok, .{ .unsigned = i.* });
             reported = true;
         }
-        char = mulOV[0] + val;
+        char = product + val;
     }
 
     i.* -= 1;
-
     return char;
 }
 
@@ -6944,9 +6927,10 @@ fn parseUnicodeEscape(p: *Parser, tok: TokenIndex, count: u8, slice: []const u8,
         try p.errExtra(.invalid_universal_character, tok, .{ .unsigned = i.* - count - 2 });
         return;
     }
+
     var buf: [4]u8 = undefined;
-    const to_write = std.unicode.utf8Encode(c, &buf) catch unreachable; // validated above
-    p.strings.appendSliceAssumeCapacity(buf[0..to_write]);
+    const toWrite = std.unicode.utf8Encode(c, &buf) catch unreachable; // validated above
+    p.strings.appendSliceAssumeCapacity(buf[0..toWrite]);
 }
 
 /// Run a parser function but do not evaluate the result
@@ -7049,28 +7033,18 @@ fn parseGenericSelection(p: *Parser) Error!Result {
     try p.expectClosing(lp, .RParen);
     if (chosen.node == .none) {
         if (defaultToken != null) {
-            try p.listBuffer.insert(listBufferTop + 1, try p.addNode(.{
-                .tag = .GenericDefaultExpr,
-                .data = .{ .unExpr = default.node },
-            }));
+            const node = try p.addNode(.{ .tag = .GenericDefaultExpr, .data = .{ .unExpr = default.node } });
+            try p.listBuffer.insert(listBufferTop + 1, node);
             chosen = default;
         } else {
             try p.errStr(.generic_no_match, controllingToken, try p.typeStr(controlling.ty));
             return error.ParsingFailed;
         }
     } else {
-        const node = try p.addNode(.{
-            .tag = .GenericAssociationExpr,
-            .data = .{ .unExpr = chosen.node },
-        });
+        const node = try p.addNode(.{ .tag = .GenericAssociationExpr, .data = .{ .unExpr = chosen.node } });
         try p.listBuffer.insert(listBufferTop + 1, node);
-
-        if (defaultToken != null) {
-            try p.listBuffer.append(try p.addNode(.{
-                .tag = .GenericDefaultExpr,
-                .data = .{ .unExpr = chosen.node },
-            }));
-        }
+        if (defaultToken != null)
+            try p.listBuffer.append(try p.addNode(.{ .tag = .GenericDefaultExpr, .data = .{ .unExpr = chosen.node } }));
     }
 
     var genericNode: AST.Node = .{

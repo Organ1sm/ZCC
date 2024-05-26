@@ -768,7 +768,7 @@ pub fn castType(res: *Result, p: *Parser, to: Type, tok: TokenIndex) !void {
         if (to.is(.Bool)) {
             try res.nullCast(p, res.ty);
             res.value.toBool();
-            res.ty = .{ .specifier = .Bool };
+            res.ty = Type.Bool;
             try res.implicitCast(p, .PointerToBool);
             try res.saveValue(p);
         } else if (to.isPointer()) {

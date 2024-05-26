@@ -517,15 +517,13 @@ pub fn nextLargestIntSameSign(comp: *const Compilation, ty: Type) ?Type {
 
 /// Smallest integer type with at least N bits
 pub fn intLeastN(comp: *const Compilation, bits: usize, signedness: std.builtin.Signedness) Type {
-    if (bits == 64 and (comp.target.isDarwin() or comp.target.isWasm())) {
-        // WebAssembly and Darwin use `long long` for `int_least64_t` and `int_fast64_t`.
-        return .{ .specifier = if (signedness == .signed) .LongLong else .ULongLong };
-    }
+    // WebAssembly and Darwin use `long long` for `int_least64_t` and `int_fast64_t`.
+    if (bits == 64 and (comp.target.isDarwin() or comp.target.isWasm()))
+        return if (signedness == .signed) Type.LongLong else Type.ULongLong;
 
-    if (bits == 16 and comp.target.cpu.arch == .avr) {
-        // AVR uses int for int_least16_t and int_fast16_t.
-        return .{ .specifier = if (signedness == .signed) .Int else .UInt };
-    }
+    // AVR uses int for int_least16_t and int_fast16_t.
+    if (bits == 16 and comp.target.cpu.arch == .avr)
+        return if (signedness == .signed) Type.Int else Type.UInt;
 
     const candidates = switch (signedness) {
         .signed => &[_]Type.Specifier{ .SChar, .Short, .Int, .Long, .LongLong },
