@@ -1046,7 +1046,7 @@ fn genExpr(c: *CodeGen, node: NodeIndex) Error!IR.Ref {
 
 fn genLval(c: *CodeGen, node: NodeIndex) Error!IR.Ref {
     std.debug.assert(node != .none);
-    std.debug.assert(Tree.isLValue(c.tree.nodes, c.tree.data, c.tree.valueMap, node));
+    std.debug.assert(c.tree.isLValue(node));
 
     const data = c.nodeData[@intFromEnum(node)];
     switch (c.nodeTag[@intFromEnum(node)]) {

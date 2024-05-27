@@ -4470,6 +4470,19 @@ fn nodeIsNoreturn(p: *Parser, node: NodeIndex) NoreturnKind {
     }
 }
 
+pub fn tempTree(p: *Parser) AST {
+    return .{
+        .nodes = p.nodes.slice(),
+        .data = p.data.items,
+        .valueMap = p.valueMap,
+        .comp = p.comp,
+        .arena = undefined,
+        .generated = undefined,
+        .tokens = undefined,
+        .rootDecls = undefined,
+    };
+}
+
 fn parseOrNextStmt(p: *Parser, comptime func: fn (*Parser) Error!bool, lbrace: TokenIndex) !bool {
     return func(p) catch |er| switch (er) {
         error.ParsingFailed => {
@@ -4652,7 +4665,7 @@ fn parseAssignExpr(p: *Parser) Error!Result {
     try rhs.lvalConversion(p);
 
     var isConst: bool = undefined;
-    if (!AST.isLValueExtra(p.nodes.slice(), p.data.items, p.valueMap, lhs.node, &isConst) or isConst) {
+    if (!p.tempTree().isLValueExtra(lhs.node, &isConst) or isConst) {
         try p.errToken(.not_assignable, token);
         return error.ParsingFailed;
     }
@@ -5369,14 +5382,15 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
             var operand = try p.parseCastExpr();
             try operand.expect(p);
 
-            const slice = p.nodes.slice();
-
-            if (p.getNode(operand.node, .MemberAccessExpr) orelse p.getNode(operand.node, .MemberAccessPtrExpr)) |memberNode| {
-                if (AST.isBitField(slice, memberNode))
+            const tree = p.tempTree();
+            if (p.getNode(operand.node, .MemberAccessExpr) orelse
+                p.getNode(operand.node, .MemberAccessPtrExpr)) |memberNode|
+            {
+                if (tree.isBitField(memberNode))
                     try p.errToken(.addr_of_bitfield, token);
             }
 
-            if (!AST.isLValue(slice, p.data.items, p.valueMap, operand.node))
+            if (!tree.isLValue(operand.node))
                 try p.errToken(.addr_of_rvalue, token);
 
             if (operand.ty.qual.register)
@@ -5484,7 +5498,7 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
             if (!operand.ty.isScalar())
                 try p.errStr(.invalid_argument_un, token, try p.typeStr(operand.ty));
 
-            if (!AST.isLValue(p.nodes.slice(), p.data.items, p.valueMap, operand.node) or operand.ty.isConst()) {
+            if (!p.tempTree().isLValue(operand.node) or operand.ty.isConst()) {
                 try p.errToken(.not_assignable, token);
                 return error.ParsingFailed;
             }
@@ -5511,7 +5525,7 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
             if (!operand.ty.isScalar())
                 try p.errStr(.invalid_argument_un, token, try p.typeStr(operand.ty));
 
-            if (!AST.isLValue(p.nodes.slice(), p.data.items, p.valueMap, operand.node) or operand.ty.isConst()) {
+            if (!p.tempTree().isLValue(operand.node) or operand.ty.isConst()) {
                 try p.errToken(.not_assignable, token);
                 return error.ParsingFailed;
             }
@@ -5791,7 +5805,7 @@ fn parseSuffixExpr(p: *Parser, lhs: Result) Error!Result {
             if (!operand.ty.isScalar())
                 try p.errStr(.invalid_argument_un, p.tokenIdx, try p.typeStr(operand.ty));
 
-            if (!AST.isLValue(p.nodes.slice(), p.data.items, p.valueMap, operand.node) or operand.ty.isConst()) {
+            if (!p.tempTree().isLValue(operand.node) or operand.ty.isConst()) {
                 try p.err(.not_assignable);
                 return error.ParsingFailed;
             }
@@ -5810,7 +5824,7 @@ fn parseSuffixExpr(p: *Parser, lhs: Result) Error!Result {
             if (!operand.ty.isScalar())
                 try p.errStr(.invalid_argument_un, p.tokenIdx, try p.typeStr(operand.ty));
 
-            if (!AST.isLValue(p.nodes.slice(), p.data.items, p.valueMap, operand.node) or operand.ty.isConst()) {
+            if (!p.tempTree().isLValue(operand.node) or operand.ty.isConst()) {
                 try p.err(.not_assignable);
                 return error.ParsingFailed;
             }

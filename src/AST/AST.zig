@@ -216,11 +216,11 @@ pub const CastKind = enum(u8) {
     VectorSplat,
 };
 
-pub fn isBitField(nodes: Node.List.Slice, node: NodeIndex) bool {
-    switch (nodes.items(.tag)[@intFromEnum(node)]) {
+pub fn isBitField(tree: *const AST, node: NodeIndex) bool {
+    switch (tree.nodes.items(.tag)[@intFromEnum(node)]) {
         .MemberAccessExpr, .MemberAccessPtrExpr => {
-            const member = nodes.items(.data)[@intFromEnum(node)].member;
-            var ty = nodes.items(.type)[@intFromEnum(member.lhs)];
+            const member = tree.nodes.items(.data)[@intFromEnum(node)].member;
+            var ty = tree.nodes.items(.type)[@intFromEnum(member.lhs)];
             if (ty.isPointer())
                 ty = ty.getElemType();
 
@@ -232,38 +232,32 @@ pub fn isBitField(nodes: Node.List.Slice, node: NodeIndex) bool {
     }
 }
 
-pub fn isLValue(nodes: Node.List.Slice, extra: []const NodeIndex, valueMap: ValueMap, node: NodeIndex) bool {
+pub fn isLValue(tree: *const AST, node: NodeIndex) bool {
     var isConst: bool = undefined;
-    return isLValueExtra(nodes, extra, valueMap, node, &isConst);
+    return tree.isLValueExtra(node, &isConst);
 }
 
-pub fn isLValueExtra(
-    nodes: Node.List.Slice,
-    extra: []const NodeIndex,
-    valueMap: ValueMap,
-    node: NodeIndex,
-    isConst: *bool,
-) bool {
+pub fn isLValueExtra(tree: *const AST, node: NodeIndex, isConst: *bool) bool {
     isConst.* = false;
-    switch (nodes.items(.tag)[@intFromEnum(node)]) {
+    switch (tree.nodes.items(.tag)[@intFromEnum(node)]) {
         .CompoundLiteralExpr => {
-            isConst.* = nodes.items(.type)[@intFromEnum(node)].isConst();
+            isConst.* = tree.nodes.items(.type)[@intFromEnum(node)].isConst();
             return true;
         },
 
         .StringLiteralExpr => return true,
         .MemberAccessPtrExpr => {
-            const lhsExpr = nodes.items(.data)[@intFromEnum(node)].member.lhs;
-            const ptrExpr = nodes.items(.type)[@intFromEnum(lhsExpr)];
+            const lhsExpr = tree.nodes.items(.data)[@intFromEnum(node)].member.lhs;
+            const ptrExpr = tree.nodes.items(.type)[@intFromEnum(lhsExpr)];
             if (ptrExpr.isPointer())
                 isConst.* = ptrExpr.getElemType().isConst();
             return true;
         },
 
         .ArrayAccessExpr => {
-            const lhsExpr = nodes.items(.data)[@intFromEnum(node)].binExpr.lhs;
+            const lhsExpr = tree.nodes.items(.data)[@intFromEnum(node)].binExpr.lhs;
             if (lhsExpr != .none) {
-                const arrayType = nodes.items(.type)[@intFromEnum(lhsExpr)];
+                const arrayType = tree.nodes.items(.type)[@intFromEnum(lhsExpr)];
                 if (arrayType.isPointer() or arrayType.isArray())
                     isConst.* = arrayType.getElemType().isConst();
             }
@@ -271,14 +265,14 @@ pub fn isLValueExtra(
         },
 
         .DeclRefExpr => {
-            const declType = nodes.items(.type)[@intFromEnum(node)];
+            const declType = tree.nodes.items(.type)[@intFromEnum(node)];
             isConst.* = declType.isConst();
             return true;
         },
 
         .DerefExpr => {
-            const data = nodes.items(.data)[@intFromEnum(node)];
-            const operandType = nodes.items(.type)[@intFromEnum(data.unExpr)];
+            const data = tree.nodes.items(.data)[@intFromEnum(node)];
+            const operandType = tree.nodes.items(.type)[@intFromEnum(data.unExpr)];
             if (operandType.isFunc())
                 return false;
             if (operandType.isPointer() or operandType.isArray())
@@ -287,20 +281,20 @@ pub fn isLValueExtra(
         },
 
         .MemberAccessExpr => {
-            const data = nodes.items(.data)[@intFromEnum(node)];
-            return isLValueExtra(nodes, extra, valueMap, data.member.lhs, isConst);
+            const data = tree.nodes.items(.data)[@intFromEnum(node)];
+            return tree.isLValueExtra(data.member.lhs, isConst);
         },
 
         .ParenExpr => {
-            const data = nodes.items(.data)[@intFromEnum(node)];
-            return isLValueExtra(nodes, extra, valueMap, data.unExpr, isConst);
+            const data = tree.nodes.items(.data)[@intFromEnum(node)];
+            return tree.isLValueExtra(data.unExpr, isConst);
         },
 
         .BuiltinChooseExpr => {
-            const data = nodes.items(.data)[@intFromEnum(node)];
-            if (valueMap.get(data.if3.cond)) |val| {
+            const data = tree.nodes.items(.data)[@intFromEnum(node)];
+            if (tree.valueMap.get(data.if3.cond)) |val| {
                 const offset = @intFromBool(val.isZero());
-                return isLValueExtra(nodes, extra, valueMap, extra[data.if3.body + offset], isConst);
+                return tree.isLValueExtra(tree.data[data.if3.body + offset], isConst);
             }
             return false;
         },
@@ -420,12 +414,12 @@ fn dumpNode(
     try ty.dump(mapper, tree.comp.langOpts, w);
     try w.writeByte('\'');
 
-    if (isLValue(tree.nodes, tree.data, tree.valueMap, node)) {
+    if (tree.isLValue(node)) {
         if (color) util.setColor(ATTRIBUTE, w);
         try w.writeAll(" lvalue");
     }
 
-    if (isBitField(tree.nodes, node)) {
+    if (tree.isBitField(node)) {
         if (color) util.setColor(ATTRIBUTE, w);
         try w.writeAll(" bitfield");
     }

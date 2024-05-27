@@ -403,15 +403,16 @@ pub fn lvalConversion(res: *Result, p: *Parser) Error!void {
         res.ty.specifier = .Pointer;
         res.ty.data = .{ .subType = elemType };
         try res.implicitCast(p, .FunctionToPointer);
-        // Decay an array type to a pointer to its first element.
-    } else if (res.ty.isArray()) {
+    }
+    // Decay an array type to a pointer to its first element.
+    else if (res.ty.isArray()) {
         res.value.tag = .unavailable;
         res.ty.decayArray();
         try res.implicitCast(p, .ArrayToPointer);
-        // Perform l-value to r-value conversion if the type is an l-value and we are not in a macro.
-    } else if (!p.inMacro and AST.isLValue(p.nodes.slice(), p.data.items, p.valueMap, res.node)) {
+    }
+    // Perform l-value to r-value conversion
+    else if (!p.inMacro and p.tempTree().isLValue(res.node)) {
         res.ty.qual = .{};
-        // Update the AST to reflect the l-value to r-value conversion.
         try res.implicitCast(p, .LValToRVal);
     }
 }
