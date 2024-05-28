@@ -16,7 +16,7 @@ Var: 'const volatile int'
 FnProto: 'fn (a: restrict *int, b: restrict *int, c: restrict *int) int'
  name: foo
 
-FnProto: 'fn (n: int, bar: d[<expr>]int) int'
+FnProto: 'fn (n: int, bar: *d[<expr>]int) int'
  name: bar
 
 TypeDef: 'void'

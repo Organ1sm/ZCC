@@ -667,9 +667,9 @@ fn usualArithmeticConversion(lhs: *Result, rhs: *Result, p: *Parser, tok: TokenI
         if (try lhs.floatConversion(rhs, lhsSpec, rhsSpec, p, floatTypes[2]))
             return;
 
-        if (p.comp.target.c_type_bit_size(.longdouble) == 64) {
-            if (try lhs.floatConversion(rhs, lhsSpec, rhsSpec, p, floatTypes[0])) return;
-        }
+        if (p.comp.target.c_type_bit_size(.longdouble) == 64)
+            if (try lhs.floatConversion(rhs, lhsSpec, rhsSpec, p, floatTypes[0]))
+                return;
 
         if (try lhs.floatConversion(rhs, lhsSpec, rhsSpec, p, floatTypes[3])) return;
         if (try lhs.floatConversion(rhs, lhsSpec, rhsSpec, p, floatTypes[4])) return;

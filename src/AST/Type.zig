@@ -31,6 +31,7 @@ data: union {
 
 qual: Qualifiers = .{},
 specifier: Specifier,
+decayed: bool = false,
 
 pub const Invalid = create(.Invalid);
 pub const Void = create(.Void);
@@ -363,7 +364,6 @@ pub const Specifier = enum {
     // data.SubType
     Pointer,
     UnspecifiedVariableLenArray,
-    DecayedUnspecifiedVariableLenArray,
 
     // data.func
     /// int foo(int bar, char baz) and int (void)
@@ -378,36 +378,31 @@ pub const Specifier = enum {
 
     // data.array
     Array,
-    DecayedArray,
     StaticArray,
-    DecayedStaticArray,
     IncompleteArray,
-    DecayedIncompleteArray,
     Vector,
+
     // data.expr
     VariableLenArray,
-    DecayedVariableLenArray,
 
     // data.record
     Struct,
     Union,
-
     // data.enum
     Enum,
 
     /// typeof(typename)
     TypeofType,
-    /// decayed array created with typeof(typename)
-    DecayedTypeofType,
 
     /// typeof(expression)
     TypeofExpr,
-    /// decayed array created with typeof(expression)
-    DecayedTypeofExpr,
+
     /// data.attributed
     Attributed,
+
     /// special type used to implement __builtin_va_start
     SpecialVaStart,
+
     /// C23 nullptr_t
     NullPtrTy,
 };
@@ -425,7 +420,11 @@ pub fn withAttributes(self: Type, allocator: std.mem.Allocator, attributes: []co
         return self;
 
     const attributedType = try Type.Attributed.create(allocator, self, self.getAttributes(), attributes);
-    return Type{ .specifier = .Attributed, .data = .{ .attributed = attributedType } };
+    return Type{
+        .specifier = .Attributed,
+        .data = .{ .attributed = attributedType },
+        .decayed = self.decayed,
+    };
 }
 
 pub fn isCallable(ty: Type) ?Type {
@@ -451,19 +450,18 @@ pub fn isFunc(ty: Type) bool {
 
 pub fn isPointer(ty: Type) bool {
     return switch (ty.specifier) {
-        .Pointer,
-        .DecayedArray,
-        .DecayedStaticArray,
-        .DecayedIncompleteArray,
-        .DecayedVariableLenArray,
-        .DecayedUnspecifiedVariableLenArray,
-        .DecayedTypeofType,
-        .DecayedTypeofExpr,
-        => true,
+        .Pointer => true,
 
-        .TypeofType => ty.data.subType.isPointer(),
-        .TypeofExpr => ty.data.expr.ty.isPointer(),
-        .Attributed => ty.data.attributed.base.isPointer(),
+        .Array,
+        .StaticArray,
+        .IncompleteArray,
+        .VariableLenArray,
+        .UnspecifiedVariableLenArray,
+        => ty.isDecayed(),
+
+        .TypeofType => ty.isDecayed() or ty.data.subType.isPointer(),
+        .TypeofExpr => ty.isDecayed() or ty.data.expr.ty.isPointer(),
+        .Attributed => ty.isDecayed() or ty.data.attributed.base.isPointer(),
 
         else => false,
     };
@@ -471,10 +469,10 @@ pub fn isPointer(ty: Type) bool {
 
 pub fn isArray(ty: Type) bool {
     return switch (ty.specifier) {
-        .Array, .StaticArray, .IncompleteArray, .VariableLenArray, .UnspecifiedVariableLenArray => true,
-        .TypeofType => ty.data.subType.isArray(),
-        .TypeofExpr => ty.data.expr.ty.isArray(),
-        .Attributed => ty.data.attributed.base.isArray(),
+        .Array, .StaticArray, .IncompleteArray, .VariableLenArray, .UnspecifiedVariableLenArray => !ty.isDecayed(),
+        .TypeofType => !ty.isDecayed() and ty.data.subType.isArray(),
+        .TypeofExpr => !ty.isDecayed() and ty.data.expr.ty.isArray(),
+        .Attributed => !ty.isDecayed() and ty.data.attributed.base.isArray(),
         else => false,
     };
 }
@@ -493,20 +491,7 @@ pub fn isScalarNonInt(ty: Type) bool {
 }
 
 pub fn isDecayed(ty: Type) bool {
-    const decayed = switch (ty.specifier) {
-        .DecayedArray,
-        .DecayedIncompleteArray,
-        .DecayedStaticArray,
-        .DecayedVariableLenArray,
-        .DecayedUnspecifiedVariableLenArray,
-        .DecayedTypeofExpr,
-        .DecayedTypeofType,
-        => true,
-        else => false,
-    };
-
-    std.debug.assert(decayed or !std.mem.startsWith(u8, @tagName(ty.specifier), "Decayed"));
-    return decayed;
+    return ty.decayed;
 }
 
 pub fn isInvalid(ty: Type) bool {
@@ -627,15 +612,15 @@ pub fn isReal(ty: Type) bool {
 
 pub fn isTypeof(ty: Type) bool {
     return switch (ty.specifier) {
-        .TypeofType, .TypeofExpr, .DecayedTypeofType, .DecayedTypeofExpr => true,
+        .TypeofType, .TypeofExpr => true,
         else => false,
     };
 }
 
 pub fn isConst(ty: Type) bool {
     return switch (ty.specifier) {
-        .TypeofType, .DecayedTypeofType => ty.qual.@"const" or ty.data.subType.isConst(),
-        .TypeofExpr, .DecayedTypeofExpr => ty.qual.@"const" or ty.data.expr.ty.isConst(),
+        .TypeofType => ty.qual.@"const" or ty.data.subType.isConst(),
+        .TypeofExpr => ty.qual.@"const" or ty.data.expr.ty.isConst(),
         .Attributed => ty.data.attributed.base.isConst(),
         else => ty.qual.@"const",
     };
@@ -732,26 +717,18 @@ pub fn isAnonymousRecord(ty: Type, comp: *const Compilation) bool {
 /// The canonicalized type after processing qualifiers and special cases related to `typeof` and `decay` operations.
 pub fn canonicalize(ty: Type, qualHandling: enum { standard, preserve_quals }) Type {
     var cur = ty;
-    if (cur.specifier == .Attributed)
+    if (cur.specifier == .Attributed) {
         cur = cur.data.attributed.base;
-    if (!cur.isTypeof()) return cur;
+        cur.decayed = ty.decayed;
+    }
+    if (!cur.isTypeof())
+        return cur;
 
     var qual = cur.qual;
     while (true) {
         switch (cur.specifier) {
             .TypeofType => cur = cur.data.subType.*,
             .TypeofExpr => cur = cur.data.expr.ty,
-
-            .DecayedTypeofType => {
-                cur = cur.data.subType.*;
-                cur.decayArray();
-            },
-
-            .DecayedTypeofExpr => {
-                cur = cur.data.expr.ty;
-                cur.decayArray();
-            },
-
             else => break,
         }
         qual = qual.mergeAllQualifiers(cur.qual);
@@ -761,6 +738,8 @@ pub fn canonicalize(ty: Type, qualHandling: enum { standard, preserve_quals }) T
         cur.qual = .{}
     else
         cur.qual = qual;
+
+    cur.decayed = ty.decayed;
     return cur;
 }
 
@@ -778,34 +757,24 @@ pub fn getElemType(ty: Type) Type {
     return switch (ty.specifier) {
         .Pointer,
         .UnspecifiedVariableLenArray,
-        .DecayedUnspecifiedVariableLenArray,
         => ty.data.subType.*,
 
         .Array,
         .StaticArray,
         .IncompleteArray,
-        .DecayedArray,
-        .DecayedStaticArray,
-        .DecayedIncompleteArray,
         .Vector,
         => ty.data.array.elem,
 
-        .VariableLenArray,
-        .DecayedVariableLenArray,
-        => ty.data.expr.ty,
+        .VariableLenArray => ty.data.expr.ty,
 
-        .TypeofType,
-        .DecayedTypeofType,
-        .TypeofExpr,
-        .DecayedTypeofExpr,
-        => {
+        .TypeofType, .TypeofExpr => {
             const unwrapped = ty.canonicalize(.preserve_quals);
             var elem = unwrapped.getElemType();
             elem.qual = elem.qual.mergeAllQualifiers(unwrapped.qual);
             return elem;
         },
 
-        .Attributed => ty.data.attributed.base,
+        .Attributed => ty.data.attributed.base.getElemType(),
 
         .Invalid => Type.Invalid,
         else => unreachable,
@@ -815,8 +784,8 @@ pub fn getElemType(ty: Type) Type {
 pub fn getReturnType(ty: Type) Type {
     return switch (ty.specifier) {
         .Func, .VarArgsFunc, .OldStyleFunc => ty.data.func.returnType,
-        .TypeofType, .DecayedTypeofType => ty.data.subType.getReturnType(),
-        .TypeofExpr, .DecayedTypeofExpr => ty.data.expr.ty.getReturnType(),
+        .TypeofType => ty.data.subType.getReturnType(),
+        .TypeofExpr => ty.data.expr.ty.getReturnType(),
         .Attributed => ty.data.attributed.base.getReturnType(),
         .Invalid => Type.Invalid,
         else => unreachable,
@@ -832,8 +801,8 @@ pub fn getReturnType(ty: Type) Type {
 pub fn getParams(ty: Type) []Function.Param {
     return switch (ty.specifier) {
         .Func, .VarArgsFunc, .OldStyleFunc => ty.data.func.params,
-        .TypeofType, .DecayedTypeofType => ty.data.subType.getParams(),
-        .TypeofExpr, .DecayedTypeofExpr => ty.data.expr.ty.getParams(),
+        .TypeofType => ty.data.subType.getParams(),
+        .TypeofExpr => ty.data.expr.ty.getParams(),
         .Attributed => ty.data.attributed.base.getParams(),
         .Invalid => &.{},
         else => unreachable,
@@ -842,16 +811,10 @@ pub fn getParams(ty: Type) []Function.Param {
 
 pub fn arrayLen(ty: Type) ?u64 {
     return switch (ty.specifier) {
-        .Array,
-        .StaticArray,
-        .DecayedArray,
-        .DecayedStaticArray,
-        => ty.data.array.len,
-
-        .TypeofType, .DecayedTypeofType => ty.data.subType.arrayLen(),
-        .TypeofExpr, .DecayedTypeofExpr => ty.data.expr.ty.arrayLen(),
+        .Array, .StaticArray => ty.data.array.len,
+        .TypeofType => ty.data.subType.arrayLen(),
+        .TypeofExpr => ty.data.expr.ty.arrayLen(),
         .Attributed => ty.data.attributed.base.arrayLen(),
-
         else => null,
     };
 }
@@ -915,6 +878,9 @@ pub fn integerPromotion(ty: Type, comp: *Compilation) Type {
 }
 
 pub fn hasIncompleteSize(ty: Type) bool {
+    if (ty.isDecayed())
+        return false;
+
     return switch (ty.specifier) {
         .Void,
         .IncompleteArray,
@@ -938,28 +904,16 @@ pub fn hasUnboundVLA(ty: Type) bool {
     var cur = ty;
     while (true) {
         switch (cur.specifier) {
-            .UnspecifiedVariableLenArray,
-            .DecayedUnspecifiedVariableLenArray,
-            => return true,
+            .UnspecifiedVariableLenArray => return true,
 
             .Array,
             .StaticArray,
             .IncompleteArray,
             .VariableLenArray,
-            .DecayedArray,
-            .DecayedStaticArray,
-            .DecayedIncompleteArray,
-            .DecayedVariableLenArray,
             => cur = cur.getElemType(),
 
-            .TypeofType,
-            .DecayedTypeofType,
-            => cur = cur.data.subType.*,
-
-            .TypeofExpr,
-            .DecayedTypeofExpr,
-            => cur = cur.data.expr.ty,
-
+            .TypeofType => cur = cur.data.subType.*,
+            .TypeofExpr => cur = cur.data.expr.ty,
             .Attributed => cur = cur.data.attributed.base,
 
             else => return false,
@@ -1028,10 +982,11 @@ pub fn sizeCompare(lhs: Type, rhs: Type, comp: *Compilation) TypeSizeOrder {
 
 /// Size of type as reported by sizeof
 pub fn sizeof(ty: Type, comp: *const Compilation) ?u64 {
+    if (ty.isPointer())
+        return comp.target.ptrBitWidth() / 8;
+
     return switch (ty.specifier) {
-        .VariableLenArray,
-        .UnspecifiedVariableLenArray,
-        => return null,
+        .VariableLenArray, .UnspecifiedVariableLenArray => null,
 
         .IncompleteArray => return if (comp.langOpts.emulate == .msvc) @as(?u64, 0) else null,
 
@@ -1085,17 +1040,8 @@ pub fn sizeof(ty: Type, comp: *const Compilation) ?u64 {
         .ComplexBitInt,
         => return 2 * ty.makeReal().sizeof(comp).?,
 
-        .Pointer,
-        .StaticArray,
-        .DecayedArray,
-        .DecayedStaticArray,
-        .DecayedIncompleteArray,
-        .DecayedVariableLenArray,
-        .DecayedUnspecifiedVariableLenArray,
-        .DecayedTypeofType,
-        .DecayedTypeofExpr,
-        .NullPtrTy,
-        => comp.target.ptrBitWidth() >> 3,
+        .Pointer => unreachable,
+        .StaticArray, .NullPtrTy => comp.target.ptrBitWidth() / 8,
 
         .Array, .Vector => {
             const size = ty.data.array.elem.sizeof(comp) orelse return null;
@@ -1116,8 +1062,8 @@ pub fn sizeof(ty: Type, comp: *const Compilation) ?u64 {
 
         .TypeofType => ty.data.subType.sizeof(comp),
         .TypeofExpr => ty.data.expr.ty.sizeof(comp),
-
         .Attributed => ty.data.attributed.base.sizeof(comp),
+
         .Invalid => null,
         else => unreachable,
     };
@@ -1126,8 +1072,8 @@ pub fn sizeof(ty: Type, comp: *const Compilation) ?u64 {
 pub fn bitSizeof(ty: Type, comp: *const Compilation) ?u64 {
     return switch (ty.specifier) {
         .Bool => if (comp.langOpts.emulate == .msvc) @as(u64, 8) else 1,
-        .TypeofType, .DecayedTypeofType => ty.data.subType.bitSizeof(comp),
-        .TypeofExpr, .DecayedTypeofExpr => ty.data.expr.ty.bitSizeof(comp),
+        .TypeofType => ty.data.subType.bitSizeof(comp),
+        .TypeofExpr => ty.data.expr.ty.bitSizeof(comp),
         .Attributed => ty.data.attributed.base.bitSizeof(comp),
         .BitInt => return ty.data.int.bits,
         .LongDouble => comp.target.c_type_bit_size(.longdouble),
@@ -1166,7 +1112,10 @@ pub fn alignof(ty: Type, comp: *const Compilation) u29 {
         .IncompleteArray,
         .Array,
         .Vector,
-        => ty.getElemType().alignof(comp),
+        => if (ty.isPointer()) switch (comp.target.cpu.arch) {
+            .avr => 1,
+            else => comp.target.ptrBitWidth() / 8,
+        } else ty.getElemType().alignof(comp),
 
         .Func, .VarArgsFunc, .OldStyleFunc => Target.defaultFunctionAlignment(comp.target),
         .Char, .SChar, .UChar, .Void, .Bool => 1,
@@ -1227,11 +1176,6 @@ pub fn alignof(ty: Type, comp: *const Compilation) u29 {
 
         .Pointer,
         .StaticArray,
-        .DecayedArray,
-        .DecayedStaticArray,
-        .DecayedIncompleteArray,
-        .DecayedVariableLenArray,
-        .DecayedUnspecifiedVariableLenArray,
         .NullPtrTy,
         => switch (comp.target.cpu.arch) {
             .avr => 1,
@@ -1241,9 +1185,8 @@ pub fn alignof(ty: Type, comp: *const Compilation) u29 {
         .Struct, .Union => if (ty.data.record.isIncomplete()) 0 else @intCast(ty.data.record.typeLayout.fieldAlignmentBits / 8),
         .Enum => if (ty.data.@"enum".isIncomplete() and !ty.data.@"enum".fixed) 0 else ty.data.@"enum".tagType.alignof(comp),
 
-        .TypeofType, .DecayedTypeofType => ty.data.subType.alignof(comp),
-        .TypeofExpr, .DecayedTypeofExpr => ty.data.expr.ty.alignof(comp),
-
+        .TypeofType => ty.data.subType.alignof(comp),
+        .TypeofExpr => ty.data.expr.ty.alignof(comp),
         .Attributed => ty.data.attributed.base.alignof(comp),
 
         else => unreachable,
@@ -1257,8 +1200,8 @@ pub fn enumIsPacked(ty: Type, comp: *const Compilation) bool {
 
 pub fn requestedAlignment(ty: Type, comp: *const Compilation) ?u29 {
     return switch (ty.specifier) {
-        .TypeofType, .DecayedTypeofType => ty.data.subType.requestedAlignment(comp),
-        .TypeofExpr, .DecayedTypeofExpr => ty.data.expr.ty.requestedAlignment(comp),
+        .TypeofType => ty.data.subType.requestedAlignment(comp),
+        .TypeofExpr => ty.data.expr.ty.requestedAlignment(comp),
         .Attributed => annotationAlignment(comp, ty.data.attributed.attributes),
         else => null,
     };
@@ -1320,15 +1263,11 @@ pub fn eql(lhsParam: Type, rhsParam: Type, comp: *const Compilation, checkQualif
         if (lhs.qual.@"volatile" != rhs.qual.@"volatile") return false;
     }
 
+    if (lhs.isPointer())
+        return lhsParam.getElemType().eql(rhsParam.getElemType(), comp, checkQualifiers);
+
     switch (lhs.specifier) {
-        .Pointer,
-        .DecayedArray,
-        .DecayedIncompleteArray,
-        .DecayedVariableLenArray,
-        .DecayedStaticArray,
-        .DecayedUnspecifiedVariableLenArray,
-        => if (!lhsParam.getElemType().eql(rhsParam.getElemType(), comp, checkQualifiers))
-            return false,
+        .Pointer => unreachable,
 
         .Func,
         .VarArgsFunc,
@@ -1379,13 +1318,14 @@ pub fn eql(lhsParam: Type, rhsParam: Type, comp: *const Compilation, checkQualif
 }
 
 pub fn decayArray(ty: *Type) void {
-    ty.specifier = @as(Type.Specifier, @enumFromInt(@intFromEnum(ty.specifier) + 1));
+    std.debug.assert(ty.isArray());
+    ty.decayed = true;
 }
 
 pub fn originalTypeOfDecayedArray(ty: Type) Type {
     std.debug.assert(ty.isDecayed());
     var copy = ty;
-    copy.specifier = @enumFromInt(@intFromEnum(ty.specifier) - 1);
+    copy.decayed = false;
     return copy;
 }
 
@@ -1478,29 +1418,27 @@ pub fn combine(inner: *Type, outer: Type) Parser.Error!void {
     switch (inner.specifier) {
         .Pointer => return inner.data.subType.combine(outer),
 
-        .UnspecifiedVariableLenArray => try inner.data.subType.combine(outer),
+        .UnspecifiedVariableLenArray => {
+            std.debug.assert(!inner.isDecayed());
+            try inner.data.subType.combine(outer);
+        },
 
-        .Array,
-        .StaticArray,
-        .IncompleteArray,
-        => try inner.data.array.elem.combine(outer),
+        .Array, .StaticArray, .IncompleteArray => {
+            std.debug.assert(!inner.isDecayed());
+            try inner.data.array.elem.combine(outer);
+        },
 
-        .VariableLenArray => try inner.data.expr.ty.combine(outer),
+        .VariableLenArray => {
+            std.debug.assert(!inner.isDecayed());
+            try inner.data.expr.ty.combine(outer);
+        },
 
         .Func,
         .VarArgsFunc,
         .OldStyleFunc,
         => try inner.data.func.returnType.combine(outer),
 
-        // type should not be able to decay before combine
-        .DecayedArray,
-        .DecayedStaticArray,
-        .DecayedIncompleteArray,
-        .DecayedVariableLenArray,
-        .DecayedUnspecifiedVariableLenArray,
-        .DecayedTypeofType,
-        .DecayedTypeofExpr,
-        => unreachable,
+        .TypeofType, .TypeofExpr => std.debug.assert(!inner.isDecayed()),
 
         .Void => inner.* = outer,
         else => unreachable,
@@ -1559,8 +1497,8 @@ pub fn validateCombinedType(ty: Type, p: *Parser, sourceToken: TokenIndex) Parse
             }
         },
 
-        .TypeofType, .DecayedTypeofType => return ty.data.subType.validateCombinedType(p, sourceToken),
-        .TypeofExpr, .DecayedTypeofExpr => return ty.data.expr.ty.validateCombinedType(p, sourceToken),
+        .TypeofType => return ty.data.subType.validateCombinedType(p, sourceToken),
+        .TypeofExpr => return ty.data.expr.ty.validateCombinedType(p, sourceToken),
         .Attributed => return ty.data.attributed.base.validateCombinedType(p, sourceToken),
         else => {},
     }
@@ -1596,8 +1534,8 @@ pub fn getAttribute(ty: Type, comptime tag: Attribute.Tag) ?Attribute.ArgumentsF
 pub fn getAttributes(ty: Type) []const Attribute {
     return switch (ty.specifier) {
         .Attributed => ty.data.attributed.attributes,
-        .TypeofType, .DecayedTypeofType => ty.data.subType.getAttributes(),
-        .TypeofExpr, .DecayedTypeofExpr => ty.data.expr.ty.getAttributes(),
+        .TypeofType => ty.data.subType.getAttributes(),
+        .TypeofExpr => ty.data.expr.ty.getAttributes(),
         else => &.{},
     };
 }
@@ -1605,8 +1543,8 @@ pub fn getAttributes(ty: Type) []const Attribute {
 pub fn getRecord(ty: Type) ?*const Type.Record {
     return switch (ty.specifier) {
         .Attributed => ty.data.attributed.base.getRecord(),
-        .TypeofType, .DecayedTypeofType => ty.data.subType.getRecord(),
-        .TypeofExpr, .DecayedTypeofExpr => ty.data.expr.ty.getRecord(),
+        .TypeofType => ty.data.subType.getRecord(),
+        .TypeofExpr => ty.data.expr.ty.getRecord(),
         .Struct, .Union => ty.data.record,
         else => null,
     };
@@ -1651,25 +1589,18 @@ fn printPrologue(ty: Type, mapper: StringInterner.TypeMapper, langOpts: LangOpts
         return true;
     }
 
-    switch (ty.specifier) {
-        .Pointer,
-        .DecayedArray,
-        .DecayedStaticArray,
-        .DecayedIncompleteArray,
-        .DecayedVariableLenArray,
-        .DecayedUnspecifiedVariableLenArray,
-        .DecayedTypeofType,
-        .DecayedTypeofExpr,
-        => {
-            const elemType = ty.getElemType();
-            const simple = try elemType.printPrologue(mapper, langOpts, w);
-            if (simple) try w.writeByte(' ');
-            if (elemType.isFunc() or elemType.isArray()) try w.writeByte('(');
-            try w.writeByte('*');
-            try ty.qual.dump(w);
-            return false;
-        },
+    if (ty.isPointer()) {
+        const elemType = ty.getElemType();
+        const simple = try elemType.printPrologue(mapper, langOpts, w);
+        if (simple) try w.writeByte(' ');
+        if (elemType.isFunc() or elemType.isArray()) try w.writeByte('(');
+        try w.writeByte('*');
+        try ty.qual.dump(w);
+        return false;
+    }
 
+    switch (ty.specifier) {
+        .Pointer => unreachable,
         .Func, .VarArgsFunc, .OldStyleFunc => {
             const retType = ty.data.func.returnType;
             const simple = try retType.printPrologue(mapper, langOpts, w);
@@ -1735,21 +1666,16 @@ fn printPrologue(ty: Type, mapper: StringInterner.TypeMapper, langOpts: LangOpts
 
 fn printEpilogue(ty: Type, mapper: StringInterner.TypeMapper, langOpts: LangOpts, w: anytype) @TypeOf(w).Error!void {
     if (ty.qual.atomic) return;
-    switch (ty.specifier) {
-        .Pointer,
-        .DecayedArray,
-        .DecayedStaticArray,
-        .DecayedIncompleteArray,
-        .DecayedVariableLenArray,
-        .DecayedUnspecifiedVariableLenArray,
-        .DecayedTypeofType,
-        .DecayedTypeofExpr,
-        => {
-            const elemType = ty.getElemType();
-            if (elemType.isFunc() or elemType.isArray()) try w.writeByte(')');
-            try elemType.printEpilogue(mapper, langOpts, w);
-        },
 
+    if (ty.isPointer()) {
+        const elemType = ty.getElemType();
+        if (elemType.isFunc() or elemType.isArray()) try w.writeByte(')');
+        try elemType.printEpilogue(mapper, langOpts, w);
+        return;
+    }
+
+    switch (ty.specifier) {
+        .Pointer => unreachable,
         .Func, .VarArgsFunc, .OldStyleFunc => {
             try w.writeByte('(');
             for (ty.data.func.params, 0..) |param, i| {
@@ -1842,10 +1768,10 @@ pub fn dump(ty: Type, mapper: StringInterner.TypeMapper, langOpts: LangOpts, w: 
             try ty.data.func.returnType.dump(mapper, langOpts, w);
         },
 
-        .Array, .StaticArray, .DecayedArray, .DecayedStaticArray => {
-            if (ty.is(.DecayedArray) or ty.is(.DecayedStaticArray)) try w.writeByte('d');
+        .Array, .StaticArray => {
+            if (ty.isDecayed()) try w.writeByte('d');
             try w.writeAll("[");
-            if (ty.is(.StaticArray) or ty.is(.DecayedStaticArray)) try w.writeAll("static ");
+            if (ty.is(.StaticArray)) try w.writeAll("static ");
             try w.print("{d}]", .{ty.data.array.len});
             try ty.data.array.elem.dump(mapper, langOpts, w);
         },
@@ -1856,8 +1782,8 @@ pub fn dump(ty: Type, mapper: StringInterner.TypeMapper, langOpts: LangOpts, w: 
             try w.writeAll(")");
         },
 
-        .IncompleteArray, .DecayedIncompleteArray => {
-            if (ty.is(.DecayedIncompleteArray)) try w.writeByte('d');
+        .IncompleteArray => {
+            if (ty.isDecayed()) try w.writeByte('d');
             try w.writeAll("[]");
             try ty.data.array.elem.dump(mapper, langOpts, w);
         },
@@ -1887,31 +1813,32 @@ pub fn dump(ty: Type, mapper: StringInterner.TypeMapper, langOpts: LangOpts, w: 
                 try dumpRecord(ty.data.record, mapper, langOpts, w);
         },
 
-        .UnspecifiedVariableLenArray, .DecayedUnspecifiedVariableLenArray => {
-            if (ty.is(.DecayedUnspecifiedVariableLenArray)) try w.writeByte('d');
+        .UnspecifiedVariableLenArray => {
+            if (ty.isDecayed()) try w.writeAll("*d");
             try w.writeAll("[*]");
             try ty.data.subType.dump(mapper, langOpts, w);
         },
 
-        .VariableLenArray, .DecayedVariableLenArray => {
-            if (ty.is(.DecayedVariableLenArray)) try w.writeByte('d');
+        .VariableLenArray => {
+            if (ty.isDecayed()) try w.writeAll("*d");
             try w.writeAll("[<expr>]");
             try ty.data.expr.ty.dump(mapper, langOpts, w);
         },
 
-        .TypeofType, .DecayedTypeofType => {
+        .TypeofType => {
             try w.writeAll("typeof(");
             try ty.data.subType.dump(mapper, langOpts, w);
             try w.writeAll(")");
         },
 
-        .TypeofExpr, .DecayedTypeofExpr => {
+        .TypeofExpr => {
             try w.writeAll("typeof(<expr>: ");
             try ty.data.expr.ty.dump(mapper, langOpts, w);
             try w.writeAll(")");
         },
 
         .Attributed => {
+            if (ty.isDecayed()) try w.writeAll("*d:");
             try w.writeAll("attributed(");
             try ty.data.attributed.base.dump(mapper, langOpts, w);
             try w.writeAll(")");

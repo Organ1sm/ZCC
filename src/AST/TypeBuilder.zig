@@ -136,6 +136,7 @@ pub const Specifier = union(enum) {
     DecayedTypeofExpr: *Type.Expr,
 
     Attributed: *Type.Attributed,
+    DecayedAttributed: *Type.Attributed,
 
     pub fn toString(spec: Specifier, langOpts: LangOpts) ?[]const u8 {
         return switch (spec) {
@@ -413,14 +414,12 @@ pub fn finish(b: @This(), p: *Parser) Parser.Error!Type {
             ty.data = .{ .subType = data };
         },
 
-        Specifier.UnspecifiedVariableLenArray => |data| {
+        Specifier.UnspecifiedVariableLenArray,
+        Specifier.DecayedUnspecifiedVariableLenArray,
+        => |data| {
             ty.specifier = .UnspecifiedVariableLenArray;
             ty.data = .{ .subType = data };
-        },
-
-        Specifier.DecayedUnspecifiedVariableLenArray => |data| {
-            ty.specifier = .DecayedUnspecifiedVariableLenArray;
-            ty.data = .{ .subType = data };
+            ty.decayed = (b.specifier == .DecayedUnspecifiedVariableLenArray);
         },
 
         Specifier.Func => |data| {
@@ -438,29 +437,22 @@ pub fn finish(b: @This(), p: *Parser) Parser.Error!Type {
             ty.data = .{ .func = data };
         },
 
-        Specifier.Array => |data| {
+        Specifier.Array, Specifier.DecayedArray => |data| {
             ty.specifier = .Array;
             ty.data = .{ .array = data };
+            ty.decayed = (b.specifier == .DecayedArray);
         },
 
-        Specifier.DecayedArray => |data| {
-            ty.specifier = .DecayedArray;
-            ty.data = .{ .array = data };
-        },
-
-        Specifier.StaticArray => |data| {
+        Specifier.StaticArray, Specifier.DecayedStaticArray => |data| {
             ty.specifier = .StaticArray;
             ty.data = .{ .array = data };
+            ty.decayed = (b.specifier == .DecayedStaticArray);
         },
 
-        Specifier.DecayedStaticArray => |data| {
-            ty.specifier = .DecayedStaticArray;
-            ty.data = .{ .array = data };
-        },
-
-        Specifier.IncompleteArray => |data| {
+        Specifier.IncompleteArray, Specifier.DecayedIncompleteArray => |data| {
             ty.specifier = .IncompleteArray;
             ty.data = .{ .array = data };
+            ty.decayed = (b.specifier == .DecayedIncompleteArray);
         },
 
         Specifier.Vector => |data| {
@@ -468,19 +460,10 @@ pub fn finish(b: @This(), p: *Parser) Parser.Error!Type {
             ty.data = .{ .array = data };
         },
 
-        Specifier.DecayedIncompleteArray => |data| {
-            ty.specifier = .DecayedIncompleteArray;
-            ty.data = .{ .array = data };
-        },
-
-        Specifier.VariableLenArray => |data| {
+        Specifier.VariableLenArray, Specifier.DecayedVariableLenArray => |data| {
             ty.specifier = .VariableLenArray;
             ty.data = .{ .expr = data };
-        },
-
-        Specifier.DecayedVariableLenArray => |data| {
-            ty.specifier = .DecayedVariableLenArray;
-            ty.data = .{ .expr = data };
+            ty.decayed = (b.specifier == .DecayedVariableLenArray);
         },
 
         Specifier.Struct => |data| {
@@ -498,29 +481,22 @@ pub fn finish(b: @This(), p: *Parser) Parser.Error!Type {
             ty.data = .{ .@"enum" = data };
         },
 
-        Specifier.TypeofType => |data| {
+        Specifier.TypeofType, Specifier.DecayedTypeofType => |data| {
             ty.specifier = .TypeofType;
             ty.data = .{ .subType = data };
+            ty.decayed = (b.specifier == .DecayedTypeofType);
         },
 
-        Specifier.DecayedTypeofType => |data| {
-            ty.specifier = .DecayedTypeofType;
-            ty.data = .{ .subType = data };
-        },
-
-        Specifier.TypeofExpr => |data| {
+        Specifier.TypeofExpr, Specifier.DecayedTypeofExpr => |data| {
             ty.specifier = .TypeofExpr;
             ty.data = .{ .expr = data };
+            ty.decayed = (b.specifier == .DecayedTypeofExpr);
         },
 
-        Specifier.DecayedTypeofExpr => |data| {
-            ty.specifier = .DecayedTypeofExpr;
-            ty.data = .{ .expr = data };
-        },
-
-        Specifier.Attributed => |data| {
+        Specifier.Attributed, Specifier.DecayedAttributed => |data| {
             ty.specifier = .Attributed;
             ty.data = .{ .attributed = data };
+            ty.decayed = (b.specifier == .DecayedAttributed);
         },
     }
 
@@ -979,30 +955,51 @@ pub fn fromType(ty: Type) Specifier {
         .ComplexFloat128 => Specifier.ComplexFloat128,
 
         .Pointer => .{ .Pointer = ty.data.subType },
-        .UnspecifiedVariableLenArray => .{ .UnspecifiedVariableLenArray = ty.data.subType },
-        .DecayedUnspecifiedVariableLenArray => .{ .DecayedUnspecifiedVariableLenArray = ty.data.subType },
+
+        .UnspecifiedVariableLenArray => if (ty.isDecayed())
+            .{ .DecayedUnspecifiedVariableLenArray = ty.data.subType }
+        else
+            .{ .UnspecifiedVariableLenArray = ty.data.subType },
+
         .Func => .{ .Func = ty.data.func },
         .VarArgsFunc => .{ .VarArgsFunc = ty.data.func },
         .OldStyleFunc => .{ .OldStyleFunc = ty.data.func },
-        .Array => .{ .Array = ty.data.array },
-        .DecayedArray => .{ .DecayedArray = ty.data.array },
-        .StaticArray => .{ .StaticArray = ty.data.array },
-        .DecayedStaticArray => .{ .DecayedStaticArray = ty.data.array },
-        .IncompleteArray => .{ .IncompleteArray = ty.data.array },
-        .DecayedIncompleteArray => .{ .DecayedIncompleteArray = ty.data.array },
+
+        .Array => if (ty.isDecayed()) .{ .DecayedArray = ty.data.array } else .{ .Array = ty.data.array },
+        .StaticArray => if (ty.isDecayed())
+            .{ .DecayedStaticArray = ty.data.array }
+        else
+            .{ .StaticArray = ty.data.array },
+
+        .IncompleteArray => if (ty.isDecayed())
+            .{ .DecayedIncompleteArray = ty.data.array }
+        else
+            .{ .IncompleteArray = ty.data.array },
+
         .Vector => .{ .Vector = ty.data.array },
-        .VariableLenArray => .{ .VariableLenArray = ty.data.expr },
-        .DecayedVariableLenArray => .{ .DecayedVariableLenArray = ty.data.expr },
+        .VariableLenArray => if (ty.isDecayed())
+            .{ .DecayedVariableLenArray = ty.data.expr }
+        else
+            .{ .VariableLenArray = ty.data.expr },
+
         .Struct => .{ .Struct = ty.data.record },
         .Union => .{ .Union = ty.data.record },
         .Enum => .{ .Enum = ty.data.@"enum" },
 
-        .TypeofType => .{ .TypeofType = ty.data.subType },
-        .DecayedTypeofType => .{ .DecayedTypeofType = ty.data.subType },
-        .TypeofExpr => .{ .TypeofExpr = ty.data.expr },
-        .DecayedTypeofExpr => .{ .DecayedTypeofExpr = ty.data.expr },
+        .TypeofType => if (ty.isDecayed())
+            .{ .DecayedTypeofType = ty.data.subType }
+        else
+            .{ .TypeofType = ty.data.subType },
 
-        .Attributed => .{ .Attributed = ty.data.attributed },
+        .TypeofExpr => if (ty.isDecayed())
+            .{ .DecayedTypeofExpr = ty.data.expr }
+        else
+            .{ .TypeofExpr = ty.data.expr },
+
+        .Attributed => if (ty.isDecayed())
+            .{ .DecayedAttributed = ty.data.attributed }
+        else
+            .{ .Attributed = ty.data.attributed },
 
         else => unreachable,
     };

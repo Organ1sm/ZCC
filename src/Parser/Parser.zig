@@ -945,7 +945,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
 
             // ensure attributed specifier is not lost for old-style functions
             const attrs = initDeclarator.d.type.getAttributes();
-            var baseTy = if (initDeclarator.d.type.specifier == .Attributed) initDeclarator.d.type.getElemType() else initDeclarator.d.type;
+            var baseTy = if (initDeclarator.d.type.specifier == .Attributed) initDeclarator.d.type.data.attributed.base else initDeclarator.d.type;
             baseTy.specifier = .Func;
             initDeclarator.d.type = try baseTy.withAttributes(p.arena, attrs);
 
@@ -1226,12 +1226,14 @@ fn typeof(p: *Parser) Error!?Type {
             .data = typeofExpr.ty.data,
             .qual = typeofExpr.ty.qual.inheritFromTypeof(),
             .specifier = typeofExpr.ty.specifier,
+            .decayed = typeofExpr.ty.decayed,
         },
     };
 
     return Type{
         .data = .{ .expr = inner },
         .specifier = .TypeofExpr,
+        .decayed = typeofExpr.ty.decayed,
     };
 }
 
