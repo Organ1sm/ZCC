@@ -239,7 +239,10 @@ pub fn isLValue(tree: *const AST, node: NodeIndex) bool {
 
 pub fn isLValueExtra(tree: *const AST, node: NodeIndex, isConst: *bool) bool {
     isConst.* = false;
-    switch (tree.nodes.items(.tag)[@intFromEnum(node)]) {
+
+    const tag = tree.nodes.items(.tag)[@intFromEnum(node)];
+    const data = tree.nodes.items(.data)[@intFromEnum(node)];
+    switch (tag) {
         .CompoundLiteralExpr => {
             isConst.* = tree.nodes.items(.type)[@intFromEnum(node)].isConst();
             return true;
@@ -247,7 +250,7 @@ pub fn isLValueExtra(tree: *const AST, node: NodeIndex, isConst: *bool) bool {
 
         .StringLiteralExpr => return true,
         .MemberAccessPtrExpr => {
-            const lhsExpr = tree.nodes.items(.data)[@intFromEnum(node)].member.lhs;
+            const lhsExpr = data.member.lhs;
             const ptrExpr = tree.nodes.items(.type)[@intFromEnum(lhsExpr)];
             if (ptrExpr.isPointer())
                 isConst.* = ptrExpr.getElemType().isConst();
@@ -255,7 +258,7 @@ pub fn isLValueExtra(tree: *const AST, node: NodeIndex, isConst: *bool) bool {
         },
 
         .ArrayAccessExpr => {
-            const lhsExpr = tree.nodes.items(.data)[@intFromEnum(node)].binExpr.lhs;
+            const lhsExpr = data.binExpr.lhs;
             if (lhsExpr != .none) {
                 const arrayType = tree.nodes.items(.type)[@intFromEnum(lhsExpr)];
                 if (arrayType.isPointer() or arrayType.isArray())
@@ -271,7 +274,6 @@ pub fn isLValueExtra(tree: *const AST, node: NodeIndex, isConst: *bool) bool {
         },
 
         .DerefExpr => {
-            const data = tree.nodes.items(.data)[@intFromEnum(node)];
             const operandType = tree.nodes.items(.type)[@intFromEnum(data.unExpr)];
             if (operandType.isFunc())
                 return false;
@@ -280,18 +282,11 @@ pub fn isLValueExtra(tree: *const AST, node: NodeIndex, isConst: *bool) bool {
             return true;
         },
 
-        .MemberAccessExpr => {
-            const data = tree.nodes.items(.data)[@intFromEnum(node)];
-            return tree.isLValueExtra(data.member.lhs, isConst);
-        },
+        .MemberAccessExpr => return tree.isLValueExtra(data.member.lhs, isConst),
 
-        .ParenExpr => {
-            const data = tree.nodes.items(.data)[@intFromEnum(node)];
-            return tree.isLValueExtra(data.unExpr, isConst);
-        },
+        .ParenExpr => return tree.isLValueExtra(data.unExpr, isConst),
 
         .BuiltinChooseExpr => {
-            const data = tree.nodes.items(.data)[@intFromEnum(node)];
             if (tree.valueMap.get(data.if3.cond)) |val| {
                 const offset = @intFromBool(val.isZero());
                 return tree.isLValueExtra(tree.data[data.if3.body + offset], isConst);

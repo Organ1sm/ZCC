@@ -3899,9 +3899,9 @@ fn parseIfStmt(p: *Parser) Error!NodeIndex {
 
     try cond.expect(p);
     try cond.lvalConversion(p);
-    if (cond.ty.isInt())
-        try cond.intCast(p, cond.ty.integerPromotion(p.comp), condToken)
-    else if (!cond.ty.isScalarNonInt())
+    try cond.usualUnaryConversion(p, condToken);
+
+    if (!cond.ty.isScalar())
         try p.errStr(.statement_scalar, lp + 1, try p.typeStr(cond.ty));
 
     try cond.saveValue(p);
@@ -3956,9 +3956,9 @@ fn parseForStmt(p: *Parser) Error!NodeIndex {
     var cond = try p.parseExpr();
     if (cond.node != .none) {
         try cond.lvalConversion(p);
-        if (cond.ty.isInt())
-            try cond.intCast(p, cond.ty.integerPromotion(p.comp), condToken)
-        else if (!cond.ty.isScalarNonInt())
+        try cond.usualUnaryConversion(p, condToken);
+
+        if (!cond.ty.isScalar())
             try p.errStr(.statement_scalar, lp + 1, try p.typeStr(cond.ty));
     }
     try cond.saveValue(p);
@@ -4010,9 +4010,9 @@ fn parseWhileStmt(p: *Parser) Error!NodeIndex {
 
     try cond.expect(p);
     try cond.lvalConversion(p);
-    if (cond.ty.isInt())
-        try cond.intCast(p, cond.ty.integerPromotion(p.comp), condToken)
-    else if (!cond.ty.isScalarNonInt())
+    try cond.usualUnaryConversion(p, condToken);
+
+    if (!cond.ty.isScalar())
         try p.errStr(.statement_scalar, lp + 1, try p.typeStr(cond.ty));
 
     try cond.saveValue(p);
@@ -4047,9 +4047,9 @@ fn parseDoWhileStmt(p: *Parser) Error!NodeIndex {
 
     try cond.expect(p);
     try cond.lvalConversion(p);
-    if (!cond.ty.isScalarNonInt())
-        try cond.intCast(p, cond.ty.integerPromotion(p.comp), condToken)
-    else if (!cond.ty.isFloat() and !cond.ty.isPointer())
+    try cond.usualUnaryConversion(p, condToken);
+
+    if (!cond.ty.isScalar())
         try p.errStr(.statement_scalar, lp + 1, try p.typeStr(cond.ty));
 
     try cond.saveValue(p);
@@ -4110,9 +4110,9 @@ fn parseSwitchStmt(p: *Parser) Error!NodeIndex {
 
     try cond.expect(p);
     try cond.lvalConversion(p);
-    if (cond.ty.isInt())
-        try cond.intCast(p, cond.ty.integerPromotion(p.comp), condToken)
-    else
+    try cond.usualUnaryConversion(p, condToken);
+
+    if (!cond.ty.isInt())
         try p.errStr(.statement_int, lp + 1, try p.typeStr(cond.ty));
 
     try cond.saveValue(p);
@@ -5463,8 +5463,7 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
             if (!operand.ty.isInt() and !operand.ty.isFloat())
                 try p.errStr(.invalid_argument_un, token, try p.typeStr(operand.ty));
 
-            if (operand.ty.isInt())
-                try operand.intCast(p, operand.ty.integerPromotion(p.comp), token);
+            try operand.usualUnaryConversion(p, token);
 
             return operand;
         },
@@ -5478,9 +5477,7 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
             if (!operand.ty.isInt() and !operand.ty.isFloat())
                 try p.errStr(.invalid_argument_un, token, try p.typeStr(operand.ty));
 
-            if (operand.ty.isInt())
-                try operand.intCast(p, operand.ty.integerPromotion(p.comp), token);
-
+            try operand.usualUnaryConversion(p, token);
             if (operand.value.isNumeric())
                 _ = operand.value.sub(operand.value.zero(), operand.value, operand.ty, p.comp)
             else
@@ -5503,8 +5500,7 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
                 return error.ParsingFailed;
             }
 
-            if (operand.ty.isInt())
-                try operand.intCast(p, operand.ty.integerPromotion(p.comp), token);
+            try operand.usualUnaryConversion(p, token);
 
             if (operand.value.isNumeric()) {
                 if (operand.value.add(operand.value, operand.value.one(), operand.ty, p.comp))
@@ -5530,8 +5526,7 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
                 return error.ParsingFailed;
             }
 
-            if (operand.ty.isInt())
-                try operand.intCast(p, operand.ty.integerPromotion(p.comp), token);
+            try operand.usualUnaryConversion(p, token);
 
             if (operand.value.isNumeric()) {
                 if (operand.value.sub(operand.value, operand.value.one(), operand.ty, p.comp))
@@ -5549,9 +5544,7 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
             var operand = try p.parseCastExpr();
             try operand.expect(p);
             try operand.lvalConversion(p);
-
-            if (!operand.ty.isInt())
-                try p.errStr(.invalid_argument_un, token, try p.typeStr(operand.ty));
+            try operand.usualUnaryConversion(p, token);
 
             if (operand.ty.isInt()) {
                 try operand.intCast(p, operand.ty.integerPromotion(p.comp), token);
@@ -5559,6 +5552,7 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
                     operand.value = operand.value.bitNot(operand.ty, p.comp);
                 }
             } else {
+                try p.errStr(.invalid_argument_un, token, try p.typeStr(operand.ty));
                 operand.value.tag = .unavailable;
             }
 
@@ -5575,8 +5569,7 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
             if (!operand.ty.isScalar())
                 try p.errStr(.invalid_argument_un, token, try p.typeStr(operand.ty));
 
-            if (operand.ty.isInt())
-                try operand.intCast(p, operand.ty.integerPromotion(p.comp), token);
+            try operand.usualUnaryConversion(p, token);
 
             if (operand.value.tag == .int) {
                 const res = Value.int(@intFromBool(!operand.value.getBool()));
@@ -5810,8 +5803,7 @@ fn parseSuffixExpr(p: *Parser, lhs: Result) Error!Result {
                 return error.ParsingFailed;
             }
 
-            if (operand.ty.isInt())
-                try operand.intCast(p, operand.ty.integerPromotion(p.comp), p.tokenIdx);
+            try operand.usualUnaryConversion(p, p.tokenIdx);
 
             try operand.un(p, .PostIncExpr);
             return operand;
@@ -5829,8 +5821,7 @@ fn parseSuffixExpr(p: *Parser, lhs: Result) Error!Result {
                 return error.ParsingFailed;
             }
 
-            if (operand.ty.isInt())
-                try operand.intCast(p, operand.ty.integerPromotion(p.comp), p.tokenIdx);
+            try operand.usualUnaryConversion(p, p.tokenIdx);
 
             try operand.un(p, .PostDecExpr);
             return operand;

@@ -212,19 +212,12 @@ pub fn adjustTypes(lhs: *Result, token: TokenIndex, rhs: *Result, p: *Parser, ki
         if (lhs.ty.eql(rhs.ty, p.comp, false))
             return lhs.shouldEval(rhs, p);
         return lhs.invalidBinTy(token, rhs, p);
-    } else if (lhsIsVec) {
-        if (rhs.coerceExtra(p, lhs.ty.getElemType(), token, .testCoerce)) {
-            try rhs.saveValue(p);
-            try rhs.implicitCast(p, .VectorSplat);
-            return lhs.shouldEval(rhs, p);
-        } else |err| switch (err) {
-            error.CoercionFailed => return lhs.invalidBinTy(token, rhs, p),
-            else => |e| return e,
-        }
-    } else if (rhsIsVec) {
-        if (lhs.coerceExtra(p, rhs.ty.getElemType(), token, .testCoerce)) {
-            try lhs.saveValue(p);
-            try lhs.implicitCast(p, .VectorSplat);
+    } else if (lhsIsVec or rhsIsVec) {
+        const vecOperand = if (lhsIsVec) lhs else rhs;
+        const scalarOperand = if (lhsIsVec) rhs else lhs;
+        if (scalarOperand.coerceExtra(p, vecOperand.ty.getElemType(), token, .testCoerce)) {
+            try scalarOperand.saveValue(p);
+            try scalarOperand.implicitCast(p, .VectorSplat);
             return lhs.shouldEval(rhs, p);
         } else |err| switch (err) {
             error.CoercionFailed => return lhs.invalidBinTy(token, rhs, p),
@@ -624,7 +617,26 @@ pub fn nullCast(res: *Result, p: *Parser, ptrType: Type) Error!void {
     try res.implicitCast(p, .NullToPointer);
 }
 
+/// Attempts to perform a cast on the result's value using the usual conversion rules.
+/// The usual conversion rules are as follows:
+///   - If the result's type is an integer, then perform an integer promotion on the result's type.
+///
+/// Arguments:
+///   - res: The result that should be cast.
+///   - p: The parser that this result is being parsed with.
+///   - tok: The token index of the token that this result is being cast to.
+///
+/// Returns:
+///   - The cast value if the cast was successful. Otherwise, an error.
+pub fn usualUnaryConversion(res: *Result, p: *Parser, tok: TokenIndex) Error!void {
+    if (res.ty.isInt())
+        try res.intCast(p, res.ty.integerPromotion(p.comp), tok);
+}
+
 fn usualArithmeticConversion(lhs: *Result, rhs: *Result, p: *Parser, tok: TokenIndex) Error!void {
+    try lhs.usualUnaryConversion(p, tok);
+    try rhs.usualUnaryConversion(p, tok);
+
     // if either is a float cast to that type
     if (lhs.ty.isFloat() or rhs.ty.isFloat()) {
         const floatTypes = [6][2]Type.Specifier{
@@ -664,21 +676,21 @@ fn usualArithmeticConversion(lhs: *Result, rhs: *Result, p: *Parser, tok: TokenI
         if (try lhs.floatConversion(rhs, lhsSpec, rhsSpec, p, floatTypes[5])) return;
     }
 
-    // Do integer promotion on both operands
-    const lhsPromoted = lhs.ty.integerPromotion(p.comp);
-    const rhsPromoted = rhs.ty.integerPromotion(p.comp);
-    if (lhsPromoted.eql(rhsPromoted, p.comp, true)) {
+    if (lhs.ty.eql(rhs.ty, p.comp, true)) {
         // cast to promoted type
-        try lhs.intCast(p, lhsPromoted, tok);
-        try rhs.intCast(p, lhsPromoted, tok);
+        try lhs.intCast(p, lhs.ty, tok);
+        try rhs.intCast(p, rhs.ty, tok);
         return;
     }
 
-    const lhsIsUnsigned = lhsPromoted.isUnsignedInt(p.comp);
-    const rhsIsUnsigned = rhsPromoted.isUnsignedInt(p.comp);
+    const lhsSpec = lhs.ty.specifier;
+    const rhsSpec = rhs.ty.specifier;
+
+    const lhsIsUnsigned = lhs.ty.isUnsignedInt(p.comp);
+    const rhsIsUnsigned = rhs.ty.isUnsignedInt(p.comp);
     if (lhsIsUnsigned == rhsIsUnsigned) {
         // cast to greater signed or unsigned type
-        const resSpecifier = @max(@intFromEnum(lhsPromoted.specifier), @intFromEnum(rhsPromoted.specifier));
+        const resSpecifier = @max(@intFromEnum(lhsSpec), @intFromEnum(rhsSpec));
         const resType = Type{ .specifier = @enumFromInt(resSpecifier) };
         try lhs.intCast(p, resType, tok);
         try rhs.intCast(p, resType, tok);
@@ -686,16 +698,16 @@ fn usualArithmeticConversion(lhs: *Result, rhs: *Result, p: *Parser, tok: TokenI
     }
 
     // cast to the unsigned type with greater rank
-    const lhsLarger = @intFromEnum(lhsPromoted.specifier) > @intFromEnum(rhsPromoted.specifier);
-    const rhsLarger = @intFromEnum(rhsPromoted.specifier) > @intFromEnum(lhsPromoted.specifier);
+    const lhsLarger = @intFromEnum(lhsSpec) > @intFromEnum(rhsSpec);
+    const rhsLarger = @intFromEnum(rhsSpec) > @intFromEnum(lhsSpec);
     if (lhsIsUnsigned) {
-        const target = if (lhsLarger) lhsPromoted else rhsPromoted;
+        const target = if (lhsLarger) lhs.ty else rhs.ty;
         try lhs.intCast(p, target, tok);
         try rhs.intCast(p, target, tok);
         return;
     } else {
         std.debug.assert(rhsIsUnsigned);
-        const target = if (rhsLarger) rhsPromoted else lhsPromoted;
+        const target = if (rhsLarger) rhs.ty else lhs.ty;
         try lhs.intCast(p, target, tok);
         try rhs.intCast(p, target, tok);
     }
