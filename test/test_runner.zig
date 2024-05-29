@@ -55,7 +55,7 @@ fn testOne(allocator: std.mem.Allocator, path: []const u8) !void {
 
     const eof = pp.preprocess(file) catch |err| {
         if (!std.unicode.utf8ValidateSlice(file.buf)) {
-            if (comp.diag.list.items.len > 0 and comp.diag.list.items[comp.diag.list.items.len - 1].tag == .invalid_utf8) {
+            if (comp.diagnostics.list.items.len > 0 and comp.diagnostics.list.items[comp.diagnostics.list.items.len - 1].tag == .invalid_utf8) {
                 return;
             }
         }
@@ -198,7 +198,7 @@ pub fn main() !void {
 
         const builtinMacros = try comp.generateBuiltinMacros();
 
-        comp.diag.errors = 0;
+        comp.diagnostics.errors = 0;
         var pp = zcc.Preprocessor.init(&comp);
         defer pp.deinit();
 
@@ -236,7 +236,7 @@ pub fn main() !void {
                 }
             } else {
                 comp.renderErrors();
-                if (comp.diag.errors != 0) {
+                if (comp.diagnostics.errors != 0) {
                     failCount += 1;
                     continue;
                 }
@@ -353,7 +353,7 @@ pub fn main() !void {
         comp.renderErrors();
 
         if (pp.defines.get("EXPECTED_OUTPUT")) |macro| blk: {
-            if (comp.diag.errors != 0) break :blk;
+            if (comp.diagnostics.errors != 0) break :blk;
 
             if (macro.isFunc) {
                 failCount += 1;
@@ -420,7 +420,7 @@ pub fn main() !void {
             continue;
         }
 
-        if (comp.diag.errors != 0) failCount += 1 else passCount += 1;
+        if (comp.diagnostics.errors != 0) failCount += 1 else passCount += 1;
     }
 
     rootNode.end();
@@ -438,7 +438,7 @@ pub fn main() !void {
 fn checkExpectedErrors(pp: *zcc.Preprocessor, progress: *std.Progress, buf: *std.ArrayList(u8)) !?bool {
     const macro = pp.defines.get("EXPECTED_ERRORS") orelse return null;
 
-    const expectedCount = pp.comp.diag.list.items.len;
+    const expectedCount = pp.comp.diagnostics.list.items.len;
     var m = MsgWriter.init(pp.comp.gpa);
     defer m.deinit();
     zcc.Diagnostics.renderMessages(pp.comp, &m);

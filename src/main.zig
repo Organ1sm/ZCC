@@ -58,8 +58,8 @@ pub fn main() u8 {
         else => return 1,
     };
 
-    if (fastExit) std.process.exit(@intFromBool(comp.diag.errors != 0));
-    return @intFromBool(comp.diag.errors != 0);
+    if (fastExit) std.process.exit(@intFromBool(comp.diagnostics.errors != 0));
+    return @intFromBool(comp.diagnostics.errors != 0);
 }
 
 test "simple test" {

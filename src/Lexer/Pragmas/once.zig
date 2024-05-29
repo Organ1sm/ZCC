@@ -41,7 +41,7 @@ fn preprocessorHandler(pragma: *Pragma, pp: *Preprocessor, startIdx: TokenIndex)
     const nameToken = pp.tokens.get(startIdx);
     const next = pp.tokens.get(startIdx + 1);
     if (next.id != .NewLine) {
-        try pp.comp.diag.add(.{
+        try pp.comp.addDiagnostic(.{
             .tag = .extra_tokens_directive_end,
             .loc = nameToken.loc,
         }, next.expansionSlice());

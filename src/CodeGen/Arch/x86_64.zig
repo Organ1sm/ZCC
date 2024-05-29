@@ -156,7 +156,7 @@ fn genNode(func: *Fn, node: Tree.NodeIndex) Codegen.Error!Value {
                 .FunctionToPointer,
                 .ArrayToPointer,
                 => return func.genNode(data.cast.operand), // no-op
-                else => return func.c.comp.diag.fatalNoSrc("TODO x86_64 genNode for cast {s}\n", .{@tagName(data.cast.kind)}),
+                else => return func.c.comp.diagnostics.fatalNoSrc("TODO x86_64 genNode for cast {s}\n", .{@tagName(data.cast.kind)}),
             }
         },
 
@@ -194,13 +194,13 @@ fn genNode(func: *Fn, node: Tree.NodeIndex) Codegen.Error!Value {
             return Value{ .symbol = symbolName };
         },
 
-        else => return func.c.comp.diag.fatalNoSrc("TODO x86_64 genNode {}\n", .{func.c.nodeTag[@intFromEnum(node)]}),
+        else => return func.c.comp.diagnostics.fatalNoSrc("TODO x86_64 genNode {}\n", .{func.c.nodeTag[@intFromEnum(node)]}),
     }
 }
 
 fn genCall(func: *Fn, lhs: Tree.NodeIndex, args: []const Tree.NodeIndex) Codegen.Error!Value {
     if (args.len > x86_64.CABIIntParamRegs.len)
-        return func.c.comp.diag.fatalNoSrc("TODO more than args {d}\n", .{x86_64.CABIIntParamRegs.len});
+        return func.c.comp.diagnostics.fatalNoSrc("TODO more than args {d}\n", .{x86_64.CABIIntParamRegs.len});
 
     const funcValue = try func.genNode(lhs);
     for (args, 0..) |arg, i| {
@@ -219,8 +219,8 @@ fn genCall(func: *Fn, lhs: Tree.NodeIndex, args: []const Tree.NodeIndex) Codegen
 
             try func.c.obj.addRelocation(sym, .func, offset, -4);
         },
-        .immediate => return func.c.comp.diag.fatalNoSrc("TODO call immediate\n", .{}),
-        .register => return func.c.comp.diag.fatalNoSrc("TODO call reg\n", .{}),
+        .immediate => return func.c.comp.diagnostics.fatalNoSrc("TODO call immediate\n", .{}),
+        .register => return func.c.comp.diagnostics.fatalNoSrc("TODO call reg\n", .{}),
     }
 
     return Value{ .register = x86_64.CABIIntReturnRegs[0] };

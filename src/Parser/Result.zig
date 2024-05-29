@@ -42,7 +42,7 @@ pub fn maybeWarnUnused(res: Result, p: *Parser, exprStart: TokenIndex, errStart:
         return;
 
     // don't warn about unused result if the expression contained errors besides other unused results
-    for (p.comp.diag.list.items[errStart..]) |errItem| {
+    for (p.comp.diagnostics.list.items[errStart..]) |errItem| {
         if (errItem.tag != .unused_value) return;
     }
 
@@ -741,6 +741,7 @@ fn invalidBinTy(lhs: *Result, tok: TokenIndex, rhs: *Result, p: *Parser) Error!b
     return false;
 }
 
+/// Return true if the result of the expression should be evaluated.
 fn shouldEval(lhs: *Result, rhs: *Result, p: *Parser) Error!bool {
     if (p.noEval) return false;
     if (!lhs.value.isUnavailable() and !rhs.value.isUnavailable())

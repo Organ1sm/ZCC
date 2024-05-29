@@ -149,29 +149,29 @@ const Label = union(enum) {
 fn checkIdentifierCodepointWarnings(comp: *Compilation, codepoint: u21, loc: Source.Location) Compilation.Error!bool {
     std.debug.assert(codepoint >= 0x80);
 
-    const errStart = comp.diag.list.items.len;
+    const errStart = comp.diagnostics.list.items.len;
 
     if (!CharInfo.isC99IdChar(codepoint)) {
-        try comp.diag.add(.{
+        try comp.addDiagnostic(.{
             .tag = .c99_compat,
             .loc = loc,
         }, &.{});
     }
     if (CharInfo.isInvisible(codepoint)) {
-        try comp.diag.add(.{
+        try comp.addDiagnostic(.{
             .tag = .unicode_zero_width,
             .loc = loc,
             .extra = .{ .actualCodePoint = codepoint },
         }, &.{});
     }
     if (CharInfo.homoglyph(codepoint)) |resembles| {
-        try comp.diag.add(.{
+        try comp.addDiagnostic(.{
             .tag = .unicode_homoglyph,
             .loc = loc,
             .extra = .{ .codePoints = .{ .actual = codepoint, .resembles = resembles } },
         }, &.{});
     }
-    return comp.diag.list.items.len != errStart;
+    return comp.diagnostics.list.items.len != errStart;
 }
 
 /// Issues diagnostics for the current extended identifier token
@@ -203,10 +203,11 @@ fn validateExtendedIdentifier(p: *Parser) !bool {
 
         if (codepoint == '$') {
             warned = true;
-            try p.comp.diag.add(.{
-                .tag = .dollar_in_identifier_extension,
-                .loc = loc,
-            }, &.{});
+            if (p.comp.langOpts.dollarsInIdentifiers)
+                try p.comp.addDiagnostic(.{
+                    .tag = .dollar_in_identifier_extension,
+                    .loc = loc,
+                }, &.{});
         }
 
         if (codepoint <= 0x7F) continue;
@@ -362,7 +363,10 @@ pub fn errExtra(p: *Parser, tag: Diagnostics.Tag, index: TokenIndex, extra: Diag
         loc.byteOffset += @intCast(p.getTokenText(index - 1).len);
     }
 
-    try p.comp.diag.add(.{ .tag = tag, .loc = loc, .extra = extra }, token.expansionSlice());
+    try p.comp.addDiagnostic(
+        .{ .tag = tag, .loc = loc, .extra = extra },
+        token.expansionSlice(),
+    );
 }
 
 pub fn errToken(p: *Parser, tag: Diagnostics.Tag, index: TokenIndex) Compilation.Error!void {
@@ -387,7 +391,7 @@ pub fn typeStr(p: *Parser, ty: Type) ![]const u8 {
 
     const mapper = p.comp.stringInterner.getSlowTypeMapper();
     try ty.print(mapper, p.comp.langOpts, p.strings.writer());
-    return try p.comp.diag.arena.allocator().dupe(u8, p.strings.items[stringsTop..]);
+    return try p.comp.diagnostics.arena.allocator().dupe(u8, p.strings.items[stringsTop..]);
 }
 
 pub fn typePairStr(p: *Parser, a: Type, b: Type) ![]const u8 {
@@ -406,7 +410,7 @@ pub fn typePairStrExtra(p: *Parser, a: Type, msg: []const u8, b: Type) ![]const 
     try p.strings.append('\'');
     try b.print(mapper, p.comp.langOpts, p.strings.writer());
     try p.strings.append('\'');
-    return try p.comp.diag.arena.allocator().dupe(u8, p.strings.items[stringsTop..]);
+    return try p.comp.diagnostics.arena.allocator().dupe(u8, p.strings.items[stringsTop..]);
 }
 
 pub fn floatValueChangedStr(p: *Parser, res: *Result, oldValue: f64, intTy: Type) ![]const u8 {
@@ -426,7 +430,7 @@ pub fn floatValueChangedStr(p: *Parser, res: *Result, oldValue: f64, intTy: Type
         try w.print(" changes {s}value from {d} to {d}", .{ nonZeroStr, oldValue, res.value.getInt(i64) });
     }
 
-    return try p.comp.diag.arena.allocator().dupe(u8, p.strings.items[stringsTop..]);
+    return try p.comp.diagnostics.arena.allocator().dupe(u8, p.strings.items[stringsTop..]);
 }
 
 /// Check for deprecated or unavailable attributes on a type and report them.
@@ -447,7 +451,7 @@ fn checkDeprecatedUnavailable(p: *Parser, ty: Type, usageToken: TokenIndex, decl
 
         const w = p.strings.writer();
         try w.print("call to '{s}' declared with attribute error: {s}", .{ p.getTokenText(@"error".__name_token), @"error".msg });
-        const str = try p.comp.diag.arena.allocator().dupe(u8, p.strings.items[stringsTop..]);
+        const str = try p.comp.diagnostics.arena.allocator().dupe(u8, p.strings.items[stringsTop..]);
         try p.errStr(.error_attribute, usageToken, str);
     }
 
@@ -457,7 +461,7 @@ fn checkDeprecatedUnavailable(p: *Parser, ty: Type, usageToken: TokenIndex, decl
 
         const w = p.strings.writer();
         try w.print("call to '{s}' declared with attribute warning: {s}", .{ p.getTokenText(warning.__name_token), warning.msg });
-        const str = try p.comp.diag.arena.allocator().dupe(u8, p.strings.items[stringsTop..]);
+        const str = try p.comp.diagnostics.arena.allocator().dupe(u8, p.strings.items[stringsTop..]);
         try p.errStr(.warning_attribute, usageToken, str);
     }
 
@@ -504,7 +508,7 @@ fn errDeprecated(p: *Parser, tag: Diagnostics.Tag, tokenIdx: TokenIndex, msg: ?[
     }
 
     // Duplicate the constructed string from the buffer and prepare the error message.
-    const str = try p.comp.diag.arena.allocator().dupe(u8, p.strings.items[stringsTop..]);
+    const str = try p.comp.diagnostics.arena.allocator().dupe(u8, p.strings.items[stringsTop..]);
     // Report the error with the constructed message.
     return p.errStr(tag, tokenIdx, str);
 }
@@ -1147,9 +1151,9 @@ fn parseStaticAssert(p: *Parser) Error!bool {
 
     // Array will never be zero; a value of zero for a pointer is a null pointer constant
     if ((res.ty.isArray() or res.ty.isPointer()) and !res.value.isZero()) {
-        const errStart = p.comp.diag.list.items.len;
+        const errStart = p.comp.diagnostics.list.items.len;
         try p.errToken(.const_decl_folded, resToken);
-        if (res.ty.isPointer() and errStart != p.comp.diag.list.items.len) {
+        if (res.ty.isPointer() and errStart != p.comp.diagnostics.list.items.len) {
             // Don't show the note if the .const_decl_folded diagnostic was not added
             try p.errToken(.constant_expression_conversion_not_allowed, resToken);
         }
@@ -1176,7 +1180,7 @@ fn parseStaticAssert(p: *Parser) Error!bool {
                 try p.errStr(
                     .static_assert_failure_message,
                     curToken,
-                    try p.comp.diag.arena.allocator().dupe(u8, buffer.items),
+                    try p.comp.diagnostics.arena.allocator().dupe(u8, buffer.items),
                 );
             } else try p.errToken(.static_assert_failure, curToken);
         }
@@ -2574,7 +2578,7 @@ fn enumerator(p: *Parser, e: *Enumerator) Error!?EnumFieldAndNode {
 
     try p.parseAttrSpec();
 
-    const errStart = p.comp.diag.list.items.len;
+    const errStart = p.comp.diagnostics.list.items.len;
     if (p.eat(.Equal)) |_| {
         const specified = try p.parseIntegerConstExpr(.GNUFoldingExtension);
         if (specified.value.isUnavailable()) {
@@ -2595,7 +2599,7 @@ fn enumerator(p: *Parser, e: *Enumerator) Error!?EnumFieldAndNode {
     else
         e.numNegativeBits = @max(e.numNegativeBits, res.value.minSignedBits(res.ty, p.comp));
 
-    if (errStart == p.comp.diag.list.items.len) {
+    if (errStart == p.comp.diagnostics.list.items.len) {
         // only do these warnings if we didn't already warn about overflow or non-representable values
         if (e.res.value.compare(.lt, Value.int(0), e.res.ty, p.comp)) {
             const value = e.res.value.getInt(i64);
@@ -3868,7 +3872,7 @@ fn parseStmt(p: *Parser) Error!NodeIndex {
         return some;
 
     const exprStart = p.tokenIdx;
-    const errStart = p.comp.diag.list.items.len;
+    const errStart = p.comp.diagnostics.list.items.len;
 
     const e = try p.parseExpr();
     if (e.node != .none) {
@@ -3945,7 +3949,7 @@ fn parseForStmt(p: *Parser) Error!NodeIndex {
 
     // for-init
     const initStart = p.tokenIdx;
-    var errStart = p.comp.diag.list.items.len;
+    var errStart = p.comp.diagnostics.list.items.len;
     var init = if (!gotDecl) try p.parseExpr() else Result{};
     try init.saveValue(p);
     try init.maybeWarnUnused(p, initStart, errStart);
@@ -3968,7 +3972,7 @@ fn parseForStmt(p: *Parser) Error!NodeIndex {
 
     // increment
     const incrStart = p.tokenIdx;
-    errStart = p.comp.diag.list.items.len;
+    errStart = p.comp.diagnostics.list.items.len;
     var incr = try p.parseExpr();
     try incr.maybeWarnUnused(p, incrStart, errStart);
     try incr.saveValue(p);
@@ -4587,7 +4591,7 @@ pub fn macroExpr(p: *Parser) Compilation.Error!bool {
 /// expression : assign-expression (',' assign-expression)*
 fn parseExpr(p: *Parser) Error!Result {
     var exprStartIdx = p.tokenIdx;
-    var errStart = p.comp.diag.list.items.len;
+    var errStart = p.comp.diagnostics.list.items.len;
     var lhs = try p.parseAssignExpr();
 
     if (p.getCurrToken() == .Comma)
@@ -4596,7 +4600,7 @@ fn parseExpr(p: *Parser) Error!Result {
     while (p.eat(.Comma)) |_| {
         try lhs.maybeWarnUnused(p, exprStartIdx, errStart);
         exprStartIdx = p.tokenIdx;
-        errStart = p.comp.diag.list.items.len;
+        errStart = p.comp.diagnostics.list.items.len;
 
         const rhs = try p.parseAssignExpr();
         try rhs.expect(p);
@@ -5105,13 +5109,13 @@ fn parseMulExpr(p: *Parser) Error!Result {
 /// This will always be the last message, if present
 fn removeUnusedWarningForTok(p: *Parser, lastExprToken: TokenIndex) void {
     if (lastExprToken == 0) return;
-    if (p.comp.diag.list.items.len == 0) return;
+    if (p.comp.diagnostics.list.items.len == 0) return;
 
     const lastExprLoc = p.pp.tokens.items(.loc)[lastExprToken];
-    const lastMessage = p.comp.diag.list.items[p.comp.diag.list.items.len - 1];
+    const lastMessage = p.comp.diagnostics.list.items[p.comp.diagnostics.list.items.len - 1];
 
     if (lastMessage.tag == .unused_value and lastMessage.loc.eql(lastExprLoc))
-        p.comp.diag.list.items.len = p.comp.diag.list.items.len - 1;
+        p.comp.diagnostics.list.items.len = p.comp.diagnostics.list.items.len - 1;
 }
 
 /// cast-expression
@@ -5883,7 +5887,7 @@ fn validateFieldAccess(
     try exprType.print(mapper, p.comp.langOpts, p.strings.writer());
     try p.strings.append('\'');
 
-    const duped = try p.comp.diag.arena.allocator().dupe(u8, p.strings.items);
+    const duped = try p.comp.diagnostics.arena.allocator().dupe(u8, p.strings.items);
     try p.errStr(.no_such_member, fieldNameToken, duped);
     return error.ParsingFailed;
 }

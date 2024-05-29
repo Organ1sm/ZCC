@@ -24,8 +24,9 @@ pub const Error = error{
 } || Allocator.Error;
 
 gpa: Allocator,
+diagnostics: Diagnostics,
+
 sources: std.StringArrayHashMap(Source),
-diag: Diagnostics,
 includeDirs: std.ArrayList([]const u8),
 systemIncludeDirs: std.ArrayList([]const u8),
 target: std.Target = builtin.target,
@@ -45,8 +46,8 @@ stringInterner: StringInterner = .{},
 pub fn init(gpa: Allocator) Compilation {
     return .{
         .gpa = gpa,
+        .diagnostics = Diagnostics.init(gpa),
         .sources = std.StringArrayHashMap(Source).init(gpa),
-        .diag = Diagnostics.init(gpa),
         .includeDirs = std.ArrayList([]const u8).init(gpa),
         .systemIncludeDirs = std.ArrayList([]const u8).init(gpa),
         .generatedBuffer = std.ArrayList(u8).init(gpa),
@@ -63,7 +64,7 @@ pub fn deinit(comp: *Compilation) void {
     }
 
     comp.sources.deinit();
-    comp.diag.deinit();
+    comp.diagnostics.deinit();
     comp.includeDirs.deinit();
     for (comp.systemIncludeDirs.items) |path|
         comp.gpa.free(path);
@@ -429,7 +430,7 @@ fn generateVaListType(comp: *Compilation) !Type {
     };
 
     // TODO this might be bad?
-    const arena = comp.diag.arena.allocator();
+    const arena = comp.diagnostics.arena.allocator();
 
     var ty: Type = undefined;
     switch (kind) {
@@ -663,7 +664,7 @@ pub fn addSourceFromReader(comp: *Compilation, reader: anytype, path: []const u8
                         i = backslashLoc;
                         try spliceList.append(i);
                         if (state == .trailing_ws) {
-                            try comp.diag.add(.{
+                            try comp.addDiagnostic(.{
                                 .tag = .backslash_newline_escape,
                                 .loc = .{ .id = sourceId, .byteOffset = i, .line = line },
                             }, &.{});
@@ -687,7 +688,7 @@ pub fn addSourceFromReader(comp: *Compilation, reader: anytype, path: []const u8
                             try spliceList.append(i);
                         }
                         if (state == .trailing_ws) {
-                            try comp.diag.add(.{
+                            try comp.addDiagnostic(.{
                                 .tag = .backslash_newline_escape,
                                 .loc = .{ .id = sourceId, .byteOffset = i, .line = line },
                             }, &.{});
@@ -1019,6 +1020,7 @@ pub fn pragmaEvent(comp: *Compilation, event: PragmaEvent) void {
 }
 
 pub const renderErrors = Diagnostics.render;
+pub const addDiagnostic = Diagnostics.add;
 
 test "addSourceFromReader" {
     const Test = struct {
@@ -1031,7 +1033,7 @@ test "addSourceFromReader" {
             const source = try comp.addSourceFromReader(reader, "path", @intCast(str.len));
 
             try std.testing.expectEqualStrings(expected, source.buffer);
-            try std.testing.expectEqual(warningCount, @as(u32, @intCast(comp.diag.list.items.len)));
+            try std.testing.expectEqual(warningCount, @as(u32, @intCast(comp.diagnostics.list.items.len)));
             try std.testing.expectEqualSlices(u32, splices, source.spliceLocs);
         }
 

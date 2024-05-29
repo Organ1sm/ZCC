@@ -7,6 +7,7 @@ const Compilation = @import("Compilation.zig");
 const Attribute = @import("../Lexer/Attribute.zig");
 const DiagnosticsMessages = @import("../Basic/DiagnosticsMessages.zig");
 const util = @import("../Basic/Util.zig");
+const LangOpts = @import("../Basic/LangOpts.zig");
 const IsWindows = @import("builtin").os.tag == .windows;
 
 const Allocator = std.mem.Allocator;
@@ -181,10 +182,11 @@ pub fn set(diag: *Diagnostics, name: []const u8, to: Kind) !void {
             return;
         }
     }
-    try diag.add(.{
-        .tag = .unknown_warning,
-        .extra = .{ .str = name },
-    }, &.{});
+    try diag.addExtra(
+        .{},
+        .{ .tag = .unknown_warning, .extra = .{ .str = name } },
+        &.{},
+    );
 }
 
 pub fn setAll(diag: *Diagnostics, to: Kind) void {
@@ -204,8 +206,17 @@ pub fn deinit(diag: *Diagnostics) void {
     diag.arena.deinit();
 }
 
-pub fn add(diag: *Diagnostics, msg: Message, expansionLocs: []const Source.Location) Compilation.Error!void {
-    const kind = diag.tagKind(msg.tag);
+pub fn add(comp: *Compilation, msg: Message, expansionLocs: []const Source.Location) Compilation.Error!void {
+    return comp.diagnostics.addExtra(comp.langOpts, msg, expansionLocs);
+}
+
+pub fn addExtra(
+    diag: *Diagnostics,
+    langopts: LangOpts,
+    msg: Message,
+    expansionLocs: []const Source.Location,
+) Compilation.Error!void {
+    const kind = diag.tagKind(msg.tag, langopts);
     if (kind == .off) return;
     var copy = msg;
     copy.kind = kind;
@@ -297,11 +308,11 @@ pub fn fatalNoSrc(diag: *Diagnostics, comptime fmt: []const u8, args: anytype) e
 }
 
 pub fn defaultMsgWriter(comp: *const Compilation) MsgWriter {
-    return MsgWriter.init(comp.diag.color);
+    return MsgWriter.init(comp.diagnostics.color);
 }
 
 pub fn render(comp: *Compilation) void {
-    if (comp.diag.list.items.len == 0) return;
+    if (comp.diagnostics.list.items.len == 0) return;
 
     var m = defaultMsgWriter(comp);
     defer m.deinit();
@@ -312,7 +323,7 @@ pub fn render(comp: *Compilation) void {
 pub fn renderMessages(comp: *Compilation, m: anytype) void {
     var errors: u32 = 0;
     var warnings: u32 = 0;
-    for (comp.diag.list.items) |msg| {
+    for (comp.diagnostics.list.items) |msg| {
         switch (msg.kind) {
             .@"fatal error", .@"error" => errors += 1,
             .warning => warnings += 1,
@@ -333,8 +344,8 @@ pub fn renderMessages(comp: *Compilation, m: anytype) void {
         m.print("{d} error{s} generated.\n", .{ errors, es });
     }
 
-    comp.diag.list.items.len = 0;
-    comp.diag.errors += errors;
+    comp.diagnostics.list.items.len = 0;
+    comp.diagnostics.errors += errors;
 }
 
 pub fn renderMessage(comp: *Compilation, m: anytype, msg: Message) void {
@@ -428,10 +439,7 @@ pub fn renderMessage(comp: *Compilation, m: anytype, msg: Message) void {
     m.end(line, width, endWithSplice);
 }
 
-fn tagKind(diag: *Diagnostics, tag: Tag) Kind {
-    // XXX: horrible hack, do not do this
-    const comp: *Compilation = @fieldParentPtr("diag", diag);
-
+fn tagKind(diag: *Diagnostics, tag: Tag, langOpts: LangOpts) Kind {
     var kind: Kind = undefined;
     switch (tag) {
         inline else => |tagVal| {
@@ -460,31 +468,31 @@ fn tagKind(diag: *Diagnostics, tag: Tag) Kind {
             }
 
             if (@hasDecl(info, "suppress_version"))
-                if (comp.langOpts.standard.atLeast(info.suppress_version))
+                if (langOpts.standard.atLeast(info.suppress_version))
                     return .off;
 
             if (@hasDecl(info, "suppress_unless_version"))
-                if (!comp.langOpts.standard.atLeast(info.suppress_unless_version))
+                if (!langOpts.standard.atLeast(info.suppress_unless_version))
                     return .off;
 
             if (@hasDecl(info, "suppress_gnu"))
-                if (comp.langOpts.standard.isExplicitGNU())
+                if (langOpts.standard.isExplicitGNU())
                     return .off;
 
             if (@hasDecl(info, "suppress_language_option"))
-                if (!@field(comp.langOpts, info.suppress_language_option))
+                if (!@field(langOpts, info.suppress_language_option))
                     return .off;
 
             if (@hasDecl(info, "suppress_gcc"))
-                if (comp.langOpts.emulate == .gcc)
+                if (langOpts.emulate == .gcc)
                     return .off;
 
             if (@hasDecl(info, "suppress_clang"))
-                if (comp.langOpts.emulate == .clang)
+                if (langOpts.emulate == .clang)
                     return .off;
 
             if (@hasDecl(info, "suppress_msvc"))
-                if (comp.langOpts.emulate == .msvc)
+                if (langOpts.emulate == .msvc)
                     return .off;
 
             if (kind == .@"error" and diag.fatalErrors)

@@ -30,7 +30,7 @@ fn preprocessorHandler(_: *Pragma, pp: *Preprocessor, startIdx: TokenIndex) Prag
 
     const str = Pragma.pasteTokens(pp, startIdx + 1) catch |err| switch (err) {
         error.ExpectedStringLiteral => {
-            return pp.comp.diag.add(.{
+            return pp.comp.addDiagnostic(.{
                 .tag = .pragma_requires_string_literal,
                 .loc = messageToken.loc,
                 .extra = .{ .str = "message" },
@@ -44,5 +44,5 @@ fn preprocessorHandler(_: *Pragma, pp: *Preprocessor, startIdx: TokenIndex) Prag
     else
         messageToken.loc;
     const extra = Diagnostics.Message.Extra{ .str = try pp.arena.allocator().dupe(u8, str) };
-    return pp.comp.diag.add(.{ .tag = .pragma_message, .loc = loc, .extra = extra }, &.{});
+    return pp.comp.addDiagnostic(.{ .tag = .pragma_message, .loc = loc, .extra = extra }, &.{});
 }

@@ -138,7 +138,7 @@ fn genType(c: *CodeGen, baseTy: Type) !Interner.Ref {
 
             for (ty.data.record.fields) |field| {
                 if (!field.isRegularField())
-                    return c.comp.diag.fatalNoSrc("TODO lower struct bitfields", .{});
+                    return c.comp.diagnostics.fatalNoSrc("TODO lower struct bitfields", .{});
 
                 // TODO handle padding bits
                 const fieldRef = try c.genType(field.ty);
@@ -150,7 +150,7 @@ fn genType(c: *CodeGen, baseTy: Type) !Interner.Ref {
         },
 
         .Union => {
-            return c.comp.diag.fatalNoSrc("TODO lower union types", .{});
+            return c.comp.diagnostics.fatalNoSrc("TODO lower union types", .{});
         },
 
         else => {},
@@ -163,7 +163,7 @@ fn genType(c: *CodeGen, baseTy: Type) !Interner.Ref {
         return .func;
 
     if (!ty.isReal())
-        return c.comp.diag.fatalNoSrc("TODO lower complex types", .{});
+        return c.comp.diagnostics.fatalNoSrc("TODO lower complex types", .{});
 
     if (ty.isInt()) {
         const bits = ty.bitSizeof(c.comp).?;
@@ -178,7 +178,7 @@ fn genType(c: *CodeGen, baseTy: Type) !Interner.Ref {
         const elem = try c.genType(ty.getElemType());
         key = .{ .vector = .{ .child = elem, .len = @intCast(ty.data.array.len) } };
     } else if (ty.is(.NullPtrTy)) {
-        return c.comp.diag.fatalNoSrc("TODO lower nullptr_t", .{});
+        return c.comp.diagnostics.fatalNoSrc("TODO lower nullptr_t", .{});
     }
 
     return c.builder.pool.put(c.builder.gpa, key);
@@ -229,7 +229,7 @@ fn genFn(c: *CodeGen, decl: NodeIndex) Error!void {
         .body = c.builder.body,
     };
 
-    res.dump(c.builder.gpa, name, c.comp.diag.color, std.io.getStdOut().writer()) catch {};
+    res.dump(c.builder.gpa, name, c.comp.diagnostics.color, std.io.getStdOut().writer()) catch {};
 }
 
 fn addUn(c: *CodeGen, tag: Inst.Tag, operand: IR.Ref, ty: Type) !IR.Ref {
@@ -604,7 +604,7 @@ fn genExpr(c: *CodeGen, node: NodeIndex) Error!IR.Ref {
         .GotoStmt,
         .ComputedGotoStmt,
         .NullPtrLiteral,
-        => return c.comp.diag.fatalNoSrc("TODO CodeGen.genStmt {}\n", .{c.nodeTag[@intFromEnum(node)]}),
+        => return c.comp.diagnostics.fatalNoSrc("TODO CodeGen.genStmt {}\n", .{c.nodeTag[@intFromEnum(node)]}),
 
         .CommaExpr => {
             _ = try c.genExpr(data.binExpr.lhs);
@@ -825,7 +825,7 @@ fn genExpr(c: *CodeGen, node: NodeIndex) Error!IR.Ref {
             .NullToPointer,
             .UnionCast,
             .VectorSplat,
-            => return c.comp.diag.fatalNoSrc("TODO CodeGen gen CastKind {}\n", .{data.cast.kind}),
+            => return c.comp.diagnostics.fatalNoSrc("TODO CodeGen gen CastKind {}\n", .{data.cast.kind}),
         },
 
         .BinaryCondExpr => {
@@ -1036,7 +1036,7 @@ fn genExpr(c: *CodeGen, node: NodeIndex) Error!IR.Ref {
         .BuiltinCallExprOne,
         .BuiltinCallExpr,
         .SizeOfExpr,
-        => return c.comp.diag.fatalNoSrc("TODO CodeGen.genExpr {}\n", .{c.nodeTag[@intFromEnum(node)]}),
+        => return c.comp.diagnostics.fatalNoSrc("TODO CodeGen.genExpr {}\n", .{c.nodeTag[@intFromEnum(node)]}),
 
         else => unreachable, // Not an expression.
     }
@@ -1099,7 +1099,7 @@ fn genLval(c: *CodeGen, node: NodeIndex) Error!IR.Ref {
         .MemberAccessExpr,
         .MemberAccessPtrExpr,
         .ArrayAccessExpr,
-        => return c.comp.diag.fatalNoSrc("TODO CodeGen.genLval {}\n", .{c.nodeTag[@intFromEnum(node)]}),
+        => return c.comp.diagnostics.fatalNoSrc("TODO CodeGen.genLval {}\n", .{c.nodeTag[@intFromEnum(node)]}),
 
         else => unreachable, // not an lvalue expression.
     }
@@ -1379,13 +1379,13 @@ fn genInitializer(c: *CodeGen, ptr: IR.Ref, destTy: Type, initializer: NodeIndex
         .UnionInitExpr,
         .ArrayFillerExpr,
         .DefaultInitExpr,
-        => return c.comp.diag.fatalNoSrc("TODO CodeGen.genInitializer {}\n", .{c.nodeTag[@intFromEnum(initializer)]}),
+        => return c.comp.diagnostics.fatalNoSrc("TODO CodeGen.genInitializer {}\n", .{c.nodeTag[@intFromEnum(initializer)]}),
 
         .StringLiteralExpr => {
             const val = c.tree.valueMap.get(initializer).?;
             const strPtr = try c.builder.addConstant(val, .ptr);
             if (destTy.isArray()) {
-                return c.comp.diag.fatalNoSrc("TODO memcpy\n", .{});
+                return c.comp.diagnostics.fatalNoSrc("TODO memcpy\n", .{});
             } else {
                 try c.builder.addStore(ptr, strPtr);
             }
@@ -1398,5 +1398,5 @@ fn genInitializer(c: *CodeGen, ptr: IR.Ref, destTy: Type, initializer: NodeIndex
     }
 }
 fn genVar(c: *CodeGen, _: NodeIndex) Error!void {
-    return c.comp.diag.fatalNoSrc("TODO CodeGen.genVar\n", .{});
+    return c.comp.diagnostics.fatalNoSrc("TODO CodeGen.genVar\n", .{});
 }

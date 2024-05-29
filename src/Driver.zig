@@ -196,7 +196,7 @@ pub fn parseArgs(
                     continue;
                 };
                 if (limit == 0) limit = std.math.maxInt(u32);
-                d.comp.diag.macroBacktraceLimit = limit;
+                d.comp.diagnostics.macroBacktraceLimit = limit;
             } else if (std.mem.startsWith(u8, arg, "-I")) {
                 var path = arg["-I".len..];
                 if (path.len == 0) {
@@ -225,7 +225,7 @@ pub fn parseArgs(
                 try d.comp.systemIncludeDirs.append(path);
             } else if (option(arg, "--emulate=")) |compilerStr| {
                 const compiler = std.meta.stringToEnum(LangOpts.Compiler, compilerStr) orelse {
-                    try d.comp.diag.add(.{ .tag = .cli_invalid_emulate, .extra = .{ .str = arg } }, &.{});
+                    try d.comp.addDiagnostic(.{ .tag = .cli_invalid_emulate, .extra = .{ .str = arg } }, &.{});
                     continue;
                 };
                 d.comp.langOpts.setEmulatedCompiler(compiler);
@@ -241,32 +241,33 @@ pub fn parseArgs(
                 }
                 d.outputName = filename;
             } else if (std.mem.eql(u8, arg, "-pedantic")) {
-                d.comp.diag.options.pedantic = .warning;
+                d.comp.diagnostics.options.pedantic = .warning;
             } else if (std.mem.eql(u8, arg, "-Wall")) {
-                d.comp.diag.setAll(.warning);
+                d.comp.diagnostics.setAll(.warning);
             } else if (std.mem.eql(u8, arg, "-Werror")) {
-                d.comp.diag.setAll(.@"error");
+                d.comp.diagnostics.setAll(.@"error");
             } else if (std.mem.eql(u8, arg, "-Wfatal-errors")) {
-                d.comp.diag.fatalErrors = true;
+                d.comp.diagnostics.fatalErrors = true;
             } else if (std.mem.eql(u8, arg, "-Wno-fatal-errors")) {
-                d.comp.diag.fatalErrors = false;
+                d.comp.diagnostics.fatalErrors = false;
             } else if (option(arg, "-Werror=")) |errName| {
-                try d.comp.diag.set(errName, .@"error");
+                try d.comp.diagnostics.set(errName, .@"error");
             } else if (option(arg, "-Wno-")) |errName| {
-                try d.comp.diag.set(errName, .off);
+                try d.comp.diagnostics.set(errName, .off);
             } else if (option(arg, "-W")) |errName| {
-                try d.comp.diag.set(errName, .warning);
+                try d.comp.diagnostics.set(errName, .warning);
             } else if (option(arg, "-std=")) |standard| {
                 d.comp.langOpts.setStandard(standard) catch
-                    try d.comp.diag.add(.{ .tag = .cli_invalid_standard, .extra = .{ .str = arg } }, &.{});
+                    try d.comp.addDiagnostic(.{ .tag = .cli_invalid_standard, .extra = .{ .str = arg } }, &.{});
             } else if (std.mem.startsWith(u8, arg, "-S")) {
                 d.onlyPreprocessAndCompile = true;
             } else if (option(arg, "--target=")) |triple| {
                 const query = std.Target.Query.parse(.{ .arch_os_abi = triple }) catch {
-                    return d.comp.diag.fatalNoSrc("Invalid target '{s}'", .{triple});
+                    try d.comp.addDiagnostic(.{ .tag = .cli_invalid_target, .extra = .{ .str = arg } }, &.{});
+                    continue;
                 };
                 const target = std.zig.system.resolveTargetQuery(query) catch |e| {
-                    return d.comp.diag.fatalNoSrc("unable to resolve target: {s}", .{@errorName(e)});
+                    return d.fatal("unable to resolve target: {s}", .{Util.errorDescription(e)});
                 };
                 d.comp.target = target;
                 d.comp.langOpts.setEmulatedCompiler(Target.systemCompiler(d.comp.target));
@@ -282,13 +283,13 @@ pub fn parseArgs(
                 d.dumpRawTokens = true;
             } else if (option(arg, "-fuse-ld=")) |linkerName| {
                 d.useLinker = std.meta.stringToEnum(Linker, linkerName) orelse {
-                    try d.comp.diag.add(.{ .tag = .cli_unknown_linker, .extra = .{ .str = arg } }, &.{});
+                    try d.comp.addDiagnostic(.{ .tag = .cli_unknown_linker, .extra = .{ .str = arg } }, &.{});
                     continue;
                 };
             } else if (option(arg, "--ld-path=")) |linkerPath| {
                 d.linkerPath = linkerPath;
             } else {
-                try d.comp.diag.add(.{ .tag = .cli_unknown_arg, .extra = .{ .str = arg } }, &.{});
+                try d.comp.addDiagnostic(.{ .tag = .cli_unknown_arg, .extra = .{ .str = arg } }, &.{});
             }
         } else if (std.mem.endsWith(u8, arg, ".o") or std.mem.endsWith(u8, arg, ".obj")) {
             try d.linkObjects.append(d.comp.gpa, arg);
@@ -300,7 +301,7 @@ pub fn parseArgs(
         }
     }
 
-    d.comp.diag.color = switch (colorSetting) {
+    d.comp.diagnostics.color = switch (colorSetting) {
         .on => true,
         .off => false,
         .unset => Util.fileSupportsColor(std.io.getStdOut()) and !std.process.hasEnvVarConstant("NO_COLOR"),
@@ -320,12 +321,12 @@ fn addSource(d: *Driver, path: []const u8) !Source {
 }
 
 fn err(d: *Driver, msg: []const u8) !void {
-    try d.comp.diag.add(.{ .tag = .cli_error, .extra = .{ .str = msg } }, &.{});
+    try d.comp.addDiagnostic(.{ .tag = .cli_error, .extra = .{ .str = msg } }, &.{});
 }
 
 fn fatal(d: *Driver, comptime fmt: []const u8, args: anytype) error{FatalError} {
     d.comp.renderErrors();
-    return d.comp.diag.fatalNoSrc(fmt, args);
+    return d.comp.diagnostics.fatalNoSrc(fmt, args);
 }
 
 pub fn main(d: *Driver, args: [][]const u8) !void {
@@ -346,7 +347,7 @@ pub fn main(d: *Driver, args: [][]const u8) !void {
 
     if (!linking)
         for (d.linkObjects.items) |obj|
-            try d.comp.diag.add(.{ .tag = .cli_unused_link_object, .extra = .{ .str = obj } }, &.{});
+            try d.comp.addDiagnostic(.{ .tag = .cli_unused_link_object, .extra = .{ .str = obj } }, &.{});
 
     if (linking and d.linkerPath == null)
         d.linkerPath = d.getLinkerPath();
@@ -379,7 +380,7 @@ pub fn main(d: *Driver, args: [][]const u8) !void {
         };
     }
 
-    if (d.comp.diag.errors != 0) {
+    if (d.comp.diagnostics.errors != 0) {
         if (fastExit) d.exitWithCleanup(1);
         return;
     }
@@ -470,19 +471,22 @@ fn processSource(
     defer tree.deinit();
 
     if (d.dumpAst) {
+        for (tree.nodes.items(.tag), 0..) |nodeTag, i|
+            std.debug.print("{d}: {s}\n", .{ i, @tagName(nodeTag) });
+
         const stdout = std.io.getStdOut();
-        const color = d.comp.diag.color and Util.fileSupportsColor(stdout);
+        const color = d.comp.diagnostics.color and Util.fileSupportsColor(stdout);
 
         var buffWriter = std.io.bufferedWriter(stdout.writer());
         tree.dump(color, buffWriter.writer()) catch {};
         buffWriter.flush() catch {};
     }
 
-    const prevErrors = d.comp.diag.errors;
+    const prevErrors = d.comp.diagnostics.errors;
     d.comp.renderErrors();
 
     // do not compile if there were errors
-    if (d.comp.diag.errors != prevErrors) {
+    if (d.comp.diagnostics.errors != prevErrors) {
         if (fastExit)
             exitWithCleanup(1);
         return; // Don't compile if there were errors
