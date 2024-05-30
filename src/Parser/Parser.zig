@@ -1171,17 +1171,10 @@ fn parseStaticAssert(p: *Parser) Error!bool {
 
                 const data = str.value.data.bytes;
                 try buffer.ensureUnusedCapacity(data.len);
-                try AST.dumpString(
-                    data,
-                    p.nodes.items(.tag)[@intFromEnum(str.node)],
-                    buffer.writer(),
-                );
+                try AST.dumpString(data, p.nodes.items(.tag)[@intFromEnum(str.node)], buffer.writer());
 
-                try p.errStr(
-                    .static_assert_failure_message,
-                    curToken,
-                    try p.comp.diagnostics.arena.allocator().dupe(u8, buffer.items),
-                );
+                const diagStr = try p.comp.diagnostics.arena.allocator().dupe(u8, buffer.items);
+                try p.errStr(.static_assert_failure_message, curToken, diagStr);
             } else try p.errToken(.static_assert_failure, curToken);
         }
     }
@@ -5149,8 +5142,7 @@ fn parseCastExpr(p: *Parser) Error!Result {
             try res.un(p, .StmtExpr);
             return res;
         }
-        const ty = (try p.parseTypeName()) orelse
-            {
+        const ty = (try p.parseTypeName()) orelse {
             p.tokenIdx -= 1;
             break :castExpr;
         };

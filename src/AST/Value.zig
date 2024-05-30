@@ -386,8 +386,7 @@ const bin_overflow = struct {
     inline fn addInt(comptime T: type, out: *Value, a: Value, b: Value) bool {
         const a_val = a.getInt(T);
         const b_val = b.getInt(T);
-        var c: T = undefined;
-        c, const overflow = @addWithOverflow(a_val, b_val);
+        const c, const overflow = @addWithOverflow(a_val, b_val);
         out.* = int(c);
 
         return overflow == 1;
@@ -402,8 +401,7 @@ const bin_overflow = struct {
     inline fn subInt(comptime T: type, out: *Value, a: Value, b: Value) bool {
         const a_val = a.getInt(T);
         const b_val = b.getInt(T);
-        var c: T = undefined;
-        c, const overflow = @subWithOverflow(a_val, b_val);
+        const c, const overflow = @subWithOverflow(a_val, b_val);
         out.* = int(c);
 
         return overflow == 1;
@@ -418,8 +416,7 @@ const bin_overflow = struct {
     inline fn mulInt(comptime T: type, out: *Value, a: Value, b: Value) bool {
         const a_val = a.getInt(T);
         const b_val = b.getInt(T);
-        var c: T = undefined;
-        c, const overflow = @mulWithOverflow(a_val, b_val);
+        const c, const overflow = @mulWithOverflow(a_val, b_val);
         out.* = int(c);
         return overflow == 1;
     }

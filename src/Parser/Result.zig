@@ -1,6 +1,7 @@
 const std = @import("std");
 const Type = @import("../AST/Type.zig");
 const AST = @import("../AST/AST.zig");
+const Diagnostics = @import("../Basic/Diagnostics.zig");
 const Value = @import("../AST/Value.zig");
 const AstTag = @import("../AST/AstTag.zig").Tag;
 const Parser = @import("Parser.zig");
@@ -765,14 +766,14 @@ pub fn saveValue(res: *Result, p: *Parser) !void {
 }
 
 pub fn castType(res: *Result, p: *Parser, to: Type, tok: TokenIndex) !void {
-    var castKind: AST.CastKind = undefined;
+    var explicitCastKind: AST.CastKind = undefined;
     if (to.is(.Void)) {
         // everything can cast to void
-        castKind = .ToVoid;
+        explicitCastKind = .ToVoid;
         res.value.tag = .unavailable;
     } else if (to.is(.NullPtrTy)) {
         if (res.ty.is(.NullPtrTy)) {
-            castKind = .NoOP;
+            explicitCastKind = .NoOP;
         } else {
             try p.errStr(.invalid_object_cast, tok, try p.typePairStrExtra(res.ty, " to ", to));
             return error.ParsingFailed;
@@ -790,136 +791,136 @@ pub fn castType(res: *Result, p: *Parser, to: Type, tok: TokenIndex) !void {
             try p.errStr(.invalid_object_cast, tok, try p.typePairStrExtra(res.ty, " to ", to));
             return error.ParsingFailed;
         }
-        castKind = .NoOP;
+        explicitCastKind = .NoOP;
     } else if (res.value.isZero() and to.isPointer()) {
-        castKind = .NullToPointer;
+        explicitCastKind = .NullToPointer;
     } else if (to.isScalar()) cast: {
-        const oldFloat = res.ty.isFloat();
-        const newFloat = to.isFloat();
+        const oldIsFloat = res.ty.isFloat();
+        const newIsFloat = to.isFloat();
 
-        if (newFloat and res.ty.isPointer()) {
+        if (newIsFloat and res.ty.isPointer()) {
             try p.errStr(.invalid_cast_to_float, tok, try p.typeStr(to));
             return error.ParsingFailed;
-        } else if (oldFloat and to.isPointer()) {
+        } else if (oldIsFloat and to.isPointer()) {
             try p.errStr(.invalid_cast_to_pointer, tok, try p.typeStr(res.ty));
             return error.ParsingFailed;
         }
-        const oldReal = res.ty.isReal();
-        const newReal = to.isReal();
+
+        const oldIsInt = res.ty.isInt();
+        const oldIsReal = res.ty.isReal();
+        const newIsReal = to.isReal();
+        const oldIsComplex = !oldIsReal;
+        const newIsComplex = !newIsReal;
 
         if (to.eql(res.ty, p.comp, false)) {
-            castKind = .NoOP;
+            explicitCastKind = .NoOP;
         } else if (to.is(.Bool)) {
             if (res.ty.isPointer()) {
-                castKind = .PointerToBool;
-            } else if (res.ty.isInt()) {
-                if (!oldReal) {
+                explicitCastKind = .PointerToBool;
+            } else if (oldIsInt or oldIsFloat) {
+                if (oldIsComplex) {
                     res.ty = res.ty.makeReal();
-                    try res.implicitCast(p, .ComplexIntToReal);
+                    try res.implicitCast(p, if (oldIsInt) .ComplexIntToReal else .ComplexFloatToReal);
                 }
-                castKind = .IntToBool;
-            } else if (oldFloat) {
-                if (!oldReal) {
-                    res.ty = res.ty.makeReal();
-                    try res.implicitCast(p, .ComplexFloatToReal);
-                }
-                castKind = .FloatToBool;
+                explicitCastKind = if (oldIsInt) .IntToBool else .FloatToBool;
             }
         } else if (to.isInt()) {
             if (res.ty.is(.Bool)) {
-                if (!newReal) {
+                if (newIsComplex) {
                     res.ty = to.makeReal();
                     try res.implicitCast(p, .BoolToInt);
-                    castKind = .RealToComplexInt;
-                } else {
-                    castKind = .BoolToInt;
                 }
+                explicitCastKind = if (newIsReal) .BoolToInt else .RealToComplexInt;
             } else if (res.ty.isInt()) {
-                if (oldReal and newReal) {
-                    castKind = .IntCast;
-                } else if (oldReal) {
-                    res.ty = to.makeReal();
-                    try res.implicitCast(p, .IntCast);
-                    castKind = .RealToComplexInt;
-                } else if (newReal) {
+                const needIntToRealCast = oldIsComplex and newIsReal;
+                const needRealToComplexIntCast = oldIsReal and newIsComplex;
+
+                if (needIntToRealCast) {
                     res.ty = res.ty.makeReal();
                     try res.implicitCast(p, .ComplexIntToReal);
-                    castKind = .IntCast;
-                } else {
-                    castKind = .ComplexIntCast;
+                } else if (needRealToComplexIntCast) {
+                    res.ty = to.makeReal();
+                    try res.implicitCast(p, .IntCast);
                 }
+
+                explicitCastKind = if ((oldIsReal and newIsReal) or needIntToRealCast)
+                    .IntCast
+                else if (needRealToComplexIntCast)
+                    .RealToComplexInt
+                else
+                    .ComplexIntCast;
             } else if (res.ty.isPointer()) {
-                if (!newReal) {
+                if (newIsComplex) {
                     res.ty = to.makeReal();
                     try res.implicitCast(p, .PointerToInt);
-                    castKind = .RealToComplexInt;
+                    explicitCastKind = .RealToComplexInt;
                 } else {
-                    castKind = .PointerToInt;
+                    explicitCastKind = .PointerToInt;
                 }
-            } else if (oldReal and newReal) {
-                castKind = .FloatToInt;
-            } else if (oldReal) {
+            } else if (oldIsReal and newIsReal) {
+                explicitCastKind = .FloatToInt;
+            } else if (oldIsReal) {
                 res.ty = to.makeReal();
                 try res.implicitCast(p, .FloatToInt);
-                castKind = .RealToComplexInt;
-            } else if (newReal) {
+                explicitCastKind = .RealToComplexInt;
+            } else if (newIsReal) {
                 res.ty = res.ty.makeReal();
                 try res.implicitCast(p, .ComplexFloatToReal);
-                castKind = .FloatToInt;
+                explicitCastKind = .FloatToInt;
             } else {
-                castKind = .ComplexFloatToComplexInt;
+                explicitCastKind = .ComplexFloatToComplexInt;
             }
         } else if (to.isPointer()) {
             if (res.ty.isArray())
-                castKind = .ArrayToPointer
+                explicitCastKind = .ArrayToPointer
             else if (res.ty.isPointer())
-                castKind = .Bitcast
+                explicitCastKind = .Bitcast
             else if (res.ty.isFunc())
-                castKind = .FunctionToPointer
+                explicitCastKind = .FunctionToPointer
             else if (res.ty.is(.Bool))
-                castKind = .BoolToPointer
+                explicitCastKind = .BoolToPointer
             else if (res.ty.isInt()) {
-                if (!oldReal) {
+                if (oldIsComplex) {
                     res.ty = res.ty.makeReal();
                     try res.implicitCast(p, .ComplexIntToReal);
                 }
-                castKind = .IntToPointer;
+                explicitCastKind = .IntToPointer;
             }
-        } else if (newFloat) {
+        } else if (newIsFloat) {
             if (res.ty.is(.Bool)) {
-                if (!newReal) {
+                if (newIsComplex) {
                     res.ty = to.makeReal();
                     try res.implicitCast(p, .BoolToFloat);
-                    castKind = .RealToComplexFloat;
+                    explicitCastKind = .RealToComplexFloat;
                 } else {
-                    castKind = .BoolToFloat;
+                    explicitCastKind = .BoolToFloat;
                 }
             } else if (res.ty.isInt()) {
-                if (oldReal and newReal) {
-                    castKind = .IntToFloat;
-                } else if (oldReal) {
+                if (oldIsReal and newIsReal) {
+                    explicitCastKind = .IntToFloat;
+                } else if (oldIsReal) {
                     res.ty = to.makeReal();
                     try res.implicitCast(p, .IntToFloat);
-                    castKind = .RealToComplexFloat;
-                } else if (newReal) {
+                    explicitCastKind = .RealToComplexFloat;
+                } else if (newIsReal) {
                     res.ty = res.ty.makeReal();
                     try res.implicitCast(p, .ComplexIntToReal);
-                    castKind = .IntToFloat;
+                    explicitCastKind = .IntToFloat;
                 } else {
-                    castKind = .ComplexIntToComplexFloat;
+                    explicitCastKind = .ComplexIntToComplexFloat;
                 }
-            } else if (oldReal and newReal) {
-                castKind = .FloatCast;
-            } else if (oldReal) {
+            } else if (oldIsReal and newIsReal) {
+                explicitCastKind = .FloatCast;
+            } else if (oldIsReal) {
                 res.ty = to.makeReal();
                 try res.implicitCast(p, .FloatCast);
-                castKind = .RealToComplexFloat;
-            } else if (newReal) {
+                explicitCastKind = .RealToComplexFloat;
+            } else if (newIsReal) {
                 res.ty = res.ty.makeReal();
                 try res.implicitCast(p, .ComplexFloatToReal);
-                castKind = .FloatCast;
+                explicitCastKind = .FloatCast;
             } else {
-                castKind = .ComplexFloatCast;
+                explicitCastKind = .ComplexFloatCast;
             }
         }
 
@@ -929,12 +930,12 @@ pub fn castType(res: *Result, p: *Parser, to: Type, tok: TokenIndex) !void {
         const newInt = to.isInt() or to.isPointer();
         if (to.is(.Bool)) {
             res.value.toBool();
-        } else if (oldFloat and newInt) {
+        } else if (oldIsFloat and newInt) {
             // Explicit cast, no conversion warning
             _ = res.value.floatToInt(res.ty, to, p.comp);
-        } else if (newFloat and oldInt) {
+        } else if (newIsFloat and oldInt) {
             res.value.intToFloat(res.ty, to, p.comp);
-        } else if (newFloat and oldFloat) {
+        } else if (newIsFloat and oldIsFloat) {
             res.value.floatCast(res.ty, to, p.comp);
         } else if (oldInt and newInt) {
             res.value.intCast(res.ty, to, p.comp);
@@ -944,17 +945,17 @@ pub fn castType(res: *Result, p: *Parser, to: Type, tok: TokenIndex) !void {
         return error.ParsingFailed;
     }
 
-    if (to.containAnyQual()) try p.errStr(.qual_cast, tok, try p.typeStr(to));
-    if (to.isInt() and res.ty.isPointer() and to.sizeCompare(res.ty, p.comp) == .lt) {
+    if (to.containAnyQual())
+        try p.errStr(.qual_cast, tok, try p.typeStr(to));
+    if (to.isInt() and res.ty.isPointer() and to.sizeCompare(res.ty, p.comp) == .lt)
         try p.errStr(.cast_to_smaller_int, tok, try p.typePairStrExtra(to, " from ", res.ty));
-    }
 
     res.ty = to;
     res.ty.qual = .{};
     res.node = try p.addNode(.{
         .tag = .ExplicitCast,
         .type = res.ty,
-        .data = .{ .cast = .{ .operand = res.node, .kind = castKind } },
+        .data = .{ .cast = .{ .operand = res.node, .kind = explicitCastKind } },
     });
 }
 
