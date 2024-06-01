@@ -1921,11 +1921,12 @@ fn parseRecordSpec(p: *Parser) Error!Type {
                 .value = .{},
             });
 
-            try p.declBuffer.append(try p.addNode(.{
+            const node = try p.addNode(.{
                 .tag = if (isStruct) .StructForwardDecl else .UnionForwardDecl,
                 .type = ty,
                 .data = undefined,
-            }));
+            });
+            try p.declBuffer.append(node);
             return ty;
         }
     };

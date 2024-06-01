@@ -549,7 +549,9 @@ pub fn floatCast(res: *Result, p: *Parser, floatType: Type) Error!void {
             res.ty = floatType;
             try res.implicitCast(p, .RealToComplexFloat);
         }
-    } else if (res.ty.isInt()) {
+    }
+    // src type is int type
+    else if (res.ty.isInt()) {
         res.value.intToFloat(res.ty, floatType, p.comp);
         const oldReal = res.ty.isReal();
         const newReal = floatType.isReal();
@@ -570,7 +572,9 @@ pub fn floatCast(res: *Result, p: *Parser, floatType: Type) Error!void {
             res.ty = floatType;
             try res.implicitCast(p, .ComplexIntToComplexFloat);
         }
-    } else if (!res.ty.eql(floatType, p.comp, true)) {
+    }
+    // src type is not equal float type
+    else if (!res.ty.eql(floatType, p.comp, true)) {
         res.value.floatCast(res.ty, floatType, p.comp);
         const oldReal = res.ty.isReal();
         const newReal = floatType.isReal();
@@ -1011,22 +1015,30 @@ pub fn coerce(res: *Result, p: *Parser, destTy: Type, tok: TokenIndex, ctx: Coer
     };
 }
 
-const Stage1Limitation = Error || error{CoercionFailed};
-
-fn coerceExtra(res: *Result, p: *Parser, destTy: Type, tok: TokenIndex, ctx: CoerceContext) Stage1Limitation!void {
+fn coerceExtra(
+    res: *Result,
+    p: *Parser,
+    destTy: Type,
+    tok: TokenIndex,
+    ctx: CoerceContext,
+) (Error || error{CoercionFailed})!void {
     // Subject of the coercion does not need to be qualified.
     var unqualTy = destTy.canonicalize(.standard);
     unqualTy.qual = .{};
     if (unqualTy.is(.NullPtrTy)) {
         if (res.ty.is(.NullPtrTy)) return;
-    } else if (unqualTy.is(.Bool)) {
+    }
+    // dest type is bool
+    else if (unqualTy.is(.Bool)) {
         if (res.ty.isScalar() and !res.ty.is(.NullPtrTy)) {
             // this is ridiculous but it's what clang does
             try res.boolCast(p, unqualTy, tok);
             return;
         }
-    } else if (unqualTy.isInt()) {
-        if (res.ty.isInt() or res.ty.isFloat()) {
+    }
+    // dest type is int
+    else if (unqualTy.isInt()) {
+        if (res.ty.isArithmetic()) {
             try res.intCast(p, unqualTy, tok);
             return;
         } else if (res.ty.isPointer()) {
@@ -1037,12 +1049,16 @@ fn coerceExtra(res: *Result, p: *Parser, destTy: Type, tok: TokenIndex, ctx: Coe
             try res.intCast(p, unqualTy, tok);
             return;
         }
-    } else if (unqualTy.isFloat()) {
-        if (res.ty.isInt() or res.ty.isFloat()) {
+    }
+    // dest type is float
+    else if (unqualTy.isFloat()) {
+        if (res.ty.isArithmetic()) {
             try res.floatCast(p, unqualTy);
             return;
         }
-    } else if (unqualTy.isPointer()) {
+    }
+    // dest type is pointer
+    else if (unqualTy.isPointer()) {
         if (res.value.isZero() or res.ty.is(.NullPtrTy)) {
             try res.nullCast(p, destTy);
             return;
@@ -1079,10 +1095,11 @@ fn coerceExtra(res: *Result, p: *Parser, destTy: Type, tok: TokenIndex, ctx: Coe
             try res.ptrCast(p, unqualTy);
             return;
         }
-    } else if (unqualTy.isRecord()) {
-        if (unqualTy.eql(res.ty, p.comp, false)) {
+    }
+    // dest type is record
+    else if (unqualTy.isRecord()) {
+        if (unqualTy.eql(res.ty, p.comp, false))
             return; // ok
-        }
 
         if (ctx == .arg) {
             if (unqualTy.get(.Union)) |unionTy| {
@@ -1104,7 +1121,9 @@ fn coerceExtra(res: *Result, p: *Parser, destTy: Type, tok: TokenIndex, ctx: Coe
             if (unqualTy.eql(res.ty, p.comp, false))
                 return; //ok
         }
-    } else {
+    }
+    // other type
+    else {
         if (ctx == .assign and (unqualTy.isArray() or unqualTy.isFunc())) {
             try p.errToken(.not_assignable, tok);
             return;
@@ -1116,12 +1135,16 @@ fn coerceExtra(res: *Result, p: *Parser, destTy: Type, tok: TokenIndex, ctx: Coe
         return error.ParsingFailed;
     }
 
-    try p.errStr(switch (ctx) {
-        .assign => .incompatible_assign,
-        .init => .incompatible_init,
-        .ret => .incompatible_return,
-        .arg => .incompatible_arg,
-        .testCoerce => return error.CoercionFailed,
-    }, tok, try ctx.typePairStr(p, destTy, res.ty));
+    try p.errStr(
+        switch (ctx) {
+            .assign => .incompatible_assign,
+            .init => .incompatible_init,
+            .ret => .incompatible_return,
+            .arg => .incompatible_arg,
+            .testCoerce => return error.CoercionFailed,
+        },
+        tok,
+        try ctx.typePairStr(p, destTy, res.ty),
+    );
     try ctx.note(p);
 }
