@@ -99,6 +99,7 @@ pub fn create(comp: *Compilation) !Builtins {
     add(a, &b, "__builtin_va_start", voidType, &.{ vaList, .{ .specifier = .SpecialVaStart } }, .Func, .{});
     add(a, &b, "__builtin_va_end", voidType, &.{vaList}, .Func, .{});
     add(a, &b, "__builtin_va_copy", voidType, &.{ vaList, vaList }, .Func, .{});
+    add(a, &b, "__builtin_unreachable", voidType, &.{}, .Func, .{ .noreturn = true });
 
     return Builtins{ ._builtins = b, ._params = _params };
 }
