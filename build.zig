@@ -82,7 +82,6 @@ pub fn build(b: *std.Build) !void {
 
         const record_tests_runner = b.addRunArtifact(record_tests);
         record_tests_runner.addArg(b.pathFromRoot("test/records"));
-        record_tests_runner.addArg(b.graph.zig_exe);
 
         const record_tests_step = b.step("test-record", "Run record layout tests");
         record_tests_step.dependOn(&record_tests_runner.step);
