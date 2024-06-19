@@ -36,20 +36,16 @@ pub fn build(b: *std.Build) !void {
         run_cmd.addArgs(args);
     }
 
-    const run_step = b.step("run", "Run the app");
-    run_step.dependOn(&run_cmd.step);
+    const unit_tests = step: {
+        var unit_tests = b.addTest(.{ .root_source_file = b.path("src/main.zig") });
+        unit_tests.root_module.addImport("deps", depsModule);
 
-    const test_step = b.step("test", "Run all tests");
-    test_step.dependOn(&exe.step);
+        const run_test = b.addRunArtifact(unit_tests);
+        const unit_test_step = b.step("test-unit", "run unit tests");
 
-    const unit_tests = b.addTest(.{
-        .root_source_file = b.path("src/main.zig"),
-        .target = target,
-        .optimize = mode,
-    });
-    unit_tests.root_module.addImport("deps", depsModule);
-    const run_unit_tests = b.addRunArtifact(unit_tests);
-    test_step.dependOn(&run_unit_tests.step);
+        unit_test_step.dependOn(&run_test.step);
+        break :step unit_test_step;
+    };
 
     const integration_tests = b.addExecutable(.{
         .name = "test-runner",

@@ -508,7 +508,7 @@ const MsgWriter = struct {
     color: bool,
 
     fn init(color: bool) MsgWriter {
-        std.debug.getStderrMutex().lock();
+        std.debug.lockStdErr();
         return .{
             .w = std.io.bufferedWriter(std.io.getStdErr().writer()),
             .color = color,
@@ -517,7 +517,7 @@ const MsgWriter = struct {
 
     pub fn deinit(m: *MsgWriter) void {
         m.w.flush() catch {};
-        std.debug.getStderrMutex().unlock();
+        std.debug.unlockStdErr();
     }
 
     pub fn print(m: *MsgWriter, comptime fmt: []const u8, args: anytype) void {
