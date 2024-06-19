@@ -36,7 +36,7 @@ pub fn build(b: *std.Build) !void {
         run_cmd.addArgs(args);
     }
 
-    const unit_tests = step: {
+    const unit_tests_step = step: {
         var unit_tests = b.addTest(.{ .root_source_file = b.path("src/main.zig") });
         unit_tests.root_module.addImport("deps", depsModule);
 
@@ -47,34 +47,51 @@ pub fn build(b: *std.Build) !void {
         break :step unit_test_step;
     };
 
-    const integration_tests = b.addExecutable(.{
-        .name = "test-runner",
-        .root_source_file = b.path("test/test_runner.zig"),
-        .target = target,
-        .optimize = mode,
-    });
-    integration_tests.root_module.addImport("zcc", zccModule);
-    const test_runner_options = b.addOptions();
-    integration_tests.root_module.addOptions("build_options", test_runner_options);
-    test_runner_options.addOption(bool, "TestAllAllocationFailures", TestAllAllocationFailures);
+    const integration_tests_step = step: {
+        var integration_tests = b.addExecutable(.{
+            .name = "test-runner",
+            .root_source_file = b.path("test/test_runner.zig"),
+            .target = target,
+            .optimize = mode,
+        });
+        integration_tests.root_module.addImport("zcc", zccModule);
+        const test_runner_options = b.addOptions();
+        integration_tests.root_module.addOptions("build_options", test_runner_options);
+        test_runner_options.addOption(bool, "TestAllAllocationFailures", TestAllAllocationFailures);
 
-    const integration_test_runner = b.addRunArtifact(integration_tests);
-    integration_test_runner.addArg(b.pathFromRoot("test/cases"));
-    integration_test_runner.addArg(b.graph.zig_exe);
+        const integration_test_runner = b.addRunArtifact(integration_tests);
+        integration_test_runner.addArg(b.pathFromRoot("test/cases"));
+        integration_test_runner.addArg(b.graph.zig_exe);
 
-    const record_tests = b.addExecutable(.{
-        .name = "record-runner",
-        .root_source_file = b.path("test/record_runner.zig"),
-        .optimize = mode,
-        .target = target,
-    });
-    record_tests.root_module.addImport("zcc", zccModule);
-    const record_tests_runner = b.addRunArtifact(record_tests);
-    record_tests_runner.addArg(b.pathFromRoot("test/records"));
-    record_tests_runner.addArg(b.graph.zig_exe);
+        const integration_tests_step = b.step("test-integration", "Run integration tests");
+        integration_tests_step.dependOn(&integration_test_runner.step);
 
-    b.installArtifact(integration_tests);
+        b.installArtifact(integration_tests);
 
-    test_step.dependOn(&integration_test_runner.step);
-    // test_step.dependOn(&record_tests_runner.step);
+        break :step integration_tests_step;
+    };
+
+    const record_tests_step = step: {
+        const record_tests = b.addExecutable(.{
+            .name = "record-runner",
+            .root_source_file = b.path("test/record_runner.zig"),
+            .optimize = mode,
+            .target = target,
+        });
+        record_tests.root_module.addImport("zcc", zccModule);
+
+        const record_tests_runner = b.addRunArtifact(record_tests);
+        record_tests_runner.addArg(b.pathFromRoot("test/records"));
+        record_tests_runner.addArg(b.graph.zig_exe);
+
+        const record_tests_step = b.step("test-record", "Run record layout tests");
+        record_tests_step.dependOn(&record_tests_runner.step);
+        break :step record_tests_step;
+    };
+
+    const tests_step = b.step("test", "Run all tests");
+    tests_step.dependOn(unit_tests_step);
+    tests_step.dependOn(integration_tests_step);
+    tests_step.dependOn(record_tests_step);
+
 }
