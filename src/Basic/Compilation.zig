@@ -324,19 +324,20 @@ pub fn generateBuiltinMacros(comp: *Compilation) !Source {
     try w.writeAll("#define __CHAR_BIT__ 8\n");
 
     // int maxs
-    try comp.generateIntMax(w, "__SCHAR_MAX__", Type.SChar);
-    try comp.generateIntMax(w, "__SHRT_MAX__", Type.Short);
-    try comp.generateIntMax(w, "__INT_MAX__", Type.Int);
-    try comp.generateIntMax(w, "__LONG_MAX__", Type.Long);
-    try comp.generateIntMax(w, "__LONG_LONG_MAX__", Type.LongLong);
-    try comp.generateIntMax(w, "__WCHAR_MAX__", comp.types.wchar);
-    // try comp.generateIntMax(w, "__WINT_MAX__", Type.wideChar(comp));
-    // try comp.generateIntMax(w, "__INTMAX_MAX__", Type.wideChar(comp));
-    try comp.generateIntMax(w, "__SIZE_MAX__", comp.types.size);
-    // try comp.generateIntMax(w, "__UINTMAX_MAX__", Type.wideChar(comp));
-    try comp.generateIntMax(w, "__PTRDIFF_MAX__", comp.types.ptrdiff);
-    // try comp.generateIntMax(w, "__INTPTR_MAX__", Type.wideChar(comp));
-    // try comp.generateIntMax(w, "__UINTPTR_MAX__", Type.sizeT(comp));
+    try comp.generateIntWidth(w, "BOOL", Type.Bool);
+    try comp.generateIntMaxAndWidth(w, "SCHAR", Type.SChar);
+    try comp.generateIntMaxAndWidth(w, "SHRT", Type.Short);
+    try comp.generateIntMaxAndWidth(w, "INT", Type.Int);
+    try comp.generateIntMaxAndWidth(w, "LONG", Type.Long);
+    try comp.generateIntMaxAndWidth(w, "LONG_LONG", Type.LongLong);
+    try comp.generateIntMaxAndWidth(w, "WCHAR", comp.types.wchar);
+    // try comp.generateIntMax(w, "WINT", comp.types.wchar);
+    // try comp.generateIntMax(w, "INTMAX", comp.types.wchar);
+    try comp.generateIntMax(w, "SIZE", comp.types.size);
+    // try comp.generateIntMax(w, "UINTMAX", comp.types.wchar);
+    try comp.generateIntMax(w, "PTRDIFF", comp.types.ptrdiff);
+    // try comp.generateIntMax(w, "INTPTR", comp.types.wchar);
+    // try comp.generateIntMax(w, "UINTPTR", comp.types.size);
 
     // int widths
     try w.writeAll("#define __BITINT_MAXWIDTH__ 128\n");
@@ -495,7 +496,16 @@ fn generateIntMax(comp: *Compilation, w: anytype, name: []const u8, ty: Type) !v
         @as(u128, if (unsigned) std.math.maxInt(u128) else std.math.maxInt(i128))
     else
         ty.maxInt(comp);
-    try w.print("#define {s} {d}\n", .{ name, max });
+    try w.print("#define __{s}_MAX__ {d}\n", .{ name, max });
+}
+
+fn generateIntWidth(comp: *Compilation, w: anytype, name: []const u8, ty: Type) !void {
+    try w.print("#define __{s}_WIDTH__ {d}\n", .{ name, 8 * ty.sizeof(comp).? });
+}
+
+fn generateIntMaxAndWidth(comp: *Compilation, w: anytype, name: []const u8, ty: Type) !void {
+    try comp.generateIntMax(w, name, ty);
+    try comp.generateIntWidth(w, name, ty);
 }
 
 fn generateSizeofType(comp: *Compilation, w: anytype, name: []const u8, ty: Type) !void {
