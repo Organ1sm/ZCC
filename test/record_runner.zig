@@ -11,6 +11,8 @@ fn lessThan(_: void, lhs: []const u8, rhs: []const u8) bool {
     return std.mem.lessThan(u8, lhs, rhs);
 }
 
+const MAX_MEM_PER_TEST = 1024 * 1024 * 16;
+
 /// Set true to debug specific targets w/ specific tests.
 const test_single_target = false;
 const single_target = .{
@@ -30,13 +32,36 @@ const Stats = struct {
     ok_count: u32 = 0,
     fail_count: u32 = 0,
     skip_count: u32 = 0,
-    progress: *std.Progress,
-    root_node: *std.Progress.Node,
+    max_alloc: usize = 0,
+    root_node: std.Progress.Node,
+
+    const ResultKind = enum {
+        ok,
+        fail,
+        skip,
+    };
+
+    fn recordResult(self: *Stats, kind: ResultKind) void {
+        const ptr = switch (kind) {
+            .ok => &self.ok_count,
+            .fail => &self.fail_count,
+            .skip => &self.skip_count,
+        };
+        _ = @atomicRmw(u32, ptr, .Add, 1, .monotonic);
+    }
+
+    fn updateMaxMemUsage(self: *Stats, bytes: usize) void {
+        _ = @atomicRmw(usize, &self.max_alloc, .Max, bytes, .monotonic);
+    }
 };
 
 const TestCase = struct {
     c_define: []const u8,
     target: []const u8,
+    path: []const u8,
+    source: []const u8,
+
+    const List = std.ArrayList(TestCase);
 };
 
 /// Types of failures expected.
@@ -63,13 +88,10 @@ pub fn main() !void {
     defer if (general_purpose_allocator.deinit() == .leak) std.process.exit(1);
 
     // max file size < 2M. max total use < 12M
-    const fixed_buffer = try gpa.alloc(u8, 1024 * 1024 * 16);
-    var fixed_alloc = std.heap.FixedBufferAllocator.init(fixed_buffer);
-    const alloc = fixed_alloc.allocator();
-    defer gpa.free(fixed_buffer);
-
     const args = try std.process.argsAlloc(gpa);
     defer std.process.argsFree(gpa, args);
+
+    const testDir = args[1];
 
     if (args.len != 2) {
         print("expected test case directory and zig executable as only arguments\n", .{});
@@ -107,50 +129,44 @@ pub fn main() !void {
 
     std.mem.sort([]const u8, cases.items, {}, lessThan);
 
-    var progress = std.Progress{};
-    const root_node = progress.start("Layout", 0);
+    var arenaInstance = std.heap.ArenaAllocator.init(gpa);
+    defer arenaInstance.deinit();
 
-    var stats = Stats{
-        .progress = &progress,
-        .root_node = root_node,
-    };
-    // The most memory used for a single run.
-    var max_alloc_size: usize = 0;
+    const arena = arenaInstance.allocator();
+    const threadCount = @max(1, std.Thread.getCpuCount() catch 1);
+
+    var threadPool: std.Thread.Pool = undefined;
+    try threadPool.init(.{ .allocator = arena, .n_jobs = @intCast(threadCount) });
+    defer threadPool.deinit();
+
+    var waitGroup: std.Thread.WaitGroup = .{};
+
+    var testCases = TestCase.List.init(gpa);
+    defer testCases.deinit();
 
     // Iterate over all cases
     for (cases.items) |path| {
-        fixed_alloc.reset();
         // Read the test into memory.
-        const source: []const u8 = fread: {
-            const file = try std.fs.cwd().openFile(path, .{});
-            defer file.close();
-            const file_size = (try file.stat()).size;
-            var src_buf = try alloc.alloc(u8, file_size);
-            const read_len = try file.readAll(src_buf);
-            std.debug.assert(read_len >= file_size);
-            break :fread src_buf[0..read_len];
-        };
-
-        const test_targets = try parseTargetsFromCode(alloc, source);
-        defer test_targets.deinit();
-
-        // Reset the fixed allocator to this point before each run.
-        const mem_reset_pos = fixed_alloc.end_index;
-        for (test_targets.items) |test_case| {
-            if (test_single_target) {
-                if (std.ascii.indexOfIgnoreCase(test_case.target, single_target.target) == null) continue;
-                if (std.mem.indexOf(u8, path, single_target.c_test) == null) continue;
-            }
-            fixed_alloc.end_index = mem_reset_pos;
-
-            try singleRun(alloc, path, source, test_case, &stats);
-
-            max_alloc_size = @max(max_alloc_size, fixed_alloc.end_index);
-        }
+        const source = try std.fs.cwd().readFileAlloc(arena, path, std.math.maxInt(u32));
+        try parseTargetsFromCode(&testCases, path, source);
     }
 
+    const root_node = std.Progress.start(.{
+        .disable_printing = false,
+        .root_name = "Layout",
+        .estimated_total_items = testCases.items.len,
+    });
+
+    var stats = Stats{ .root_node = root_node };
+
+    for (0..threadCount) |i| {
+        waitGroup.start();
+        try threadPool.spawn(runTestCases, .{ gpa, testDir, &waitGroup, testCases.items[i..], threadCount, &stats });
+    }
+    threadPool.waitAndWork(&waitGroup);
     root_node.end();
-    std.debug.print("max mem used = {:.2}\n", .{std.fmt.fmtIntSizeBin(max_alloc_size)});
+
+    std.debug.print("max mem used = {:.2}\n", .{std.fmt.fmtIntSizeBin(stats.max_alloc)});
     if (stats.ok_count == cases.items.len and stats.skip_count == 0) {
         print("All {d} tests passed.\n", .{stats.ok_count});
     } else if (stats.fail_count == 0) {
@@ -161,15 +177,53 @@ pub fn main() !void {
     }
 }
 
-fn singleRun(alloc: std.mem.Allocator, path: []const u8, source: []const u8, test_case: TestCase, state: *Stats) !void {
+fn runTestCases(
+    allocator: std.mem.Allocator,
+    testDir: []const u8,
+    wg: *std.Thread.WaitGroup,
+    testCases: []const TestCase,
+    stride: usize,
+    stats: *Stats,
+) void {
+    defer wg.finish();
+    const mem = allocator.alloc(u8, MAX_MEM_PER_TEST) catch |err| {
+        std.log.err("{s}", .{@errorName(err)});
+        if (@errorReturnTrace()) |trace| {
+            std.debug.dumpStackTrace(trace.*);
+        }
+        stats.recordResult(.fail);
+        return;
+    };
+
+    defer allocator.free(mem);
+
+    var fib = std.heap.FixedBufferAllocator.init(mem);
+
+    for (testCases, 0..) |case, i| {
+        if (i % stride != 0) continue;
+        defer fib.end_index = 0;
+
+        singleRun(fib.allocator(), testDir, case, stats) catch |err| {
+            std.log.err("{s}", .{@errorName(err)});
+            if (@errorReturnTrace()) |trace| {
+                std.debug.dumpStackTrace(trace.*);
+            }
+            stats.recordResult(.fail);
+        };
+        stats.updateMaxMemUsage(fib.end_index);
+    }
+}
+
+fn singleRun(alloc: std.mem.Allocator, testDir: []const u8, testCase: TestCase, stats: *Stats) !void {
+    const path = testCase.path;
+
     var comp = zcc.Compilation.init(alloc);
     defer comp.deinit();
 
     try comp.addDefaultPragmaHandlers();
-    try comp.defineSystemIncludes();
+    try comp.defineSystemIncludes(testDir);
 
-    const target = setTarget(&comp, test_case.target) catch |err| switch (err) {
-        error.InvalidTarget => return, // Skip invalid targets.
+    const target = setTarget(&comp, testCase.target) catch |err| switch (err) {
         error.UnknownCpuModel => unreachable,
     };
     switch (target.os.tag) {
@@ -183,18 +237,16 @@ fn singleRun(alloc: std.mem.Allocator, path: []const u8, source: []const u8, tes
     const test_name = std.mem.sliceTo(std.fs.path.basename(path), '_');
     try case_name.writer().print("{s} | {s} | {s}", .{
         test_name,
-        test_case.target,
-        test_case.c_define,
+        testCase.target,
+        testCase.c_define,
     });
 
-    var case_node = state.root_node.start(case_name.items, 0);
-    case_node.activate();
+    var case_node = stats.root_node.start(case_name.items, 0);
     defer case_node.end();
-    state.progress.refresh();
 
-    const file = comp.addSourceFromBuffer(path, source) catch |err| {
-        state.fail_count += 1;
-        state.progress.log("could not add source '{s}': {s}\n", .{ path, @errorName(err) });
+    const file = comp.addSourceFromBuffer(path, testCase.source) catch |err| {
+        stats.recordResult(.fail);
+        std.debug.print("could not add source '{s}': {s}\n", .{ path, @errorName(err) });
         return;
     };
 
@@ -204,7 +256,7 @@ fn singleRun(alloc: std.mem.Allocator, path: []const u8, source: []const u8, tes
     comp.langOpts.setEmulatedCompiler(zcc.TargetUtil.systemCompiler(comp.target));
 
     const mac_writer = macro_buf.writer();
-    try mac_writer.print("#define {s}\n", .{test_case.c_define});
+    try mac_writer.print("#define {s}\n", .{testCase.c_define});
     if (comp.langOpts.emulate == .msvc) {
         comp.langOpts.enableMSExtensions();
         try mac_writer.writeAll("#define MSVC\n");
@@ -220,17 +272,8 @@ fn singleRun(alloc: std.mem.Allocator, path: []const u8, source: []const u8, tes
     _ = try pp.preprocess(builtin_macros);
     _ = try pp.preprocess(user_macros);
     const eof = pp.preprocess(file) catch |err| {
-        if (!std.unicode.utf8ValidateSlice(file.buffer)) {
-            // non-utf8 files are not preprocessed, so we can't use EXPECTED_ERRORS; instead we
-            // check that the most recent error is .invalid_utf8
-            if (comp.diag.list.items.len > 0 and comp.diag.list.items[comp.diag.list.items.len - 1].tag == .invalid_utf8) {
-                _ = comp.diag.list.pop();
-                return;
-            }
-        }
-
-        state.fail_count += 1;
-        state.progress.log("could not preprocess file '{s}': {s}\n", .{ path, @errorName(err) });
+        stats.recordResult(.fail);
+        std.debug.print("could not preprocess file '{s}': {s}\n", .{ path, @errorName(err) });
         return;
     };
     try pp.tokens.append(alloc, eof);
@@ -245,24 +288,24 @@ fn singleRun(alloc: std.mem.Allocator, path: []const u8, source: []const u8, tes
     }
 
     if (global_test_exclude.has(test_name)) {
-        state.skip_count += 1;
+        stats.skip_count += 1;
         return;
     }
 
     var buf: [128]u8 = undefined;
     var buf_strm = std.io.fixedBufferStream(&buf);
-    try buf_strm.writer().print("{s}|{s}", .{ test_case.target, test_name });
+    try buf_strm.writer().print("{s}|{s}", .{ testCase.target, test_name });
 
     const expected = compErr.get(buf[0..buf_strm.pos]) orelse ExpectedFailure{};
 
-    if (comp.diag.list.items.len == 0 and expected.any()) {
-        state.progress.log("\nTest Passed when failures expected:\n\texpected:{any}\n", .{expected});
+    if (comp.diagnostics.list.items.len == 0 and expected.any()) {
+        std.debug.print("\nTest Passed when failures expected:\n\texpected:{any}\n", .{expected});
     } else {
         var m = zcc.Diagnostics.defaultMsgWriter(&comp);
         defer m.deinit();
 
         var actual = ExpectedFailure{};
-        for (comp.diag.list.items) |msg| {
+        for (comp.diagnostics.list.items) |msg| {
             switch (msg.kind) {
                 .@"fatal error", .@"error" => {},
                 else => continue,
@@ -286,14 +329,14 @@ fn singleRun(alloc: std.mem.Allocator, path: []const u8, source: []const u8, tes
 
         if (!expected.eql(actual)) {
             m.print("\nexp:{any}\nact:{any}\n", .{ expected, actual });
-            for (comp.diag.list.items) |msg| {
+            for (comp.diagnostics.list.items) |msg| {
                 zcc.Diagnostics.renderMessage(&comp, &m, msg);
             }
-            state.fail_count += 1;
+            stats.recordResult(.fail);
         } else if (actual.any()) {
-            state.skip_count += 1;
+            stats.skip_count += 1;
         } else {
-            state.ok_count += 1;
+            stats.ok_count += 1;
         }
     }
 }
@@ -301,7 +344,7 @@ fn singleRun(alloc: std.mem.Allocator, path: []const u8, source: []const u8, tes
 /// Get Zig std.Target from string in the arch-cpu-os-abi format.
 fn getTarget(zig_target_string: []const u8) !std.Target {
     var ret: std.Target = undefined;
-    var iter = std.mem.tokenizeScalar(u8, zig_target_string, "-");
+    var iter = std.mem.tokenizeScalar(u8, zig_target_string, '-');
 
     ret.cpu.arch = std.meta.stringToEnum(std.Target.Cpu.Arch, iter.next().?).?;
     ret.cpu.model = try std.Target.Cpu.Arch.parseCpuModel(ret.cpu.arch, iter.next().?);
@@ -309,14 +352,15 @@ fn getTarget(zig_target_string: []const u8) !std.Target {
     const tag = std.meta.stringToEnum(std.Target.Os.Tag, iter.next().?).?;
     // `defaultVersionRange` will panic for invalid targets, check that
     // here and return an error instead.
+    var os: ?std.Target.Os = null;
     if (tag == .macos) {
         switch (ret.cpu.arch) {
             .x86_64, .aarch64 => {},
-            else => return error.InvalidTarget,
+            else => os = .{ .version_range = .{ .none = {} }, .tag = .macos },
         }
     }
 
-    ret.os = std.Target.Os.Tag.defaultVersionRange(tag, ret.cpu.arch);
+    ret.os = os orelse std.Target.Os.Tag.defaultVersionRange(tag, ret.cpu.arch);
     ret.abi = std.meta.stringToEnum(std.Target.Abi, iter.next().?).?;
     return ret;
 }
@@ -335,22 +379,20 @@ fn setTarget(comp: *zcc.Compilation, target: []const u8) !std.Target {
     const expected_compiler_name = target[compiler_split_index + 1 ..];
     const set_name = @tagName(comp.langOpts.emulate);
 
-    var progress = std.Progress{};
-    progress.log(" '{s}': {s}\n", .{ expected_compiler_name, set_name });
+    // std.debug.print(" '{s}': {s}\n", .{ expected_compiler_name, set_name });
 
     std.debug.assert(std.ascii.eqlIgnoreCase(set_name, expected_compiler_name));
 
     return zig_target;
 }
 
-fn parseTargetsFromCode(alloc: std.mem.Allocator, source: []const u8) !std.ArrayList(TestCase) {
-    var result = std.ArrayList(TestCase).init(alloc);
-    var lines = std.mem.tokenizeScalar(u8, source, "\n");
+fn parseTargetsFromCode(cases: *TestCase.List, path: []const u8, source: []const u8) !void {
+    var lines = std.mem.tokenizeScalar(u8, source, '\n');
     while (lines.next()) |line| {
         if (std.mem.indexOf(u8, line, "// MAPPING|") == null) continue;
 
         std.debug.assert(std.mem.count(u8, line, "|") > 1);
-        var parts = std.mem.tokenizeScalar(u8, line, "|");
+        var parts = std.mem.tokenizeScalar(u8, line, '|');
         _ = parts.next(); // Skip the MAPPING bit
         const define = parts.next().?; // The define to set for this chunk.
 
@@ -358,13 +400,14 @@ fn parseTargetsFromCode(alloc: std.mem.Allocator, source: []const u8) !std.Array
             if (std.mem.startsWith(u8, target, "END")) break;
             // These point to source, which lives
             // for the life of the test. So should be ok
-            try result.append(.{
+            try cases.append(.{
+                .path = path,
+                .source = source,
                 .c_define = define,
                 .target = target,
             });
         }
     }
-    return result;
 }
 
 const compErr = blk: {

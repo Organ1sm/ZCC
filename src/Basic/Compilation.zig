@@ -566,9 +566,9 @@ pub fn fixedEnumTagSpecifier(comp: *const Compilation) ?Type.Specifier {
 /// Errors:
 /// - SelfExeNotFound: Failed to obtain self executable path
 /// - ZccIncludeNotFound: Did not find system include directory
-pub fn defineSystemIncludes(comp: *Compilation) !void {
+pub fn defineSystemIncludes(comp: *Compilation, zccDir: []const u8) !void {
     var buf: [std.fs.max_path_bytes]u8 = undefined;
-    var searchPath: []const u8 = std.fs.selfExePath(&buf) catch return error.SelfExeNotFound;
+    var searchPath = zccDir;
 
     while (std.fs.path.dirname(searchPath)) |dirname| : (searchPath = dirname) {
         var baseDir = std.fs.cwd().openDir(dirname, .{}) catch continue;

@@ -85,6 +85,9 @@ pub fn build(b: *std.Build) !void {
 
         const record_tests_step = b.step("test-record", "Run record layout tests");
         record_tests_step.dependOn(&record_tests_runner.step);
+
+
+        b.installArtifact(record_tests);
         break :step record_tests_step;
     };
 

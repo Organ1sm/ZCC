@@ -43,6 +43,9 @@ dumpRawTokens: bool = false,
 useLinker: Linker = .ld,
 linkerPath: ?[]const u8 = null,
 
+/// Full Path to the zcc executable
+zccName: []const u8 = "",
+
 pub fn deinit(d: *Driver) void {
     const linking = !(d.onlyPreprocess or d.onlySyntax or d.onlyCompile or d.onlyPreprocessAndCompile);
     if (linking) for (d.linkObjects.items[d.linkObjects.items.len - d.tempFileCount ..]) |obj| {
@@ -306,7 +309,6 @@ pub fn parseArgs(
         .off => false,
         .unset => Util.fileSupportsColor(std.io.getStdOut()) and !std.process.hasEnvVarConstant("NO_COLOR"),
     };
-
     return false;
 }
 
@@ -352,9 +354,8 @@ pub fn main(d: *Driver, args: [][]const u8) !void {
     if (linking and d.linkerPath == null)
         d.linkerPath = d.getLinkerPath();
 
-    d.comp.defineSystemIncludes() catch |er| switch (er) {
+    d.comp.defineSystemIncludes(d.zccName) catch |er| switch (er) {
         error.OutOfMemory => return error.OutOfMemory,
-        error.SelfExeNotFound => return d.fatal("unable to find ZCC executable path", .{}),
         error.ZccIncludeNotFound => return d.fatal("unable to find ZCC builtin headers", .{}),
     };
 

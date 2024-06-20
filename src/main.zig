@@ -23,6 +23,13 @@ pub fn main() u8 {
 
     const fastExit = @import("builtin").mode != .Debug;
 
+    const zccName = std.fs.selfExePathAlloc(gpa) catch {
+        std.debug.print("unable to find Zcc executable path\n", .{});
+        if (fastExit) std.process.exit(1);
+        return 1;
+    };
+    defer gpa.free(zccName);
+
     var comp = Compilation.init(gpa);
     defer comp.deinit();
 
@@ -36,7 +43,7 @@ pub fn main() u8 {
 
     comp.langOpts.setEmulatedCompiler(Target.systemCompiler(comp.target));
 
-    var driver = Driver{ .comp = &comp };
+    var driver = Driver{ .comp = &comp, .zccName = zccName };
     defer driver.deinit();
 
     driver.main(args) catch |er| switch (er) {

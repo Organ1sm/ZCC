@@ -29,12 +29,12 @@ fn addCommandLineArgs(comp: *zcc.Compilation, file: zcc.Source, macroBuffer: any
     return false;
 }
 
-fn testOne(allocator: std.mem.Allocator, path: []const u8) !void {
+fn testOne(allocator: std.mem.Allocator, path: []const u8, testDir: []const u8) !void {
     var comp = zcc.Compilation.init(allocator);
     defer comp.deinit();
 
     try comp.addDefaultPragmaHandlers();
-    try comp.defineSystemIncludes();
+    try comp.defineSystemIncludes(testDir);
 
     const file = try comp.addSourceFromPath(path);
     var macroBuffer = std.ArrayList(u8).init(comp.gpa);
@@ -68,7 +68,7 @@ fn testOne(allocator: std.mem.Allocator, path: []const u8) !void {
     tree.dump(false, std.io.null_writer) catch {};
 }
 
-fn testAllAllocationFailures(cases: [][]const u8) !void {
+fn testAllAllocationFailures(cases: [][]const u8, testDir: []const u8) !void {
     var progress = std.Progress{};
     const rootNode = progress.start(.{
         .disable_printing = false,
@@ -81,7 +81,7 @@ fn testAllAllocationFailures(cases: [][]const u8) !void {
         var caseNode = rootNode.start(caseName, 0);
         defer caseNode.end();
 
-        try std.testing.checkAllAllocationFailures(std.testing.allocator, testOne, .{case}) catch |er| switch (er) {
+        try std.testing.checkAllAllocationFailures(std.testing.allocator, testOne, .{ case, testDir }) catch |er| switch (er) {
             error.SwallowedOutOfMemoryError => {},
             else => |e| return e,
         };
@@ -100,6 +100,8 @@ pub fn main() !void {
         print("expected test case directory  and zig executable as only argument\n", .{});
         return error.InvalidArguments;
     }
+
+    const testDir = args[1];
 
     var buffer = std.ArrayList(u8).init(gpa);
     var cases = std.ArrayList([]const u8).init(gpa);
@@ -134,7 +136,7 @@ pub fn main() !void {
     }
 
     if (buildOptions.TestAllAllocationFailures) {
-        return testAllAllocationFailures(cases.items);
+        return testAllAllocationFailures(cases.items, testDir);
     }
 
     const rootNode = std.Progress.start(.{
@@ -158,7 +160,7 @@ pub fn main() !void {
     try initialComp.includeDirs.append(caseNextIncludeDir);
 
     try initialComp.addDefaultPragmaHandlers();
-    try initialComp.defineSystemIncludes();
+    try initialComp.defineSystemIncludes(testDir);
 
     // apparently we can't use setAstCwd without libc on windows yet
     const win = @import("builtin").os.tag == .windows;
