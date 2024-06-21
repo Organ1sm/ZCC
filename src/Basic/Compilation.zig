@@ -496,7 +496,7 @@ fn generateIntMax(comp: *Compilation, w: anytype, name: []const u8, ty: Type) !v
         @as(u128, if (unsigned) std.math.maxInt(u128) else std.math.maxInt(i128))
     else
         ty.maxInt(comp);
-    try w.print("#define __{s}_MAX__ {d}\n", .{ name, max });
+    try w.print("#define __{s}_MAX__ {d}{s}\n", .{ name, max, ty.intValueSuffix(comp) });
 }
 
 fn generateIntWidth(comp: *Compilation, w: anytype, name: []const u8, ty: Type) !void {
