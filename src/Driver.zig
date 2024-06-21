@@ -65,7 +65,7 @@ const usage =
     \\  -v, --version   Print ZCC version.
     \\ 
     \\Compile Options:
-    \\  -c                      Only run preprocess, compile, and assemble steps
+    \\  -c, --compile           Only run preprocess, compile, and assemble steps
     \\  -D <macro>=<value>      Define <macro> to <value> (defaults to 1)
     \\  -E                      Only run the preprocessor
     \\  -fcolor-diagnostics     Enable colors in diagnostics
@@ -90,7 +90,7 @@ const usage =
     \\  -o <file>               Write output to <file>
     \\  -pedantic               Warn on language extensions
     \\  -std=<standard>         Specify language standard
-    \\  -S                      Only run preprocess and compilation step
+    \\  -S, --assemble          Only run preprocess and compilation step
     \\ --target=<value>         Generate code for the given target
     \\  -U <macro>              Undefine <macro>
     \\  -Wall                   Enable all warnings
@@ -169,7 +169,7 @@ pub fn parseArgs(
                     macro = args[i];
                 }
                 try macroBuffer.print("#undef {s} \n", .{macro});
-            } else if (std.mem.eql(u8, arg, "-c")) {
+            } else if (std.mem.eql(u8, arg, "-c") or std.mem.eql(u8, arg, "--compile")) {
                 d.onlyCompile = true;
             } else if (std.mem.eql(u8, arg, "-E")) {
                 d.onlyPreprocess = true;
@@ -262,7 +262,7 @@ pub fn parseArgs(
             } else if (option(arg, "-std=")) |standard| {
                 d.comp.langOpts.setStandard(standard) catch
                     try d.comp.addDiagnostic(.{ .tag = .cli_invalid_standard, .extra = .{ .str = arg } }, &.{});
-            } else if (std.mem.startsWith(u8, arg, "-S")) {
+            } else if (std.mem.eql(u8, arg, "-S") or std.mem.eql(u8, arg, "--assemble")) {
                 d.onlyPreprocessAndCompile = true;
             } else if (option(arg, "--target=")) |triple| {
                 const query = std.Target.Query.parse(.{ .arch_os_abi = triple }) catch {
