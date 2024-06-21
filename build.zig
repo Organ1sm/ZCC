@@ -6,6 +6,7 @@ pub fn build(b: *std.Build) !void {
 
     const TestAllAllocationFailures = b.option(bool, "test-all-allocation-failures", "Test all allocation failures") orelse false;
     const LinkLibc = b.option(bool, "link-libc", "Force self-hosted compile to link libc") orelse (mode != .Debug);
+    const skipRecordTests = b.option(bool, "skip-record-tests", "Skip record layout tests") orelse false;
 
     const depsModule = b.createModule(.{ .root_source_file = b.path("deps/lib.zig") });
     const zccModule = b.addModule("zcc", .{
@@ -86,7 +87,6 @@ pub fn build(b: *std.Build) !void {
         const record_tests_step = b.step("test-record", "Run record layout tests");
         record_tests_step.dependOn(&record_tests_runner.step);
 
-
         b.installArtifact(record_tests);
         break :step record_tests_step;
     };
@@ -94,6 +94,6 @@ pub fn build(b: *std.Build) !void {
     const tests_step = b.step("test", "Run all tests");
     tests_step.dependOn(unit_tests_step);
     tests_step.dependOn(integration_tests_step);
-    tests_step.dependOn(record_tests_step);
-
+    if (!skipRecordTests)
+        tests_step.dependOn(record_tests_step);
 }
