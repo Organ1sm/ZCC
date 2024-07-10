@@ -23,6 +23,8 @@ pub const Error = error{
     FatalError,
 } || Allocator.Error;
 
+pub const BitIntMaxBits = 128;
+
 gpa: Allocator,
 diagnostics: Diagnostics,
 
@@ -340,7 +342,7 @@ pub fn generateBuiltinMacros(comp: *Compilation) !Source {
     // try comp.generateIntMax(w, "UINTPTR", comp.types.size);
 
     // int widths
-    try w.writeAll("#define __BITINT_MAXWIDTH__ 128\n");
+    try w.print("#define __BITINT_MAXWIDTH__ {d}\n", .{BitIntMaxBits});
 
     // sizeof types
     try comp.generateSizeofType(w, "__SIZEOF_FLOAT__", Type.Float);

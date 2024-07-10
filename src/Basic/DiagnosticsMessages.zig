@@ -1,3 +1,5 @@
+const std = @import("std");
+const Compilation = @import("Compilation.zig");
 const DiagnosticsMessages = @This();
 
 pub const todo = struct { // Maybe someday this will no longer be needed.
@@ -1988,7 +1990,7 @@ pub const signed_bit_int_too_small = struct {
     pub const kind = .@"error";
 };
 pub const bit_int_too_big = struct {
-    pub const msg = "{s} of bit sizes greater than 128 not supported";
+    pub const msg = "{s} of bit sizes greater than " ++ std.fmt.comptimePrint("{d}", .{Compilation.BitIntMaxBits}) ++ " not supported";
     pub const extra = .str;
     pub const kind = .@"error";
 };
