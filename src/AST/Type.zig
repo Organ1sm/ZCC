@@ -837,42 +837,45 @@ pub fn integerPromotion(ty: Type, comp: *Compilation) Type {
         specifier = ty.data.@"enum".tagType.specifier;
     }
 
-    return .{
-        .specifier = switch (specifier) {
-            .Bool, .Char, .SChar, .UChar, .Short => .Int,
-            .UShort => if (ty.sizeof(comp).? == sizeof(Type.Int, comp)) .UInt else .Int,
+    return switch (specifier) {
+        .BitInt, .ComplexBitInt => .{ .specifier = .BitInt, .data = .{ .int = ty.data.int } },
+        else => .{
+            .specifier = switch (specifier) {
+                .Bool, .Char, .SChar, .UChar, .Short => .Int,
+                .UShort => if (ty.sizeof(comp).? == sizeof(Type.Int, comp)) .UInt else .Int,
 
-            .Int,
-            .UInt,
-            .Long,
-            .ULong,
-            .LongLong,
-            .ULongLong,
-            .Int128,
-            .UInt128,
-            .ComplexChar,
-            .ComplexSChar,
-            .ComplexUChar,
-            .ComplexShort,
-            .ComplexUShort,
-            .ComplexInt,
-            .ComplexUInt,
-            .ComplexLong,
-            .ComplexULong,
-            .ComplexLongLong,
-            .ComplexULongLong,
-            .ComplexInt128,
-            .ComplexUInt128,
-            .BitInt,
-            .ComplexBitInt,
-            => specifier,
+                .Int,
+                .UInt,
+                .Long,
+                .ULong,
+                .LongLong,
+                .ULongLong,
+                .Int128,
+                .UInt128,
+                .ComplexChar,
+                .ComplexSChar,
+                .ComplexUChar,
+                .ComplexShort,
+                .ComplexUShort,
+                .ComplexInt,
+                .ComplexUInt,
+                .ComplexLong,
+                .ComplexULong,
+                .ComplexLongLong,
+                .ComplexULongLong,
+                .ComplexInt128,
+                .ComplexUInt128,
+                .BitInt,
+                .ComplexBitInt,
+                => specifier,
 
-            .TypeofType => return ty.data.subType.integerPromotion(comp),
-            .TypeofExpr => return ty.data.expr.ty.integerPromotion(comp),
-            .Attributed => return ty.data.attributed.base.integerPromotion(comp),
+                .TypeofType => return ty.data.subType.integerPromotion(comp),
+                .TypeofExpr => return ty.data.expr.ty.integerPromotion(comp),
+                .Attributed => return ty.data.attributed.base.integerPromotion(comp),
 
-            .Invalid => .Invalid,
-            else => unreachable, // not an integer type
+                .Invalid => .Invalid,
+                else => unreachable, // not an integer type
+            },
         },
     };
 }
