@@ -2045,3 +2045,9 @@ pub const invalid_object_cast = struct {
     pub const extra = .str;
     pub const kind = .@"error";
 };
+pub const bitint_suffix = struct {
+    pub const msg = "'_BitInt' suffix for literals is a C2x extension";
+    pub const opt = "c2x-extensions";
+    pub const kind = .warning;
+    pub const suppress_version = .c2x;
+};

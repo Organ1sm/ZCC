@@ -111,7 +111,10 @@ pub fn getLineCol(source: Source, loc: Location) LineCol {
     var endWithSplice = false;
     if (std.mem.indexOfScalar(u8, source.buffer[start..], '\n')) |some|
         nl = some + start;
-    if (source.spliceLocs.len > spliceIndex and nl > source.spliceLocs[spliceIndex] and source.spliceLocs[spliceIndex] > start) {
+    if (source.spliceLocs.len > spliceIndex and
+        nl > source.spliceLocs[spliceIndex] and
+        source.spliceLocs[spliceIndex] > start)
+    {
         endWithSplice = true;
         nl = source.spliceLocs[spliceIndex];
     }
