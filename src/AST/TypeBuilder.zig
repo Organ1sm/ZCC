@@ -378,7 +378,7 @@ pub fn finish(b: @This(), p: *Parser) Parser.Error!Type {
                 }
             }
 
-            if (bits > 128) {
+            if (bits > Compilation.BitIntMaxBits) {
                 try p.errStr(.bit_int_too_big, b.bitIntToken.?, b.specifier.toString(p.comp.langOpts).?);
                 return error.ParsingFailed;
             }

@@ -830,11 +830,14 @@ pub fn containAnyQual(ty: Type) bool {
 /// Promote an integer type to the smallest type that can represent it without loss.
 pub fn integerPromotion(ty: Type, comp: *Compilation) Type {
     var specifier = ty.specifier;
-    if (specifier == .Enum) {
-        // promote incomplete enums to int type
-        if (ty.hasIncompleteSize())
-            return Type.Int;
-        specifier = ty.data.@"enum".tagType.specifier;
+    switch (specifier) {
+        .Enum => {
+            if (ty.hasIncompleteSize())
+                return Type.Int;
+            specifier = ty.data.@"enum".tagType.specifier;
+        },
+        .BitInt, .ComplexBitInt => return .{ .specifier = specifier, .data = ty.data },
+        else => {},
     }
 
     return .{
@@ -1870,7 +1873,11 @@ pub fn dump(ty: Type, mapper: StringInterner.TypeMapper, langOpts: LangOpts, w: 
         },
 
         .SpecialVaStart => try w.writeAll("(var start param)"),
-        else => try w.writeAll(TypeBuilder.fromType(ty).toString(langOpts).?),
+        else => {
+            try w.writeAll(TypeBuilder.fromType(ty).toString(langOpts).?);
+            if (ty.specifier == .BitInt or ty.specifier == .ComplexBitInt)
+                try w.print("({d})", .{ty.data.int.bits});
+        },
     }
 }
 

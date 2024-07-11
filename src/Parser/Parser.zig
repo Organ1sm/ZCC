@@ -1,4 +1,5 @@
 const std = @import("std");
+const big = std.math.big;
 const Compilation = @import("../Basic/Compilation.zig");
 const Source = @import("../Basic/Source.zig");
 const TokenType = @import("../Basic/TokenType.zig").TokenType;
@@ -6500,17 +6501,7 @@ fn castInt(p: *Parser, val: u64, specs: []const Type.Specifier) Error!Result {
     return res;
 }
 
-fn parseInt(
-    p: *Parser,
-    prefix: NumberPrefix,
-    buf: []const u8,
-    suffix: NumberSuffix,
-    tokenIdx: TokenIndex,
-) !Result {
-    if (prefix == .binary)
-        try p.errToken(.binary_integer_literal, tokenIdx);
-
-    const base = @intFromEnum(prefix);
+fn fixedSizeInt(p: *Parser, base: u8, buf: []const u8, suffix: NumberSuffix, tokenIdx: TokenIndex) !Result {
     var value: u64 = 0;
     var overflow = false;
     for (buf) |ch| {
@@ -6547,7 +6538,7 @@ fn parseInt(
     if (suffix.isSignedInteger() and value > std.math.maxInt(i64))
         try p.errToken(.implicitly_unsigned_literal, tokenIdx);
 
-    var res = try if (base == 10)
+    return if (base == 10)
         switch (suffix) {
             .None, .I => p.castInt(value, &.{ .Int, .Long, .LongLong }),
             .U, .IU => p.castInt(value, &.{ .UInt, .ULong, .ULongLong }),
@@ -6566,6 +6557,23 @@ fn parseInt(
         .ULL, .IULL => p.castInt(value, &.{.ULongLong}),
         else => unreachable,
     };
+}
+
+fn parseInt(
+    p: *Parser,
+    prefix: NumberPrefix,
+    buf: []const u8,
+    suffix: NumberSuffix,
+    tokenIdx: TokenIndex,
+) !Result {
+    if (prefix == .binary)
+        try p.errToken(.binary_integer_literal, tokenIdx);
+
+    const base = @intFromEnum(prefix);
+    var res = if (suffix.isBitInt())
+        try p.bitInt(base, buf, suffix, tokenIdx)
+    else
+        try p.fixedSizeInt(base, buf, suffix, tokenIdx);
 
     if (suffix.isImaginary()) {
         try p.errToken(.gnu_imaginary_constant, tokenIdx);
@@ -6573,6 +6581,60 @@ fn parseInt(
         res.value.tag = .unavailable;
         try res.un(p, .ImaginaryLiteral);
     }
+    return res;
+}
+fn bitInt(p: *Parser, base: u8, buf: []const u8, suffix: NumberSuffix, tokenIdx: TokenIndex) Error!Result {
+    try p.errStr(.pre_c2x_compat, tokenIdx, "'_BitInt' suffix for literals");
+    try p.errToken(.bitint_suffix, tokenIdx);
+
+    var managed = try big.int.Managed.init(p.comp.gpa);
+    defer managed.deinit();
+
+    managed.setString(base, buf) catch |e| switch (e) {
+        error.InvalidBase => unreachable, // `base` is one of 2, 8, 10, 16
+        error.InvalidCharacter => unreachable, // digits validated by Tokenizer
+        else => |er| return er,
+    };
+
+    const c = managed.toConst();
+    const bitsNeeded: std.math.IntFittingRange(0, Compilation.BitIntMaxBits) = blk: {
+        const count = @max(1, c.bitCountTwosComp());
+        const signBits = @intFromBool(suffix.isSignedInteger());
+        const bitsNeeded = count + signBits;
+
+        if (bitsNeeded > Compilation.BitIntMaxBits) {
+            const specifier: TypeBuilder.Specifier = switch (suffix) {
+                .WB => .{ .BitInt = 0 },
+                .UWB => .{ .UBitInt = 0 },
+                .IWB => .{ .ComplexBitInt = 0 },
+                .IUWB => .{ .ComplexUBitInt = 0 },
+                else => unreachable,
+            };
+
+            try p.errStr(.bit_int_too_big, tokenIdx, specifier.toString(p.comp.langOpts).?);
+            return error.ParsingFailed;
+        }
+
+        if (bitsNeeded > 64)
+            return p.todo("_BitInt constants > 64 bits");
+
+        break :blk @intCast(bitsNeeded);
+    };
+
+    const val = c.to(u64) catch |e| switch (e) {
+        error.NegativeIntoUnsigned => unreachable, // unary minus parsed elsewhere; we only see positive integers
+        error.TargetTooSmall => unreachable, // Validated above but Todo: handle larger _BitInt
+    };
+
+    var res: Result = .{
+        .value = Value.int(val),
+        .ty = .{
+            .specifier = .BitInt,
+            .data = .{ .int = .{ .bits = bitsNeeded, .signedness = suffix.signedness() } },
+        },
+    };
+    res.node = try p.addNode(.{ .tag = .IntLiteral, .type = res.ty, .data = undefined });
+    if (!p.inMacro) try p.valueMap.put(res.node, res.value);
     return res;
 }
 
