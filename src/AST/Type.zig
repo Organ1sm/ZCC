@@ -1873,7 +1873,11 @@ pub fn dump(ty: Type, mapper: StringInterner.TypeMapper, langOpts: LangOpts, w: 
         },
 
         .SpecialVaStart => try w.writeAll("(var start param)"),
-        else => try w.writeAll(TypeBuilder.fromType(ty).toString(langOpts).?),
+        else => {
+            try w.writeAll(TypeBuilder.fromType(ty).toString(langOpts).?);
+            if (ty.specifier == .BitInt or ty.specifier == .ComplexBitInt)
+                try w.print("({d})", .{ty.data.int.bits});
+        },
     }
 }
 
