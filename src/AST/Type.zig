@@ -1314,6 +1314,8 @@ pub fn eql(lhsParam: Type, rhsParam: Type, comp: *const Compilation, checkQualif
         .Union, .Struct => if (lhs.data.record != rhs.data.record) return false,
         .Enum => if (lhs.data.@"enum" != rhs.data.@"enum") return false,
 
+        .BitInt, .ComplexBitInt => return (lhs.data.int.bits == rhs.data.int.bits) and (lhs.data.int.signedness == rhs.data.int.signedness),
+
         else => {},
     }
 
