@@ -1334,6 +1334,25 @@ pub fn originalTypeOfDecayedArray(ty: Type) Type {
     return copy;
 }
 
+/// Rank for integer conversions, ignoring domain (complex vs real)
+/// Asserts that ty is an integer type
+pub fn integerRank(ty: Type, comp: *const Compilation) usize {
+    const real = ty.makeReal();
+    return @intCast(switch (real.specifier) {
+        .BitInt => @as(u64, real.data.int.bits) << 3,
+
+        .Bool => 1 + (ty.bitSizeof(comp).? << 3),
+        .Char, .SChar, .UChar => 2 + (ty.bitSizeof(comp).? << 3),
+        .Short, .UShort => 3 + (ty.bitSizeof(comp).? << 3),
+        .Int, .UInt => 4 + (ty.bitSizeof(comp).? << 3),
+        .Long, .ULong => 5 + (ty.bitSizeof(comp).? << 3),
+        .LongLong, .ULongLong => 6 + (ty.bitSizeof(comp).? << 3),
+        .Int128, .UInt128 => 7 + (ty.bitSizeof(comp).? << 3),
+
+        else => unreachable,
+    });
+}
+
 pub fn makeReal(ty: Type) Type {
     // TODO discards attributed/typeof
     var base = ty.canonicalize(.standard);
@@ -1560,6 +1579,96 @@ pub fn hasAttribute(ty: Type, tag: Attribute.Tag) bool {
         if (attr.tag == tag) return true;
     }
     return false;
+}
+
+fn compareIntegerRanks(lhs: Type, rhs: Type, comp: *const Compilation) std.math.Order {
+    std.debug.assert(lhs.isInt() and rhs.isInt());
+    if (lhs.eql(rhs, comp, false)) return .eq;
+
+    const lhsUnsigned = lhs.isUnsignedInt(comp);
+    const rhsUnsigned = rhs.isUnsignedInt(comp);
+
+    const lhsRank = lhs.integerRank(comp);
+    const rhsRank = rhs.integerRank(comp);
+    if (lhsUnsigned == rhsUnsigned)
+        return std.math.order(lhsRank, rhsRank);
+
+    if (lhsUnsigned) {
+        if (lhsRank >= rhsRank) return .gt;
+        return .lt;
+    }
+
+    std.debug.assert(rhsUnsigned);
+    if (rhsRank >= lhsRank) return .lt;
+    return .gt;
+}
+
+fn realIntegerConversion(lhs: Type, rhs: Type, comp: *const Compilation) Type {
+    std.debug.assert(lhs.isReal() and rhs.isReal());
+
+    const typeOrder = lhs.compareIntegerRanks(rhs, comp);
+    const lhsSigned = !lhs.isUnsignedInt(comp);
+    const rhsSigned = !rhs.isUnsignedInt(comp);
+    if (lhsSigned == rhsSigned) {
+        // If both have the same sign, use higher-rank type.
+        return switch (typeOrder) {
+            .lt => rhs,
+            .eq, .gt => lhs,
+        };
+    } else if (typeOrder != if (lhsSigned) std.math.Order.gt else std.math.Order.lt) {
+        // Only one is signed; and the unsigned type has rank >= the signed type
+        // Use the unsigned type
+        return if (rhsSigned) lhs else rhs;
+    } else if (lhs.bitSizeof(comp).? != rhs.bitSizeof(comp).?) {
+        // Signed type is higher rank and sizes are not equal
+        // Use the signed type
+        return if (lhsSigned) lhs else rhs;
+    } else {
+        // Signed type is higher rank but same size as unsigned type
+        // e.g. `long` and `unsigned` on x86-linux-gnu
+        // Use unsigned version of the signed type
+        return if (lhsSigned) lhs.makeIntegerUnsigned() else rhs.makeIntegerUnsigned();
+    }
+}
+
+pub fn makeIntegerUnsigned(ty: Type) Type {
+    // TODO discards attributed/typeof
+    var base = ty.canonicalize(.standard);
+    switch (base.specifier) {
+        // zig fmt: off
+        .UChar, .UShort, .UInt, .ULong, .ULongLong, .UInt128,
+        .ComplexUChar, .ComplexUShort, .ComplexUInt, .ComplexULong, .ComplexULongLong, .ComplexUInt128,
+        => return ty,
+        // zig fmt: on
+
+        .Char, .ComplexChar => {
+            base.specifier = @enumFromInt(@intFromEnum(base.specifier) + 2);
+            return base;
+        },
+
+        // zig fmt: off
+        .SChar, .Short, .Int, .Long, .LongLong, .Int128,
+        .ComplexSChar, .ComplexShort, .ComplexInt, .ComplexLong, .ComplexLongLong, .ComplexInt128 => {
+            base.specifier = @enumFromInt(@intFromEnum(base.specifier) + 1);
+            return base;
+        },
+        // zig fmt: on
+
+        .BitInt, .ComplexBitInt => {
+            base.data.int.signedness = .unsigned;
+            return base;
+        },
+
+        else => unreachable,
+    }
+}
+
+/// Find the common type of a and b for binary operations
+pub fn integerConversion(lhs: Type, rhs: Type, comp: *const Compilation) Type {
+    const lhsReal = lhs.isReal();
+    const rhsReal = rhs.isReal();
+    const targetTy = lhs.makeReal().realIntegerConversion(rhs.makeReal(), comp);
+    return if (lhsReal and rhsReal) targetTy else targetTy.makeComplex();
 }
 
 /// Suffix for integer values of this type

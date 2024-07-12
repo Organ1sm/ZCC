@@ -688,35 +688,11 @@ fn usualArithmeticConversion(lhs: *Result, rhs: *Result, p: *Parser, tok: TokenI
         return;
     }
 
-    const lhsSpec = lhs.ty.specifier;
-    const rhsSpec = rhs.ty.specifier;
-
-    const lhsIsUnsigned = lhs.ty.isUnsignedInt(p.comp);
-    const rhsIsUnsigned = rhs.ty.isUnsignedInt(p.comp);
-    if (lhsIsUnsigned == rhsIsUnsigned) {
-        // cast to greater signed or unsigned type
-        const resSpecifier = @max(@intFromEnum(lhsSpec), @intFromEnum(rhsSpec));
-        const resType = Type{ .specifier = @enumFromInt(resSpecifier) };
-        try lhs.intCast(p, resType, tok);
-        try rhs.intCast(p, resType, tok);
-        return;
-    }
-
-    // cast to the unsigned type with greater rank
-    const lhsLarger = @intFromEnum(lhsSpec) > @intFromEnum(rhsSpec);
-    const rhsLarger = @intFromEnum(rhsSpec) > @intFromEnum(lhsSpec);
-    if (lhsIsUnsigned) {
-        const target = if (lhsLarger) lhs.ty else rhs.ty;
-        try lhs.intCast(p, target, tok);
-        try rhs.intCast(p, target, tok);
-        return;
-    } else {
-        std.debug.assert(rhsIsUnsigned);
-        const target = if (rhsLarger) rhs.ty else lhs.ty;
-        try lhs.intCast(p, target, tok);
-        try rhs.intCast(p, target, tok);
-    }
+    const targetTy = lhs.ty.integerConversion(rhs.ty, p.comp);
+    try lhs.intCast(p, targetTy, tok);
+    try rhs.intCast(p, targetTy, tok);
 }
+
 fn floatConversion(
     lhs: *Result,
     rhs: *Result,
