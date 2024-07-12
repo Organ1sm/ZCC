@@ -514,8 +514,11 @@ pub fn intCast(res: *Result, p: *Parser, intType: Type, tok: TokenIndex) Error!v
             res.ty = intType;
             try res.implicitCast(p, .IntCast);
         } else if (oldReal) {
-            res.ty = intType.makeReal();
-            try res.implicitCast(p, .IntCast);
+            const realIntTy = intType.makeReal();
+            if (!res.ty.eql(realIntTy, p.comp, false)) {
+                res.ty = realIntTy;
+                try res.implicitCast(p, .IntCast);
+            }
             res.ty = intType;
             try res.implicitCast(p, .RealToComplexInt);
         } else if (newReal) {
