@@ -919,7 +919,7 @@ pub fn fromType(ty: Type) Specifier {
         .BitInt => if (ty.data.int.signedness == .unsigned)
             return .{ .UBitInt = ty.data.int.bits }
         else
-            return .{ .SBitInt = ty.data.int.bits },
+            return .{ .BitInt = ty.data.int.bits },
 
         .ComplexChar => Specifier.ComplexChar,
         .ComplexSChar => Specifier.ComplexSChar,
@@ -938,7 +938,7 @@ pub fn fromType(ty: Type) Specifier {
         .ComplexBitInt => if (ty.data.int.signedness == .unsigned)
             return .{ .ComplexUBitInt = ty.data.int.bits }
         else
-            return .{ .ComplexSBitInt = ty.data.int.bits },
+            return .{ .ComplexBitInt = ty.data.int.bits },
 
         .FP16 => Specifier.FP16,
         .Float => Specifier.Float,

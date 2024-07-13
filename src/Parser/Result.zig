@@ -514,8 +514,11 @@ pub fn intCast(res: *Result, p: *Parser, intType: Type, tok: TokenIndex) Error!v
             res.ty = intType;
             try res.implicitCast(p, .IntCast);
         } else if (oldReal) {
-            res.ty = intType.makeReal();
-            try res.implicitCast(p, .IntCast);
+            const realIntTy = intType.makeReal();
+            if (!res.ty.eql(realIntTy, p.comp, false)) {
+                res.ty = realIntTy;
+                try res.implicitCast(p, .IntCast);
+            }
             res.ty = intType;
             try res.implicitCast(p, .RealToComplexInt);
         } else if (newReal) {
@@ -688,35 +691,15 @@ fn usualArithmeticConversion(lhs: *Result, rhs: *Result, p: *Parser, tok: TokenI
         return;
     }
 
-    const lhsSpec = lhs.ty.specifier;
-    const rhsSpec = rhs.ty.specifier;
-
-    const lhsIsUnsigned = lhs.ty.isUnsignedInt(p.comp);
-    const rhsIsUnsigned = rhs.ty.isUnsignedInt(p.comp);
-    if (lhsIsUnsigned == rhsIsUnsigned) {
-        // cast to greater signed or unsigned type
-        const resSpecifier = @max(@intFromEnum(lhsSpec), @intFromEnum(rhsSpec));
-        const resType = Type{ .specifier = @enumFromInt(resSpecifier) };
-        try lhs.intCast(p, resType, tok);
-        try rhs.intCast(p, resType, tok);
-        return;
+    const targetTy = lhs.ty.integerConversion(rhs.ty, p.comp);
+    if (!targetTy.isReal()) {
+        try lhs.saveValue(p);
+        try rhs.saveValue(p);
     }
-
-    // cast to the unsigned type with greater rank
-    const lhsLarger = @intFromEnum(lhsSpec) > @intFromEnum(rhsSpec);
-    const rhsLarger = @intFromEnum(rhsSpec) > @intFromEnum(lhsSpec);
-    if (lhsIsUnsigned) {
-        const target = if (lhsLarger) lhs.ty else rhs.ty;
-        try lhs.intCast(p, target, tok);
-        try rhs.intCast(p, target, tok);
-        return;
-    } else {
-        std.debug.assert(rhsIsUnsigned);
-        const target = if (rhsLarger) rhs.ty else lhs.ty;
-        try lhs.intCast(p, target, tok);
-        try rhs.intCast(p, target, tok);
-    }
+    try lhs.intCast(p, targetTy, tok);
+    try rhs.intCast(p, targetTy, tok);
 }
+
 fn floatConversion(
     lhs: *Result,
     rhs: *Result,
