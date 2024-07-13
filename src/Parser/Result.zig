@@ -692,6 +692,10 @@ fn usualArithmeticConversion(lhs: *Result, rhs: *Result, p: *Parser, tok: TokenI
     }
 
     const targetTy = lhs.ty.integerConversion(rhs.ty, p.comp);
+    if (!targetTy.isReal()) {
+        try lhs.saveValue(p);
+        try rhs.saveValue(p);
+    }
     try lhs.intCast(p, targetTy, tok);
     try rhs.intCast(p, targetTy, tok);
 }
