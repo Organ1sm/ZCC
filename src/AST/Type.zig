@@ -1261,7 +1261,17 @@ pub fn compatible(lhs: Type, rhs: Type, comp: *const Compilation) bool {
     const lhsUnqual = lhs.stripCVTypeQuals();
     const rhsUnqual = rhs.stripCVTypeQuals();
 
-    return (lhsUnqual.eql(rhsUnqual, comp, true));
+    if (lhsUnqual.eql(rhsUnqual, comp, true)) return true;
+
+    if (!lhsUnqual.isArray() or !rhsUnqual.isArray()) return false;
+
+    if (lhsUnqual.arrayLen() == null or rhsUnqual.arrayLen() == null) {
+        // incomplete arrays are compatible with arrays of the same element type
+        // GCC and clang ignore cv-qualifiers on arrays
+        return lhsUnqual.getElemType().compatible(rhsUnqual.getElemType(), comp);
+    }
+
+    return false;
 }
 
 pub fn eql(lhsParam: Type, rhsParam: Type, comp: *const Compilation, checkQualifiers: bool) bool {
