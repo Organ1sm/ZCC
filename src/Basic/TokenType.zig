@@ -230,6 +230,7 @@ pub const TokenType = enum(u8) {
     BuiltinVaArg,
     BuiltinOffsetof,
     BuiltinBitOffsetof,
+    BuiltinTypesCompatibleP,
 
     // MS extension
     KeywordDeclSpec,
@@ -371,6 +372,7 @@ pub const TokenType = enum(u8) {
             .BuiltinVaArg,
             .BuiltinOffsetof,
             .BuiltinBitOffsetof,
+            .BuiltinTypesCompatibleP,
             .KeywordAttribute1,
             .KeywordAttribute2,
             .Identifier,
@@ -670,6 +672,7 @@ pub const TokenType = enum(u8) {
             .BuiltinVaArg => "__builtin_va_arg",
             .BuiltinOffsetof => "__builtin_offsetof",
             .BuiltinBitOffsetof => "__builtin_bitoffsetof",
+            .BuiltinTypesCompatibleP => "__builtin_types_compatible_p",
             .KeywordAttribute1 => "__attribute",
             .KeywordAttribute2 => "__attribute__",
         };
@@ -677,7 +680,17 @@ pub const TokenType = enum(u8) {
 
     pub fn symbol(id: TokenType) []const u8 {
         return switch (id) {
-            .Identifier, .ExtendedIdentifier, .MacroFunc, .MacroFunction, .MacroPrettyFunc, .BuiltinChooseExpr, .BuiltinVaArg, .BuiltinOffsetof, .BuiltinBitOffsetof => "an identifier",
+            .Identifier,
+            .ExtendedIdentifier,
+            .MacroFunc,
+            .MacroFunction,
+            .MacroPrettyFunc,
+            .BuiltinChooseExpr,
+            .BuiltinVaArg,
+            .BuiltinOffsetof,
+            .BuiltinBitOffsetof,
+            .BuiltinTypesCompatibleP,
+            => "an identifier",
 
             .StringLiteral,
             .StringLiteralUTF_8,

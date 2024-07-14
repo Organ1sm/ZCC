@@ -5180,11 +5180,41 @@ fn parseCastExpr(p: *Parser) Error!Result {
         .BuiltinVaArg => return p.builtinVaArg(),
         .BuiltinOffsetof => return p.builtinOffsetof(false),
         .BuiltinBitOffsetof => return p.builtinOffsetof(true),
+        .BuiltinTypesCompatibleP => return p.typesCompatible(),
         // TODO: other special-cased builtins
         else => {},
     }
 
     return p.parseUnaryExpr();
+}
+
+fn typesCompatible(p: *Parser) Error!Result {
+    p.tokenIdx += 1;
+    const lp = try p.expectToken(.LParen);
+
+    const first = (try p.parseTypeName()) orelse {
+        try p.err(.expected_type);
+        p.skipTo(.RParen);
+        return error.ParsingFailed;
+    };
+
+    _ = try p.expectToken(.Comma);
+
+    const second = (try p.parseTypeName()) orelse {
+        try p.err(.expected_type);
+        p.skipTo(.RParen);
+        return error.ParsingFailed;
+    };
+
+    try p.expectClosing(lp, .RParen);
+
+    const compatible = first.compatible(second, p.comp);
+    const res = Result{
+        .value = Value.int(@intFromBool(compatible)),
+        .node = try p.addNode(.{ .tag = .IntLiteral, .type = Type.Int, .data = .{ .int = @intFromBool(compatible) } }),
+    };
+
+    return res;
 }
 
 fn parseBuiltinChooseExpr(p: *Parser) Error!Result {

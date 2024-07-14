@@ -208,5 +208,6 @@ pub const Token = struct {
         .{ "__builtin_va_arg", .BuiltinVaArg },
         .{ "__builtin_offsetof", .BuiltinOffsetof },
         .{ "__builtin_bitoffsetof", .BuiltinBitOffsetof },
+        .{ "__builtin_types_compatible_p", .BuiltinTypesCompatibleP },
     });
 };
