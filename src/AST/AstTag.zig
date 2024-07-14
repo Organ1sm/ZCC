@@ -260,6 +260,8 @@ pub const Tag = enum(u8) {
     GenericDefaultExpr,
     /// __builtin_choose_expr(lhs, data[0], data[1])
     BuiltinChooseExpr,
+    /// __builtin_types_compatible_p(lhs, rhs)
+    BuiltinTypesCompatibleP,
     /// ({ un }) *gnu extension*
     StmtExpr,
 

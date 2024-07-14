@@ -5197,6 +5197,7 @@ fn typesCompatible(p: *Parser) Error!Result {
         p.skipTo(.RParen);
         return error.ParsingFailed;
     };
+    const lhs = try p.addNode(.{ .tag = .Invalid, .type = first, .data = undefined });
 
     _ = try p.expectToken(.Comma);
 
@@ -5205,15 +5206,21 @@ fn typesCompatible(p: *Parser) Error!Result {
         p.skipTo(.RParen);
         return error.ParsingFailed;
     };
+    const rhs = try p.addNode(.{ .tag = .Invalid, .type = second, .data = undefined });
 
     try p.expectClosing(lp, .RParen);
 
     const compatible = first.compatible(second, p.comp);
     const res = Result{
         .value = Value.int(@intFromBool(compatible)),
-        .node = try p.addNode(.{ .tag = .IntLiteral, .type = Type.Int, .data = .{ .int = @intFromBool(compatible) } }),
+        .node = try p.addNode(.{
+            .tag = .BuiltinTypesCompatibleP,
+            .type = Type.Int,
+            .data = .{ .binExpr = .{ .lhs = lhs, .rhs = rhs } },
+        }),
     };
 
+    try p.valueMap.put(res.node, res.value);
     return res;
 }
 
