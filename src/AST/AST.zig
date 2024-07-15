@@ -595,6 +595,9 @@ fn dumpNode(
         },
 
         .BuiltinTypesCompatibleP => {
+            std.debug.assert(tree.nodes.items(.tag)[@intFromEnum(data.binExpr.lhs)] == .Invalid);
+            std.debug.assert(tree.nodes.items(.tag)[@intFromEnum(data.binExpr.rhs)] == .Invalid);
+
             try w.writeByteNTimes(' ', level + half);
             try w.writeAll("lhs: ");
 

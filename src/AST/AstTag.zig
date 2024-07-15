@@ -1,5 +1,7 @@
 pub const Tag = enum(u8) {
-    /// Only appears at index 0 and reaching it is always a result of a bug.
+    /// Must appear at index 0. 
+    /// Also used as the tag for __builtin_types_compatible_p arguments, since the arguments are types
+    /// Reaching it is always the result of a bug.
     Invalid,
 
     // ====== Decl ======
