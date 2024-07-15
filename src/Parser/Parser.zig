@@ -1118,13 +1118,54 @@ fn parseDeclaration(p: *Parser) Error!bool {
     return true;
 }
 
+fn staticAssertMessage(p: *Parser, condNode: NodeIndex, message: Result) !?[]const u8 {
+    const condTag = p.nodes.items(.tag)[@intFromEnum(condNode)];
+    if (condTag != .BuiltinTypesCompatibleP and message.node == .none) return null;
+
+    var buf = std.ArrayList(u8).init(p.gpa);
+    defer buf.deinit();
+
+    if (condTag == .BuiltinTypesCompatibleP) {
+        const mapper = p.comp.stringInterner.getSlowTypeMapper();
+        const data = p.nodes.items(.data)[@intFromEnum(condNode)].binExpr;
+
+        try buf.appendSlice("'__builtin_types_compatible_p(");
+
+        const lhsTy = p.nodes.items(.type)[@intFromEnum(data.lhs)];
+        try lhsTy.print(mapper, p.comp.langOpts, buf.writer());
+        try buf.appendSlice(", ");
+
+        const rhsTy = p.nodes.items(.type)[@intFromEnum(data.rhs)];
+        try rhsTy.print(mapper, p.comp.langOpts, buf.writer());
+
+        try buf.appendSlice(")'");
+    }
+
+    if (message.node != .none) {
+        std.debug.assert(p.nodes.items(.tag)[@intFromEnum(message.node)] == .StringLiteralExpr);
+
+        if (buf.items.len > 0)
+            try buf.append(' ');
+
+        const data = message.value.data.bytes;
+        try buf.ensureUnusedCapacity(data.len);
+        try AST.dumpString(
+            data,
+            p.nodes.items(.tag)[@intFromEnum(message.node)],
+            buf.writer(),
+        );
+    }
+    return try p.comp.diagnostics.arena.allocator().dupe(u8, buf.items);
+}
+
 /// static-assert-declaration
 ///  : (`_Static_assert` | `static_assert`) '(' integer-const-expression ',' StringLiteral+ ')' ';'
 fn parseStaticAssert(p: *Parser) Error!bool {
-    const curToken = p.eat(.KeywordStaticAssert) orelse p.eat(.KeywordC23StaticAssert) orelse return false;
+    const staticAssert = p.eat(.KeywordStaticAssert) orelse p.eat(.KeywordC23StaticAssert) orelse return false;
     const lp = try p.expectToken(.LParen);
     const resToken = p.tokenIdx;
     var res = try p.constExpr(.GNUFoldingExtension);
+    const resNode = res.node;
 
     const str = if (p.eat(.Comma) != null)
         switch (p.getCurrToken()) {
@@ -1146,8 +1187,8 @@ fn parseStaticAssert(p: *Parser) Error!bool {
     try p.expectClosing(lp, .RParen);
     _ = try p.expectToken(.Semicolon);
     if (str.node == .none) {
-        try p.errToken(.static_assert_missing_message, curToken);
-        try p.errStr(.pre_c2x_compat, curToken, "'_Static_assert' with no message");
+        try p.errToken(.static_assert_missing_message, staticAssert);
+        try p.errStr(.pre_c2x_compat, staticAssert, "'_Static_assert' with no message");
     }
 
     // Array will never be zero; a value of zero for a pointer is a null pointer constant
@@ -1166,17 +1207,10 @@ fn parseStaticAssert(p: *Parser) Error!bool {
             try p.errToken(.static_assert_not_constant, resToken);
     } else {
         if (!res.value.getBool()) {
-            if (str.node != .none) {
-                var buffer = std.ArrayList(u8).init(p.gpa);
-                defer buffer.deinit();
-
-                const data = str.value.data.bytes;
-                try buffer.ensureUnusedCapacity(data.len);
-                try AST.dumpString(data, p.nodes.items(.tag)[@intFromEnum(str.node)], buffer.writer());
-
-                const diagStr = try p.comp.diagnostics.arena.allocator().dupe(u8, buffer.items);
-                try p.errStr(.static_assert_failure_message, curToken, diagStr);
-            } else try p.errToken(.static_assert_failure, curToken);
+            if (try p.staticAssertMessage(resNode, str)) |message|
+                try p.errStr(.static_assert_failure_message, staticAssert, message)
+            else
+                try p.errToken(.static_assert_failure, staticAssert);
         }
     }
 
