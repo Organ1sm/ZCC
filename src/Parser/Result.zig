@@ -142,44 +142,44 @@ pub fn implicitCast(operand: *Result, p: *Parser, kind: AST.CastKind) Error!void
     });
 }
 
-pub fn adjustCondExprPtrs(a: *Result, tok: TokenIndex, b: *Result, p: *Parser) !bool {
-    std.debug.assert(a.ty.isPointer() and b.ty.isPointer());
+pub fn adjustCondExprPtrs(lhs: *Result, tok: TokenIndex, rhs: *Result, p: *Parser) !bool {
+    std.debug.assert(lhs.ty.isPointer() and rhs.ty.isPointer());
 
-    const aElem = a.ty.getElemType();
-    const bElem = b.ty.getElemType();
-    if (aElem.eql(bElem, p.comp, true))
+    const lhsElem = lhs.ty.getElemType();
+    const rhsElem = rhs.ty.getElemType();
+    if (lhsElem.eql(rhsElem, p.comp, true))
         return true;
 
     var adjustedElemType = try p.arena.create(Type);
-    adjustedElemType.* = aElem;
+    adjustedElemType.* = lhsElem;
 
-    const hasVoidStarBranch = a.ty.isVoidStar() or b.ty.isVoidStar();
-    const onlyQualsDiffer = aElem.eql(bElem, p.comp, false);
+    const hasVoidStarBranch = lhs.ty.isVoidStar() or rhs.ty.isVoidStar();
+    const onlyQualsDiffer = lhsElem.eql(rhsElem, p.comp, false);
     const pointersCompatible = onlyQualsDiffer or hasVoidStarBranch;
 
     if (!pointersCompatible or hasVoidStarBranch) {
         if (!pointersCompatible)
-            try p.errStr(.pointer_mismatch, tok, try p.typePairStrExtra(a.ty, " and ", b.ty));
+            try p.errStr(.pointer_mismatch, tok, try p.typePairStrExtra(lhs.ty, " and ", rhs.ty));
         adjustedElemType.* = Type.Void;
     }
 
     if (pointersCompatible)
-        adjustedElemType.qual = aElem.qual.mergeCVQualifiers(bElem.qual);
+        adjustedElemType.qual = lhsElem.qual.mergeCVQualifiers(rhsElem.qual);
 
-    if (!adjustedElemType.eql(aElem, p.comp, true)) {
-        a.ty = .{
+    if (!adjustedElemType.eql(lhsElem, p.comp, true)) {
+        lhs.ty = .{
             .data = .{ .subType = adjustedElemType },
             .specifier = .Pointer,
         };
-        try a.implicitCast(p, .Bitcast);
+        try lhs.implicitCast(p, .Bitcast);
     }
 
-    if (!adjustedElemType.eql(bElem, p.comp, true)) {
-        b.ty = .{
+    if (!adjustedElemType.eql(rhsElem, p.comp, true)) {
+        rhs.ty = .{
             .data = .{ .subType = adjustedElemType },
             .specifier = .Pointer,
         };
-        try b.implicitCast(p, .Bitcast);
+        try rhs.implicitCast(p, .Bitcast);
     }
     return true;
 }
