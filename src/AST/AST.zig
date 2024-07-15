@@ -594,6 +594,29 @@ fn dumpNode(
             try tree.dumpNode(tree.data[data.if3.body + 1], level + delta, mapper, color, w);
         },
 
+        .BuiltinTypesCompatibleP => {
+            std.debug.assert(tree.nodes.items(.tag)[@intFromEnum(data.binExpr.lhs)] == .Invalid);
+            std.debug.assert(tree.nodes.items(.tag)[@intFromEnum(data.binExpr.rhs)] == .Invalid);
+
+            try w.writeByteNTimes(' ', level + half);
+            try w.writeAll("lhs: ");
+
+            const lhsTy = tree.nodes.items(.type)[@intFromEnum(data.binExpr.lhs)];
+            if (color) util.setColor(TYPE, w);
+            try lhsTy.dump(mapper, tree.comp.langOpts, w);
+            if (color) util.setColor(.reset, w);
+            try w.writeByte('\n');
+
+            try w.writeByteNTimes(' ', level + half);
+            try w.writeAll("rhs: ");
+
+            const rhsTy = tree.nodes.items(.type)[@intFromEnum(data.binExpr.rhs)];
+            if (color) util.setColor(TYPE, w);
+            try rhsTy.dump(mapper, tree.comp.langOpts, w);
+            if (color) util.setColor(.reset, w);
+            try w.writeByte('\n');
+        },
+
         .IfThenStmt => {
             try w.writeByteNTimes(' ', level + half);
             try w.writeAll("cond:\n");

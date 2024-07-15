@@ -1242,6 +1242,38 @@ pub fn annotationAlignment(comp: *const Compilation, attrs: ?[]const Attribute) 
     return maxRequested;
 }
 
+/// Returns a canonicalized version of the given type without cv qualifiers.
+pub fn stripCVTypeQuals(ty: Type) Type {
+    //  unwrap typeof-types when checking compatibility
+    var tyUnqual = ty.canonicalize(.standard);
+    tyUnqual.qual.@"const" = false;
+    tyUnqual.qual.@"volatile" = false;
+    return tyUnqual;
+}
+
+/// Checks type compatibility for __builtin_types_compatible_p
+/// Returns true if the unqualified version of `lhs` and `rhs` are the same
+/// Ignores top-level qualifiers (e.g. `int` and `const int` are compatible) but `int *` and `const int *` are not
+/// Two types that are typedefed are considered compatible if their underlying types are compatible.
+/// An enum type is not considered to be compatible with another enum type even if both are compatible with the same integer type;
+/// `A[]` and `A[N]` for a type `A` and integer `N` are compatible
+pub fn compatible(lhs: Type, rhs: Type, comp: *const Compilation) bool {
+    const lhsUnqual = lhs.stripCVTypeQuals();
+    const rhsUnqual = rhs.stripCVTypeQuals();
+
+    if (lhsUnqual.eql(rhsUnqual, comp, true)) return true;
+
+    if (!lhsUnqual.isArray() or !rhsUnqual.isArray()) return false;
+
+    if (lhsUnqual.arrayLen() == null or rhsUnqual.arrayLen() == null) {
+        // incomplete arrays are compatible with arrays of the same element type
+        // GCC and clang ignore cv-qualifiers on arrays
+        return lhsUnqual.getElemType().compatible(rhsUnqual.getElemType(), comp);
+    }
+
+    return false;
+}
+
 pub fn eql(lhsParam: Type, rhsParam: Type, comp: *const Compilation, checkQualifiers: bool) bool {
     const lhs = lhsParam.canonicalize(.standard);
     const rhs = rhsParam.canonicalize(.standard);
