@@ -501,7 +501,7 @@ pub fn finish(b: @This(), p: *Parser) Parser.Error!Type {
     }
 
     if (!ty.isReal() and ty.isInt())
-        try p.errToken(.complex_int, b.complexToken.?);
+        if (b.complexToken) |tok| try p.errToken(.complex_int, tok);
 
     try b.qual.finish(p, &ty);
     return ty;
