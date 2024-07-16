@@ -252,6 +252,7 @@ pub const TokenType = enum(u8) {
     // Preprocessor directives
     KeywordInclude,
     KeywordIncludeNext,
+    KeywordEmbed,
     KeywordDefine,
     KeywordDefined,
     KeywordUndef,
@@ -295,6 +296,7 @@ pub const TokenType = enum(u8) {
         return switch (id) {
             .KeywordInclude,
             .KeywordIncludeNext,
+            .KeywordEmbed,
             .KeywordDefine,
             .KeywordDefined,
             .KeywordIfdef,
@@ -428,6 +430,7 @@ pub const TokenType = enum(u8) {
         switch (id.*) {
             .KeywordInclude,
             .KeywordIncludeNext,
+            .KeywordEmbed,
             .KeywordDefine,
             .KeywordUndef,
             .KeywordIfdef,
@@ -654,6 +657,7 @@ pub const TokenType = enum(u8) {
 
             .KeywordInclude => "include",
             .KeywordIncludeNext => "include_next",
+            .KeywordEmbed => "embed",
             .KeywordDefine => "define",
             .KeywordDefined => "defined",
             .KeywordUndef => "undef",
