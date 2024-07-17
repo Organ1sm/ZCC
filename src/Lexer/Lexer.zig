@@ -974,6 +974,7 @@ test "preprocessor directives" {
     try expectTokens(
         \\#include
         \\#include_next
+        // \\#embed
         \\#define
         \\#ifdef
         \\#ifndef
@@ -983,6 +984,7 @@ test "preprocessor directives" {
     , &.{
         .Hash, .KeywordInclude,     .NewLine,
         .Hash, .KeywordIncludeNext, .NewLine,
+        // .Hash, .KeywordEmbed,       .NewLine,
         .Hash, .KeywordDefine,      .NewLine,
         .Hash, .KeywordIfdef,       .NewLine,
         .Hash, .KeywordIfndef,      .NewLine,

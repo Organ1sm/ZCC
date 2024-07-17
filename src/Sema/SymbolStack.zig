@@ -66,7 +66,7 @@ scopes: std.ArrayListUnmanaged(Scope) = .{},
 p: *Parser = undefined,
 
 pub fn deinit(self: *SymbolStack, gpa: Allocator) void {
-    std.debug.assert(self.activeLen == 0); // all scopes should be popped at end
+    assert(self.activeLen == 0); // all scopes should be popped at end
     for (self.scopes.items) |*scope|
         scope.deinit(gpa);
     self.scopes.deinit(gpa);

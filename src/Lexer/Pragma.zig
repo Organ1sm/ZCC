@@ -1,4 +1,5 @@
 const std = @import("std");
+const assert = std.debug.assert;
 const Compilation = @import("../Basic/Compilation.zig");
 const Preprocessor = @import("Preprocessor.zig");
 const Parser = @import("../Parser/Parser.zig");
@@ -85,6 +86,6 @@ pub fn preprocessorCB(self: *Pragma, pp: *Preprocessor, startIdx: TokenIndex) Er
 
 pub fn parserCB(self: *Pragma, p: *Parser, startIdx: TokenIndex) Compilation.Error!void {
     const tokenIdx = p.tokenIdx;
-    defer std.debug.assert(tokenIdx == p.tokenIdx);
+    defer assert(tokenIdx == p.tokenIdx);
     if (self.parserHandler) |func| return func(self, p, startIdx);
 }

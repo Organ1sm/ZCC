@@ -2,6 +2,7 @@
 //! Licensed under MIT license: https://github.com/mahkoh/repr-c/tree/master/repc/facade
 
 const std = @import("std");
+const assert = std.debug.assert;
 const Type = @import("../AST/Type.zig");
 const Attribute = @import("../Lexer/Attribute.zig");
 const Compilation = @import("../Basic/Compilation.zig");
@@ -158,7 +159,7 @@ const SysVContext = struct {
         isNamed: bool,
         width: u64,
     ) FieldLayout {
-        std.debug.assert(width <= tySizeBits); // validated in parser
+        assert(width <= tySizeBits); // validated in parser
 
         // In a union, the size of the underlying type does not affect the size of the union.
         // See test case 0070.
@@ -271,7 +272,7 @@ const SysVContext = struct {
         var tyFieldAlignBits: u32 = fieldLayout.fieldAlignmentBits;
 
         if (bitWidth > 0) {
-            std.debug.assert(bitWidth <= tySizeBits); // Checked in Parser
+            assert(bitWidth <= tySizeBits); // Checked in Parser
             //// Some targets ignore the alignment of the underlying type when laying out
             //// non-zero-sized bit-fields. See test case 0072. On such targets, bit-fields never
             //// cross a storage boundary. See test case 0081.
@@ -319,7 +320,7 @@ const SysVContext = struct {
                     fieldAlignBits = @max(fieldAlignBits, tyFieldAlignBits);
             }
         } else {
-            std.debug.assert(self.comp.langOpts.emulate == .clang);
+            assert(self.comp.langOpts.emulate == .clang);
 
             // On Clang, the alignment requested by annotations is not respected if it is
             // larger than the value of #pragma pack. See test case 0083.
@@ -484,7 +485,7 @@ const MsvcContext = struct {
                 return .{ .offsetBits = self.sizeBits, .sizeBits = bitWidth };
             }
         } else {
-            std.debug.assert(bitWidth <= tySizeBits);
+            assert(bitWidth <= tySizeBits);
             // If there is an ongoing bit-field in a struct whose underlying type has the same size and
             // if there is enough space left to place this bit-field, then this bit-field is placed in
             // the ongoing bit-field and the overall layout of the struct is not affected by this

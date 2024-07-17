@@ -1,6 +1,7 @@
 /// Compilation holds onto the entire state of the Program
 /// and declared symbols as well and house all compiler operation
 const std = @import("std");
+const assert = std.debug.assert;
 const builtin = @import("builtin");
 const Source = @import("Source.zig");
 const Diagnostics = @import("../Basic/Diagnostics.zig");
@@ -93,7 +94,7 @@ fn generateDateAndTime(w: anytype) !void {
     const monthDay = yearDay.calculateMonthDay();
 
     const MonthNames = [_][]const u8{ "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
-    std.debug.assert(std.time.epoch.Month.jan.numeric() == 1);
+    assert(std.time.epoch.Month.jan.numeric() == 1);
 
     const monthName = MonthNames[monthDay.month.numeric() - 1];
     try w.print("#define __DATE__ \"{s} {d: >2} {d}\"\n", .{
@@ -515,7 +516,7 @@ fn generateSizeofType(comp: *Compilation, w: anytype, name: []const u8, ty: Type
 }
 
 pub fn nextLargestIntSameSign(comp: *const Compilation, ty: Type) ?Type {
-    std.debug.assert(ty.isInt());
+    assert(ty.isInt());
     const specifiers = if (ty.isUnsignedInt(comp))
         [_]Type.Specifier{ .Short, .Int, .Long, .LongLong }
     else
@@ -938,6 +939,50 @@ pub const IncludeType = enum {
     Quotes, // `"`
     AngleBrackets, // `<`
 };
+
+fn getFileContents(comp: *Compilation, path: []const u8) ![]const u8 {
+    if (std.mem.indexOfScalar(u8, path, 0) != null)
+        return error.FileNotFound;
+
+    const file = try std.fs.cwd().openFile(path, .{});
+    defer file.close();
+
+    return file.readToEndAlloc(comp.gpa, std.math.maxInt(u32));
+}
+
+pub fn findEmbed(
+    comp: *Compilation,
+    filename: []const u8,
+    includerTokenSource: Source.ID,
+    /// angle bracket vs quotes
+    includeType: IncludeType,
+) !?[]const u8 {
+    var pathBuffer: [std.fs.max_path_bytes]u8 = undefined;
+    if (std.fs.path.isAbsolute(filename)) {
+        return if (comp.getFileContents(filename)) |some|
+            some
+        else |err| switch (err) {
+            error.OutOfMemory => |e| return e,
+            else => null,
+        };
+    }
+
+    const cwdSourceId = switch (includeType) {
+        .Quotes => includerTokenSource,
+        .AngleBrackets => null,
+    };
+    var it = IncludeDirIterator{ .comp = comp, .cwdSourceID = cwdSourceId, .pathBuffer = &pathBuffer };
+
+    while (it.nextWithFile(filename)) |path| {
+        if (comp.getFileContents(path)) |some|
+            return some
+        else |err| switch (err) {
+            error.OutOfMemory => return error.OutOfMemory,
+            else => {},
+        }
+    }
+    return null;
+}
 
 pub fn findInclude(
     comp: *Compilation,

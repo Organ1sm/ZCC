@@ -1,4 +1,5 @@
 const std = @import("std");
+const assert = std.debug.assert;
 const buildOptions = @import("build_options");
 const print = std.debug.print;
 const zcc = @import("zcc");
@@ -374,7 +375,7 @@ pub fn main() !void {
 
             defer buffer.items.len = 0;
             // realistically the strings will only contain \" if any escapes so we can use Zig's string parsing
-            std.debug.assert((try std.zig.string_literal.parseWrite(buffer.writer(), pp.getTokenSlice(macro.tokens[0]))) == .success);
+            assert((try std.zig.string_literal.parseWrite(buffer.writer(), pp.getTokenSlice(macro.tokens[0]))) == .success);
             const expectedOutput = buffer.items;
 
             const objName = "testObject.o";
@@ -465,7 +466,7 @@ fn checkExpectedErrors(pp: *zcc.Preprocessor, buf: *std.ArrayList(u8)) !?bool {
 
         defer buf.items.len = 0;
         // realistically the strings will only contain \" if any escapes so we can use Zig's string parsing
-        std.debug.assert((try std.zig.string_literal.parseWrite(buf.writer(), pp.getTokenSlice(str))) == .success);
+        assert((try std.zig.string_literal.parseWrite(buf.writer(), pp.getTokenSlice(str))) == .success);
         try buf.append('\n');
         const expectedError = buf.items;
 

@@ -141,6 +141,7 @@ pub const Token = struct {
         // Preprocessor directives
         .{ "include", .KeywordInclude },
         .{ "include_next", .KeywordIncludeNext },
+        .{ "embed", .KeywordEmbed },
         .{ "define", .KeywordDefine },
         .{ "defined", .KeywordDefined },
         .{ "undef", .KeywordUndef },

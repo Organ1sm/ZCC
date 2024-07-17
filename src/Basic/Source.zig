@@ -1,6 +1,6 @@
 const std = @import("std");
-/// Source represents a source code file added to the compilation.
-/// Contains the file path, contents buffer, and an ID.
+const assert = std.debug.assert;
+
 const Source = @This();
 
 /// Definition of the Location structure, used to track a specific position within a Source.
@@ -160,7 +160,7 @@ fn codepointWidth(cp: u32) u32 {
 /// Returns the first offset, if any, in buf where an invalid utf8 sequence
 /// is found.
 fn offsetOfInvalidUtf8(buffer: []const u8) ?u32 {
-    std.debug.assert(buffer.len <= std.math.maxInt(u32));
+    assert(buffer.len <= std.math.maxInt(u32));
     var i: u32 = 0;
     while (i < buffer.len) {
         if (std.unicode.utf8ByteSequenceLength(buffer[i])) |cpLen| {

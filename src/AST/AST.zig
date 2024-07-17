@@ -1,4 +1,5 @@
 const std = @import("std");
+const assert = std.debug.assert;
 const Type = @import("Type.zig");
 const Compilation = @import("../Basic/Compilation.zig");
 const Source = @import("../Basic/Source.zig");
@@ -388,7 +389,7 @@ fn dumpNode(
     const LITERAL = util.Color.green;
     const ATTRIBUTE = util.Color.yellow;
 
-    std.debug.assert(node != .none);
+    assert(node != .none);
 
     const tag = tree.nodes.items(.tag)[@intFromEnum(node)];
     const data = tree.nodes.items(.data)[@intFromEnum(node)];
@@ -595,8 +596,8 @@ fn dumpNode(
         },
 
         .BuiltinTypesCompatibleP => {
-            std.debug.assert(tree.nodes.items(.tag)[@intFromEnum(data.binExpr.lhs)] == .Invalid);
-            std.debug.assert(tree.nodes.items(.tag)[@intFromEnum(data.binExpr.rhs)] == .Invalid);
+            assert(tree.nodes.items(.tag)[@intFromEnum(data.binExpr.lhs)] == .Invalid);
+            assert(tree.nodes.items(.tag)[@intFromEnum(data.binExpr.rhs)] == .Invalid);
 
             try w.writeByteNTimes(' ', level + half);
             try w.writeAll("lhs: ");
