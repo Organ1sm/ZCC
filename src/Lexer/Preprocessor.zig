@@ -761,7 +761,7 @@ fn expr(pp: *Preprocessor, lexer: *Lexer) MacroError!bool {
 /// Turns macro_tok from .keyword_defined into .zero or .one depending on whether the argument is defined
 /// Returns the number of tokens consumed
 fn handleKeywordDefined(pp: *Preprocessor, macroToken: *Token, tokens: []const Token, eof: RawToken) !usize {
-    std.debug.assert(macroToken.id == .KeywordDefined);
+    assert(macroToken.id == .KeywordDefined);
     var it = TokenIterator.init(tokens);
     const first = it.nextNoWS() orelse {
         try pp.addError(eof, .macro_name_missing);
@@ -1010,10 +1010,10 @@ fn pragmaOperator(pp: *Preprocessor, argToken: Token, operatorLoc: Source.Locati
     pp.generatedLine += 1;
 
     const hashToken = tempLexer.next();
-    std.debug.assert(hashToken.id == .Hash);
+    assert(hashToken.id == .Hash);
 
     const pragmaToken = tempLexer.next();
-    std.debug.assert(pragmaToken.id == .KeywordPragma);
+    assert(pragmaToken.id == .KeywordPragma);
 
     try pp.pragma(&tempLexer, pragmaToken, operatorLoc, argToken.expansionSlice());
 }

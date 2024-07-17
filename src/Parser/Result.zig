@@ -1,4 +1,5 @@
 const std = @import("std");
+const assert = std.debug.assert;
 const Type = @import("../AST/Type.zig");
 const AST = @import("../AST/AST.zig");
 const Diagnostics = @import("../Basic/Diagnostics.zig");
@@ -143,7 +144,7 @@ pub fn implicitCast(operand: *Result, p: *Parser, kind: AST.CastKind) Error!void
 }
 
 pub fn adjustCondExprPtrs(lhs: *Result, tok: TokenIndex, rhs: *Result, p: *Parser) !bool {
-    std.debug.assert(lhs.ty.isPointer() and rhs.ty.isPointer());
+    assert(lhs.ty.isPointer() and rhs.ty.isPointer());
 
     const lhsElem = lhs.ty.getElemType();
     const rhsElem = rhs.ty.getElemType();
@@ -299,7 +300,7 @@ pub fn adjustTypes(lhs: *Result, token: TokenIndex, rhs: *Result, p: *Parser, ki
             } else if (lhsIsPtr) {
                 try rhs.ptrCast(p, lhs.ty);
             } else {
-                std.debug.assert(rhsIsPtr);
+                assert(rhsIsPtr);
                 try lhs.ptrCast(p, rhs.ty);
             }
 
@@ -742,7 +743,7 @@ fn shouldEval(lhs: *Result, rhs: *Result, p: *Parser) Error!bool {
 
 /// Saves value and replaces it with `.unavailable`.
 pub fn saveValue(res: *Result, p: *Parser) !void {
-    std.debug.assert(!p.inMacro);
+    assert(!p.inMacro);
     if (res.value.isUnavailable() or res.value.tag == .nullptrTy)
         return;
 

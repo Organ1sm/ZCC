@@ -597,7 +597,7 @@ fn writeValue(ir: IR, valRe: Interner.Ref, color: bool, w: anytype) !void {
 }
 
 fn writeRef(ir: IR, refMap: *RefMap, ref: Ref, color: bool, w: anytype) !void {
-    std.debug.assert(ref != .none);
+    assert(ref != .none);
     const index = @intFromEnum(ref);
     const tyRef = ir.instructions.items(.type)[index];
 
@@ -631,7 +631,7 @@ fn writeNewRef(ir: IR, refMap: *RefMap, ref: Ref, color: bool, w: anytype) !void
 }
 
 fn writeLabel(ir: IR, labelMap: *RefMap, ref: Ref, color: bool, w: anytype) !void {
-    std.debug.assert(ref != .none);
+    assert(ref != .none);
     const index = @intFromEnum(ref);
     const label = ir.instructions.items(.data)[index].label;
 

@@ -1,6 +1,7 @@
 /// Compilation holds onto the entire state of the Program
 /// and declared symbols as well and house all compiler operation
 const std = @import("std");
+const assert = std.debug.assert;
 const builtin = @import("builtin");
 const Source = @import("Source.zig");
 const Diagnostics = @import("../Basic/Diagnostics.zig");
@@ -93,7 +94,7 @@ fn generateDateAndTime(w: anytype) !void {
     const monthDay = yearDay.calculateMonthDay();
 
     const MonthNames = [_][]const u8{ "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
-    std.debug.assert(std.time.epoch.Month.jan.numeric() == 1);
+    assert(std.time.epoch.Month.jan.numeric() == 1);
 
     const monthName = MonthNames[monthDay.month.numeric() - 1];
     try w.print("#define __DATE__ \"{s} {d: >2} {d}\"\n", .{
@@ -515,7 +516,7 @@ fn generateSizeofType(comp: *Compilation, w: anytype, name: []const u8, ty: Type
 }
 
 pub fn nextLargestIntSameSign(comp: *const Compilation, ty: Type) ?Type {
-    std.debug.assert(ty.isInt());
+    assert(ty.isInt());
     const specifiers = if (ty.isUnsignedInt(comp))
         [_]Type.Specifier{ .Short, .Int, .Long, .LongLong }
     else

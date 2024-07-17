@@ -1,4 +1,5 @@
 const std = @import("std");
+const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
 const Compilation = @import("../Basic/Compilation.zig");
 const Tree = @import("../AST/AST.zig");
@@ -265,7 +266,7 @@ fn genStmt(c: *CodeGen, node: NodeIndex) Error!void {
 }
 
 fn genExpr(c: *CodeGen, node: NodeIndex) Error!IR.Ref {
-    std.debug.assert(node != .none);
+    assert(node != .none);
 
     const ty = c.nodeTy[@intFromEnum(node)];
     if (c.tree.valueMap.get(node)) |val|
@@ -1045,8 +1046,8 @@ fn genExpr(c: *CodeGen, node: NodeIndex) Error!IR.Ref {
 }
 
 fn genLval(c: *CodeGen, node: NodeIndex) Error!IR.Ref {
-    std.debug.assert(node != .none);
-    std.debug.assert(c.tree.isLValue(node));
+    assert(node != .none);
+    assert(c.tree.isLValue(node));
 
     const data = c.nodeData[@intFromEnum(node)];
     switch (c.nodeTag[@intFromEnum(node)]) {
@@ -1370,7 +1371,7 @@ fn genPtrArithmetic(c: *CodeGen, ptr: IR.Ref, offset: IR.Ref, offsetTy: Type, ty
 }
 
 fn genInitializer(c: *CodeGen, ptr: IR.Ref, destTy: Type, initializer: NodeIndex) Error!void {
-    std.debug.assert(initializer != .none);
+    assert(initializer != .none);
     switch (c.nodeTag[@intFromEnum(initializer)]) {
         .ArrayInitExprTwo,
         .ArrayInitExpr,

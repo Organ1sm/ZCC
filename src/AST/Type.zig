@@ -1,4 +1,5 @@
 const std = @import("std");
+const assert = std.debug.assert;
 const Parser = @import("../Parser/Parser.zig");
 const Tree = @import("AST.zig");
 const Compilation = @import("../Basic/Compilation.zig");
@@ -410,7 +411,7 @@ pub const Specifier = enum {
 /// Determine if type matches the given specifier, recursing into typeof
 /// types if necessary.
 pub fn is(ty: Type, specifier: Specifier) bool {
-    std.debug.assert(specifier != .TypeofExpr and specifier != .TypeofType);
+    assert(specifier != .TypeofExpr and specifier != .TypeofType);
     return ty.get(specifier) != null;
 }
 
@@ -744,7 +745,7 @@ pub fn canonicalize(ty: Type, qualHandling: enum { standard, preserve_quals }) T
 }
 
 pub fn get(ty: *const Type, specifier: Specifier) ?*const Type {
-    std.debug.assert(specifier != .TypeofType and specifier != .TypeofExpr);
+    assert(specifier != .TypeofType and specifier != .TypeofExpr);
     return switch (ty.specifier) {
         .TypeofType => ty.data.subType.get(specifier),
         .TypeofExpr => ty.data.expr.ty.get(specifier),
@@ -925,7 +926,7 @@ pub fn hasUnboundVLA(ty: Type) bool {
 }
 
 pub fn maxInt(ty: Type, comp: *const Compilation) u64 {
-    std.debug.assert(ty.isInt());
+    assert(ty.isInt());
     return switch (ty.sizeof(comp).?) {
         1 => if (ty.isUnsignedInt(comp)) @as(u64, std.math.maxInt(u8)) else std.math.maxInt(i8),
         2 => if (ty.isUnsignedInt(comp)) @as(u64, std.math.maxInt(u16)) else std.math.maxInt(i16),
@@ -936,7 +937,7 @@ pub fn maxInt(ty: Type, comp: *const Compilation) u64 {
 }
 
 pub fn minInt(ty: Type, comp: *const Compilation) i64 {
-    std.debug.assert(ty.isInt());
+    assert(ty.isInt());
     if (ty.isUnsignedInt(comp)) return 0;
     return switch (ty.sizeof(comp).?) {
         1 => std.math.minInt(i8),
@@ -951,7 +952,7 @@ pub fn minInt(ty: Type, comp: *const Compilation) i64 {
 pub fn hasField(ty: Type, name: StringId) bool {
     switch (ty.specifier) {
         .Struct, .Union => {
-            std.debug.assert(!ty.data.record.isIncomplete());
+            assert(!ty.data.record.isIncomplete());
             for (ty.data.record.fields) |f| {
                 if (f.isAnonymousRecord() and f.ty.hasField(name)) return true;
                 if (name == f.name) return true;
@@ -1197,7 +1198,7 @@ pub fn alignof(ty: Type, comp: *const Compilation) u29 {
 }
 
 pub fn enumIsPacked(ty: Type, comp: *const Compilation) bool {
-    std.debug.assert(ty.is(.Enum));
+    assert(ty.is(.Enum));
     return comp.langOpts.shortEnums or Target.packAllEnums(comp.target) or ty.hasAttribute(.@"packed");
 }
 
@@ -1355,12 +1356,12 @@ pub fn eql(lhsParam: Type, rhsParam: Type, comp: *const Compilation, checkQualif
 }
 
 pub fn decayArray(ty: *Type) void {
-    std.debug.assert(ty.isArray());
+    assert(ty.isArray());
     ty.decayed = true;
 }
 
 pub fn originalTypeOfDecayedArray(ty: Type) Type {
-    std.debug.assert(ty.isDecayed());
+    assert(ty.isDecayed());
     var copy = ty;
     copy.decayed = false;
     return copy;
@@ -1475,17 +1476,17 @@ pub fn combine(inner: *Type, outer: Type) Parser.Error!void {
         .Pointer => return inner.data.subType.combine(outer),
 
         .UnspecifiedVariableLenArray => {
-            std.debug.assert(!inner.isDecayed());
+            assert(!inner.isDecayed());
             try inner.data.subType.combine(outer);
         },
 
         .Array, .StaticArray, .IncompleteArray => {
-            std.debug.assert(!inner.isDecayed());
+            assert(!inner.isDecayed());
             try inner.data.array.elem.combine(outer);
         },
 
         .VariableLenArray => {
-            std.debug.assert(!inner.isDecayed());
+            assert(!inner.isDecayed());
             try inner.data.expr.ty.combine(outer);
         },
 
@@ -1494,7 +1495,7 @@ pub fn combine(inner: *Type, outer: Type) Parser.Error!void {
         .OldStyleFunc,
         => try inner.data.func.returnType.combine(outer),
 
-        .TypeofType, .TypeofExpr => std.debug.assert(!inner.isDecayed()),
+        .TypeofType, .TypeofExpr => assert(!inner.isDecayed()),
 
         .Void => inner.* = outer,
         else => unreachable,
@@ -1614,7 +1615,7 @@ pub fn hasAttribute(ty: Type, tag: Attribute.Tag) bool {
 }
 
 fn compareIntegerRanks(lhs: Type, rhs: Type, comp: *const Compilation) std.math.Order {
-    std.debug.assert(lhs.isInt() and rhs.isInt());
+    assert(lhs.isInt() and rhs.isInt());
     if (lhs.eql(rhs, comp, false)) return .eq;
 
     const lhsUnsigned = lhs.isUnsignedInt(comp);
@@ -1630,13 +1631,13 @@ fn compareIntegerRanks(lhs: Type, rhs: Type, comp: *const Compilation) std.math.
         return .lt;
     }
 
-    std.debug.assert(rhsUnsigned);
+    assert(rhsUnsigned);
     if (rhsRank >= lhsRank) return .lt;
     return .gt;
 }
 
 fn realIntegerConversion(lhs: Type, rhs: Type, comp: *const Compilation) Type {
-    std.debug.assert(lhs.isReal() and rhs.isReal());
+    assert(lhs.isReal() and rhs.isReal());
 
     const typeOrder = lhs.compareIntegerRanks(rhs, comp);
     const lhsSigned = !lhs.isUnsignedInt(comp);
@@ -1713,7 +1714,7 @@ pub fn intValueSuffix(ty: Type, comp: *const Compilation) []const u8 {
             if (ty.specifier == .Char and Target.getCharSignedness(comp.target) == .signed) return "";
             // Only 8-bit char supported currently;
             // TODO: handle platforms with 16-bit int + 16-bit char
-            std.debug.assert(ty.sizeof(comp).? == 8);
+            assert(ty.sizeof(comp).? == 8);
             return "";
         },
         .UShort => {

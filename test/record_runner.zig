@@ -1,8 +1,9 @@
 const std = @import("std");
+const assert = std.debug.assert;
 const print = std.debug.print;
 const zcc = @import("zcc");
 
-/// These tests don't work for any platform due to Aro bugs.
+/// These tests don't work for any platform due to bugs.
 /// Skip entirely.
 /// To skip a test entirely just put the test name as a single-element tuple e.g. initComptime(.{.{"0044"}});
 const global_test_exclude = std.StaticStringMap(void).initComptime(.{});
@@ -227,7 +228,7 @@ fn singleRun(alloc: std.mem.Allocator, testDir: []const u8, testCase: TestCase, 
         error.UnknownCpuModel => unreachable,
     };
     switch (target.os.tag) {
-        .hermit => return, // Skip targets Aro doesn't support.
+        .hermit => return, // Skip targets zcc doesn't support.
         else => {},
     }
 
@@ -381,7 +382,7 @@ fn setTarget(comp: *zcc.Compilation, target: []const u8) !std.Target {
 
     // std.debug.print(" '{s}': {s}\n", .{ expected_compiler_name, set_name });
 
-    std.debug.assert(std.ascii.eqlIgnoreCase(set_name, expected_compiler_name));
+    assert(std.ascii.eqlIgnoreCase(set_name, expected_compiler_name));
 
     return zig_target;
 }
@@ -391,7 +392,7 @@ fn parseTargetsFromCode(cases: *TestCase.List, path: []const u8, source: []const
     while (lines.next()) |line| {
         if (std.mem.indexOf(u8, line, "// MAPPING|") == null) continue;
 
-        std.debug.assert(std.mem.count(u8, line, "|") > 1);
+        assert(std.mem.count(u8, line, "|") > 1);
         var parts = std.mem.tokenizeScalar(u8, line, '|');
         _ = parts.next(); // Skip the MAPPING bit
         const define = parts.next().?; // The define to set for this chunk.
