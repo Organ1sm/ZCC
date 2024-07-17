@@ -405,6 +405,8 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!Token {
                             try pp.include(&lexer, .Next);
                         }
                     },
+
+                    .KeywordEmbed => try pp.embed(&lexer),
                     .KeywordPragma => try pp.pragma(&lexer, directive, null, &.{}),
 
                     .KeywordLine => {
@@ -2113,6 +2115,57 @@ fn define(pp: *Preprocessor, lexer: *Lexer) Error!void {
     });
 }
 
+/// Handle an #embed directive
+fn embed(pp: *Preprocessor, lexer: *Lexer) MacroError!void {
+    const first = lexer.nextNoWhiteSpace();
+    const fileNameToken = pp.findIncludeFilenameToken(first, lexer, .expectNlEof) catch |er| switch (er) {
+        error.InvalidInclude => return,
+        else => |e| return e,
+    };
+
+    // Check for empty filename.
+    const tokSlice = pp.expandedSlice(fileNameToken);
+    if (tokSlice.len < 3) {
+        try pp.addError(first, .empty_filename);
+        return;
+    }
+
+    const filename = tokSlice[1 .. tokSlice.len - 1];
+    const includeType: Compilation.IncludeType = switch (fileNameToken.id) {
+        .StringLiteral => .Quotes,
+        .MacroString => .AngleBrackets,
+        else => unreachable,
+    };
+
+    const embedBytes = (try pp.comp.findEmbed(filename, first.source, includeType)) orelse
+        return pp.fatal(first, "'{s}' not found", .{filename});
+    defer pp.comp.gpa.free(embedBytes);
+
+    if (embedBytes.len == 0) return;
+
+    try pp.tokens.ensureUnusedCapacity(pp.comp.gpa, 2 * embedBytes.len - 1); // N bytes and N-1 commas
+
+    // TODO: We currently only support systems with CHAR_BIT == 8
+    // If the target's CHAR_BIT is not 8, we need to write out correctly-sized embed_bytes
+    // and correctly account for the target's endianness
+    const writer = pp.comp.generatedBuffer.writer();
+
+    {
+        const byte = embedBytes[0];
+        const start = pp.comp.generatedBuffer.items.len;
+        try writer.print("{d}", .{byte});
+        pp.tokens.appendAssumeCapacity(try pp.makeGeneratedToken(start, .EmbedByte, fileNameToken));
+    }
+
+    for (embedBytes[1..]) |byte| {
+        const start = pp.comp.generatedBuffer.items.len;
+        try writer.print(",{d}", .{byte});
+        pp.tokens.appendAssumeCapacity(.{ .id = .Comma, .loc = .{ .id = .generated, .byteOffset = @intCast(start) } });
+        pp.tokens.appendAssumeCapacity(try pp.makeGeneratedToken(start + 1, .EmbedByte, fileNameToken));
+    }
+    try pp.comp.generatedBuffer.append('\n');
+}
+
 /// Handle a function like #define directive
 fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: RawToken, lParen: RawToken) Error!void {
     assert(macroName.id.isMacroIdentifier());
@@ -2644,6 +2697,7 @@ test "Include guards" {
 
                 .KeywordInclude,
                 .KeywordIncludeNext,
+                .KeywordEmbed,
                 .KeywordDefine,
                 .KeywordDefined,
                 .KeywordUndef,

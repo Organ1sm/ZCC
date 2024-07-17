@@ -1,4 +1,5 @@
 const std = @import("std");
+const assert = std.debug.assert;
 const big = std.math.big;
 const Compilation = @import("../Basic/Compilation.zig");
 const Source = @import("../Basic/Source.zig");
@@ -148,7 +149,7 @@ const Label = union(enum) {
 };
 
 fn checkIdentifierCodepointWarnings(comp: *Compilation, codepoint: u21, loc: Source.Location) Compilation.Error!bool {
-    std.debug.assert(codepoint >= 0x80);
+    assert(codepoint >= 0x80);
 
     const errStart = comp.diagnostics.list.items.len;
 
@@ -180,7 +181,7 @@ fn checkIdentifierCodepointWarnings(comp: *Compilation, codepoint: u21, loc: Sou
 /// true means consider the token to actually be an identifier
 /// false means it is not
 fn validateExtendedIdentifier(p: *Parser) !bool {
-    std.debug.assert(p.getCurrToken() == .ExtendedIdentifier);
+    assert(p.getCurrToken() == .ExtendedIdentifier);
 
     const slice = p.getTokenText(p.tokenIdx);
     const view = std.unicode.Utf8View.init(slice) catch {
@@ -271,7 +272,7 @@ fn expectIdentifier(p: *Parser) Error!TokenIndex {
 }
 
 fn eat(p: *Parser, expected: TokenType) ?TokenIndex {
-    std.debug.assert(expected != .Identifier and expected != .ExtendedIdentifier); // use eatIdentifier
+    assert(expected != .Identifier and expected != .ExtendedIdentifier); // use eatIdentifier
     if (p.getCurrToken() == expected) {
         defer p.tokenIdx += 1;
         return p.tokenIdx;
@@ -283,12 +284,12 @@ pub fn getCurrToken(p: *Parser) TokenType {
 }
 
 pub fn lookAhead(p: *Parser, n: u32) TokenType {
-    std.debug.assert(p.tokenIdx + n < p.tokenIds.len);
+    assert(p.tokenIdx + n < p.tokenIds.len);
     return p.tokenIds[p.tokenIdx + n];
 }
 
 fn expectToken(p: *Parser, expected: TokenType) Error!TokenIndex {
-    std.debug.assert(expected != .Identifier and expected != .ExtendedIdentifier); // use eatIdentifier
+    assert(expected != .Identifier and expected != .ExtendedIdentifier); // use eatIdentifier
     const actual = p.getCurrToken();
     if (actual != expected)
         return p.errExpectedToken(expected, actual);
@@ -633,7 +634,7 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
         p.recordMembers.deinit(pp.comp.gpa);
         p.attrBuffer.deinit(pp.comp.gpa);
         p.attrApplicationBuffer.deinit(pp.comp.gpa);
-        std.debug.assert(p.fieldAttrBuffer.items.len == 0);
+        assert(p.fieldAttrBuffer.items.len == 0);
         p.fieldAttrBuffer.deinit();
     }
 
@@ -1041,7 +1042,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
         }
 
         const body = (try p.parseCompoundStmt(true, null)) orelse {
-            std.debug.assert(initDeclarator.d.oldTypeFunc != null);
+            assert(initDeclarator.d.oldTypeFunc != null);
             try p.err(.expected_fn_body);
             return true;
         };
@@ -1142,7 +1143,7 @@ fn staticAssertMessage(p: *Parser, condNode: NodeIndex, message: Result) !?[]con
     }
 
     if (message.node != .none) {
-        std.debug.assert(p.nodes.items(.tag)[@intFromEnum(message.node)] == .StringLiteralExpr);
+        assert(p.nodes.items(.tag)[@intFromEnum(message.node)] == .StringLiteralExpr);
 
         if (buf.items.len > 0)
             try buf.append(' ');
@@ -3569,7 +3570,7 @@ fn coerceArrayInit(p: *Parser, item: *Result, token: TokenIndex, target: Type) !
     }
 
     if (target.get(.Array)) |arrayType| {
-        std.debug.assert(item.ty.is(.Array));
+        assert(item.ty.is(.Array));
         const len = item.ty.arrayLen().?;
         const arrayLen = arrayType.arrayLen().?;
         if (isStrLiteral) {
@@ -3697,7 +3698,7 @@ fn convertInitList(p: *Parser, il: InitList, initType: Type) Error!NodeIndex {
         }
         return try p.addNode(arrInitNode);
     } else if (initType.get(.Struct)) |structType| {
-        std.debug.assert(!structType.hasIncompleteSize());
+        assert(!structType.hasIncompleteSize());
 
         if (il.node != .none)
             return il.node;
@@ -5809,7 +5810,7 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
 ///  | '++'
 ///  | '--'
 fn parseSuffixExpr(p: *Parser, lhs: Result) Error!Result {
-    std.debug.assert(!lhs.empty(p));
+    assert(!lhs.empty(p));
     switch (p.getCurrToken()) {
         .LBracket => {
             const lb = p.tokenIdx;
@@ -6289,7 +6290,7 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
                     .data = .{ .int = numericValue },
                 }),
             };
-            std.debug.assert(!p.inMacro); // Should have been replaced with .one / .zero
+            assert(!p.inMacro); // Should have been replaced with .one / .zero
             try p.valueMap.put(res.node, res.value);
             return res;
         },
@@ -6410,6 +6411,26 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
         },
 
         .PPNumber => return p.parsePPNumber(),
+
+        .EmbedByte => {
+            assert(!p.inMacro);
+            const loc = p.pp.tokens.items(.loc)[p.tokenIdx];
+            p.tokenIdx += 1;
+
+            const buffer = p.comp.getSource(.generated).buffer[loc.byteOffset..];
+            var byte: u8 = buffer[0] - '0';
+            for (buffer[1..]) |c| {
+                if (!std.ascii.isDigit(c)) break;
+                byte *= 10;
+                byte += c - '0';
+            }
+
+            var res: Result = .{ .value = Value.int(byte) };
+            res.node = try p.addNode(.{ .tag = .IntLiteral, .type = res.ty, .data = undefined });
+            try p.valueMap.put(res.node, res.value);
+
+            return res;
+        },
 
         .KeywordGeneric => return p.parseGenericSelection(),
 
@@ -6711,7 +6732,7 @@ fn bitInt(p: *Parser, base: u8, buf: []const u8, suffix: NumberSuffix, tokenIdx:
 
 fn getFracPart(p: *Parser, buffer: []const u8, prefix: NumberPrefix, tokenIdx: TokenIndex) ![]const u8 {
     if (buffer.len == 0 or buffer[0] != '.') return "";
-    std.debug.assert(prefix != .octal);
+    assert(prefix != .octal);
 
     if (prefix == .binary) {
         try p.errStr(.invalid_int_suffix, tokenIdx, buffer);
@@ -6731,7 +6752,7 @@ fn getExponent(p: *Parser, buffer: []const u8, prefix: NumberPrefix, tokenIdx: T
     if (buffer.len == 0) return "";
 
     switch (buffer[0]) {
-        'e', 'E' => std.debug.assert(prefix == .decimal),
+        'e', 'E' => assert(prefix == .decimal),
         'p', 'P' => if (prefix != .hex) {
             try p.errStr(.invalid_float_suffix, tokenIdx, buffer);
             return error.ParsingFailed;
@@ -6782,7 +6803,7 @@ pub fn parseNumberToken(p: *Parser, tokenIdx: TokenIndex) !Result {
     };
 
     if (isFloat) {
-        std.debug.assert(prefix == .hex or prefix == .decimal);
+        assert(prefix == .hex or prefix == .decimal);
         if (prefix == .hex and exponent.len == 0) {
             try p.errToken(.hex_floating_constant_requires_exponent, tokenIdx);
             return error.ParsingFailed;
