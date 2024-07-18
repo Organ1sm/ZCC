@@ -211,6 +211,10 @@ pub fn next(self: *Lexer) Token {
             },
 
             .u8 => switch (c) {
+                '\'' => {
+                    id = .CharLiteralUTF_8;
+                    state = .char_literal_start;
+                },
                 '\"' => {
                     id = .StringLiteralUTF_8;
                     state = .string_literal;
@@ -1032,6 +1036,7 @@ test "string prefix" {
         \\U"foo"
         \\L"foo"
         \\'foo'
+        \\u8'A'
         \\u'foo'
         \\U'foo'
         \\L'foo'
@@ -1043,6 +1048,7 @@ test "string prefix" {
         .StringLiteralUTF_32, .NewLine,
         .StringLiteralWide,   .NewLine,
         .CharLiteral,         .NewLine,
+        .CharLiteralUTF_8,    .NewLine,
         .CharLiteralUTF_16,   .NewLine,
         .CharLiteralUTF_32,   .NewLine,
         .CharLiteralWide,     .NewLine,

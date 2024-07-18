@@ -6389,6 +6389,7 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
         => return p.parseStringLiteral(),
 
         .CharLiteral,
+        .CharLiteralUTF_8,
         .CharLiteralUTF_16,
         .CharLiteralUTF_32,
         .CharLiteralWide,
@@ -6834,6 +6835,7 @@ fn parseCharLiteral(p: *Parser) Error!Result {
     const ty: Type = switch (p.getCurrToken()) {
         .CharLiteral => Type.Int,
         .CharLiteralWide => p.comp.types.wchar,
+        .CharLiteralUTF_8 => Type.UChar,
         .CharLiteralUTF_16 => Type.UShort,
         .CharLiteralUTF_32 => Type.ULong,
         else => unreachable,
@@ -6842,6 +6844,7 @@ fn parseCharLiteral(p: *Parser) Error!Result {
     const max: u32 = switch (p.getCurrToken()) {
         .CharLiteral => std.math.maxInt(u8),
         .CharLiteralWide => @intCast(p.comp.types.wchar.maxInt(p.comp)),
+        .CharLiteralUTF_8 => std.math.maxInt(u8),
         .CharLiteralUTF_16 => std.math.maxInt(u16),
         .CharLiteralUTF_32 => std.math.maxInt(u32),
         else => unreachable,
@@ -6849,6 +6852,7 @@ fn parseCharLiteral(p: *Parser) Error!Result {
     var multichar: u8 = switch (p.getCurrToken()) {
         .CharLiteral => 0,
         .CharLiteralWide => 4,
+        .CharLiteralUTF_8 => 2,
         .CharLiteralUTF_16 => 2,
         .CharLiteralUTF_32 => 2,
         else => unreachable,
