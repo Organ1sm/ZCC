@@ -6953,7 +6953,7 @@ fn parseCharLiteral(p: *Parser) Error!Result {
             else => {},
         }
 
-        const product, const overflowed = @mulWithOverflow(val, max);
+        const product, const overflowed = @mulWithOverflow(val, max +% 1);
         if (overflowed != 0 and !overflowReported) {
             try p.errExtra(.char_lit_too_wide, p.tokenIdx, .{ .unsigned = i });
             overflowReported = true;

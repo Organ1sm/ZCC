@@ -27,6 +27,7 @@ const State = enum {
     string_literal,
     char_literal_start,
     char_literal,
+    char_escape_sequence,
     escape_sequence,
     octal_escape,
     hex_escape,
@@ -274,8 +275,7 @@ pub fn next(self: *Lexer) Token {
 
             .char_literal_start => switch (c) {
                 '\\' => {
-                    returnState = .char_literal;
-                    state = .escape_sequence;
+                    state = .char_escape_sequence;
                 },
 
                 '\'', '\n' => {
@@ -289,8 +289,7 @@ pub fn next(self: *Lexer) Token {
 
             .char_literal => switch (c) {
                 '\\' => {
-                    returnState = .string_literal;
-                    state = .escape_sequence;
+                    state = .char_escape_sequence;
                 },
                 '\'' => {
                     self.index += 1;
@@ -301,6 +300,11 @@ pub fn next(self: *Lexer) Token {
                     break;
                 },
                 else => {},
+            },
+
+            .char_escape_sequence => switch (c) {
+                '\r', '\n' => unreachable, // removed by line splicing
+                else => state = .char_literal,
             },
 
             .escape_sequence => switch (c) {
@@ -729,6 +733,7 @@ pub fn next(self: *Lexer) Token {
             .char_literal_start,
             .char_literal,
             .escape_sequence,
+            .char_escape_sequence,
             .octal_escape,
             .hex_escape,
             .unicode_escape,
