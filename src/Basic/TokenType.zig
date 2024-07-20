@@ -19,6 +19,7 @@ pub const TokenType = enum(u8) {
     // char literals with prefixes
     CharLiteral,
     CharLiteralWide,
+    CharLiteralUTF_8,
     CharLiteralUTF_16,
     CharLiteralUTF_32,
 
@@ -470,6 +471,7 @@ pub const TokenType = enum(u8) {
             .StringLiteralUTF_32,
             .StringLiteralWide,
             .CharLiteral,
+            .CharLiteralUTF_8,
             .CharLiteralUTF_16,
             .CharLiteralUTF_32,
             .CharLiteralWide,
@@ -709,6 +711,7 @@ pub const TokenType = enum(u8) {
             => "a string literal",
 
             .CharLiteral,
+            .CharLiteralUTF_8,
             .CharLiteralUTF_16,
             .CharLiteralUTF_32,
             .CharLiteralWide,
@@ -734,6 +737,7 @@ pub const TokenType = enum(u8) {
             .StringLiteralUTF_32,
             .StringLiteralWide,
             .CharLiteral,
+            .CharLiteralUTF_8,
             .CharLiteralUTF_16,
             .CharLiteralUTF_32,
             .CharLiteralWide,

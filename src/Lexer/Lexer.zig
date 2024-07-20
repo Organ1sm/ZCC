@@ -27,6 +27,7 @@ const State = enum {
     string_literal,
     char_literal_start,
     char_literal,
+    char_escape_sequence,
     escape_sequence,
     octal_escape,
     hex_escape,
@@ -211,6 +212,10 @@ pub fn next(self: *Lexer) Token {
             },
 
             .u8 => switch (c) {
+                '\'' => {
+                    id = .CharLiteralUTF_8;
+                    state = .char_literal_start;
+                },
                 '\"' => {
                     id = .StringLiteralUTF_8;
                     state = .string_literal;
@@ -270,8 +275,7 @@ pub fn next(self: *Lexer) Token {
 
             .char_literal_start => switch (c) {
                 '\\' => {
-                    returnState = .char_literal;
-                    state = .escape_sequence;
+                    state = .char_escape_sequence;
                 },
 
                 '\'', '\n' => {
@@ -285,8 +289,7 @@ pub fn next(self: *Lexer) Token {
 
             .char_literal => switch (c) {
                 '\\' => {
-                    returnState = .string_literal;
-                    state = .escape_sequence;
+                    state = .char_escape_sequence;
                 },
                 '\'' => {
                     self.index += 1;
@@ -297,6 +300,11 @@ pub fn next(self: *Lexer) Token {
                     break;
                 },
                 else => {},
+            },
+
+            .char_escape_sequence => switch (c) {
+                '\r', '\n' => unreachable, // removed by line splicing
+                else => state = .char_literal,
             },
 
             .escape_sequence => switch (c) {
@@ -725,6 +733,7 @@ pub fn next(self: *Lexer) Token {
             .char_literal_start,
             .char_literal,
             .escape_sequence,
+            .char_escape_sequence,
             .octal_escape,
             .hex_escape,
             .unicode_escape,
@@ -1032,6 +1041,7 @@ test "string prefix" {
         \\U"foo"
         \\L"foo"
         \\'foo'
+        \\u8'A'
         \\u'foo'
         \\U'foo'
         \\L'foo'
@@ -1043,6 +1053,7 @@ test "string prefix" {
         .StringLiteralUTF_32, .NewLine,
         .StringLiteralWide,   .NewLine,
         .CharLiteral,         .NewLine,
+        .CharLiteralUTF_8,    .NewLine,
         .CharLiteralUTF_16,   .NewLine,
         .CharLiteralUTF_32,   .NewLine,
         .CharLiteralWide,     .NewLine,

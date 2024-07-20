@@ -6389,6 +6389,7 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
         => return p.parseStringLiteral(),
 
         .CharLiteral,
+        .CharLiteralUTF_8,
         .CharLiteralUTF_16,
         .CharLiteralUTF_32,
         .CharLiteralWide,
@@ -6831,9 +6832,20 @@ fn parsePPNumber(p: *Parser) Error!Result {
 
 fn parseCharLiteral(p: *Parser) Error!Result {
     defer p.tokenIdx += 1;
+
+    const allowMultiByte = switch (p.getCurrToken()) {
+        .CharLiteral => false,
+        .CharLiteralWide => false,
+        .CharLiteralUTF_8 => true,
+        .CharLiteralUTF_16 => true,
+        .CharLiteralUTF_32 => true,
+        else => unreachable,
+    };
+
     const ty: Type = switch (p.getCurrToken()) {
         .CharLiteral => Type.Int,
         .CharLiteralWide => p.comp.types.wchar,
+        .CharLiteralUTF_8 => Type.UChar,
         .CharLiteralUTF_16 => Type.UShort,
         .CharLiteralUTF_32 => Type.ULong,
         else => unreachable,
@@ -6842,6 +6854,7 @@ fn parseCharLiteral(p: *Parser) Error!Result {
     const max: u32 = switch (p.getCurrToken()) {
         .CharLiteral => std.math.maxInt(u8),
         .CharLiteralWide => @intCast(p.comp.types.wchar.maxInt(p.comp)),
+        .CharLiteralUTF_8 => std.math.maxInt(u8),
         .CharLiteralUTF_16 => std.math.maxInt(u16),
         .CharLiteralUTF_32 => std.math.maxInt(u32),
         else => unreachable,
@@ -6849,6 +6862,7 @@ fn parseCharLiteral(p: *Parser) Error!Result {
     var multichar: u8 = switch (p.getCurrToken()) {
         .CharLiteral => 0,
         .CharLiteralWide => 4,
+        .CharLiteralUTF_8 => 2,
         .CharLiteralUTF_16 => 2,
         .CharLiteralUTF_32 => 2,
         else => unreachable,
@@ -6861,6 +6875,7 @@ fn parseCharLiteral(p: *Parser) Error!Result {
     var i = std.mem.indexOf(u8, slice, "\'").? + 1;
     while (i < slice.len) : (i += 1) {
         var c: u32 = slice[i];
+        var multibyte = false;
         switch (c) {
             '\\' => {
                 i += 1;
@@ -6891,6 +6906,7 @@ fn parseCharLiteral(p: *Parser) Error!Result {
                 c <<= 6;
                 c |= slice[i + 1] & 0b00111111;
                 i += 1;
+                multibyte = true;
             },
             0b1110_0000...0b1110_1111 => {
                 c &= 0b00001111;
@@ -6899,6 +6915,7 @@ fn parseCharLiteral(p: *Parser) Error!Result {
                 c <<= 6;
                 c |= slice[i + 2] & 0b00111111;
                 i += 2;
+                multibyte = true;
             },
             0b1111_0000...0b1111_0111 => {
                 c &= 0b00000111;
@@ -6909,11 +6926,12 @@ fn parseCharLiteral(p: *Parser) Error!Result {
                 c <<= 6;
                 c |= slice[i + 3] & 0b00111111;
                 i += 3;
+                multibyte = true;
             },
             else => {},
         }
 
-        if (c > max)
+        if (c > max or (multibyte and !allowMultiByte))
             try p.err(.char_too_large);
 
         switch (multichar) {
@@ -6935,7 +6953,7 @@ fn parseCharLiteral(p: *Parser) Error!Result {
             else => {},
         }
 
-        const product, const overflowed = @mulWithOverflow(val, max);
+        const product, const overflowed = @mulWithOverflow(val, max +% 1);
         if (overflowed != 0 and !overflowReported) {
             try p.errExtra(.char_lit_too_wide, p.tokenIdx, .{ .unsigned = i });
             overflowReported = true;
