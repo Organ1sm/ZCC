@@ -322,7 +322,7 @@ pub fn generateBuiltinMacros(comp: *Compilation) !Source {
     try generateDateAndTime(w);
 
     //types
-    if (Target.getCharSignedness(comp.target) == .unsigned)
+    if (comp.getCharSignedness() == .unsigned)
         try w.writeAll("#define __CHAR_UNSIGNED__ 1\n");
     try w.writeAll("#define __CHAR_BIT__ 8\n");
 
@@ -561,6 +561,10 @@ pub fn fixedEnumTagSpecifier(comp: *const Compilation) ?Type.Specifier {
         .gcc => {},
     }
     return null;
+}
+
+pub fn getCharSignedness(comp: *const Compilation) std.builtin.Signedness {
+    return comp.langOpts.charSignednessOverride orelse Target.getCharSignedness(comp.target);
 }
 
 /// Define the system header file include directories for Zcc

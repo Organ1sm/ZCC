@@ -99,6 +99,8 @@ dollarsInIdentifiers: bool = true,
 /// This field indicates whether ms extension declaration specifiers and attributes are enabled.
 declSpecAttrs: bool = false,
 msExtensions: bool = false,
+/// If set, use specified signedness for `char` instead of the target's default char signedness
+charSignednessOverride: ?std.builtin.Signedness = null,
 
 pub fn setStandard(self: *LangOpts, name: []const u8) error{InvalidStandard}!void {
     self.standard = Standard.NameMap.get(name) orelse return error.InvalidStandard;
@@ -117,4 +119,8 @@ pub fn disableMSExtensions(self: *LangOpts) void {
 pub fn setEmulatedCompiler(self: *LangOpts, compiler: Compiler) void {
     self.emulate = compiler;
     if (compiler == .msvc) self.enableMSExtensions();
+}
+
+pub fn setCharSignedness(self: *LangOpts, signedness: std.builtin.Signedness) void {
+    self.charSignednessOverride = signedness;
 }

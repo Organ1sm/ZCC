@@ -641,7 +641,7 @@ pub fn isVoidStar(ty: Type) bool {
 
 pub fn isUnsignedInt(ty: Type, comp: *const Compilation) bool {
     return switch (ty.specifier) {
-        .Char, .ComplexChar => return Target.getCharSignedness(comp.target) == .unsigned,
+        .Char, .ComplexChar => return comp.getCharSignedness() == .unsigned,
 
         .UChar,
         .UShort,
@@ -1711,7 +1711,7 @@ pub fn intValueSuffix(ty: Type, comp: *const Compilation) []const u8 {
         .Long => "L",
         .LongLong => "LL",
         .UChar, .Char => {
-            if (ty.specifier == .Char and Target.getCharSignedness(comp.target) == .signed) return "";
+            if (ty.specifier == .Char and comp.getCharSignedness() == .signed) return "";
             // Only 8-bit char supported currently;
             // TODO: handle platforms with 16-bit int + 16-bit char
             assert(ty.sizeof(comp).? == 8);
