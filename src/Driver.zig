@@ -80,7 +80,11 @@ const usage =
     \\                          Disallow '$' in identifiers
     \\  -fshort-enums           Use the narrowest possible integer type for enums.
     \\  -fno-short-enums        Use "int" as the tag type for enums.
+    \\  -fsigned-char           "char" is signed
+    \\  -fno-signed-char        "char" is unsigned
     \\  -fsyntax-only           Only run the preprocessor parser, and semantic analysis stages
+    \\  -funsigned-char         "char" is unsigned
+    \\  -fno-unsigned-char      "char" is signed
     \\  -fmacro-backtrace-limit=<limit>
     \\                          Set limit on how many macro expansion traces are shown in errors (default 6)
     \\  -I <dir>                Add directory to include search path
@@ -181,6 +185,14 @@ pub fn parseArgs(
                 d.comp.langOpts.shortEnums = true;
             } else if (std.mem.eql(u8, arg, "-fno-short-enums")) {
                 d.comp.langOpts.shortEnums = false;
+            } else if (mem.eql(u8, arg, "-fsigned-char")) {
+                d.comp.langOpts.setCharSignedness(.signed);
+            } else if (mem.eql(u8, arg, "-fno-signed-char")) {
+                d.comp.langOpts.setCharSignedness(.unsigned);
+            } else if (mem.eql(u8, arg, "-funsigned-char")) {
+                d.comp.langOpts.setCharSignedness(.unsigned);
+            } else if (mem.eql(u8, arg, "-fno-unsigned-char")) {
+                d.comp.langOpts.setCharSignedness(.signed);
             } else if (std.mem.eql(u8, arg, "-fdeclspec")) {
                 d.comp.langOpts.declSpecAttrs = true;
             } else if (std.mem.eql(u8, arg, "-fno-declspec")) {
