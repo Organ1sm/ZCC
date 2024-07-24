@@ -646,6 +646,9 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
     // NodeIndex 0 must be invalid
     _ = try p.addNode(.{ .tag = .Invalid, .type = undefined, .data = undefined });
     {
+        if (p.comp.langOpts.hasChar8_t())
+            try p.symStack.defineTypedef(try p.comp.intern("char8_t"), Type.UChar, 0, .none);
+
         try p.symStack.defineTypedef(try p.comp.intern("__int128_t"), Type.Int128, 0, .none);
         try p.symStack.defineTypedef(try p.comp.intern("__uint128_t"), Type.UInt128, 0, .none);
 

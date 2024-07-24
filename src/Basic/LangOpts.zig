@@ -101,6 +101,8 @@ declSpecAttrs: bool = false,
 msExtensions: bool = false,
 /// If set, use specified signedness for `char` instead of the target's default char signedness
 charSignednessOverride: ?std.builtin.Signedness = null,
+/// If set, override the default availability of char8_t (by default, enabled in C2X and later; disabled otherwise)
+hasChar8tOverride: ?bool = null,
 
 pub fn setStandard(self: *LangOpts, name: []const u8) error{InvalidStandard}!void {
     self.standard = Standard.NameMap.get(name) orelse return error.InvalidStandard;
@@ -114,6 +116,10 @@ pub fn enableMSExtensions(self: *LangOpts) void {
 pub fn disableMSExtensions(self: *LangOpts) void {
     self.declSpecAttrs = false;
     self.msExtensions = true;
+}
+
+pub fn hasChar8_t(self: *const LangOpts) bool {
+    return self.hasChar8tOverride orelse self.standard.atLeast(.c2x);
 }
 
 pub fn setEmulatedCompiler(self: *LangOpts, compiler: Compiler) void {
