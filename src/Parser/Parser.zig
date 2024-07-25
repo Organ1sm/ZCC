@@ -646,6 +646,9 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
     // NodeIndex 0 must be invalid
     _ = try p.addNode(.{ .tag = .Invalid, .type = undefined, .data = undefined });
     {
+        if (p.comp.langOpts.hasChar8_t())
+            try p.symStack.defineTypedef(try p.comp.intern("char8_t"), Type.UChar, 0, .none);
+
         try p.symStack.defineTypedef(try p.comp.intern("__int128_t"), Type.Int128, 0, .none);
         try p.symStack.defineTypedef(try p.comp.intern("__uint128_t"), Type.UInt128, 0, .none);
 
@@ -3148,11 +3151,9 @@ pub fn initializer(p: *Parser, initType: Type) Error!Result {
 
 /// initializerItems : designation? initializer (',' designation? initializer)* ','?
 /// designation : designator-list '='
-/// designator-list:
-///  : designator designator-list designator
-/// designator
-///  : '[' integer-constant-expression ']'
-///  | '.' identifier
+/// designator-list: designator designator-list designator
+/// designator : '[' integer-constant-expression ']'
+///            | '.' identifier
 pub fn initializerItem(p: *Parser, il: *InitList, initType: Type) Error!bool {
     const lb = p.eat(.LBrace) orelse {
         const token = p.tokenIdx;
@@ -3189,7 +3190,7 @@ pub fn initializerItem(p: *Parser, il: *InitList, initType: Type) Error!bool {
 
     var count: u64 = 0;
     var warnedExcess = false;
-    const isStrInit = false;
+    var isStrInit = false;
     var indexHint: ?u64 = null;
     while (true) : (count += 1) {
         errdefer p.skipTo(.RBrace);
@@ -3287,6 +3288,7 @@ pub fn initializerItem(p: *Parser, il: *InitList, initType: Type) Error!bool {
             defer tempIL.deinit(p.gpa);
             saw = try p.initializerItem(&tempIL, Type.Void);
         } else if (count == 0 and p.isStringInit(initType)) {
+            isStrInit = true;
             saw = try p.initializerItem(il, initType);
         } else if (isScalar and count != 0) {
             // discard further scalars
@@ -3561,7 +3563,8 @@ fn coerceArrayInit(p: *Parser, item: *Result, token: TokenIndex, target: Type) !
     const targetSpec = target.getElemType().canonicalize(.standard).specifier;
     const itemSpec = item.ty.getElemType().canonicalize(.standard).specifier;
     const compatible = target.getElemType().eql(item.ty.getElemType(), p.comp, false) or
-        (isStrLiteral and itemSpec == .Char and (targetSpec == .UChar or targetSpec == .SChar));
+        (isStrLiteral and itemSpec == .Char and (targetSpec == .UChar or targetSpec == .SChar)) or
+        (isStrLiteral and itemSpec == .UChar and (targetSpec == .UChar or targetSpec == .SChar or targetSpec == .Char));
 
     if (!compatible) {
         const eMsg = " with array of type ";
@@ -6975,14 +6978,18 @@ fn parseCharLiteral(p: *Parser) Error!Result {
 fn parseStringLiteral(p: *Parser) Error!Result {
     var start = p.tokenIdx;
     var width: ?u8 = null;
+    var isU8Literal = false;
 
     while (true) {
         switch (p.getCurrToken()) {
             .StringLiteral => {},
-            .StringLiteralUTF_8 => if (width) |some| {
-                if (some != 8) try p.err(.unsupported_str_cat);
-            } else {
-                width = 8;
+            .StringLiteralUTF_8 => {
+                isU8Literal = true;
+                if (width) |some| {
+                    if (some != 8) try p.err(.unsupported_str_cat);
+                } else {
+                    width = 8;
+                }
             },
 
             .StringLiteralUTF_16 => if (width) |some| {
@@ -7058,7 +7065,8 @@ fn parseStringLiteral(p: *Parser) Error!Result {
     const slice = p.strings.items;
 
     const arrayType = try p.arena.create(Type.Array);
-    arrayType.* = .{ .elem = Type.Char, .len = slice.len };
+    const specifier: Type.Specifier = if (isU8Literal and p.comp.langOpts.hasChar8_t()) .UChar else .Char;
+    arrayType.* = .{ .elem = .{ .specifier = specifier }, .len = slice.len };
 
     var res: Result = .{
         .ty = .{ .specifier = .Array, .data = .{ .array = arrayType } },
@@ -7128,6 +7136,9 @@ fn parseGenericSelection(p: *Parser) Error!Result {
     const controlling = try p.parseNoEval(parseAssignExpr);
     _ = try p.expectToken(.Comma);
 
+    var controllingTy = controlling.ty;
+    if (controllingTy.isArray()) controllingTy.decayArray();
+
     const listBufferTop = p.listBuffer.items.len;
     defer p.listBuffer.items.len = listBufferTop;
 
@@ -7156,7 +7167,7 @@ fn parseGenericSelection(p: *Parser) Error!Result {
             const node = try p.parseAssignExpr();
             try node.expect(p);
 
-            if (ty.eql(controlling.ty, p.comp, false)) {
+            if (ty.eql(controllingTy, p.comp, false)) {
                 if (chosen.node == .none) {
                     chosen = node;
                     chosenToken = start;
@@ -7209,7 +7220,7 @@ fn parseGenericSelection(p: *Parser) Error!Result {
             try p.listBuffer.insert(listBufferTop + 1, node);
             chosen = default;
         } else {
-            try p.errStr(.generic_no_match, controllingToken, try p.typeStr(controlling.ty));
+            try p.errStr(.generic_no_match, controllingToken, try p.typeStr(controllingTy));
             return error.ParsingFailed;
         }
     } else {
