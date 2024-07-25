@@ -86,18 +86,13 @@ pub fn bytes(v: anytype) Value {
 /// @param comp    A pointer to the Compilation context.
 /// @return i64    The sign-extended integer as a 64-bit integer.
 pub fn signExtend(v: Value, oldTy: Type, comp: *Compilation) i64 {
-    // Determine the size of the old type to perform the correct sign extension.
     const size = oldTy.sizeof(comp).?;
 
-    // Perform sign extension based on the determined size.
     return switch (size) {
         1 => v.getInt(i8),
         2 => v.getInt(i16),
-        // If the size is 4 bytes, interpret `v` as a 32-bit integer and return it.
         4 => v.getInt(i32),
-        // If the size is 8 bytes, interpret `v` as a 64-bit integer and return it.
         8 => v.getInt(i64),
-        // If the size is neither 4 nor 8 bytes, the situation is not handled; this is an unreachable state.
         else => unreachable,
     };
 }
@@ -307,9 +302,9 @@ pub fn intCast(v: *Value, oldTy: Type, newTy: Type, comp: *Compilation) void {
     if (!oldTy.isUnsignedInt(comp)) {
         const size = newTy.sizeof(comp).?;
         switch (size) {
-            1 => v.* = int(@as(u8, @bitCast(v.getInt(i8)))),
-            2 => v.* = int(@as(u16, @bitCast(v.getInt(i16)))),
-            4 => v.* = int(@as(u32, @bitCast(v.getInt(i32)))),
+            1 => v.* = int(@as(u8, @truncate(@as(u64, @bitCast(v.signExtend(oldTy, comp)))))),
+            2 => v.* = int(@as(u16, @truncate(@as(u64, @bitCast(v.signExtend(oldTy, comp)))))),
+            4 => v.* = int(@as(u32, @truncate(@as(u64, @bitCast(v.signExtend(oldTy, comp)))))),
             8 => return,
             else => unreachable,
         }
