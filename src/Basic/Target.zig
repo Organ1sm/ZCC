@@ -53,7 +53,7 @@ pub fn isTlsSupported(target: std.Target) bool {
         return supported;
     }
     return switch (target.cpu.arch) {
-        .tce, .tcele, .bpfel, .bpfeb, .msp430, .nvptx, .nvptx64, .x86, .arm, .armeb, .thumb, .thumbeb => false,
+        .bpfel, .bpfeb, .msp430, .nvptx, .nvptx64, .x86, .arm, .armeb, .thumb, .thumbeb => false,
         else => true,
     };
 }

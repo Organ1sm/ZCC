@@ -158,7 +158,7 @@
 
    `u8"nop"`
 
-- [ ] `char8_t` as the type of UTF-8 string literal
+- [x] `char8_t` as the type of UTF-8 string literal
 
 - [ ] Empty initializer `= {}`
 
