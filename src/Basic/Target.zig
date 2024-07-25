@@ -2,6 +2,35 @@ const std = @import("std");
 const LangOpts = @import("LangOpts.zig");
 const Type = @import("../AST/Type.zig");
 
+/// intmax_t for this target
+pub fn intMaxType(target: std.Target) Type {
+    switch (target.cpu.arch) {
+        .aarch64,
+        .sparc64,
+        => if (target.os.tag != .openbsd) return Type.Long,
+
+        .bpfel,
+        .bpfeb,
+        .loongarch64,
+        .riscv64,
+        .powerpc64,
+        .powerpc64le,
+        .ve,
+        => return Type.Long,
+
+        .x86_64 => switch (target.os.tag) {
+            .windows, .openbsd => {},
+            else => switch (target.abi) {
+                .gnux32, .muslx32 => {},
+                else => return Type.Long,
+            },
+        },
+
+        else => {},
+    }
+    return Type.LongLong;
+}
+
 pub fn getCharSignedness(target: std.Target) std.builtin.Signedness {
     switch (target.cpu.arch) {
         .aarch64,
