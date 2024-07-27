@@ -38,10 +38,14 @@ langOpts: LangOpts = .{},
 generatedBuffer: std.ArrayList(u8),
 builtins: Builtins = .{},
 types: struct {
-    wchar: Type,
-    ptrdiff: Type,
-    size: Type,
-    vaList: Type,
+    wchar: Type = undefined,
+    ptrdiff: Type = undefined,
+    size: Type = undefined,
+    vaList: Type = undefined,
+    intmax: Type = .{ .specifier = .Invalid },
+    uintmax: Type = .{ .specifier = .Invalid },
+    intptr: Type = .{ .specifier = .Invalid },
+    uintptr: Type = .{ .specifier = .Invalid },
 } = undefined,
 
 stringInterner: StringInterner = .{},
@@ -84,14 +88,6 @@ pub fn intern(comp: *Compilation, str: []const u8) !StringInterner.StringId {
 
 /// Dec 31 9999 23:59:59
 const MaxTimestamp = 253402300799;
-
-pub fn intMaxType(comp: *const Compilation) Type {
-    return Target.intMaxType(comp.target);
-}
-
-pub fn uintMaxType(comp: *const Compilation) Type {
-    return Target.intMaxType(comp.target).makeIntegerUnsigned();
-}
 
 fn generateDateAndTime(w: anytype) !void {
     const timestamp = std.math.clamp(std.time.timestamp(), 0, std.math.maxInt(i64));
@@ -343,12 +339,12 @@ pub fn generateBuiltinMacros(comp: *Compilation) !Source {
     try comp.generateIntMaxAndWidth(w, "LONG_LONG", Type.LongLong);
     try comp.generateIntMaxAndWidth(w, "WCHAR", comp.types.wchar);
     // try comp.generateIntMax(w, "WINT", comp.types.wchar);
-    try comp.generateIntMaxAndWidth(w, "INTMAX", comp.intMaxType());
+    try comp.generateIntMaxAndWidth(w, "INTMAX", comp.types.intmax);
     try comp.generateIntMax(w, "SIZE", comp.types.size);
-    try comp.generateIntMaxAndWidth(w, "UINTMAX", comp.uintMaxType());
+    try comp.generateIntMaxAndWidth(w, "UINTMAX", comp.types.uintmax);
     try comp.generateIntMax(w, "PTRDIFF", comp.types.ptrdiff);
-    // try comp.generateIntMax(w, "INTPTR", comp.types.wchar);
-    // try comp.generateIntMax(w, "UINTPTR", comp.types.size);
+    try comp.generateIntMaxAndWidth(w, "INTPTR", comp.types.intptr);
+    try comp.generateIntMaxAndWidth(w, "UINTPTR", comp.types.uintptr);
 
     // int widths
     try w.print("#define __BITINT_MAXWIDTH__ {d}\n", .{BitIntMaxBits});
@@ -412,11 +408,22 @@ fn generateBuiltinTypes(comp: *Compilation) !void {
     };
 
     const vaList = try comp.generateVaListType();
+
+    const intmax = Target.intMaxType(comp.target);
+    const uintmax = intmax.makeIntegerUnsigned();
+
+    const intptr = Target.intPtrType(comp.target);
+    const uintptr = intptr.makeIntegerUnsigned();
+
     comp.types = .{
         .wchar = wchar,
         .ptrdiff = ptrdiff,
         .size = size,
         .vaList = vaList,
+        .intmax = intmax,
+        .uintmax = uintmax,
+        .intptr = intptr,
+        .uintptr = uintptr,
     };
 }
 

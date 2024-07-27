@@ -31,6 +31,59 @@ pub fn intMaxType(target: std.Target) Type {
     return Type.LongLong;
 }
 
+/// intptr_t for this target
+pub fn intPtrType(target: std.Target) Type {
+    if (target.os.tag == .haiku) return Type.Long;
+
+    switch (target.cpu.arch) {
+        .aarch64 => switch (target.os.tag) {
+            .windows => return Type.LongLong,
+            else => {},
+        },
+
+        .msp430,
+        .csky,
+        .loongarch32,
+        .riscv32,
+        .xcore,
+        .hexagon,
+        .m68k,
+        .spir,
+        .spirv32,
+        .arc,
+        .avr,
+        => return Type.Int,
+
+        .sparc, .sparcel => switch (target.os.tag) {
+            .netbsd, .openbsd => {},
+            else => return Type.Int,
+        },
+
+        .powerpc, .powerpcle => switch (target.os.tag) {
+            .linux, .freebsd, .netbsd => return Type.Int,
+            else => {},
+        },
+
+        // 32-bit x86 Darwin, OpenBSD, and RTEMS use long (the default); others use int
+        .x86 => switch (target.os.tag) {
+            .openbsd, .rtems => {},
+            else => if (!target.os.tag.isDarwin()) return Type.Int,
+        },
+
+        .x86_64 => switch (target.os.tag) {
+            .windows => return Type.LongLong,
+            else => switch (target.abi) {
+                .gnux32, .muslx32 => return Type.Int,
+                else => {},
+            },
+        },
+
+        else => {},
+    }
+
+    return Type.Long;
+}
+
 pub fn getCharSignedness(target: std.Target) std.builtin.Signedness {
     switch (target.cpu.arch) {
         .aarch64,

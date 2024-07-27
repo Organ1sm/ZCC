@@ -13,6 +13,7 @@ pub const Source = @import("Basic/Source.zig");
 pub const Token = @import("Lexer/Token.zig").Token;
 pub const Lexer = @import("Lexer/Lexer.zig");
 pub const Tree = @import("AST/AST.zig");
+pub const Type = @import("AST/Type.zig");
 pub const VersionStr = @import("Basic/Info.zig").VersionStr;
 pub const TypeMapper = @import("Basic/StringInterner.zig").TypeMapper;
 pub const TargetUtil = @import("Basic/Target.zig");
