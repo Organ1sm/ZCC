@@ -6400,7 +6400,7 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
 
         .Zero => {
             p.tokenIdx += 1;
-            var res: Result = .{ .value = Value.int(0) };
+            var res: Result = .{ .value = Value.int(0), .ty = if (p.inMacro) p.comp.intMaxType() else Type.Int };
             res.node = try p.addNode(.{ .tag = .IntLiteral, .type = res.ty, .data = undefined });
             if (!p.inMacro) try p.valueMap.put(res.node, res.value);
             return res;
@@ -6408,7 +6408,7 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
 
         .One => {
             p.tokenIdx += 1;
-            var res: Result = .{ .value = Value.int(1) };
+            var res: Result = .{ .value = Value.int(1), .ty = if (p.inMacro) p.comp.intMaxType() else Type.Int };
             res.node = try p.addNode(.{ .tag = .IntLiteral, .type = res.ty, .data = undefined });
             if (!p.inMacro) try p.valueMap.put(res.node, res.value);
             return res;
@@ -6631,7 +6631,7 @@ fn fixedSizeInt(p: *Parser, base: u8, buf: []const u8, suffix: NumberSuffix, tok
         return res;
     }
 
-    if (suffix.isSignedInteger() and value > std.math.maxInt(i64))
+    if (suffix.isSignedInteger() and value > p.comp.intMaxType().maxInt(p.comp))
         try p.errToken(.implicitly_unsigned_literal, tokenIdx);
 
     return if (base == 10)
@@ -6821,12 +6821,13 @@ pub fn parseNumberToken(p: *Parser, tokenIdx: TokenIndex) !Result {
 
 fn parsePPNumber(p: *Parser) Error!Result {
     defer p.tokenIdx += 1;
-    const res = try p.parseNumberToken(p.tokenIdx);
+    var res = try p.parseNumberToken(p.tokenIdx);
     if (p.inMacro) {
         if (res.ty.isFloat() or !res.ty.isReal()) {
             try p.errToken(.float_literal_in_pp_expr, p.tokenIdx);
             return error.ParsingFailed;
         }
+        res.ty = if (res.ty.isUnsignedInt(p.comp)) p.comp.uintMaxType() else p.comp.intMaxType();
     } else {
         try p.valueMap.put(res.node, res.value);
     }
@@ -6964,8 +6965,14 @@ fn parseCharLiteral(p: *Parser) Error!Result {
         val = product + c;
     }
 
+    // This is the type the literal will have if we're in a macro; macros always operate on intmax_t/uintmax_t values
+    const macroTy = if (ty.isUnsignedInt(p.comp) or (p.getCurrToken() == .CharLiteral and p.comp.getCharSignedness() == .unsigned))
+        p.comp.uintMaxType()
+    else
+        p.comp.intMaxType();
+
     const res = Result{
-        .ty = ty,
+        .ty = if (p.inMacro) macroTy else ty,
         .value = Value.int(val),
         .node = try p.addNode(.{ .tag = .IntLiteral, .type = ty, .data = undefined }),
     };
