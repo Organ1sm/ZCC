@@ -1704,6 +1704,18 @@ pub fn integerConversion(lhs: Type, rhs: Type, comp: *const Compilation) Type {
     return if (lhsReal and rhsReal) targetTy else targetTy.makeComplex();
 }
 
+/// printf format modifier
+pub fn formatModifier(ty: Type) []const u8 {
+    return switch (ty.specifier) {
+        .SChar, .UChar => "hh",
+        .Short, .UShort => "h",
+        .Int, .UInt => "",
+        .Long, .ULong => "l",
+        .LongLong, .ULongLong => "ll",
+        else => unreachable,
+    };
+}
+
 /// Suffix for integer values of this type
 pub fn intValueSuffix(ty: Type, comp: *const Compilation) []const u8 {
     return switch (ty.specifier) {

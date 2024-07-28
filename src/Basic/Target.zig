@@ -6,6 +6,7 @@ const Type = @import("../AST/Type.zig");
 pub fn intMaxType(target: std.Target) Type {
     switch (target.cpu.arch) {
         .aarch64,
+        .aarch64_be,
         .sparc64,
         => if (target.os.tag != .openbsd) return Type.Long,
 
@@ -36,7 +37,7 @@ pub fn intPtrType(target: std.Target) Type {
     if (target.os.tag == .haiku) return Type.Long;
 
     switch (target.cpu.arch) {
-        .aarch64 => switch (target.os.tag) {
+        .aarch64, .aarch64_be => switch (target.os.tag) {
             .windows => return Type.LongLong,
             else => {},
         },
@@ -82,6 +83,28 @@ pub fn intPtrType(target: std.Target) Type {
     }
 
     return Type.Long;
+}
+
+/// int64_t for this target
+pub fn int64Type(target: std.Target) Type {
+    switch (target.cpu.arch) {
+        .loongarch64,
+        .ve,
+        .riscv64,
+        .powerpc64,
+        .powerpc64le,
+        .bpfel,
+        .bpfeb,
+        => return Type.Long,
+
+        .sparc64 => return intMaxType(target),
+
+        .x86 => return intMaxType(target),
+        .aarch64, .aarch64_be => if (!target.isDarwin() and target.os.tag != .openbsd and target.os.tag != .windows)
+            return Type.Long,
+        else => {},
+    }
+    return Type.LongLong;
 }
 
 pub fn getCharSignedness(target: std.Target) std.builtin.Signedness {
