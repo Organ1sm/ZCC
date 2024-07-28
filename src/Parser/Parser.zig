@@ -6827,7 +6827,7 @@ fn parsePPNumber(p: *Parser) Error!Result {
             try p.errToken(.float_literal_in_pp_expr, p.tokenIdx);
             return error.ParsingFailed;
         }
-        res.ty = if (res.ty.isUnsignedInt(p.comp)) p.comp.types.uintmax else p.comp.types.intmax;
+        res.ty = if (res.ty.isUnsignedInt(p.comp)) p.comp.types.intmax.makeIntegerUnsigned() else p.comp.types.intmax;
     } else {
         try p.valueMap.put(res.node, res.value);
     }
@@ -6967,7 +6967,7 @@ fn parseCharLiteral(p: *Parser) Error!Result {
 
     // This is the type the literal will have if we're in a macro; macros always operate on intmax_t/uintmax_t values
     const macroTy = if (ty.isUnsignedInt(p.comp) or (p.getCurrToken() == .CharLiteral and p.comp.getCharSignedness() == .unsigned))
-        p.comp.types.uintmax
+        p.comp.types.intmax.makeIntegerUnsigned()
     else
         p.comp.types.intmax;
 

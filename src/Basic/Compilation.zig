@@ -42,12 +42,10 @@ types: struct {
     ptrdiff: Type = undefined,
     size: Type = undefined,
     vaList: Type = undefined,
-    intmax: Type = .{ .specifier = .Invalid },
-    uintmax: Type = .{ .specifier = .Invalid },
-    intptr: Type = .{ .specifier = .Invalid },
-    uintptr: Type = .{ .specifier = .Invalid },
-    int64: Type = .{ .specifier = .Invalid },
-    uint64: Type = .{ .specifier = .Invalid },
+    intmax: Type = Type.Invalid,
+    intptr: Type = Type.Invalid,
+    int16: Type = Type.Invalid,
+    int64: Type = Type.Invalid,
 } = undefined,
 
 stringInterner: StringInterner = .{},
@@ -343,10 +341,10 @@ pub fn generateBuiltinMacros(comp: *Compilation) !Source {
     // try comp.generateIntMax(w, "WINT", comp.types.wchar);
     try comp.generateIntMaxAndWidth(w, "INTMAX", comp.types.intmax);
     try comp.generateIntMax(w, "SIZE", comp.types.size);
-    try comp.generateIntMaxAndWidth(w, "UINTMAX", comp.types.uintmax);
+    try comp.generateIntMaxAndWidth(w, "UINTMAX", comp.types.intmax.makeIntegerUnsigned());
     try comp.generateIntMax(w, "PTRDIFF", comp.types.ptrdiff);
     try comp.generateIntMaxAndWidth(w, "INTPTR", comp.types.intptr);
-    try comp.generateIntMaxAndWidth(w, "UINTPTR", comp.types.uintptr);
+    try comp.generateIntMaxAndWidth(w, "UINTPTR", comp.types.intptr.makeIntegerUnsigned());
 
     // int widths
     try w.print("#define __BITINT_MAXWIDTH__ {d}\n", .{BitIntMaxBits});
@@ -414,13 +412,9 @@ fn generateBuiltinTypes(comp: *Compilation) !void {
     const vaList = try comp.generateVaListType();
 
     const intmax = Target.intMaxType(comp.target);
-    const uintmax = intmax.makeIntegerUnsigned();
-
     const intptr = Target.intPtrType(comp.target);
-    const uintptr = intptr.makeIntegerUnsigned();
-
+    const int16 = Target.int16Type(comp.target);
     const int64 = Target.int64Type(comp.target);
-    const uint64 = int64.makeIntegerUnsigned();
 
     comp.types = .{
         .wchar = wchar,
@@ -428,11 +422,9 @@ fn generateBuiltinTypes(comp: *Compilation) !void {
         .size = size,
         .vaList = vaList,
         .intmax = intmax,
-        .uintmax = uintmax,
         .intptr = intptr,
-        .uintptr = uintptr,
+        .int16 = int16,
         .int64 = int64,
-        .uint64 = uint64,
     };
 }
 
@@ -507,11 +499,12 @@ fn generateExactWidthType(
     const width = 8 * ty.sizeof(comp).?;
     const unsigned = ty.isUnsignedInt(comp);
 
-    if (width == 64) {
-        ty = if (unsigned) comp.types.uint64 else comp.types.int64;
+    if (width == 16) {
+        ty = if (unsigned) comp.types.int16.makeIntegerUnsigned() else comp.types.int16;
+    } else if (width == 64) {
+        ty = if (unsigned) comp.types.int64.makeIntegerUnsigned() else comp.types.int64;
     }
 
-    // TODO: Use target-specific int16 types when appropriate
     var prefix = std.BoundedArray(u8, 16).init(0) catch unreachable;
     prefix.writer().print("{s}{d}", .{ if (unsigned) "__UINT" else "__INT", width }) catch unreachable;
 
@@ -622,7 +615,7 @@ fn generateExactWidthIntMax(comp: *const Compilation, w: anytype, specifier: Typ
     const unsigned = ty.isUnsignedInt(comp);
 
     if (bitCount == 64)
-        ty = if (unsigned) comp.types.uint64 else comp.types.int64;
+        ty = if (unsigned) comp.types.int64.makeIntegerUnsigned() else comp.types.int64;
 
     var name = std.BoundedArray(u8, 6).init(0) catch unreachable;
     name.writer().print("{s}{d}", .{ if (unsigned) "UINT" else "INT", bitCount }) catch return error.OutOfMemory;

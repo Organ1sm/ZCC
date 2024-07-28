@@ -85,6 +85,14 @@ pub fn intPtrType(target: std.Target) Type {
     return Type.Long;
 }
 
+/// int16_t for this target
+pub fn int16Type(target: std.Target) Type {
+    return switch (target.cpu.arch) {
+        .avr => Type.Int,
+        else => Type.Short,
+    };
+}
+
 /// int64_t for this target
 pub fn int64Type(target: std.Target) Type {
     switch (target.cpu.arch) {
@@ -99,7 +107,7 @@ pub fn int64Type(target: std.Target) Type {
 
         .sparc64 => return intMaxType(target),
 
-        .x86 => return intMaxType(target),
+        .x86, .x86_64 => return intMaxType(target),
         .aarch64, .aarch64_be => if (!target.isDarwin() and target.os.tag != .openbsd and target.os.tag != .windows)
             return Type.Long,
         else => {},
