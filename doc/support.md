@@ -79,6 +79,13 @@
 - [x] `typedef`
 - [x] comment `//` `/* asdas*/`
 
+- **Fixed size int**
+
+  - [x] `int64_t, uint64_t`
+  - [x] `int32_t, uint32_t`
+  - [x] `int16_t, uint16_t`
+  - [x] `int8_t, uint8_t`
+
 - **Number Suffix**
 
 - **Labels**
