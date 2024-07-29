@@ -367,8 +367,13 @@ pub fn generateBuiltinMacros(comp: *Compilation) !Source {
     const mapper = comp.stringInterner.getSlowTypeMapper();
     try generateTypeMacro(w, mapper, "__INTPTR_TYPE__", comp.types.intptr, comp.langOpts);
     try generateTypeMacro(w, mapper, "__UINTPTR_TYPE__", comp.types.intptr.makeIntegerUnsigned(), comp.langOpts);
+
     try generateTypeMacro(w, mapper, "__INTMAX_TYPE__", comp.types.intmax, comp.langOpts);
+    try comp.generateSuffixMacro("__INTMAX", w, comp.types.intptr);
+
     try generateTypeMacro(w, mapper, "__UINTMAX_TYPE__", comp.types.intmax.makeIntegerUnsigned(), comp.langOpts);
+    try comp.generateSuffixMacro("__UINTMAX", w, comp.types.intptr.makeIntegerUnsigned());
+
     try generateTypeMacro(w, mapper, "__PTRDIFF_TYPE__", comp.types.ptrdiff, comp.langOpts);
     try generateTypeMacro(w, mapper, "__SIZE_TYPE__", comp.types.size, comp.langOpts);
     try generateTypeMacro(w, mapper, "__WCHAR_TYPE__", comp.types.wchar, comp.langOpts);
@@ -489,6 +494,10 @@ fn generateFmt(comp: *const Compilation, prefix: []const u8, w: anytype, ty: Typ
         try w.print("#define {s}_FMT{c}__ \"{s}{c}\"\n", .{ prefix, c, modifier, c });
 }
 
+fn generateSuffixMacro(comp: *const Compilation, prefix: []const u8, w: anytype, ty: Type) !void {
+    return w.print("#define {s}_C_SUFFIX__ {s}\n", .{ prefix, ty.intValueSuffix(comp) });
+}
+
 /// Generate the following for ty:
 ///     Name macro (e.g. #define __UINT32_TYPE__ unsigned int)
 ///     Format strings (e.g. #define __UINT32_FMTu__ "u")
@@ -520,7 +529,7 @@ fn generateExactWidthType(
     }
 
     try comp.generateFmt(prefix.constSlice(), w, ty);
-    try w.print("#define {s}_C_SUFFIX__ {s}\n", .{ prefix.constSlice(), ty.intValueSuffix(comp) });
+    try comp.generateSuffixMacro(prefix.constSlice(), w, ty);
 }
 
 fn generateVaListType(comp: *Compilation) !Type {
