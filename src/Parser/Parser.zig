@@ -6400,7 +6400,7 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
 
         .Zero => {
             p.tokenIdx += 1;
-            var res: Result = .{ .value = Value.int(0), .ty = if (p.inMacro) p.comp.intMaxType() else Type.Int };
+            var res: Result = .{ .value = Value.int(0), .ty = if (p.inMacro) p.comp.types.intmax else Type.Int };
             res.node = try p.addNode(.{ .tag = .IntLiteral, .type = res.ty, .data = undefined });
             if (!p.inMacro) try p.valueMap.put(res.node, res.value);
             return res;
@@ -6408,7 +6408,7 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
 
         .One => {
             p.tokenIdx += 1;
-            var res: Result = .{ .value = Value.int(1), .ty = if (p.inMacro) p.comp.intMaxType() else Type.Int };
+            var res: Result = .{ .value = Value.int(1), .ty = if (p.inMacro) p.comp.types.intmax else Type.Int };
             res.node = try p.addNode(.{ .tag = .IntLiteral, .type = res.ty, .data = undefined });
             if (!p.inMacro) try p.valueMap.put(res.node, res.value);
             return res;
@@ -6631,7 +6631,7 @@ fn fixedSizeInt(p: *Parser, base: u8, buf: []const u8, suffix: NumberSuffix, tok
         return res;
     }
 
-    if (suffix.isSignedInteger() and value > p.comp.intMaxType().maxInt(p.comp))
+    if (suffix.isSignedInteger() and value > p.comp.types.intmax.maxInt(p.comp))
         try p.errToken(.implicitly_unsigned_literal, tokenIdx);
 
     return if (base == 10)
@@ -6827,7 +6827,7 @@ fn parsePPNumber(p: *Parser) Error!Result {
             try p.errToken(.float_literal_in_pp_expr, p.tokenIdx);
             return error.ParsingFailed;
         }
-        res.ty = if (res.ty.isUnsignedInt(p.comp)) p.comp.uintMaxType() else p.comp.intMaxType();
+        res.ty = if (res.ty.isUnsignedInt(p.comp)) p.comp.types.intmax.makeIntegerUnsigned() else p.comp.types.intmax;
     } else {
         try p.valueMap.put(res.node, res.value);
     }
@@ -6967,9 +6967,9 @@ fn parseCharLiteral(p: *Parser) Error!Result {
 
     // This is the type the literal will have if we're in a macro; macros always operate on intmax_t/uintmax_t values
     const macroTy = if (ty.isUnsignedInt(p.comp) or (p.getCurrToken() == .CharLiteral and p.comp.getCharSignedness() == .unsigned))
-        p.comp.uintMaxType()
+        p.comp.types.intmax.makeIntegerUnsigned()
     else
-        p.comp.intMaxType();
+        p.comp.types.intmax;
 
     const res = Result{
         .ty = if (p.inMacro) macroTy else ty,

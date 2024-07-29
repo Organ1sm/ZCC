@@ -6,6 +6,7 @@ const Type = @import("../AST/Type.zig");
 pub fn intMaxType(target: std.Target) Type {
     switch (target.cpu.arch) {
         .aarch64,
+        .aarch64_be,
         .sparc64,
         => if (target.os.tag != .openbsd) return Type.Long,
 
@@ -25,6 +26,93 @@ pub fn intMaxType(target: std.Target) Type {
                 else => return Type.Long,
             },
         },
+
+        else => {},
+    }
+    return Type.LongLong;
+}
+
+/// intptr_t for this target
+pub fn intPtrType(target: std.Target) Type {
+    if (target.os.tag == .haiku) return Type.Long;
+
+    switch (target.cpu.arch) {
+        .aarch64, .aarch64_be => switch (target.os.tag) {
+            .windows => return Type.LongLong,
+            else => {},
+        },
+
+        .msp430,
+        .csky,
+        .loongarch32,
+        .riscv32,
+        .xcore,
+        .hexagon,
+        .m68k,
+        .spir,
+        .spirv32,
+        .arc,
+        .avr,
+        => return Type.Int,
+
+        .sparc, .sparcel => switch (target.os.tag) {
+            .netbsd, .openbsd => {},
+            else => return Type.Int,
+        },
+
+        .powerpc, .powerpcle => switch (target.os.tag) {
+            .linux, .freebsd, .netbsd => return Type.Int,
+            else => {},
+        },
+
+        // 32-bit x86 Darwin, OpenBSD, and RTEMS use long (the default); others use int
+        .x86 => switch (target.os.tag) {
+            .openbsd, .rtems => {},
+            else => if (!target.os.tag.isDarwin()) return Type.Int,
+        },
+
+        .x86_64 => switch (target.os.tag) {
+            .windows => return Type.LongLong,
+            else => switch (target.abi) {
+                .gnux32, .muslx32 => return Type.Int,
+                else => {},
+            },
+        },
+
+        else => {},
+    }
+
+    return Type.Long;
+}
+
+/// int16_t for this target
+pub fn int16Type(target: std.Target) Type {
+    return switch (target.cpu.arch) {
+        .avr => Type.Int,
+        else => Type.Short,
+    };
+}
+
+/// int64_t for this target
+pub fn int64Type(target: std.Target) Type {
+    switch (target.cpu.arch) {
+        .loongarch64,
+        .ve,
+        .riscv64,
+        .powerpc64,
+        .powerpc64le,
+        .bpfel,
+        .bpfeb,
+        => return Type.Long,
+
+        .sparc64 => return intMaxType(target),
+
+        .x86, .x86_64 => if (!target.isDarwin()) return intMaxType(target),
+
+        .aarch64,
+        .aarch64_be,
+        => if (!target.isDarwin() and target.os.tag != .openbsd and target.os.tag != .windows)
+            return Type.Long,
 
         else => {},
     }
