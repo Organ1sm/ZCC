@@ -1599,12 +1599,13 @@ fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec, attrBufferTop: usize) Er
     _ = try p.parseAssembly(.declLable);
     try p.attributeSpecifier(ID.d.name);
 
+    var applyVarAttributes = false;
     if (declSpec.storageClass == .typedef) {
         ID.d.type = try Attribute.applyTypeAttributes(p, ID.d.type, attrBufferTop, null);
     } else if (ID.d.type.isFunc()) {
         ID.d.type = try Attribute.applyFunctionAttributes(p, ID.d.type, attrBufferTop);
     } else {
-        ID.d.type = try Attribute.applyVariableAttributes(p, ID.d.type, attrBufferTop, null);
+        applyVarAttributes = true;
     }
 
     if (p.eat(.Equal)) |eq| init: {
@@ -1635,20 +1636,11 @@ fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec, attrBufferTop: usize) Er
         if (ID.d.type.specifier == .IncompleteArray) {
             ID.d.type.data.array.len = initListExpr.ty.arrayLen() orelse break :init;
             ID.d.type.specifier = .Array;
-        } else if (ID.d.type.is(.IncompleteArray)) {
-            const attrs = ID.d.type.getAttributes();
-            const arrayType = try p.arena.create(Type.Array);
-            arrayType.* = .{
-                .elem = ID.d.type.getElemType(),
-                .len = initListExpr.ty.arrayLen().?,
-            };
-            const ty = Type{
-                .specifier = .Array,
-                .data = .{ .array = arrayType },
-            };
-            ID.d.type = try ty.withAttributes(p.arena, attrs);
         }
     }
+
+    if (applyVarAttributes)
+        ID.d.type = try Attribute.applyVariableAttributes(p, ID.d.type, attrBufferTop, null);
 
     const name = ID.d.name;
     if (declSpec.storageClass != .typedef and ID.d.type.hasIncompleteSize()) incomplete: {

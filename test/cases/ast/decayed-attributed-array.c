@@ -2,8 +2,7 @@ Var: 'attributed([1]int)'
  attr: aligned alignment: null
  name: arr
  init:
-  ArrayInitExprTwo: 'attributed([1]int)'
-   attr: aligned alignment: null
+  ArrayInitExprTwo: '[1]int'
     IntLiteral: 'int' (value: 0)
 
 Var: '*int'
