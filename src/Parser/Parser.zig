@@ -4635,8 +4635,9 @@ fn parseExpr(p: *Parser) Error!Result {
         exprStartIdx = p.tokenIdx;
         errStart = p.comp.diagnostics.list.items.len;
 
-        const rhs = try p.parseAssignExpr();
+        var rhs = try p.parseAssignExpr();
         try rhs.expect(p);
+        try rhs.lvalConversion(p);
         lhs.value = rhs.value;
         lhs.ty = rhs.ty;
         try lhs.bin(p, .CommaExpr, rhs);
