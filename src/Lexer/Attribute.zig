@@ -705,6 +705,9 @@ const attributes = struct {
     pub const pure = struct {
         const gnu = "pure";
     };
+    pub const reproducible = struct {
+        const c23 = "reproducible";
+    };
     pub const restrict = struct {
         const declspec = "restrict";
     };
@@ -821,6 +824,9 @@ const attributes = struct {
     };
     pub const uninitialized = struct {
         const gnu = "uninitialized";
+    };
+    pub const unsequenced = struct {
+        const c23 = "unsequenced";
     };
     pub const unused = struct {
         const gnu = "unused";
@@ -1205,6 +1211,7 @@ pub fn applyFunctionAttributes(p: *Parser, ty: Type, attrBufferStart: usize) !Ty
         .noreturn, .unused, .used, .warning, .deprecated, .unavailable, .weak, .pure, .leaf,
         .@"const", .warn_unused_result, .section, .returns_nonnull, .returns_twice, .@"error",
         .externally_visible, .retain, .flatten, .gnu_inline, .alias, .asm_label, .nodiscard,
+        .reproducible, .unsequenced,
          => try p.attrApplicationBuffer.append(p.gpa, attr),
         // zig fmt: on
 

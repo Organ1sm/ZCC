@@ -178,6 +178,7 @@
     - [x] [[maybe_unused]]
     - [x] [[noreturn]]
     - [x] [[reproducible]]
+    - [x] [[unsequenced]]
 
  2. **attribute with a namespace**
     - [x] such as `[[gnu::unused]]`
