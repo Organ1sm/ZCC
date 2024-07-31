@@ -222,6 +222,7 @@ void bar(float, char) {
 - [x] `__real, __real__`
 - [x] `__typeof__, __typeof`
 - [x] `__attribute, __attribute__`
+- [x] `__auto_type`
 
 - **Binary Literal**
   - [x] `0b11`

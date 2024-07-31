@@ -158,6 +158,7 @@ pub const Options = packed struct {
     @"pre-c2x-compat": Kind = .default,
     @"pointer-bool-conversion": Kind = .default,
     @"string-conversion": Kind = .default,
+    @"gnu-auto-type": Kind = .default,
 };
 
 list: std.ArrayListUnmanaged(Message) = .{},

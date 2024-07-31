@@ -2051,3 +2051,44 @@ pub const bitint_suffix = struct {
     pub const kind = .warning;
     pub const suppress_version = .c2x;
 };
+pub const auto_type_extension = struct {
+    pub const msg = "'__auto_type' is a GNU extension";
+    pub const opt = "gnu-auto-type";
+    pub const kind = .off;
+    pub const pedantic = true;
+};
+pub const auto_type_not_allowed = struct {
+    pub const msg = "'__auto_type' not allowed in {s}";
+    pub const kind = .@"error";
+    pub const extra = .str;
+};
+pub const auto_type_requires_initializer = struct {
+    pub const msg = "declaration of variable '{s}' with deduced type requires an initializer";
+    pub const kind = .@"error";
+    pub const extra = .str;
+};
+pub const auto_type_requires_single_declarator = struct {
+    pub const msg = "'__auto_type' may only be used with a single declarator";
+    pub const kind = .@"error";
+};
+pub const auto_type_requires_plain_declarator = struct {
+    pub const msg = "'__auto_type' requires a plain identifier as declarator";
+    pub const kind = .@"error";
+};
+pub const invalid_cast_to_auto_type = struct {
+    pub const msg = "Invalid cast to '__auto_type'";
+    pub const kind = .@"error";
+};
+pub const auto_type_from_bitfield = struct {
+    pub const msg = "cannot use bit-field as '__auto_type' initializer";
+    pub const kind = .@"error";
+};
+pub const array_of_auto_type = struct {
+    pub const msg = "'{s}' declared as array of '__auto_type'";
+    pub const kind = .@"error";
+    pub const extra = .str;
+};
+pub const auto_type_with_init_list = struct {
+    pub const msg = "cannot use '__auto_type' with initializer list";
+    pub const kind = .@"error";
+};

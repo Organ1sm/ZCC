@@ -395,7 +395,7 @@ fn generateBuiltinTypes(comp: *Compilation) !void {
         .xcore => Type.UChar,
         .ve, .msp430 => Type.UInt,
         .arm, .armeb, .thumb, .thumbeb => if (os != .windows and os != .netbsd and os != .openbsd) Type.UInt else Type.Int,
-        .aarch64, .aarch64_be, .aarch64_32 => if (!os.isDarwin() and os != .netbsd) Type.UInt else Type.Int,
+        .aarch64, .aarch64_be => if (!os.isDarwin() and os != .netbsd) Type.UInt else Type.Int,
         .x86_64, .x86 => if (os == .windows) Type.UShort else Type.Int,
         else => Type.Int,
     };

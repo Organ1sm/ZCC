@@ -1253,7 +1253,7 @@ pub fn applyFunctionAttributes(p: *Parser, ty: Type, attrBufferStart: usize) !Ty
                 else => try p.errStr(.callconv_not_supported, tok, p.tokenIds[tok].getTokenText().?),
             },
             .vectorcall => switch (p.comp.target.cpu.arch) {
-                .x86, .aarch64, .aarch64_be, .aarch64_32 => try p.attrApplicationBuffer.append(p.gpa, attr),
+                .x86, .aarch64, .aarch64_be => try p.attrApplicationBuffer.append(p.gpa, attr),
                 else => try p.errStr(.callconv_not_supported, tok, p.tokenIds[tok].getTokenText().?),
             },
         },

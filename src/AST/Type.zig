@@ -313,6 +313,10 @@ pub const Specifier = enum {
     /// A NaN-like poison value
     Invalid,
 
+    /// GNU auto type
+    /// This is a placeholder specifier - it must be replaced by the actual type specifier (determined by the initializer)
+    AutoType,
+
     Void,
     Bool,
 
@@ -990,6 +994,7 @@ pub fn sizeof(ty: Type, comp: *const Compilation) ?u64 {
         return comp.target.ptrBitWidth() / 8;
 
     return switch (ty.specifier) {
+        .AutoType => unreachable,
         .VariableLenArray, .UnspecifiedVariableLenArray => null,
 
         .IncompleteArray => return if (comp.langOpts.emulate == .msvc) @as(?u64, 0) else null,
@@ -1111,6 +1116,9 @@ pub fn alignof(ty: Type, comp: *const Compilation) u29 {
     }
 
     return switch (ty.specifier) {
+        .Invalid => unreachable,
+        .AutoType => unreachable,
+
         .UnspecifiedVariableLenArray,
         .VariableLenArray,
         .IncompleteArray,
@@ -1278,6 +1286,9 @@ pub fn compatible(lhs: Type, rhs: Type, comp: *const Compilation) bool {
 pub fn eql(lhsParam: Type, rhsParam: Type, comp: *const Compilation, checkQualifiers: bool) bool {
     const lhs = lhsParam.canonicalize(.standard);
     const rhs = rhsParam.canonicalize(.standard);
+
+    if (lhs.specifier == .Invalid or rhs.specifier == .Invalid)
+        return false;
 
     if (lhs.alignof(comp) != rhs.alignof(comp))
         return false;

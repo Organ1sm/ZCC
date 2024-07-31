@@ -21,6 +21,7 @@ threadLocal: ?TokenIndex = null,
 constexpr: ?TokenIndex = null,
 @"inline": ?TokenIndex = null,
 noreturn: ?TokenIndex = null,
+autoType: ?TokenIndex = null,
 type: Type,
 
 pub fn validateParam(d: DeclSpec, p: *Parser, ty: *Type) Error!void {
@@ -34,6 +35,10 @@ pub fn validateParam(d: DeclSpec, p: *Parser, ty: *Type) Error!void {
     if (d.@"inline") |tokenIndex| try p.errStr(.func_spec_non_func, tokenIndex, "inline");
     if (d.noreturn) |tokenIndex| try p.errStr(.func_spec_non_func, tokenIndex, "_Noreturn");
     if (d.constexpr) |tokenIndex| try p.errToken(.invalid_storage_on_param, tokenIndex);
+    if (d.autoType) |tokenIndex| {
+        try p.errStr(.auto_type_not_allowed, tokenIndex, "function prototype");
+        ty.* = Type.Invalid;
+    }
 }
 
 pub fn validateFnDef(d: DeclSpec, p: *Parser) Error!AstTag {
