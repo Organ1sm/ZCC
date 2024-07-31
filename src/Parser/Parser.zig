@@ -919,6 +919,11 @@ fn parseDeclaration(p: *Parser) Error!bool {
         initDeclarator.initializer.node == .none and
         initDeclarator.d.type.isFunc())
     fndef: {
+        if (declSpec.autoType) |tokenIdx| {
+            try p.errStr(.auto_type_not_allowed, tokenIdx, "function return type");
+            return error.ParsingFailed;
+        }
+
         switch (p.getCurrToken()) {
             .Comma, .Semicolon => break :fndef,
             .LBrace => {},
@@ -1026,7 +1031,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
             for (initDeclarator.d.type.getParams()) |param| {
                 if (param.ty.hasUnboundVLA())
                     try p.errToken(.unbound_vla, param.nameToken);
-                if (param.ty.hasIncompleteSize() and !param.ty.is(.Void))
+                if (param.ty.hasIncompleteSize() and !param.ty.is(.Void) and !param.ty.is(.Invalid))
                     try p.errStr(.parameter_incomplete_ty, param.nameToken, try p.typeStr(param.ty));
                 if (param.name == .empty) {
                     try p.errToken(.omitting_parameter_name, param.nameToken);
@@ -1111,6 +1116,8 @@ fn parseDeclaration(p: *Parser) Error!bool {
 
         if (p.eat(.Comma) == null)
             break;
+
+        if (declSpec.autoType) |tokenIdx| try p.errToken(.auto_type_requires_single_declarator, tokenIdx);
 
         initDeclarator = (try p.parseInitDeclarator(&declSpec, attrBufferTop)) orelse {
             try p.err(.expected_ident_or_l_paren);
@@ -1394,6 +1401,7 @@ fn parseDeclSpec(p: *Parser) Error!?DeclSpec {
         return null;
 
     d.type = try spec.finish(p);
+    d.autoType = spec.autoTypeToken;
     return d;
 }
 
@@ -1601,6 +1609,10 @@ fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec, attrBufferTop: usize) Er
 
     var applyVarAttributes = false;
     if (declSpec.storageClass == .typedef) {
+        if (declSpec.autoType) |tokIndex| {
+            try p.errStr(.auto_type_not_allowed, tokIndex, "typedef");
+            return error.ParsingFailed;
+        }
         ID.d.type = try Attribute.applyTypeAttributes(p, ID.d.type, attrBufferTop, null);
     } else if (ID.d.type.isFunc()) {
         ID.d.type = try Attribute.applyFunctionAttributes(p, ID.d.type, attrBufferTop);
@@ -1639,10 +1651,22 @@ fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec, attrBufferTop: usize) Er
         }
     }
 
+    const name = ID.d.name;
+    if (ID.d.type.is(.AutoType)) {
+        if (ID.initializer.node == .none) {
+            ID.d.type = Type.Invalid;
+            try p.errStr(.auto_type_requires_initializer, name, p.getTokenText(name));
+            return ID;
+        } else {
+            ID.d.type.specifier = ID.initializer.ty.specifier;
+            ID.d.type.data = ID.initializer.ty.data;
+            ID.d.type.decayed = ID.initializer.ty.decayed;
+        }
+    }
+
     if (applyVarAttributes)
         ID.d.type = try Attribute.applyVariableAttributes(p, ID.d.type, attrBufferTop, null);
 
-    const name = ID.d.name;
     if (declSpec.storageClass != .typedef and ID.d.type.hasIncompleteSize()) incomplete: {
         const specifier = ID.d.type.canonicalize(.standard).specifier;
         if (declSpec.storageClass == .@"extern") switch (specifier) {
@@ -1670,6 +1694,7 @@ fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec, attrBufferTop: usize) Er
 
 /// type-specifier
 ///  : `void`
+///  | `auto_type`
 ///  | `char`
 ///  | `short`
 ///  | `int`
@@ -1711,6 +1736,10 @@ fn parseTypeSpec(p: *Parser, ty: *TypeBuilder) Error!bool {
 
         switch (p.getCurrToken()) {
             .KeywordVoid => try ty.combine(p, .Void, p.tokenIdx),
+            .KeywordAutoType => {
+                try p.errToken(.auto_type_extension, p.tokenIdx);
+                try ty.combine(p, .AutoType, p.tokenIdx);
+            },
             .KeywordBool, .KeywordC23Bool => try ty.combine(p, .Bool, p.tokenIdx),
             .KeywordMSInt8_, .KeywordMSInt8__, .KeywordChar => try ty.combine(p, .Char, p.tokenIdx),
             .KeywordMSInt16_, .KeywordMSInt16__, .KeywordShort => try ty.combine(p, .Short, p.tokenIdx),
@@ -2144,6 +2173,11 @@ fn parseRecordDeclarator(p: *Parser) Error!bool {
         // 0 means unnamed
         var nameToken: TokenIndex = 0;
         var ty = baseType;
+        if (ty.is(.AutoType)) {
+            try p.errStr(.auto_type_not_allowed, p.tokenIdx, if (p.record.kind == .KeywordStruct) "struct member" else "union member");
+            ty = Type.Invalid;
+        }
+
         var bitsNode: NodeIndex = .none;
         var bits: ?u32 = null;
         const firstToken = p.tokenIdx;
@@ -2251,7 +2285,7 @@ fn parseRecordDeclarator(p: *Parser) Error!bool {
                     try p.errToken(.flexible_non_final, some);
             }
             p.record.flexibleField = firstToken;
-        } else if (ty.hasIncompleteSize()) {
+        } else if (ty.hasIncompleteSize() and !ty.is(.Invalid)) {
             try p.errStr(.field_incomplete_ty, firstToken, try p.typeStr(ty));
         } else if (p.record.flexibleField) |some| {
             if (some != firstToken and p.record.kind == .KeywordStruct)
@@ -2737,6 +2771,10 @@ const DeclaratorKind = enum { normal, abstract, param, record };
 fn declarator(p: *Parser, baseType: Type, kind: DeclaratorKind) Error!?Declarator {
     const start = p.tokenIdx;
     var d = Declarator{ .name = 0, .type = try p.parsePointer(baseType) };
+    if (baseType.is(.AutoType) and !d.type.is(.AutoType)) {
+        try p.errToken(.auto_type_requires_plain_declarator, start);
+        return error.ParsingFailed;
+    }
 
     const maybeIdent = p.tokenIdx;
     if (kind != .abstract and (try p.eatIdentifier()) != null) {
@@ -2855,6 +2893,11 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: Declarator
 
         if (static) |_|
             try size.expect(p);
+
+        if (baseType.is(.AutoType)) {
+            try p.errStr(.array_of_auto_type, d.name, p.getTokenText(d.name));
+            return error.ParsingFailed;
+        }
 
         const outer = try p.directDeclarator(baseType, d, kind);
         var maxBits = p.comp.target.ptrBitWidth();
@@ -3128,6 +3171,11 @@ pub fn initializer(p: *Parser, initType: Type) Error!Result {
 
         try p.coerceInit(&res, token, initType);
         return res;
+    }
+
+    if (initType.is(.AutoType)) {
+        try p.err(.auto_type_with_init_list);
+        return error.ParsingFailed;
     }
 
     var il: InitList = .{};
@@ -3588,7 +3636,15 @@ fn coerceInit(p: *Parser, item: *Result, token: TokenIndex, target: Type) !void 
     if (target.is(.Void))
         return;
 
+    const node = item.node;
     try item.lvalConversion(p);
+    if (target.is(.AutoType)) {
+        if (p.getNode(node, .MemberAccessExpr) orelse p.getNode(node, .MemberAccessPtrExpr)) |memberNode| {
+            if (p.tempTree().isBitField(memberNode))
+                try p.errToken(.auto_type_from_bitfield, token);
+        }
+        return;
+    }
     try item.coerce(p, target, token, .init);
 }
 

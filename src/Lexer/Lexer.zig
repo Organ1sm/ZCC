@@ -914,7 +914,7 @@ test "operators" {
 
 test "keywords" {
     try expectTokens(
-        \\auto break case char const continue default do 
+        \\auto __auto_type break case char const continue default do 
         \\double else enum extern float for goto if int 
         \\long register return short signed sizeof static 
         \\struct switch typedef union unsigned void volatile 
@@ -924,6 +924,7 @@ test "keywords" {
         \\
     , &.{
         .KeywordAuto,
+        .KeywordAutoType,
         .KeywordBreak,
         .KeywordCase,
         .KeywordChar,

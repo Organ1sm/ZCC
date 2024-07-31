@@ -135,6 +135,7 @@ pub const TokenType = enum(u8) {
     One,
 
     KeywordAuto,
+    KeywordAutoType,
     KeywordBreak,
     KeywordCase,
     KeywordChar,
@@ -318,6 +319,7 @@ pub const TokenType = enum(u8) {
             .MacroFunction,
             .MacroPrettyFunc,
             .KeywordAuto,
+            .KeywordAutoType,
             .KeywordBreak,
             .KeywordCase,
             .KeywordChar,
@@ -567,6 +569,7 @@ pub const TokenType = enum(u8) {
             .AngleBracketAngleBracketRightEqual => ">>=",
 
             .KeywordAuto => "auto",
+            .KeywordAutoType => "__auto_type",
             .KeywordBreak => "break",
             .KeywordCase => "case",
             .KeywordChar => "char",

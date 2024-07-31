@@ -929,7 +929,10 @@ pub fn castType(res: *Result, p: *Parser, to: Type, tok: TokenIndex) !void {
             res.value.intCast(res.ty, to, p.comp);
         }
     } else {
-        try p.errStr(.invalid_cast_type, tok, try p.typeStr(to));
+        if (to.is(.AutoType))
+            try p.errToken(.invalid_cast_to_auto_type, tok)
+        else
+            try p.errStr(.invalid_cast_type, tok, try p.typeStr(to));
         return error.ParsingFailed;
     }
 

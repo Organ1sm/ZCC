@@ -159,6 +159,7 @@ pub const Token = struct {
         .{ "__PRETTY_FUNCTION__", .MacroPrettyFunc },
 
         // gcc keywords
+        .{ "__auto_type", .KeywordAutoType },
         .{ "__const", .KeywordGccConst1 },
         .{ "__const__", .KeywordGccConst2 },
         .{ "__inline", .KeywordGccInline1 },

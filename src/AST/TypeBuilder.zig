@@ -11,12 +11,13 @@ const TypeBuilder = @This();
 
 complexToken: ?TokenIndex = null,
 bitIntToken: ?TokenIndex = null,
+autoTypeToken: ?TokenIndex = null,
 typedef: ?struct {
     token: TokenIndex,
     type: Type,
 } = null,
 
-specifier: @This().Specifier = .None,
+specifier: Specifier = .None,
 qual: Qualifiers.Builder = .{},
 typeof: ?Type = null,
 /// When true an error is returned instead of adding a diagnostic message.
@@ -26,6 +27,8 @@ errorOnInvalid: bool = false,
 pub const Specifier = union(enum) {
     None,
     Void,
+    /// GNU __auto_type extension
+    AutoType,
     NullPtrTy,
     Bool,
     Char,
@@ -141,6 +144,8 @@ pub const Specifier = union(enum) {
     pub fn toString(spec: Specifier, langOpts: LangOpts) ?[]const u8 {
         return switch (spec) {
             .None => unreachable,
+
+            .AutoType => "__auto_type",
 
             .Void => "void",
             .NullPtrTy => "nullptr_t",
@@ -298,6 +303,7 @@ pub fn finish(b: @This(), p: *Parser) Parser.Error!Type {
         // nullptr_t can only be accessed via typeof(nullptr)
         Specifier.NullPtrTy => unreachable,
 
+        Specifier.AutoType => ty.specifier = .AutoType,
         Specifier.Void => ty.specifier = .Void,
         Specifier.Bool => ty.specifier = .Bool,
         Specifier.Char => ty.specifier = .Char,
@@ -573,11 +579,12 @@ fn combineExtra(b: *@This(), p: *Parser, new: Specifier, sourceToken: TokenIndex
         try p.errStr(.invalid_typeof, sourceToken, new.toString(p.comp.langOpts).?);
     }
 
-    if (new == .Complex)
-        b.complexToken = sourceToken;
-
-    if (new == .BitInt)
-        b.bitIntToken = sourceToken;
+    switch (new) {
+        .Complex => b.complexToken = sourceToken,
+        .BitInt => b.bitIntToken = sourceToken,
+        .AutoType => b.autoTypeToken = sourceToken,
+        else => {},
+    }
 
     if (new == .Int128 and !Target.hasInt128(p.comp.target))
         try p.errStr(.type_not_supported_on_target, sourceToken, "__int128");
@@ -771,6 +778,11 @@ fn combineExtra(b: *@This(), p: *Parser, new: Specifier, sourceToken: TokenIndex
             else => return b.cannotCombine(p, sourceToken),
         },
 
+        .AutoType => b.specifier = switch (b.specifier) {
+            .None => .AutoType,
+            else => return b.cannotCombine(p, sourceToken),
+        },
+
         .FP16 => b.specifier = switch (b.specifier) {
             .None => .FP16,
             .Complex => .ComplexFP16,
@@ -900,6 +912,7 @@ fn combineExtra(b: *@This(), p: *Parser, new: Specifier, sourceToken: TokenIndex
 pub fn fromType(ty: Type) Specifier {
     return switch (ty.specifier) {
         .Void => Specifier.Void,
+        .AutoType => Specifier.AutoType,
         .NullPtrTy => Specifier.NullPtrTy,
         .Bool => Specifier.Bool,
         .Char => Specifier.Char,

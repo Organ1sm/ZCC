@@ -122,7 +122,6 @@ pub fn int64Type(target: std.Target) Type {
 pub fn getCharSignedness(target: std.Target) std.builtin.Signedness {
     switch (target.cpu.arch) {
         .aarch64,
-        .aarch64_32,
         .aarch64_be,
         .arm,
         .armeb,
@@ -146,7 +145,7 @@ pub fn getCharSignedness(target: std.Target) std.builtin.Signedness {
 pub fn defaultFunctionAlignment(target: std.Target) u8 {
     return switch (target.cpu.arch) {
         .arm, .armeb => 4,
-        .aarch64, .aarch64_32, .aarch64_be => 4,
+        .aarch64, .aarch64_be => 4,
         .sparc, .sparcel, .sparc64 => 4,
         .riscv64 => 2,
         else => 1,
