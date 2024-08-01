@@ -2293,7 +2293,15 @@ fn parseRecordDeclarator(p: *Parser) Error!bool {
         }
         if (p.eat(.Comma) == null) break;
     }
-    _ = try p.expectToken(.Semicolon);
+
+    if (p.eat(.Semicolon) == null) {
+        const curToken = p.getCurrToken();
+        if (curToken == .RBrace)
+            try p.err(.missing_semicolon)
+        else
+            return p.errExpectedToken(.Semicolon, curToken);
+    }
+
     return true;
 }
 

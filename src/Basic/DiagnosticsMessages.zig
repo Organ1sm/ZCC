@@ -2076,7 +2076,7 @@ pub const auto_type_requires_plain_declarator = struct {
     pub const kind = .@"error";
 };
 pub const invalid_cast_to_auto_type = struct {
-    pub const msg = "Invalid cast to '__auto_type'";
+    pub const msg = "invalid cast to '__auto_type'";
     pub const kind = .@"error";
 };
 pub const auto_type_from_bitfield = struct {
@@ -2091,4 +2091,8 @@ pub const array_of_auto_type = struct {
 pub const auto_type_with_init_list = struct {
     pub const msg = "cannot use '__auto_type' with initializer list";
     pub const kind = .@"error";
+};
+pub const missing_semicolon = struct {
+    pub const msg = "expected ';' at end of declaration list";
+    pub const kind = .warning;
 };
