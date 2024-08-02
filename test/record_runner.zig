@@ -6,7 +6,7 @@ const zcc = @import("zcc");
 /// These tests don't work for any platform due to bugs.
 /// Skip entirely.
 /// To skip a test entirely just put the test name as a single-element tuple e.g. initComptime(.{.{"0044"}});
-const global_test_exclude = std.StaticStringMap(void).initComptime(.{});
+const globalTestExclude = std.StaticStringMap(void).initComptime(.{});
 
 fn lessThan(_: void, lhs: []const u8, rhs: []const u8) bool {
     return std.mem.lessThan(u8, lhs, rhs);
@@ -15,7 +15,7 @@ fn lessThan(_: void, lhs: []const u8, rhs: []const u8) bool {
 const MAX_MEM_PER_TEST = 1024 * 1024 * 16;
 
 /// Set true to debug specific targets w/ specific tests.
-const test_single_target = false;
+const testSingleTarget = false;
 const single_target = .{
     // .target = "arm-cortex_r4-ios-none:Clang",
     // .c_test = "0064",
@@ -30,29 +30,32 @@ const single_target = .{
 };
 
 const Stats = struct {
-    ok_count: u32 = 0,
-    fail_count: u32 = 0,
-    skip_count: u32 = 0,
-    max_alloc: usize = 0,
-    root_node: std.Progress.Node,
+    okCount: u32 = 0,
+    failCount: u32 = 0,
+    skipCount: u32 = 0,
+    invalidTargetCount: u32 = 0,
+    maxAlloc: usize = 0,
+    rootNode: std.Progress.Node,
 
     const ResultKind = enum {
         ok,
         fail,
         skip,
+        invalidTarget,
     };
 
     fn recordResult(self: *Stats, kind: ResultKind) void {
         const ptr = switch (kind) {
-            .ok => &self.ok_count,
-            .fail => &self.fail_count,
-            .skip => &self.skip_count,
+            .ok => &self.okCount,
+            .fail => &self.failCount,
+            .skip => &self.skipCount,
+            .invalidTarget => &self.invalidTargetCount,
         };
         _ = @atomicRmw(u32, ptr, .Add, 1, .monotonic);
     }
 
     fn updateMaxMemUsage(self: *Stats, bytes: usize) void {
-        _ = @atomicRmw(usize, &self.max_alloc, .Max, bytes, .monotonic);
+        _ = @atomicRmw(usize, &self.maxAlloc, .Max, bytes, .monotonic);
     }
 };
 
@@ -158,7 +161,7 @@ pub fn main() !void {
         .estimated_total_items = testCases.items.len,
     });
 
-    var stats = Stats{ .root_node = root_node };
+    var stats = Stats{ .rootNode = root_node };
 
     for (0..threadCount) |i| {
         waitGroup.start();
@@ -167,13 +170,13 @@ pub fn main() !void {
     threadPool.waitAndWork(&waitGroup);
     root_node.end();
 
-    std.debug.print("max mem used = {:.2}\n", .{std.fmt.fmtIntSizeBin(stats.max_alloc)});
-    if (stats.ok_count == cases.items.len and stats.skip_count == 0) {
-        print("All {d} tests passed.\n", .{stats.ok_count});
-    } else if (stats.fail_count == 0) {
-        print("{d} passed; {d} skipped.\n", .{ stats.ok_count, stats.skip_count });
+    std.debug.print("max mem used = {:.2}\n", .{std.fmt.fmtIntSizeBin(stats.maxAlloc)});
+    if (stats.okCount == cases.items.len and stats.skipCount == 0) {
+        print("All {d} tests passed. ({d} invalid targets)\n", .{ stats.okCount, stats.invalidTargetCount });
+    } else if (stats.failCount == 0) {
+        print("{d} passed; {d} skipped. ({d} invalid targets)\n", .{ stats.okCount, stats.skipCount, stats.invalidTargetCount });
     } else {
-        print("{d} passed; {d} failed.\n\n", .{ stats.ok_count, stats.fail_count });
+        print("{d} passed; {d} failed. ({d} invalid targets)\n\n", .{ stats.okCount, stats.failCount, stats.invalidTargetCount });
         std.process.exit(1);
     }
 }
@@ -228,22 +231,25 @@ fn singleRun(alloc: std.mem.Allocator, testDir: []const u8, testCase: TestCase, 
         error.UnknownCpuModel => unreachable,
     };
     switch (target.os.tag) {
-        .hermit => return, // Skip targets zcc doesn't support.
+        .hermit => {
+            stats.recordResult(.invalidTarget);
+            return; // Skip targets zcc doesn't support.
+        },
         else => {},
     }
 
-    var case_name = std.ArrayList(u8).init(alloc);
-    defer case_name.deinit();
+    var caseName = std.ArrayList(u8).init(alloc);
+    defer caseName.deinit();
 
-    const test_name = std.mem.sliceTo(std.fs.path.basename(path), '_');
-    try case_name.writer().print("{s} | {s} | {s}", .{
-        test_name,
+    const testName = std.mem.sliceTo(std.fs.path.basename(path), '_');
+    try caseName.writer().print("{s} | {s} | {s}", .{
+        testName,
         testCase.target,
         testCase.c_define,
     });
 
-    var case_node = stats.root_node.start(case_name.items, 0);
-    defer case_node.end();
+    var caseNode = stats.rootNode.start(caseName.items, 0);
+    defer caseNode.end();
 
     const file = comp.addSourceFromBuffer(path, testCase.source) catch |err| {
         stats.recordResult(.fail);
@@ -251,27 +257,27 @@ fn singleRun(alloc: std.mem.Allocator, testDir: []const u8, testCase: TestCase, 
         return;
     };
 
-    var macro_buf = std.ArrayList(u8).init(comp.gpa);
-    defer macro_buf.deinit();
+    var macroBuffer = std.ArrayList(u8).init(comp.gpa);
+    defer macroBuffer.deinit();
 
     comp.langOpts.setEmulatedCompiler(zcc.TargetUtil.systemCompiler(comp.target));
 
-    const mac_writer = macro_buf.writer();
-    try mac_writer.print("#define {s}\n", .{testCase.c_define});
+    const macroWriter = macroBuffer.writer();
+    try macroWriter.print("#define {s}\n", .{testCase.c_define});
     if (comp.langOpts.emulate == .msvc) {
         comp.langOpts.enableMSExtensions();
-        try mac_writer.writeAll("#define MSVC\n");
+        try macroWriter.writeAll("#define MSVC\n");
     }
 
-    const user_macros = try comp.addSourceFromBuffer("<command line>", macro_buf.items);
-    const builtin_macros = try comp.generateBuiltinMacros();
+    const userMacros = try comp.addSourceFromBuffer("<command line>", macroBuffer.items);
+    const builtinMacros = try comp.generateBuiltinMacros();
 
     var pp = zcc.Preprocessor.init(&comp);
     defer pp.deinit();
     try pp.addBuiltinMacros();
 
-    _ = try pp.preprocess(builtin_macros);
-    _ = try pp.preprocess(user_macros);
+    _ = try pp.preprocess(builtinMacros);
+    _ = try pp.preprocess(userMacros);
     const eof = pp.preprocess(file) catch |err| {
         stats.recordResult(.fail);
         std.debug.print("could not preprocess file '{s}': {s}\n", .{ path, @errorName(err) });
@@ -283,21 +289,21 @@ fn singleRun(alloc: std.mem.Allocator, testDir: []const u8, testCase: TestCase, 
     defer tree.deinit();
     tree.dump(false, std.io.null_writer) catch {};
 
-    if (test_single_target) {
+    if (testSingleTarget) {
         comp.renderErrors();
         return;
     }
 
-    if (global_test_exclude.has(test_name)) {
-        stats.skip_count += 1;
+    if (globalTestExclude.has(testName)) {
+        stats.skipCount += 1;
         return;
     }
 
     var buf: [128]u8 = undefined;
-    var buf_strm = std.io.fixedBufferStream(&buf);
-    try buf_strm.writer().print("{s}|{s}", .{ testCase.target, test_name });
+    var bufferStrm = std.io.fixedBufferStream(&buf);
+    try bufferStrm.writer().print("{s}|{s}", .{ testCase.target, testName });
 
-    const expected = compErr.get(buf[0..buf_strm.pos]) orelse ExpectedFailure{};
+    const expected = compErr.get(buf[0..bufferStrm.pos]) orelse ExpectedFailure{};
 
     if (comp.diagnostics.list.items.len == 0 and expected.any()) {
         std.debug.print("\nTest Passed when failures expected:\n\texpected:{any}\n", .{expected});
@@ -335,9 +341,9 @@ fn singleRun(alloc: std.mem.Allocator, testDir: []const u8, testCase: TestCase, 
             }
             stats.recordResult(.fail);
         } else if (actual.any()) {
-            stats.skip_count += 1;
+            stats.skipCount += 1;
         } else {
-            stats.ok_count += 1;
+            stats.okCount += 1;
         }
     }
 }
