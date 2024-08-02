@@ -698,7 +698,7 @@ pub fn fixedEnumTagSpecifier(comp: *const Compilation) ?Type.Specifier {
 }
 
 pub fn getCharSignedness(comp: *const Compilation) std.builtin.Signedness {
-    return comp.langOpts.charSignednessOverride orelse Target.getCharSignedness(comp.target);
+    return comp.langOpts.charSignednessOverride orelse comp.target.charSignedness();
 }
 
 /// Define the system header file include directories for Zcc
