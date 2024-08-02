@@ -1900,7 +1900,8 @@ fn parseTypeSpec(p: *Parser, ty: *TypeBuilder) Error!bool {
 
             .KeywordEnum => {
                 const tagToken = p.tokenIdx;
-                try ty.combine(p, .{ .Enum = try p.parseEnumSpec() }, tagToken);
+                const enumTy = try p.parseEnumSpec();
+                try ty.combine(p, TypeBuilder.fromType(enumTy), tagToken);
                 continue;
             },
 
@@ -2394,7 +2395,7 @@ fn checkEnumFixedTy(p: *Parser, fixedTy: ?Type, identToken: TokenIndex, prev: Sy
 /// enum-specifier
 ///  : `enum` identifier? (':', type-name)? { enumerator (',' enumerator)? ',') }
 ///  | `enum` identifier (':', type-name)?
-fn parseEnumSpec(p: *Parser) Error!*Type.Enum {
+fn parseEnumSpec(p: *Parser) Error!Type {
     const enumTK = p.tokenIdx;
     p.tokenIdx += 1;
 
@@ -2429,7 +2430,7 @@ fn parseEnumSpec(p: *Parser) Error!*Type.Enum {
         const internedName = try p.getInternString(ident);
         if (try p.symStack.findTag(internedName, .KeywordEnum, ident, p.getCurrToken())) |prev| {
             try p.checkEnumFixedTy(fixedTy, ident, prev);
-            return prev.type.get(.Enum).?.data.@"enum";
+            return prev.type;
         } else {
             // this is a forward declaration, create a new enum type
             const enumType = try Type.Enum.create(p.arena, internedName, fixedTy);
@@ -2444,13 +2445,9 @@ fn parseEnumSpec(p: *Parser) Error!*Type.Enum {
                 .value = .{},
             });
 
-            const node = try p.addNode(.{
-                .tag = .EnumForwardDecl,
-                .type = ty,
-                .data = .{ .declRef = ident },
-            });
+            const node = try p.addNode(.{ .tag = .EnumForwardDecl, .type = ty, .data = .{ .declRef = ident } });
             try p.declBuffer.append(node);
-            return enumType;
+            return ty;
         }
     };
 
@@ -2504,10 +2501,7 @@ fn parseEnumSpec(p: *Parser) Error!*Type.Enum {
     done = true;
     try p.parseAttrSpec();
 
-    var ty = Type{
-        .specifier = .Enum,
-        .data = .{ .@"enum" = enumType },
-    };
+    var ty = Type{ .specifier = .Enum, .data = .{ .@"enum" = enumType } };
     ty = try Attribute.applyTypeAttributes(p, ty, attrBufferTop, null);
 
     if (!enumType.fixed) {
@@ -2579,7 +2573,7 @@ fn parseEnumSpec(p: *Parser) Error!*Type.Enum {
     p.declBuffer.items[declBufferTop - 1] = try p.addNode(node);
     if (p.func.type == null)
         _ = p.tentativeDefs.remove(enumType.name);
-    return enumType;
+    return ty;
 }
 
 const Enumerator = struct {
