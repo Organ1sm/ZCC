@@ -2096,3 +2096,13 @@ pub const missing_semicolon = struct {
     pub const msg = "expected ';' at end of declaration list";
     pub const kind = .warning;
 };
+pub const tentative_definition_incomplete = struct {
+    pub const msg = "tentative definition has type '{s}' that is never completed";
+    pub const kind = .@"error";
+    pub const extra = .str;
+};
+pub const forward_declaration_here = struct {
+    pub const msg = "forward declaration of '{s}'";
+    pub const kind = .note;
+    pub const extra = .str;
+};

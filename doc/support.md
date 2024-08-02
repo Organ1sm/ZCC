@@ -106,6 +106,8 @@
 
 - **statement expression**
 
+- **allow tentative top-level records and enums**
+
 ---
 
 ### c99
