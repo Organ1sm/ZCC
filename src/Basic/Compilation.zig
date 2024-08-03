@@ -263,7 +263,7 @@ pub fn generateBuiltinMacros(comp: *Compilation) !Source {
             \\
         ),
 
-        .sparc, .sparcel => try w.writeAll(
+        .sparc => try w.writeAll(
             \\#define __sparc__ 1
             \\#define __sparc 1
             \\

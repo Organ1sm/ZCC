@@ -49,13 +49,12 @@ pub fn intPtrType(target: std.Target) Type {
         .xcore,
         .hexagon,
         .m68k,
-        .spir,
         .spirv32,
         .arc,
         .avr,
         => return Type.Int,
 
-        .sparc, .sparcel => switch (target.os.tag) {
+        .sparc => switch (target.os.tag) {
             .netbsd, .openbsd => {},
             else => return Type.Int,
         },
@@ -119,34 +118,12 @@ pub fn int64Type(target: std.Target) Type {
     return Type.LongLong;
 }
 
-pub fn getCharSignedness(target: std.Target) std.builtin.Signedness {
-    switch (target.cpu.arch) {
-        .aarch64,
-        .aarch64_be,
-        .arm,
-        .armeb,
-        .thumb,
-        .thumbeb,
-        => return if (target.os.tag.isDarwin() or target.os.tag == .windows) .signed else .unsigned,
-
-        .powerpc, .powerpc64 => return if (target.os.tag.isDarwin()) .signed else .unsigned,
-        .powerpc64le,
-        .s390x,
-        .xcore,
-        .arc,
-        .msp430,
-        => return .unsigned,
-
-        else => return .signed,
-    }
-}
-
 /// This function returns 1 if function alignment is not observable or settable.
 pub fn defaultFunctionAlignment(target: std.Target) u8 {
     return switch (target.cpu.arch) {
         .arm, .armeb => 4,
         .aarch64, .aarch64_be => 4,
-        .sparc, .sparcel, .sparc64 => 4,
+        .sparc, .sparc64 => 4,
         .riscv64 => 2,
         else => 1,
     };
