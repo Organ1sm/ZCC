@@ -159,6 +159,7 @@ pub const Options = packed struct {
     @"pointer-bool-conversion": Kind = .default,
     @"string-conversion": Kind = .default,
     @"gnu-auto-type": Kind = .default,
+    @"gnu-union-cast": Kind = .default,
 };
 
 list: std.ArrayListUnmanaged(Message) = .{},

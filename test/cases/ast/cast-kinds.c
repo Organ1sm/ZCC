@@ -204,5 +204,25 @@ FnDef: 'fn () void'
     Var: 'union U'
      name: u
 
+    AssignExpr: 'union U'
+     lhs:
+      DeclRefExpr: 'union U' lvalue
+       name: u
+     rhs:
+      ExplicitCast: (UnionCast) 'union U'
+        ImplicitCast: (LValToRVal) 'int'
+          DeclRefExpr: 'int' lvalue
+           name: x
+
+    AssignExpr: 'union U'
+     lhs:
+      DeclRefExpr: 'union U' lvalue
+       name: u
+     rhs:
+      ExplicitCast: (UnionCast) 'union U'
+        ImplicitCast: (LValToRVal) 'float'
+          DeclRefExpr: 'float' lvalue
+           name: f
+
     ImplicitReturn: 'void'
 

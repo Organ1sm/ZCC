@@ -928,6 +928,17 @@ pub fn castType(res: *Result, p: *Parser, to: Type, tok: TokenIndex) !void {
         } else if (oldInt and newInt) {
             res.value.intCast(res.ty, to, p.comp);
         }
+    } else if (to.get(.Union)) |unionTy| {
+        if (unionTy.data.record.hasFieldOfType(res.ty, p.comp)) {
+            explicitCastKind = .UnionCast;
+            try p.errToken(.gnu_union_cast, tok);
+        } else {
+            if (unionTy.data.record.isIncomplete())
+                try p.errStr(.cast_to_incomplete_type, tok, try p.typeStr(to))
+            else
+                try p.errStr(.invalid_union_cast, tok, try p.typeStr(res.ty));
+            return error.ParsingFailed;
+        }
     } else {
         if (to.is(.AutoType))
             try p.errToken(.invalid_cast_to_auto_type, tok)

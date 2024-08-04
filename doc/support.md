@@ -224,10 +224,12 @@ void bar(float, char) {
 - [x] `__real, __real__`
 - [x] `__typeof__, __typeof`
 - [x] `__attribute, __attribute__`
-- [x] `__auto_type`
+- [x] [`__auto_type` as type specifier](../test/cases/__auto_type.c)
 
 - **Binary Literal**
   - [x] `0b11`
+
+- **Cast to Union**
 
 - **Empty struct/union**
 

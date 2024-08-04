@@ -2106,3 +2106,19 @@ pub const forward_declaration_here = struct {
     pub const kind = .note;
     pub const extra = .str;
 };
+pub const gnu_union_cast = struct {
+    pub const msg = "cast to union type is a GNU extension";
+    pub const opt = "gnu-union-cast";
+    pub const kind = .off;
+    pub const pedantic = true;
+};
+pub const invalid_union_cast = struct {
+    pub const msg = "cast to union type from type '{s}' not present in union";
+    pub const kind = .@"error";
+    pub const extra = .str;
+};
+pub const cast_to_incomplete_type = struct {
+    pub const msg = "cast to incomplete type '{s}'";
+    pub const kind = .@"error";
+    pub const extra = .str;
+};

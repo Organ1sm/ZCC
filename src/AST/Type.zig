@@ -294,6 +294,16 @@ pub const Record = struct {
         return r.fields.len == std.math.maxInt(usize);
     }
 
+    pub fn hasFieldOfType(self: *const Record, ty: Type, comp: *const Compilation) bool {
+        if (self.isIncomplete()) return false;
+
+        for (self.fields) |f| {
+            if (ty.eql(f.ty, comp, false)) return true;
+        }
+
+        return false;
+    }
+
     pub fn create(allocator: std.mem.Allocator, name: StringId) !*Record {
         var r = try allocator.create(Record);
         r.name = name;
