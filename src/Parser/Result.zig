@@ -602,6 +602,7 @@ pub fn floatCast(res: *Result, p: *Parser, floatType: Type) Error!void {
     }
 }
 
+/// converts a bool or integer to a pointer
 pub fn ptrCast(res: *Result, p: *Parser, ptrType: Type) Error!void {
     if (res.ty.is(.Bool)) {
         res.ty = ptrType;
@@ -611,6 +612,12 @@ pub fn ptrCast(res: *Result, p: *Parser, ptrType: Type) Error!void {
         res.ty = ptrType;
         try res.implicitCast(p, .IntToPointer);
     }
+}
+
+/// converts pointer to one with a different child type
+fn ptrChildTypeCast(res: *Result, p: *Parser, ptrTy: Type) Error!void {
+    res.ty = ptrTy;
+    return res.implicitCast(p, .Bitcast);
 }
 
 pub fn toVoid(res: *Result, p: *Parser) Error!void {
@@ -1092,11 +1099,11 @@ fn coerceExtra(
                 .assign => .incompatible_ptr_assign,
                 .init => .incompatible_ptr_init,
                 .ret => .incompatible_return,
-                .arg => .incompatible_arg,
+                .arg => .incompatible_ptr_arg,
                 .testCoerce => return error.CoercionFailed,
             }, tok, try ctx.typePairStr(p, destTy, res.ty));
             try ctx.note(p);
-            try res.ptrCast(p, unqualTy);
+            try res.ptrChildTypeCast(p, unqualTy);
             return;
         }
     }

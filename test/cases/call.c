@@ -45,6 +45,8 @@ void call_void_star(void) {
     void_star_param(s);
     void_star_param(&s);
     void_star_param((_Complex int)42);
+    long x;
+    ip(&x);
 }
 
 #define EXPECTED_ERRORS "call.c:16:7: error: passing 'void' to parameter of incompatible type '_Bool'" \
@@ -67,4 +69,5 @@ void call_void_star(void) {
     "call.c:37:28: note: passing argument to parameter here" \
     "call.c:47:21: error: passing '_Complex int' to parameter of incompatible type 'void *'" \
     "call.c:37:28: note: passing argument to parameter here" \
-
+    "call.c:49:8: warning: passing 'long *' to parameter of incompatible type 'int *' [-Wincompatible-pointer-types]" \
+    "call.c:8:20: note: passing argument to parameter here" \

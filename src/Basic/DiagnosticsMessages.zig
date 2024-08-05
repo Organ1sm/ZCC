@@ -811,6 +811,12 @@ pub const incompatible_arg = struct {
     pub const extra = .str;
     pub const kind = .@"error";
 };
+pub const incompatible_ptr_arg = struct {
+    pub const msg = "passing {s}";
+    pub const extra = .str;
+    pub const kind = .warning;
+    pub const opt = "incompatible-pointer-types";
+};
 pub const parameter_here = struct {
     pub const msg = "passing argument to parameter here";
     pub const kind = .note;
