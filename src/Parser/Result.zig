@@ -1064,14 +1064,16 @@ fn coerceExtra(
         if (res.value.isZero() or res.ty.is(.NullPtrTy)) {
             try res.nullCast(p, destTy);
             return;
-        } else if (res.ty.isInt()) {
+        } else if (res.ty.isInt() and res.ty.isReal()) {
             if (ctx == .testCoerce)
                 return error.CoercionFailed;
             try p.errStr(.implicit_int_to_ptr, tok, try p.typePairStrExtra(res.ty, " to ", destTy));
             try ctx.note(p);
             try res.ptrCast(p, unqualTy);
             return;
-        } else if (res.ty.isVoidStar() or unqualTy.isVoidStar() or unqualTy.eql(res.ty, p.comp, true)) {
+        } else if (res.ty.isVoidStar() or unqualTy.eql(res.ty, p.comp, true)) {
+            return; // ok
+        } else if (unqualTy.isVoidStar() and res.ty.isPointer() or (res.ty.isInt() and res.ty.isReal())) {
             return; // ok
         } else if (unqualTy.eql(res.ty, p.comp, false)) {
             if (!unqualTy.getElemType().qual.hasQuals(res.ty.getElemType().qual)) {
