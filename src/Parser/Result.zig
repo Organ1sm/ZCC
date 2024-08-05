@@ -926,6 +926,10 @@ pub fn castType(res: *Result, p: *Parser, to: Type, tok: TokenIndex) !void {
         } else if (newIsFloat and oldIsFloat) {
             res.value.floatCast(res.ty, to, p.comp);
         } else if (oldInt and newInt) {
+            if (to.hasIncompleteSize()) {
+                try p.errStr(.cast_to_incomplete_type, tok, try p.typeStr(to));
+                return error.ParsingFailed;
+            }
             res.value.intCast(res.ty, to, p.comp);
         }
     } else if (to.get(.Union)) |unionTy| {
