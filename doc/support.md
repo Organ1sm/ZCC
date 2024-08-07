@@ -48,16 +48,16 @@
 
 ### Pragmas
 
-- `#pragma diagnostic`
+- **#pragma diagnostic**
   - [x] `#pragma GCC diagnostic warning`
   - [x] `#pragma GCC diagnostic error`
   - [x] `#pragma GCC diagnostic ignored`
   - [x] `#pragma GCC diagnostic push`
   - [x] `#pragma GCC diagnostic pop`
 
-- [x] [`#pragma pack`](https://github.com/Organ1sm/ZCC/blob/main/test/cases/pragma-pack.c)
-- [x] [`#pragma once`](https://github.com/Organ1sm/ZCC/blob/main/test/cases/include/global-var-once.h)
-- [x] [`#pragma poison`](https://github.com/Organ1sm/ZCC/blob/main/test/cases/pragma-poison.c)
+- [x] [`#pragma pack`](../test/cases/pragma-pack.c)
+- [x] [`#pragma once`](../test/cases/include/global-var-once.h)
+- [x] [`#pragma poison`](../test/cases/pragma-poison.c)
 
 ## Basic
 
@@ -79,6 +79,8 @@
 - [x] `typedef`
 - [x] comment `//` `/* asdas*/`
 
+---
+
 - **Fixed size int**
 
   - [x] `int64_t, uint64_t`
@@ -88,8 +90,27 @@
 
 - **Number Suffix**
 
+  - [x] [`i, fi, f`](../test/cases/arithmetic-conversion-floats.c)
+  - [x] [`u`]
+  - [x] [`wb, uwb`](../test/cases/_BitInt.c)
+
 - **Labels**
   - [x] `label:`
+
+- [**BitFields**](../test/cases/bitfields.c)
+
+```c
+struct Foo
+{
+    int a : 1;
+    int b : 2;
+};
+```
+
+- [**Comma operator**](../test/cases/comma-operator.c)
+
+`const int x = 0;`
+`__typeof__((void) 0, x) y = 5;`
 
 - **Flexible Array**
 
@@ -97,7 +118,7 @@
 
 - **Boolean Type**
 
-- **Type Casting**
+- [**Type Casting**](../test/cases/cast-kinds.c)
   - `(type) value`
   - Implicit Conversion
 
@@ -107,6 +128,8 @@
 - **statement expression**
 
 - **allow tentative top-level records and enums**
+
+- [**main function implicit return zero**](../test/cases/implicit-main-return-zero.c)
 
 ---
 
@@ -132,7 +155,7 @@
 
 - [x] `_Alignas`
 - [x] `_Alignof`
-- [x] `_Generic`
+- [x] [`_Generic`](../test/cases/generic.c)
 - [ ] `_Atomic`(support ast/sematic)
 - [x] `_Thread_local`
 - [x] `_Static_assert`
@@ -152,28 +175,28 @@
 - [x] `static_assert`
 - [x] `thread_local`
 - [x] `bool, true, false`
-- [x] `constexpr`
+- [x] [`constexpr`](../test/cases/constexpr.c)
 - [x] `typeof`
 - [x] `unreachable()`
 - [x] [Bit-precise integers `_BitInt(N)` and suffixes](../test/cases/_BitInt.c)
 - [x] Allow duplicate attributes
 
 - [ ] Decimal floating-point types (`_Decimal32, _Decimal64, and _Decimal128`)
-- [x] Binary integer constants / Digit separator
+- [x] [Binary integer constants / Digit separator](../test/cases/c2x-digit-separators.c)
 
   `_Static_assert(0b1001'0110 == 150);`
 
-- [x] u8 character constants
+- [x] [u8 character constants](../test/cases/u8-character-constant.c)
 
-   `u8"nop"`
+   `const unsigned char c2 = u8'™';`
 
-- [x] `char8_t` as the type of UTF-8 string literal
+- [x] `char8_t` [as the type of UTF-8 string literal](../test/cases/c2x-char8_t.c)
 
 - [ ] Empty initializer `= {}`
 
 - [x] **Attributes**
 
- 1. **standard attribute**
+ 1. [**standard attribute**](../test/cases/c23-attributes.c)
     - [x] [[deprecated]]
     - [x] [[fallthrough]]
     - [x] [[nodiscard]]
@@ -226,48 +249,79 @@ void bar(float, char) {
 - [x] `__attribute, __attribute__`
 - [x] [`__auto_type` as type specifier](../test/cases/__auto_type.c)
 
-- **Binary Literal**
-  - [x] `0b11`
+- [x] [**Label as values / Computed goto statement**](../test/cases/address-of-label.c)
 
-- **Cast to Union**
+```c
+void foo()
+{
+    int x = 5;
+    void *y = &&baz;
 
-- **Empty struct/union**
+    bar:
+      y = &&bar;
+
+    baz:
+      x = 0;
+
+    goto *y;
+    goto *&&baz;
+}
+```
+
+- [x] [**Binary Literal**](../test/cases/binary-literal.c)
+
+  `0b0011110`
+
+- [x] [**Cast to Union**](../test/cases/cast-to-union.c)
+
+```c
+union U {
+    int x;
+    float y;
+};
+
+void foo(void) {
+    union U u;
+    u = (union U)1;
+}
+```
+
+- [x] [**Empty struct/union**](../test/cases/empty-records.c)
 
 ```c
 #pragma GCC diagnostic warning "-Wgnu-empty-struct"
 
-struct {}s;
-union {}u;
+struct {} s;
+union {} u;
 ```
 
 - **Attribute Specifiers**
   - [x] `aligned, __aligned__`
-  - [x] `__alignof__`
   - [x] `access`
   - [x] `alias`
   - [x] `assume_aligned`
-  - [x] `hot, pure`
+  - [x] `cold`
+  - [x] `hot, __hot__`,
+  - [x] `pure`
   - [x] `cleanup`
   - [x] `cleanup`
   - [x] `__const__`
   - [x] `simd`
-  - [x] `invalid_attribute`
   - [x] `deprecated`
-  - [x] `cold`
   - [x] `packed`
   - [x] `unavailable`
   - [x] `noreturn, __noreturn__`
-  - [x] `does_not_exit`
   - [x] `mode`
   - [x] `section`
-  - [x] `__unused__`
+  - [x] `unused, __unused__`
+  - [x] `uninitialized`
   - [x] `fallthrough`
   - [x] `format`
   - [x] `vector_size`
   - [x] `designated_init`
   - [x] `transparent_union`
 
-- **Folding constant**
+- [**Folding constant**](../test/cases/const-decl-folding.c)
 
 ```c
 #pragma GCC diagnostic warning "-Wgnu-folding-constant"
@@ -276,12 +330,14 @@ const int x = 1;
 
 struct S { int bits: x; };
 
-void foo(void) {
+void foo(void) 
+{
     int array[] = {[x+10] = 1};
     _Static_assert(sizeof(array) == sizeof(array[0]) * (1 + 10 + 1), "wrong size");
 }
 
-void switch_fn(int param) {
+void switch_fn(int param) 
+{
     switch (param) {
         case x: return;
     }
@@ -293,17 +349,17 @@ void switch_fn(int param) {
     `__asm__ volatile`
 
 - **Built-in Functions**
-  - [x] `__has_builtin()`
-  - [x] `__has_attribute()`
-  - [x] `__has_extension()`
-  - [x] `__has_feature()`
-  - [x] `__has_include()`
-  - [x] `__has_warning()`
-  - [x] `__is_identifier()`
-  - [x] `__builtin_types_compatible_p`
-  - [x] `__builtin_choose_expr`
-  - [x] `__builtin_offsetof`
-  - [x] `__builtin_bitoffsetof`
+  - [x] [`__has_builtin()`](../test/cases/__has_builtin.c)
+  - [x] [`__has_attribute()`](../test/cases/__has_attribute.c)
+  - [x] [`__has_extension()`](../test/cases/__has_extension.c)
+  - [x] [`__has_feature()`](../test/cases/__has_feature.c)
+  - [x] [`__has_include()`](../test/cases/__has_include.c)
+  - [x] [`__has_warning()`](../test/cases/__has_warning.c)
+  - [x] [`__is_identifier()`](../test/cases/__is_identifier.c)
+  - [x] [`__builtin_types_compatible_p`](../test/cases/__builtin_types_compatible_p.c)
+  - [x] [`__builtin_choose_expr`](../test/cases/builtin-choose-expr.c)
+  - [x] [`__builtin_offsetof`](../test/cases/offsetof.c)
+  - [x] [`__builtin_bitoffsetof`](../test/cases/offsetof.c)
 
 - **Variadic Macros**
 
@@ -311,14 +367,18 @@ void switch_fn(int param) {
 
 - [x] `__fp16`
 
-- **fixed enum**
+- [**fixed enum**](../test/cases/enum-fixed.c)
 
 ```c
 #pragma GCC diagnostic warning "-Wfixed-enum-extension"
 
 enum E3: unsigned char {
-    A = 255,
+    A = 254,
     B,
+};
+
+enum E6: char {
+    a = 0u,
 };
 ```
 
@@ -331,9 +391,13 @@ enum E3: unsigned char {
 - [ ] `__stdcall, _stdcall`
 - [ ] `__thiscall, _thiscall`
 - [ ] `__vectorcall, _vectorcall`
-- [x] `__declspec`
+- [x] [`__declspec`](../test/cases/declspec.c)
 
-- **dollars in identifiers**
+```c
+__declspec(align(16)) int bar;
+```
+
+- [**dollars in identifiers**](../test/cases/dollars-in-identifiers.c)
 
 ```c
 void fib() {

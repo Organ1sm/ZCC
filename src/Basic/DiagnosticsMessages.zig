@@ -2,6 +2,8 @@ const std = @import("std");
 const Compilation = @import("Compilation.zig");
 const DiagnosticsMessages = @This();
 
+const PointerSignMessage = " converts between pointers to integer types with different sign";
+
 pub const todo = struct { // Maybe someday this will no longer be needed.
     pub const msg = "TODO: {s}";
     pub const extra = .str;

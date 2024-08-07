@@ -555,7 +555,7 @@ fn processSource(
     defer outFile.close();
 
     obj.finish(outFile) catch |er|
-        return d.fatal("could output to object file '{s}': {s}", .{ outFileName, Util.errorDescription(er) });
+        return d.fatal("could not output to object file '{s}': {s}", .{ outFileName, Util.errorDescription(er) });
 
     if (d.onlyCompile) {
         if (fastExit)

@@ -2649,13 +2649,12 @@ const Enumerator = struct {
         const shortWidth = Type.Short.sizeof(p.comp).? * 8;
         const intWidth = Type.Int.sizeof(p.comp).? * 8;
         if (e.numNegativeBits > 0) {
-            if (isPacked and e.numNegativeBits <= charWidth and e.numPositiveBits < charWidth) {
-                return .SChar;
-            } else if (isPacked and e.numNegativeBits <= shortWidth and e.numPositiveBits < shortWidth) {
-                return .Short;
-            } else if (e.numNegativeBits <= intWidth and e.numPositiveBits < intWidth) {
+            if (isPacked and e.numNegativeBits <= charWidth and e.numPositiveBits < charWidth)
+                return .SChar
+            else if (isPacked and e.numNegativeBits <= shortWidth and e.numPositiveBits < shortWidth)
+                return .Short
+            else if (e.numNegativeBits <= intWidth and e.numPositiveBits < intWidth)
                 return .Int;
-            }
 
             const longWidth = Type.Long.sizeof(p.comp).? * 8;
             if (e.numNegativeBits <= longWidth and e.numPositiveBits < longWidth)
@@ -2667,15 +2666,15 @@ const Enumerator = struct {
             return .LongLong;
         }
 
-        if (isPacked and e.numPositiveBits <= charWidth) {
-            return .UChar;
-        } else if (isPacked and e.numPositiveBits <= shortWidth) {
-            return .UShort;
-        } else if (e.numPositiveBits <= intWidth) {
-            return .UInt;
-        } else if (e.numPositiveBits <= Type.Long.sizeof(p.comp).? * 8) {
+        if (isPacked and e.numPositiveBits <= charWidth)
+            return .UChar
+        else if (isPacked and e.numPositiveBits <= shortWidth)
+            return .UShort
+        else if (e.numPositiveBits <= intWidth)
+            return .UInt
+        else if (e.numPositiveBits <= Type.Long.sizeof(p.comp).? * 8)
             return .ULong;
-        }
+
         return .ULongLong;
     }
 };
@@ -2736,12 +2735,7 @@ fn enumerator(p: *Parser, e: *Enumerator) Error!?EnumFieldAndNode {
     const node = try p.addNode(.{
         .tag = .EnumFieldDecl,
         .type = res.ty,
-        .data = .{
-            .decl = .{
-                .name = nameToken,
-                .node = res.node,
-            },
-        },
+        .data = .{ .decl = .{ .name = nameToken, .node = res.node } },
     });
 
     return EnumFieldAndNode{
