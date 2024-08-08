@@ -788,6 +788,12 @@ pub const incompatible_return = struct {
     pub const extra = .str;
     pub const kind = .@"error";
 };
+pub const incompatible_return_sign = struct {
+    pub const msg = "returning {s}" ++ PointerSignMessage;
+    pub const extra = .str;
+    pub const kind = .warning;
+    pub const opt = "pointer-sign";
+};
 pub const implicit_int_to_ptr = struct {
     pub const msg = "implicit integer to pointer conversion from {s}";
     pub const extra = .str;
@@ -818,6 +824,12 @@ pub const incompatible_ptr_arg = struct {
     pub const extra = .str;
     pub const kind = .warning;
     pub const opt = "incompatible-pointer-types";
+};
+pub const incompatible_ptr_arg_sign = struct {
+    pub const msg = "passing {s}" ++ PointerSignMessage;
+    pub const extra = .str;
+    pub const kind = .warning;
+    pub const opt = "pointer-sign";
 };
 pub const parameter_here = struct {
     pub const msg = "passing argument to parameter here";
@@ -933,10 +945,22 @@ pub const incompatible_ptr_init = struct {
     pub const opt = "incompatible-pointer-types";
     pub const kind = .warning;
 };
+pub const incompatible_ptr_init_sign = struct {
+    pub const msg = "incompatible pointer types initializing {s}" ++ PointerSignMessage;
+    pub const extra = .str;
+    pub const opt = "pointer-sign";
+    pub const kind = .warning;
+};
 pub const incompatible_ptr_assign = struct {
     pub const msg = "incompatible pointer types assigning to {s}";
     pub const extra = .str;
     pub const opt = "incompatible-pointer-types";
+    pub const kind = .warning;
+};
+pub const incompatible_ptr_assign_sign = struct {
+    pub const msg = "incompatible pointer types assigning to {s} " ++ PointerSignMessage;
+    pub const extra = .str;
+    pub const opt = "pointer-sign";
     pub const kind = .warning;
 };
 pub const vla_init = struct {

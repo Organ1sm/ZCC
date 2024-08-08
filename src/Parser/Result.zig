@@ -1095,11 +1095,12 @@ fn coerceExtra(
             try res.ptrCast(p, unqualTy);
             return;
         } else if (res.ty.isPointer()) {
+            const differentSignOnly = unqualTy.getElemType().sameRankDifferentSign(res.ty.getElemType(), p.comp);
             try p.errStr(switch (ctx) {
-                .assign => .incompatible_ptr_assign,
-                .init => .incompatible_ptr_init,
-                .ret => .incompatible_return,
-                .arg => .incompatible_ptr_arg,
+                .assign => ([2]Diagnostics.Tag{ .incompatible_ptr_assign, .incompatible_ptr_assign_sign })[@intFromBool(differentSignOnly)],
+                .init => ([2]Diagnostics.Tag{ .incompatible_ptr_init, .incompatible_ptr_init_sign })[@intFromBool(differentSignOnly)],
+                .ret => ([2]Diagnostics.Tag{ .incompatible_return, .incompatible_return_sign })[@intFromBool(differentSignOnly)],
+                .arg => ([2]Diagnostics.Tag{ .incompatible_ptr_arg, .incompatible_ptr_arg_sign })[@intFromBool(differentSignOnly)],
                 .testCoerce => return error.CoercionFailed,
             }, tok, try ctx.typePairStr(p, destTy, res.ty));
             try ctx.note(p);
