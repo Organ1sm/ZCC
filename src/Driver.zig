@@ -47,11 +47,10 @@ linkerPath: ?[]const u8 = null,
 zccName: []const u8 = "",
 
 pub fn deinit(d: *Driver) void {
-    const linking = !(d.onlyPreprocess or d.onlySyntax or d.onlyCompile or d.onlyPreprocessAndCompile);
-    if (linking) for (d.linkObjects.items[d.linkObjects.items.len - d.tempFileCount ..]) |obj| {
+    for (d.linkObjects.items[d.linkObjects.items.len - d.tempFileCount ..]) |obj| {
         std.fs.deleteFileAbsolute(obj) catch {};
         d.comp.gpa.free(obj);
-    };
+    }
     d.inputs.deinit(d.comp.gpa);
     d.linkObjects.deinit(d.comp.gpa);
     d.* = undefined;
@@ -529,12 +528,17 @@ fn processSource(
     const obj = try Codegen.generateTree(d.comp, tree);
     defer obj.deinit();
 
+    // If it's used, name_buf will either hold a filename or `/tmp/<12 random bytes with base-64 encoding>.<extension>`
+    // both of which should fit into MAX_NAME_BYTES for all systems
+    var name_buf: [std.fs.max_name_bytes]u8 = undefined;
+
     const outFileName = if (d.onlyCompile) blk: {
-        const basename = std.fs.path.basename(source.path);
-        break :blk d.outputName orelse try std.fmt.allocPrint(d.comp.gpa, "{s}{s}", .{
-            basename[0 .. basename.len - std.fs.path.extension(source.path).len],
+        const fmtTemplate = "{s}{s}";
+        const fmtArgs = .{
+            std.fs.path.stem(source.path),
             d.comp.target.ofmt.fileExt(d.comp.target.cpu.arch),
-        });
+        };
+        break :blk d.outputName orelse std.fmt.bufPrint(&name_buf, fmtTemplate, fmtArgs) catch return d.fatal("Filename too long for filesystem: " ++ fmtTemplate, fmtArgs);
     } else blk: {
         const randomBytesCount = 12;
         const subPathLen = comptime std.fs.base64_encoder.calcSize(randomBytesCount);
@@ -544,11 +548,13 @@ fn processSource(
         var randomName: [subPathLen]u8 = undefined;
         _ = std.fs.base64_encoder.encode(&randomName, &randomBytes);
 
-        break :blk try std.fmt.allocPrint(d.comp.gpa, "/tmp/{s}{s}", .{
-            randomName, d.comp.target.ofmt.fileExt(d.comp.target.cpu.arch),
-        });
+        const fmtTemplate = "/tmp/{s}{s}";
+        const fmtArgs = .{
+            randomName,
+            d.comp.target.ofmt.fileExt(d.comp.target.cpu.arch),
+        };
+        break :blk std.fmt.bufPrint(&name_buf, fmtTemplate, fmtArgs) catch return d.fatal("Filename too long for filesystem: " ++ fmtTemplate, fmtArgs);
     };
-    defer if (d.onlyCompile) d.comp.gpa.free(outFileName);
 
     const outFile = std.fs.cwd().createFile(outFileName, .{}) catch |er|
         return d.fatal("unable to create output file '{s}': {s}", .{ outFileName, Util.errorDescription(er) });
@@ -563,7 +569,8 @@ fn processSource(
         return;
     }
 
-    try d.linkObjects.append(d.comp.gpa, outFileName);
+    try d.linkObjects.ensureUnusedCapacity(d.comp.gpa, 1);
+    d.linkObjects.appendAssumeCapacity(try d.comp.gpa.dupe(u8, outFileName));
     d.tempFileCount += 1;
     if (fastExit) {
         try invokeLinker();
