@@ -3036,7 +3036,7 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: Declarator
             return resType;
         }
 
-        if (try p.parseParamDecls()) |params| {
+        if (try p.parseParamDecls(d)) |params| {
             funcType.params = params;
             if (p.eat(.Ellipsis)) |_|
                 specifier = .VarArgsFunc;
@@ -3053,7 +3053,10 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: Declarator
                 p.symStack.popScope();
             }
 
-            specifier = .OldStyleFunc;
+            specifier = if (p.comp.langOpts.standard.atLeast(.c2x))
+                .VarArgsFunc
+            else
+                .OldStyleFunc;
             while (true) {
                 const nameToken = try p.expectIdentifier();
                 const internedName = try p.getInternString(nameToken);
@@ -3107,7 +3110,7 @@ fn parsePointer(p: *Parser, baseType: Type) Error!Type {
 
 /// param-decls : param-decl (',' param-decl)* (',' '...')
 /// paramDecl : decl-specifier (declarator | abstract-declarator)
-fn parseParamDecls(p: *Parser) Error!?[]Type.Function.Param {
+fn parseParamDecls(p: *Parser, d: *Declarator) Error!?[]Type.Function.Param {
     const paramBufferTop = p.paramBuffer.items.len;
 
     try p.symStack.pushScope();
@@ -3123,9 +3126,29 @@ fn parseParamDecls(p: *Parser) Error!?[]Type.Function.Param {
 
         const paramDeclSpec = if (try p.parseDeclSpec()) |some|
             some
-        else if (p.paramBuffer.items.len == paramBufferTop)
-            return null
-        else blk: {
+        else if (p.comp.langOpts.standard.atLeast(.c2x) and
+            (p.getCurrToken() == .Identifier or p.getCurrToken() == .ExtendedIdentifier))
+        {
+            // handle deprecated K&R style parameters
+            const identifier = try p.expectIdentifier();
+            try p.errStr(.unknown_type_name, identifier, p.getTokenText(identifier));
+
+            if (d.oldTypeFunc == null)
+                d.oldTypeFunc = identifier;
+
+            try p.paramBuffer.append(.{
+                .name = try p.comp.intern(p.getTokenText(identifier)),
+                .nameToken = identifier,
+                .ty = Type.Int,
+            });
+
+            if (p.eat(.Comma) == null) break;
+            if (p.getCurrToken() == .Ellipsis) break;
+
+            continue;
+        } else if (p.paramBuffer.items.len == paramBufferTop) {
+            return null;
+        } else blk: {
             var spec: TypeBuilder = .{};
             break :blk DeclSpec{ .type = try spec.finish(p) };
         };
@@ -5351,7 +5374,14 @@ fn typesCompatible(p: *Parser) Error!Result {
 
     try p.expectClosing(lp, .RParen);
 
-    const compatible = first.compatible(second, p.comp);
+    var firstUnqual = first.canonicalize(.standard);
+    firstUnqual.qual.removeCVQualifiers();
+
+    var secondUnqual = second.canonicalize(.standard);
+    secondUnqual.qual.removeCVQualifiers();
+
+    const compatible = firstUnqual.eql(secondUnqual, p.comp, true);
+
     const res = Result{
         .value = Value.int(@intFromBool(compatible)),
         .node = try p.addNode(.{
@@ -6201,8 +6231,12 @@ fn parseCallExpr(p: *Parser, lhs: Result) Error!Result {
     if (ty.is(.Func) and params.len != argCount)
         try p.errExtra(.expected_arguments, firstAfter, extra);
 
-    if (ty.is(.OldStyleFunc) and params.len != argCount)
-        try p.errExtra(.expected_arguments_old, firstAfter, extra);
+    if (ty.is(.OldStyleFunc) and params.len != argCount) {
+        if (params.len == 0)
+            try p.errToken(.passing_args_to_kr, firstAfter)
+        else
+            try p.errExtra(.expected_arguments_old, firstAfter, extra);
+    }
 
     if (ty.is(.VarArgsFunc) and argCount < params.len)
         try p.errExtra(.expected_at_least_arguments, firstAfter, extra);
@@ -6355,7 +6389,7 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
                 };
             }
 
-            if (p.getCurrToken() == .LParen) {
+            if (p.getCurrToken() == .LParen and !p.comp.langOpts.standard.atLeast(.c2x)) {
                 // implicitly declare simple functions as like `puts("foo")`;
                 // allow implicitly declaring functions before C99 like `puts("foo")`
                 if (std.mem.startsWith(u8, name, "__builtin_"))

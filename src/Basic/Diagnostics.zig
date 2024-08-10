@@ -161,6 +161,7 @@ pub const Options = packed struct {
     @"gnu-auto-type": Kind = .default,
     @"gnu-union-cast": Kind = .default,
     @"pointer-sign": Kind = .default,
+    @"deprecated-non-prototype": Kind = .default,
 };
 
 list: std.ArrayListUnmanaged(Message) = .{},

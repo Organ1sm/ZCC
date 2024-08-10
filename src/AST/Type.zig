@@ -93,6 +93,12 @@ pub const Qualifiers = packed struct {
         };
     }
 
+    /// remove cv qualifiers
+    pub fn removeCVQualifiers(qual: *Qualifiers) void {
+        qual.@"const" = false;
+        qual.@"volatile" = false;
+    }
+
     /// Merge all qualifiers, used by typeof()
     pub fn mergeAllQualifiers(a: Qualifiers, b: Qualifiers) Qualifiers {
         return .{
@@ -154,6 +160,46 @@ pub const Function = struct {
         name: StringId,
         nameToken: TokenIndex,
     };
+
+    fn eql(
+        lhs: *const Function,
+        rhs: *const Function,
+        lhsSpec: Specifier,
+        rhsSpec: Specifier,
+        comp: *const Compilation,
+    ) bool {
+        if (!lhs.returnType.eql(rhs.returnType, comp, false))
+            return false;
+
+        if (lhs.params.len != rhs.params.len) {
+            if (lhsSpec == .OldStyleFunc or rhsSpec == .OldStyleFunc) {
+                const maybeHasParams = if (lhsSpec == .OldStyleFunc) rhs else lhs;
+                for (maybeHasParams.params) |param| {
+                    if (param.ty.undergoesDefaultArgPromotion(comp))
+                        return false;
+                }
+                return true;
+            }
+            return false;
+        }
+
+        // Check if both types are functions or neither is a function
+        if ((lhsSpec == .Func) != (rhsSpec == .Func))
+            return false;
+
+        for (lhs.params, rhs.params) |lhsParam, rhsParam| {
+            var lhsParamUnqual = lhsParam.ty;
+            lhsParamUnqual.qual.removeCVQualifiers();
+
+            var rhsParamUnqual = rhsParam.ty;
+            rhsParamUnqual.qual.removeCVQualifiers();
+
+            if (!lhsParamUnqual.eql(rhsParamUnqual, comp, true))
+                return false;
+        }
+
+        return true;
+    }
 };
 
 pub const Array = struct {
@@ -421,6 +467,23 @@ pub const Specifier = enum {
     /// C23 nullptr_t
     NullPtrTy,
 };
+
+/// Whether the type is promoted if used as a variadic argument or
+/// as an argument to a function with no prototype
+fn undergoesDefaultArgPromotion(ty: Type, comp: *const Compilation) bool {
+    return switch (ty.specifier) {
+        .Bool => true,
+        .Char, .UChar, .SChar => true,
+        .Short, .UShort => true,
+        .Enum => if (comp.langOpts.emulate == .clang) ty.data.@"enum".isIncomplete() else false,
+        .Float => true,
+
+        .TypeofType => ty.data.subType.undergoesDefaultArgPromotion(comp),
+        .TypeofExpr => ty.data.expr.ty.undergoesDefaultArgPromotion(comp),
+        .Attributed => ty.data.attributed.base.undergoesDefaultArgPromotion(comp),
+        else => false,
+    };
+}
 
 /// Determine if type matches the given specifier, recursing into typeof
 /// types if necessary.
@@ -1265,32 +1328,8 @@ pub fn annotationAlignment(comp: *const Compilation, attrs: ?[]const Attribute) 
 pub fn stripCVTypeQuals(ty: Type) Type {
     //  unwrap typeof-types when checking compatibility
     var tyUnqual = ty.canonicalize(.standard);
-    tyUnqual.qual.@"const" = false;
-    tyUnqual.qual.@"volatile" = false;
+    tyUnqual.qual.removeCVQualifiers();
     return tyUnqual;
-}
-
-/// Checks type compatibility for __builtin_types_compatible_p
-/// Returns true if the unqualified version of `lhs` and `rhs` are the same
-/// Ignores top-level qualifiers (e.g. `int` and `const int` are compatible) but `int *` and `const int *` are not
-/// Two types that are typedefed are considered compatible if their underlying types are compatible.
-/// An enum type is not considered to be compatible with another enum type even if both are compatible with the same integer type;
-/// `A[]` and `A[N]` for a type `A` and integer `N` are compatible
-pub fn compatible(lhs: Type, rhs: Type, comp: *const Compilation) bool {
-    const lhsUnqual = lhs.stripCVTypeQuals();
-    const rhsUnqual = rhs.stripCVTypeQuals();
-
-    if (lhsUnqual.eql(rhsUnqual, comp, true)) return true;
-
-    if (!lhsUnqual.isArray() or !rhsUnqual.isArray()) return false;
-
-    if (lhsUnqual.arrayLen() == null or rhsUnqual.arrayLen() == null) {
-        // incomplete arrays are compatible with arrays of the same element type
-        // GCC and clang ignore cv-qualifiers on arrays
-        return lhsUnqual.getElemType().compatible(rhsUnqual.getElemType(), comp);
-    }
-
-    return false;
 }
 
 pub fn eql(lhsParam: Type, rhsParam: Type, comp: *const Compilation, checkQualifiers: bool) bool {
@@ -1329,37 +1368,22 @@ pub fn eql(lhsParam: Type, rhsParam: Type, comp: *const Compilation, checkQualif
         .Func,
         .VarArgsFunc,
         .OldStyleFunc,
-        => {
-            // TODO validate this
-            if (lhs.data.func.params.len != rhs.data.func.params.len)
-                return false;
-
-            // return type cannot have qualifiers
-            if (!lhs.data.func.returnType.eql(rhs.data.func.returnType, comp, false))
-                return false;
-
-            for (lhs.data.func.params, rhs.data.func.params) |param, bQual| {
-                var aUnqual = param.ty;
-                aUnqual.qual.@"const" = false;
-                aUnqual.qual.@"volatile" = false;
-
-                var bUnqual = bQual.ty;
-                bUnqual.qual.@"const" = false;
-                bUnqual.qual.@"volatile" = false;
-
-                if (!aUnqual.eql(bUnqual, comp, checkQualifiers))
-                    return false;
-            }
-        },
+        => if (!lhs.data.func.eql(rhs.data.func, lhs.specifier, rhs.specifier, comp)) return false,
 
         .Array,
         .StaticArray,
         .IncompleteArray,
         .Vector,
         => {
-            if (!std.meta.eql(lhs.arrayLen(), rhs.arrayLen()))
+            const lhsLen = lhs.arrayLen();
+            const rhsLen = rhs.arrayLen();
+            if (lhsLen == null or rhsLen == null) {
+                // At least one array is incomplete; only check child type for equality
+            } else if (lhsLen.? != rhsLen.?) {
                 return false;
-            if (!lhs.getElemType().eql(rhs.getElemType(), comp, checkQualifiers))
+            }
+
+            if (!lhs.getElemType().eql(rhs.getElemType(), comp, false))
                 return false;
         },
 
@@ -1408,10 +1432,10 @@ pub fn integerRank(ty: Type, comp: *const Compilation) usize {
 }
 
 /// Returns true if `lhs` and `rhs` are integer types that differ only in sign
-pub fn sameRankDifferentSign( lhs: Type, rhs: Type, comp: *const Compilation) bool {
-    if (! lhs.isInt() or !rhs.isInt()) return false;
-    if ( lhs.integerRank(comp) != rhs.integerRank(comp)) return false;
-    return  lhs.isUnsignedInt(comp) != rhs.isUnsignedInt(comp);
+pub fn sameRankDifferentSign(lhs: Type, rhs: Type, comp: *const Compilation) bool {
+    if (!lhs.isInt() or !rhs.isInt()) return false;
+    if (lhs.integerRank(comp) != rhs.integerRank(comp)) return false;
+    return lhs.isUnsignedInt(comp) != rhs.isUnsignedInt(comp);
 }
 
 pub fn makeReal(ty: Type) Type {
@@ -1962,7 +1986,10 @@ pub fn dump(ty: Type, mapper: StringInterner.TypeMapper, langOpts: LangOpts, w: 
         },
 
         .Func, .VarArgsFunc, .OldStyleFunc => {
-            try w.writeAll("fn (");
+            if (ty.specifier == .OldStyleFunc)
+                try w.writeAll("kr (")
+            else
+                try w.writeAll("fn (");
             for (ty.data.func.params, 0..) |param, i| {
                 if (i != 0)
                     try w.writeAll(", ");

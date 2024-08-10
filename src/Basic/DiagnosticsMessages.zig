@@ -323,10 +323,10 @@ pub const static_func_not_global = struct {
     pub const kind = .@"error";
 };
 pub const implicit_func_decl = struct {
-    pub const msg = "implicit declaration of function '{s}' is invalid in C99";
+    pub const msg = "call to undeclared function '{s}'; ISO C99 and later do not support implicit function declarations";
     pub const extra = .str;
     pub const opt = "implicit-function-declaration";
-    pub const kind = .warning;
+    pub const kind = .@"error";
     pub const all = true;
 };
 pub const unknown_builtin = struct {
@@ -2151,6 +2151,21 @@ pub const invalid_union_cast = struct {
 };
 pub const cast_to_incomplete_type = struct {
     pub const msg = "cast to incomplete type '{s}'";
+    pub const kind = .@"error";
+    pub const extra = .str;
+};
+pub const def_no_proto_deprecated = struct {
+    pub const msg = "a function definition without a prototype is deprecated in all versions of C and is not supported in C2x";
+    pub const kind = .warning;
+    pub const opt = "deprecated-non-prototype";
+};
+pub const passing_args_to_kr = struct {
+    pub const msg = "passing arguments to without a prototype is deprecated in all versions of C and is not supported in C2x";
+    pub const kind = .warning;
+    pub const opt = "deprecated-non-prototype";
+};
+pub const unknown_type_name = struct {
+    pub const msg = "unknown type name '{s}'";
     pub const kind = .@"error";
     pub const extra = .str;
 };

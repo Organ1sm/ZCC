@@ -34,9 +34,9 @@
 - [x] `__DATE__`
 - [x] `__TIME__`
 - [x] `__TIMESTAMP__`
-- [x] `__LINE__`
+- [x] [`__LINE__`](../test/cases/__line__.c)
 - [x] `__FILE__`
-- [x] `__COUNTER__`
+- [x] [`__COUNTER__`](../test/cases/line-counter.c)
 - [x] `__VA_ARGS__`
 - [x] `__has_attribute`
 - [x] `__has_builtin`
@@ -72,7 +72,7 @@
 - [x] `extern`
 - [x] `register`
 - [x] `return`
-- [x] `sizeof`
+- [x] [`sizeof`](../test/cases/sizeof-alignof.c)
 - [x] `static`
 - [x] `enum`
 - [x] `struct, union`
@@ -91,8 +91,9 @@
 - **Number Suffix**
 
   - [x] [`i, fi, f`](../test/cases/arithmetic-conversion-floats.c)
-  - [x] [`u`]
-  - [x] [`wb, uwb`](../test/cases/_BitInt.c)
+  - [x] `u`, `ul`, `ull`, `iu`, `iul`, `iull`, `l`, `il`, `ll`, `ill`
+  - [x] `f`, `if`
+  - [x] [`wb, uwb, iwb, iuwb`](../test/cases/_BitInt.c)
 
 - **Labels**
   - [x] `label:`
@@ -109,12 +110,14 @@ struct Foo
 
 - [**Comma operator**](../test/cases/comma-operator.c)
 
-`const int x = 0;`
-`__typeof__((void) 0, x) y = 5;`
+```c
+const int x = 0;
+__typeof__((void) 0, x) y = 5;
+```
 
 - **Flexible Array**
 
-- **tentative array**
+- **Tentative Array**
 
 - **Boolean Type**
 
@@ -125,11 +128,28 @@ struct Foo
 - **String Literals**
   - [x] `L"nop"`
 
-- **statement expression**
+- [**Statements**](../test/cases/statements.c)
 
-- **allow tentative top-level records and enums**
+- **Allow tentative top-level records and enums**
 
-- [**main function implicit return zero**](../test/cases/implicit-main-return-zero.c)
+- [**Main function implicit return zero**](../test/cases/implicit-main-return-zero.c)
+
+- [**Newline splicing**](../test/cases/newline-splicing.c)
+
+- [**Variadic functions**](../test/cases/stdarg.c)
+
+```c
+#include <stdarg.h>
+
+void foo(int a, ...) 
+{
+    va_list va, new;
+    va_start(va, a);
+    int arg = va_arg(va, int);
+    va_copy(va, new);
+    va_end(va);
+}
+```
 
 ---
 
@@ -138,7 +158,7 @@ struct Foo
 - [x] `_Bool`
 - [x] `_Complex`
 - [x] `_Imaginary`
-- [x] `_Pragma`
+- [x] [`_Pragma`](../test/cases/pragma-operator.c)
 - [x] `Inline`
 - [x] `restrict`
 - [x] Flexible array members
@@ -172,11 +192,11 @@ struct Foo
 
 - [x] `alignof`
 - [x] `alignas`
-- [x] `static_assert`
+- [x] [`static_assert` and with no message](../test/cases/static-assert-c2x.c)
 - [x] `thread_local`
 - [x] `bool, true, false`
 - [x] [`constexpr`](../test/cases/constexpr.c)
-- [x] `typeof`
+- [x] [`typeof`](../test/cases/parse-using-typeof-types.c)
 - [x] `unreachable()`
 - [x] [Bit-precise integers `_BitInt(N)` and suffixes](../test/cases/_BitInt.c)
 - [x] Allow duplicate attributes
@@ -225,7 +245,7 @@ void bar(float, char) {
 - [x] Single-argument _Static_assert
    `void foo(void) { static_assert(1); }`
 
-- [x]  `nullptr` constant and the associated `nullptr_t` type
+- [x]  [`nullptr` constant and the associated `nullptr_t` type](../test/cases/nullptr.c)
 
 ---
 
@@ -343,6 +363,20 @@ void switch_fn(int param)
     }
 }
 ```
+
+- [**Statement expression**](../test/cases/statement-expr.c)
+
+```c
+void foo(void) 
+{
+    int y = ({
+        int z = 5;
+        z += 10;
+        z;
+    });
+}
+```
+
 
 - **Inline Assembly**
 
