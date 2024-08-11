@@ -13,6 +13,7 @@ var general_purpose_allocator = std.heap.GeneralPurposeAllocator(.{}){};
 
 /// Return true if saw -E option
 fn addCommandLineArgs(comp: *zcc.Compilation, file: zcc.Source, macroBuffer: anytype) !bool {
+    var onlyPreprocess = false;
     if (std.mem.startsWith(u8, file.buffer, "//zcc-args")) {
         var testArgs = std.ArrayList([]const u8).init(comp.gpa);
         defer testArgs.deinit();
@@ -25,9 +26,27 @@ fn addCommandLineArgs(comp: *zcc.Compilation, file: zcc.Source, macroBuffer: any
         defer driver.deinit();
 
         _ = try driver.parseArgs(std.io.null_writer, macroBuffer, testArgs.items);
-        return driver.onlyPreprocess;
+        onlyPreprocess = driver.onlyPreprocess;
     }
-    return false;
+
+    if (std.mem.indexOf(u8, file.buffer, "//zcc-env")) |idx| {
+        const buf = file.buffer[idx..];
+        const nl = std.mem.indexOfAny(u8, buf, "\n\r") orelse buf.len;
+        var it = std.mem.tokenizeScalar(u8, buf[0..nl], ' ');
+        while (it.next()) |some| {
+            var parts = std.mem.splitScalar(u8, some, '=');
+            const name = parts.next().?;
+            const val = parts.next() orelse "";
+            inline for (@typeInfo(zcc.Compilation.Environment).Struct.fields) |field| {
+                var envVarBuffer: [field.name.len]u8 = undefined;
+                const varName = std.ascii.lowerString(&envVarBuffer, field.name);
+                if (std.ascii.eqlIgnoreCase(name, varName))
+                    @field(comp.environment, field.name) = val;
+            }
+        }
+    }
+
+    return onlyPreprocess;
 }
 
 fn testOne(allocator: std.mem.Allocator, path: []const u8, testDir: []const u8) !void {
@@ -98,7 +117,7 @@ pub fn main() !void {
     defer std.process.argsFree(gpa, args);
 
     if (args.len != 3) {
-        print("expected test case directory  and zig executable as only argument\n", .{});
+        print("expected test case directory and zig executable as only argument\n", .{});
         return error.InvalidArguments;
     }
 

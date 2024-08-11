@@ -33,6 +33,15 @@ pub fn main() u8 {
     var comp = Compilation.init(gpa);
     defer comp.deinit();
 
+    comp.environment.loadAll(gpa) catch |er| switch (er) {
+        error.OutOfMemory => {
+            std.debug.print("Out of Memory\n", .{});
+            if (fastExit) std.process.exit(1);
+            return 1;
+        },
+    };
+    defer comp.environment.deinit(gpa);
+
     comp.addDefaultPragmaHandlers() catch |er| switch (er) {
         error.OutOfMemory => {
             std.debug.print("Out of Memory\n", .{});

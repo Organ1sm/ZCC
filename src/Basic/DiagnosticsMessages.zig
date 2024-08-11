@@ -2169,3 +2169,7 @@ pub const unknown_type_name = struct {
     pub const kind = .@"error";
     pub const extra = .str;
 };
+pub const invalid_source_epoch = struct {
+    pub const msg = "environment variable SOURCE_DATE_EPOCH must expand to a non-negative integer less than or equal to 253402300799";
+    pub const kind = .@"error";
+};

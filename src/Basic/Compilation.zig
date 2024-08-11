@@ -26,7 +26,66 @@ pub const Error = error{
 
 pub const BitIntMaxBits = 128;
 
+/// Environment variables used during compilation / linking.
+pub const Environment = struct {
+    /// Directory to use for temporary files
+    /// TODO: not implemented yet
+    tmpdir: ?[]const u8 = null,
+
+    /// Directories to try when searching for subprograms.
+    /// TODO: not implemented yet
+    compilerPath: ?[]const u8 = null,
+
+    /// Directories to try when searching for special linker files, if compiling for the native target
+    /// TODO: not implemented yet
+    libraryPath: ?[]const u8 = null,
+
+    /// List of directories to be searched as if specified with -I, but after any paths given with -I options on the command line
+    /// Used regardless of the language being compiled
+    /// TODO: not implemented yet
+    cpath: ?[]const u8 = null,
+
+    /// List of directories to be searched as if specified with -I, but after any paths given with -I options on the command line
+    /// Used if the language being compiled is C
+    /// TODO: not implemented yet
+    cIncludePath: ?[]const u8 = null,
+
+    /// UNIX timestamp to be used instead of the current date and time in the __DATE__ and __TIME__ macros
+    sourceDateEpoch: ?[]const u8 = null,
+
+    /// Load all of the environment variables using the std.process API. Do not use if using Aro as a shared library on Linux without libc
+    /// See https://github.com/ziglang/zig/issues/4524
+    /// Assumes that `self` has been default-initialized
+    pub fn loadAll(self: *Environment, allocator: std.mem.Allocator) !void {
+        errdefer self.deinit(allocator);
+
+        inline for (@typeInfo(@TypeOf(self.*)).Struct.fields) |field| {
+            std.debug.assert(@field(self, field.name) == null);
+
+            var envVarBuffer: [field.name.len]u8 = undefined;
+            const envVarName = std.ascii.upperString(&envVarBuffer, field.name);
+            const val: ?[]const u8 = std.process.getEnvVarOwned(allocator, envVarName) catch |err| switch (err) {
+                error.OutOfMemory => |e| return e,
+                error.EnvironmentVariableNotFound => null,
+                error.InvalidWtf8 => null,
+            };
+            @field(self, field.name) = val;
+        }
+    }
+
+    /// Use this only if environment slices were allocated with `allocator` (such as via `loadAll`)
+    pub fn deinit(self: *Environment, allocator: std.mem.Allocator) void {
+        inline for (@typeInfo(@TypeOf(self.*)).Struct.fields) |field| {
+            if (@field(self, field.name)) |slice| {
+                allocator.free(slice);
+            }
+        }
+        self.* = undefined;
+    }
+};
+
 gpa: Allocator,
+environment: Environment = .{},
 diagnostics: Diagnostics,
 
 sources: std.StringArrayHashMap(Source),
@@ -89,9 +148,28 @@ pub fn intern(comp: *Compilation, str: []const u8) !StringInterner.StringId {
 /// Dec 31 9999 23:59:59
 const MaxTimestamp = 253402300799;
 
-fn generateDateAndTime(w: anytype) !void {
-    const timestamp = std.math.clamp(std.time.timestamp(), 0, std.math.maxInt(i64));
-    const epochSeconds = EpochSeconds{ .secs = @as(u64, @intCast(timestamp)) };
+pub fn getSourceEpoch(self: *const Compilation, max: i64) !?i64 {
+    const provided = self.environment.sourceDateEpoch orelse return null;
+    const parsed = std.fmt.parseInt(i64, provided, 10) catch return error.InvalidEpoch;
+    if (parsed < 0 or parsed > max)
+        return error.InvalidEpoch;
+    return parsed;
+}
+
+fn getTimeStamp(comp: *Compilation) !u47 {
+    const provided: ?i64 = comp.getSourceEpoch(MaxTimestamp) catch blk: {
+        try comp.addDiagnostic(.{
+            .tag = .invalid_source_epoch,
+            .loc = .{ .id = .unused, .byteOffset = 0, .line = 0 },
+        }, &.{});
+        break :blk null;
+    };
+    const timestamp = provided orelse std.time.timestamp();
+    return @intCast(std.math.clamp(timestamp, 0, MaxTimestamp));
+}
+
+fn generateDateAndTime(w: anytype, timestamp: u47) !void {
+    const epochSeconds = EpochSeconds{ .secs = timestamp };
     const epochDay = epochSeconds.getEpochDay();
     const daySeconds = epochSeconds.getDaySeconds();
     const yearDay = epochDay.calculateYearDay();
@@ -323,7 +401,8 @@ pub fn generateBuiltinMacros(comp: *Compilation) !Source {
         );
 
     // timestamps
-    try generateDateAndTime(w);
+    const timestamp = try comp.getTimeStamp();
+    try generateDateAndTime(w, timestamp);
 
     //types
     if (comp.getCharSignedness() == .unsigned)
