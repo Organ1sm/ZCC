@@ -79,16 +79,17 @@ pub fn main() u8 {
 }
 
 test "simple test" {
-    _ = @import("Lexer/Lexer.zig");
-    _ = @import("Lexer/Preprocessor.zig");
     _ = @import("Basic/Diagnostics.zig");
-    _ = @import("Parser/Parser.zig");
-    _ = @import("Lexer/Pragma.zig");
-    _ = @import("Parser/InitList.zig");
     _ = @import("Basic/Source.zig");
     _ = @import("Basic/LangOpts.zig");
     _ = @import("Basic/Compilation.zig");
+    _ = @import("Basic/Target.zig");
+    _ = @import("Driver/Distro.zig");
+    _ = @import("Lexer/Lexer.zig");
+    _ = @import("Lexer/Preprocessor.zig");
+    _ = @import("Lexer/Pragma.zig");
+    _ = @import("Parser/Parser.zig");
+    _ = @import("Parser/InitList.zig");
     _ = @import("AST/AST.zig");
     _ = @import("AST/Type.zig");
-    _ = @import("Basic/Target.zig");
 }
