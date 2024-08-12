@@ -7,14 +7,24 @@ pub fn build(b: *std.Build) !void {
     const TestAllAllocationFailures = b.option(bool, "test-all-allocation-failures", "Test all allocation failures") orelse false;
     const LinkLibc = b.option(bool, "link-libc", "Force self-hosted compile to link libc") orelse (mode != .Debug);
     const skipRecordTests = b.option(bool, "skip-record-tests", "Skip record layout tests") orelse false;
+    const defaultLinker = b.option([]const u8, "default-linker", "Default linker zcc will use if none is supplied via -fuse-ld") orelse "ld";
+
+    const systemDefaults = b.addOptions();
+    systemDefaults.addOption([]const u8, "linker", defaultLinker);
 
     const depsModule = b.createModule(.{ .root_source_file = b.path("deps/lib.zig") });
     const zccModule = b.addModule("zcc", .{
         .root_source_file = b.path("src/zcc.zig"),
-        .imports = &.{.{
-            .name = "deps",
-            .module = depsModule,
-        }},
+        .imports = &.{
+            .{
+                .name = "system-defaults",
+                .module = systemDefaults.createModule(),
+            },
+            .{
+                .name = "deps",
+                .module = depsModule,
+            },
+        },
     });
 
     const exe = b.addExecutable(.{

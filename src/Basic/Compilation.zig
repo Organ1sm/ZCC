@@ -53,7 +53,8 @@ pub const Environment = struct {
     /// UNIX timestamp to be used instead of the current date and time in the __DATE__ and __TIME__ macros
     sourceDateEpoch: ?[]const u8 = null,
 
-    /// Load all of the environment variables using the std.process API. Do not use if using Aro as a shared library on Linux without libc
+    /// Load all of the environment variables using the std.process API. 
+    /// Do not use if using zcc as a shared library on Linux without libc
     /// See https://github.com/ziglang/zig/issues/4524
     /// Assumes that `self` has been default-initialized
     pub fn loadAll(self: *Environment, allocator: std.mem.Allocator) !void {
