@@ -2173,3 +2173,8 @@ pub const invalid_source_epoch = struct {
     pub const msg = "environment variable SOURCE_DATE_EPOCH must expand to a non-negative integer less than or equal to 253402300799";
     pub const kind = .@"error";
 };
+pub const fuse_ld_path = struct {
+    pub const msg = "'-fuse-ld=' taking a path is deprecated; use '--ld-path=' instead";
+    pub const kind = .off;
+    pub const opt = "fuse-ld-path";
+};

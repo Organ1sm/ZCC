@@ -162,6 +162,7 @@ pub const Options = packed struct {
     @"gnu-union-cast": Kind = .default,
     @"pointer-sign": Kind = .default,
     @"deprecated-non-prototype": Kind = .default,
+    @"fuse-ld-path": Kind = .default,
 };
 
 list: std.ArrayListUnmanaged(Message) = .{},

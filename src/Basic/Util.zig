@@ -80,3 +80,14 @@ pub fn errorDescription(err: anyerror) []const u8 {
         else => @errorName(err),
     };
 }
+
+pub fn canExecute(path: []const u8) bool {
+    std.posix.access(path, std.posix.X_OK) catch return false;
+    // Todo: ensure path is not a directory
+    return true;
+}
+
+pub fn exists(path: []const u8) bool {
+    std.posix.access(path, std.posix.F_OK) catch return false;
+    return true;
+}

@@ -33,6 +33,7 @@ pub fn build(b: *std.Build) !void {
         .target = target,
         .optimize = .Debug,
     });
+    exe.root_module.addOptions("system-defaults", systemDefaults);
     exe.root_module.addImport("zcc", zccModule);
     exe.root_module.addImport("deps", depsModule);
 
