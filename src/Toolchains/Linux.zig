@@ -5,6 +5,7 @@ const Toolchain = @import("../Toolchain.zig");
 const Driver = @import("../Driver.zig");
 const Distro = @import("../Driver/Distro.zig");
 const TargetUtil = @import("../Basic/Target.zig");
+const SystemDefaults = @import("system-defaults");
 
 const Linux = @This();
 
@@ -49,6 +50,9 @@ fn buildExtraOpts(self: *Linux, tc: *Toolchain) !void {
             inline else => |tag| "--hash-style=" ++ @tagName(tag),
         });
     }
+
+    if (SystemDefaults.enableLinkerBuildId)
+        try self.extraOpts.append(gpa, "--build-id");
 }
 
 /// TODO: Very incomplete

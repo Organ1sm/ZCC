@@ -4,13 +4,15 @@ pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
     const mode = b.standardOptimizeOption(.{});
 
+    const EnableLinkerBuildId = b.option(bool, "enable-linker-build-id", "pass --build-id to linker") orelse false;
     const TestAllAllocationFailures = b.option(bool, "test-all-allocation-failures", "Test all allocation failures") orelse false;
     const LinkLibc = b.option(bool, "link-libc", "Force self-hosted compile to link libc") orelse (mode != .Debug);
-    const skipRecordTests = b.option(bool, "skip-record-tests", "Skip record layout tests") orelse false;
-    const defaultLinker = b.option([]const u8, "default-linker", "Default linker zcc will use if none is supplied via -fuse-ld") orelse "ld";
+    const SkipRecordTests = b.option(bool, "skip-record-tests", "Skip record layout tests") orelse false;
+    const DefaultLinker = b.option([]const u8, "default-linker", "Default linker zcc will use if none is supplied via -fuse-ld") orelse "ld";
 
     const systemDefaults = b.addOptions();
-    systemDefaults.addOption([]const u8, "linker", defaultLinker);
+    systemDefaults.addOption(bool, "enableLinkerBuildId", EnableLinkerBuildId);
+    systemDefaults.addOption([]const u8, "linker", DefaultLinker);
 
     const depsModule = b.createModule(.{ .root_source_file = b.path("deps/lib.zig") });
     const zccModule = b.addModule("zcc", .{
@@ -105,6 +107,6 @@ pub fn build(b: *std.Build) !void {
     const tests_step = b.step("test", "Run all tests");
     tests_step.dependOn(unit_tests_step);
     tests_step.dependOn(integration_tests_step);
-    if (!skipRecordTests)
+    if (!SkipRecordTests)
         tests_step.dependOn(record_tests_step);
 }
