@@ -47,6 +47,9 @@ zccName: []const u8 = "",
 /// Directory from which aro was invoked
 zccDir: []const u8 = "",
 
+/// Value of --triple= passed via CLI
+rawTargetTriple: ?[]const u8 = null,
+
 // linker options
 useLinker: ?[]const u8 = null,
 linkerPath: ?[]const u8 = null,
@@ -321,6 +324,7 @@ pub fn parseArgs(
                 };
                 d.comp.target = target;
                 d.comp.langOpts.setEmulatedCompiler(Target.systemCompiler(d.comp.target));
+                d.rawTargetTriple = triple;
             } else if (std.mem.eql(u8, arg, "-dump-pp")) {
                 d.dumpPP = true;
             } else if (std.mem.eql(u8, arg, "-dump-ast")) {
