@@ -202,27 +202,26 @@ fn getProgramPath(tc: *const Toolchain, name: []const u8, buf: []u8) []const u8 
 
 /// Search for `name` in a variety of places
 /// TODO: cache results based on `name` so we're not repeatedly allocating the same strings?
-pub fn getFilePath(toolchain: *const Toolchain, name: []const u8) ![]const u8 {
+pub fn getFilePath(tc: *const Toolchain, name: []const u8) ![]const u8 {
     var pathBuffer: [std.fs.max_path_bytes]u8 = undefined;
     var fib = std.heap.FixedBufferAllocator.init(&pathBuffer);
     const allocator = fib.allocator();
-    const d = toolchain.driver;
 
     // todo check resource dir
     // todo check compiler RT path
 
-    const candidate = try std.fs.path.join(allocator, &.{ d.zccDir, "..", name });
+    const candidate = try std.fs.path.join(allocator, &.{ tc.driver.zccDir, "..", name });
     if (util.exists(candidate))
-        return toolchain.arena.dupe(u8, candidate);
+        return tc.arena.dupe(u8, candidate);
 
     fib.reset();
-    if (searchPaths(allocator, toolchain.libaryPaths.items, name)) |path| {
-        return toolchain.arena.dupe(u8, path);
+    if (searchPaths(allocator, tc.driver.sysroot, tc.libaryPaths.items, name)) |path| {
+        return tc.arena.dupe(u8, path);
     }
 
     fib.reset();
-    if (searchPaths(allocator, toolchain.filePaths.items, name)) |path| {
-        return try toolchain.arena.dupe(u8, path);
+    if (searchPaths(allocator, tc.driver.sysroot, tc.filePaths.items, name)) |path| {
+        return try tc.arena.dupe(u8, path);
     }
 
     return name;
@@ -230,11 +229,20 @@ pub fn getFilePath(toolchain: *const Toolchain, name: []const u8) ![]const u8 {
 
 /// Search a list of `path_prefixes` for the existence `name`
 /// Assumes that `fba` is a fixed-buffer allocator, so does not free joined path candidates
-fn searchPaths(fba: mem.Allocator, pathPrefixes: []const []const u8, name: []const u8) ?[]const u8 {
+fn searchPaths(
+    fba: mem.Allocator,
+    sysroot: []const u8,
+    pathPrefixes: []const []const u8,
+    name: []const u8,
+) ?[]const u8 {
     for (pathPrefixes) |path| {
         if (path.len == 0) continue;
 
-        const candidate = std.fs.path.join(fba, &.{ path, name }) catch continue;
+        const candidate = if (path[0] == '=')
+            std.fs.path.join(fba, &.{ sysroot, path[1..], name }) catch continue
+        else
+            std.fs.path.join(fba, &.{ path, name }) catch continue;
+
         if (util.exists(candidate))
             return candidate;
     }

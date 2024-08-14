@@ -12,6 +12,7 @@ const Source = @import("Basic/Source.zig");
 const Toolchain = @import("Toolchain.zig");
 const Util = @import("Basic/Util.zig");
 const Target = @import("Basic/Target.zig");
+const SystemDefault = @import("system-defaults");
 
 const Driver = @This();
 
@@ -27,7 +28,7 @@ comp: *Compilation,
 inputs: std.ArrayListUnmanaged(Source) = .{},
 linkObjects: std.ArrayListUnmanaged([]const u8) = .{},
 outputName: ?[]const u8 = null,
-sysroot: ?[]const u8 = null,
+sysroot: []const u8 = SystemDefault.sysroot,
 tempFileCount: u32 = 0,
 
 // debug options

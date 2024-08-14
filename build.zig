@@ -9,10 +9,12 @@ pub fn build(b: *std.Build) !void {
     const LinkLibc = b.option(bool, "link-libc", "Force self-hosted compile to link libc") orelse (mode != .Debug);
     const SkipRecordTests = b.option(bool, "skip-record-tests", "Skip record layout tests") orelse false;
     const DefaultLinker = b.option([]const u8, "default-linker", "Default linker zcc will use if none is supplied via -fuse-ld") orelse "ld";
+    const DefaultSysroot = b.option([]const u8, "default-sysroot", "Default <path> to all compiler invocations for --sysroot=<path>.") orelse "";
 
     const systemDefaults = b.addOptions();
     systemDefaults.addOption(bool, "enableLinkerBuildId", EnableLinkerBuildId);
     systemDefaults.addOption([]const u8, "linker", DefaultLinker);
+    systemDefaults.addOption([]const u8, "sysroot", DefaultSysroot);
 
     const depsModule = b.createModule(.{ .root_source_file = b.path("deps/lib.zig") });
     const zccModule = b.addModule("zcc", .{
