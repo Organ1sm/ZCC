@@ -157,55 +157,86 @@ pub fn getLinkerPath(self: *const Toolchain, buf: []u8) ![]const u8 {
     return self.getProgramPath(defaultLinker, buf);
 }
 
-fn getProgramPath(toolchain: *const Toolchain, name: []const u8, buf: []u8) []const u8 {
-    _ = toolchain;
-    _ = buf;
-    return name;
+/// If an explicit target is provided, also check the prefixed tool-specific name
+/// TODO: this isn't exactly right since our target names don't necessarily match up
+/// with GCC's.
+/// For example the Zig target `arm-freestanding-eabi` would need the `arm-none-eabi` tools
+fn possibleProgramNames(rawTriple: ?[]const u8, name: []const u8, buf: *[64]u8) std.BoundedArray([]const u8, 2) {
+    var possibleNames: std.BoundedArray([]const u8, 2) = .{};
+    if (rawTriple) |triple| {
+        if (std.fmt.bufPrint(buf, "{s}-{s}", .{ triple, name })) |res| {
+            possibleNames.appendAssumeCapacity(res);
+        } else |_| {}
+    }
+
+    possibleNames.appendAssumeCapacity(name);
+    return possibleNames;
 }
 
-const PathStackSize = 128;
-const PathAllocator = std.heap.StackFallbackAllocator(PathStackSize);
+/// Search for an executable called `name` or `{triple}-{name} in programPaths and the $PATH environment variable
+/// If not found there, just use `name`
+/// Writes the result to `buf` and returns a slice of it
+fn getProgramPath(tc: *const Toolchain, name: []const u8, buf: []u8) []const u8 {
+    var pathBuffer: [std.fs.max_path_bytes]u8 = undefined;
+    var fib = std.heap.FixedBufferAllocator.init(&pathBuffer);
 
+    var toolSpecificBuffer: [64]u8 = undefined;
+    const possibleNames = possibleProgramNames(tc.driver.rawTargetTriple, name, &toolSpecificBuffer);
+
+    for (possibleNames.constSlice()) |toolName| {
+        for (tc.programPaths.items) |programPath| {
+            defer fib.reset();
+
+            const candidate = std.fs.path.join(fib.allocator(), &.{ programPath, toolName }) catch continue;
+            if (util.canExecute(candidate) and candidate.len <= buf.len) {
+                @memcpy(buf[0..candidate.len], candidate);
+                return buf[0..candidate.len];
+            }
+        }
+        // todo: check $PATH
+    }
+
+    @memcpy(buf[0..name.len], name);
+    return buf[0..name.len];
+}
+
+/// Search for `name` in a variety of places
+/// TODO: cache results based on `name` so we're not repeatedly allocating the same strings?
 pub fn getFilePath(toolchain: *const Toolchain, name: []const u8) ![]const u8 {
+    var pathBuffer: [std.fs.max_path_bytes]u8 = undefined;
+    var fib = std.heap.FixedBufferAllocator.init(&pathBuffer);
+    const allocator = fib.allocator();
     const d = toolchain.driver;
-
-    var stack_fb = std.heap.stackFallback(PathStackSize, d.comp.gpa);
-    var allocator = stack_fb.get();
 
     // todo check resource dir
     // todo check compiler RT path
 
     const candidate = try std.fs.path.join(allocator, &.{ d.zccDir, "..", name });
-    defer allocator.free(candidate);
     if (util.exists(candidate))
         return toolchain.arena.dupe(u8, candidate);
 
-    if (try searchPaths(&stack_fb, toolchain.libaryPaths.items, name)) |path| {
-        defer allocator.free(path);
+    fib.reset();
+    if (searchPaths(allocator, toolchain.libaryPaths.items, name)) |path| {
         return toolchain.arena.dupe(u8, path);
     }
 
-    if (try searchPaths(&stack_fb, toolchain.filePaths.items, name)) |path| {
-        defer allocator.free(path);
+    fib.reset();
+    if (searchPaths(allocator, toolchain.filePaths.items, name)) |path| {
         return try toolchain.arena.dupe(u8, path);
     }
 
     return name;
 }
 
-/// find path
-fn searchPaths(pathAllocator: *PathAllocator, paths: []const []const u8, name: []const u8) !?[]const u8 {
-    for (paths) |path| {
+/// Search a list of `path_prefixes` for the existence `name`
+/// Assumes that `fba` is a fixed-buffer allocator, so does not free joined path candidates
+fn searchPaths(fba: mem.Allocator, pathPrefixes: []const []const u8, name: []const u8) ?[]const u8 {
+    for (pathPrefixes) |path| {
         if (path.len == 0) continue;
 
-        const allocator = pathAllocator.get(); // resets underlying fixed buffer
-        const candidate = try std.fs.path.join(allocator, &.{ path, name });
-
-        if (util.exists(candidate)) {
-            const duped = try pathAllocator.fallback_allocator.dupe(u8, candidate);
-            return duped;
-        }
-        allocator.free(candidate);
+        const candidate = std.fs.path.join(fba, &.{ path, name }) catch continue;
+        if (util.exists(candidate))
+            return candidate;
     }
     return null;
 }
@@ -216,12 +247,12 @@ const PathKind = enum {
     program,
 };
 
+/// Join `components` into a path. If the path exists, add it to the specified path list.
 pub fn addPathIfExists(self: *Toolchain, components: []const []const u8, destKind: PathKind) !void {
-    var stackFb = std.heap.stackFallback(PathStackSize, self.driver.comp.gpa);
-    var allocator = stackFb.get();
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var fib = std.heap.FixedBufferAllocator.init(&path_buf);
 
-    const candidate = try std.fs.path.join(allocator, components);
-    defer allocator.free(candidate);
+    const candidate = try std.fs.path.join(fib.allocator(), components);
 
     if (util.exists(candidate)) {
         const gpa = self.driver.comp.gpa;
