@@ -74,20 +74,6 @@ pub fn discover(self: *Toolchain) !void {
 pub fn deinit(self: *Toolchain) void {
     const gpa = self.driver.comp.gpa;
     self.inner.deinit(gpa);
-
-    for (self.libaryPaths.items) |item| {
-        gpa.free(item);
-    }
-    self.libaryPaths.deinit(gpa);
-
-    for (self.filePaths.items) |item| {
-        gpa.free(item);
-    }
-    self.filePaths.deinit(gpa);
-
-    for (self.programPaths.items) |item| {
-        gpa.free(item);
-    }
     self.programPaths.deinit(gpa);
 }
 
@@ -263,7 +249,8 @@ const PathKind = enum {
     program,
 };
 
-/// Join `components` into a path. If the path exists, add it to the specified path list.
+/// Join `components` into a path. If the path exists, dupe it into the toolchain arena and
+/// add it to the specified path list.
 pub fn addPathIfExists(self: *Toolchain, components: []const []const u8, destKind: PathKind) !void {
     var path_buf: [std.fs.max_path_bytes]u8 = undefined;
     var fib = std.heap.FixedBufferAllocator.init(&path_buf);
@@ -271,16 +258,13 @@ pub fn addPathIfExists(self: *Toolchain, components: []const []const u8, destKin
     const candidate = try std.fs.path.join(fib.allocator(), components);
 
     if (util.exists(candidate)) {
-        const gpa = self.driver.comp.gpa;
-        const duped = try gpa.dupe(u8, candidate);
-        errdefer gpa.free(duped);
-
+        const duped = try self.arena.dupe(u8, candidate);
         const dest = switch (destKind) {
             .library => &self.libaryPaths,
             .file => &self.filePaths,
             .program => &self.programPaths,
         };
-        try dest.append(gpa, duped);
+        try dest.append(self.driver.comp.gpa, duped);
     }
 }
 
