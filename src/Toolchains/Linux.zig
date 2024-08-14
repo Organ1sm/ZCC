@@ -59,15 +59,15 @@ fn buildExtraOpts(self: *Linux, tc: *Toolchain) !void {
 fn findPaths(self: *Linux, tc: *Toolchain) !void {
     _ = self;
     const target = tc.getTarget();
-    const sysroot = tc.driver.sysroot;
+    const sysroot = tc.getSysroot();
 
-    const os_lib_dir = getOSLibDir(target);
-    const multiarch_triple = getMultiarchTriple(target);
+    const osLibDir = getOSLibDir(target);
+    const multiarchTriple = getMultiarchTriple(target);
 
-    try tc.addPathIfExists(&.{ sysroot, "/lib", multiarch_triple }, .file);
-    try tc.addPathIfExists(&.{ sysroot, "/lib/..", os_lib_dir }, .file);
-    try tc.addPathIfExists(&.{ sysroot, "/usr/lib", multiarch_triple }, .file);
-    try tc.addPathIfExists(&.{ sysroot, "/usr/lib/..", os_lib_dir }, .file);
+    try tc.addPathIfExists(&.{ sysroot, "/lib", multiarchTriple }, .file);
+    try tc.addPathIfExists(&.{ sysroot, "/lib/..", osLibDir }, .file);
+    try tc.addPathIfExists(&.{ sysroot, "/usr/lib", multiarchTriple }, .file);
+    try tc.addPathIfExists(&.{ sysroot, "/usr/lib/..", osLibDir }, .file);
 
     try tc.addPathIfExists(&.{ sysroot, "/lib" }, .file);
     try tc.addPathIfExists(&.{ sysroot, "/usr/lib" }, .file);

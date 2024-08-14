@@ -202,12 +202,18 @@ fn getProgramPath(tc: *const Toolchain, name: []const u8, buf: []u8) []const u8 
     return buf[0..name.len];
 }
 
+pub fn getSysroot(tc: *const Toolchain) []const u8 {
+    return tc.driver.sysroot orelse SystemDefaults.sysroot;
+}
+
 /// Search for `name` in a variety of places
 /// TODO: cache results based on `name` so we're not repeatedly allocating the same strings?
 pub fn getFilePath(tc: *const Toolchain, name: []const u8) ![]const u8 {
     var pathBuffer: [std.fs.max_path_bytes]u8 = undefined;
     var fib = std.heap.FixedBufferAllocator.init(&pathBuffer);
     const allocator = fib.allocator();
+
+    const sysroot = tc.getSysroot();
 
     // todo check resource dir
     // todo check compiler RT path
@@ -217,12 +223,12 @@ pub fn getFilePath(tc: *const Toolchain, name: []const u8) ![]const u8 {
         return tc.arena.dupe(u8, candidate);
 
     fib.reset();
-    if (searchPaths(allocator, tc.driver.sysroot, tc.libaryPaths.items, name)) |path| {
+    if (searchPaths(allocator, sysroot, tc.libaryPaths.items, name)) |path| {
         return tc.arena.dupe(u8, path);
     }
 
     fib.reset();
-    if (searchPaths(allocator, tc.driver.sysroot, tc.filePaths.items, name)) |path| {
+    if (searchPaths(allocator, sysroot, tc.filePaths.items, name)) |path| {
         return try tc.arena.dupe(u8, path);
     }
 
