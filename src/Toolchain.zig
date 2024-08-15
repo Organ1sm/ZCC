@@ -163,6 +163,24 @@ fn possibleProgramNames(rawTriple: ?[]const u8, name: []const u8, buf: *[64]u8) 
     return possibleNames;
 }
 
+/// Add toolchain `file_paths` to argv as `-L` arguments
+pub fn addFilePathLibArgs(tc: *const Toolchain, argv: *std.ArrayList([]const u8)) !void {
+    try argv.ensureUnusedCapacity(tc.filePaths.items.len);
+
+    var bytesNeeded: usize = 0;
+    for (tc.filePaths.items) |path| {
+        bytesNeeded += path.len + 2; // +2 for `-L`
+    }
+    var bytes = try tc.arena.alloc(u8, bytesNeeded);
+    var index: usize = 0;
+    for (tc.filePaths.items) |path| {
+        @memcpy(bytes[index..][0..2], "-L");
+        @memcpy(bytes[index + 2 ..][0..path.len], path);
+        argv.appendAssumeCapacity(bytes[index..][0 .. path.len + 2]);
+        index += path.len + 2;
+    }
+}
+
 /// Search for an executable called `name` or `{triple}-{name} in programPaths and the $PATH environment variable
 /// If not found there, just use `name`
 /// Writes the result to `buf` and returns a slice of it

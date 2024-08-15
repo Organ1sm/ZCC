@@ -147,6 +147,7 @@ const usage =
     \\  -dump-raw-tokens       Lex file in raw mode and dump raw tokens to stdout
     \\  -dump-linker-args      Dump linker arguments to stdout
     \\
+    \\
 ;
 
 fn option(arg: []const u8, name: []const u8) ?[]const u8 {

@@ -18,7 +18,7 @@ pub fn discover(self: *Linux, tc: *Toolchain) !void {
     try self.findPaths(tc);
 }
 
-fn buildExtraOpts(self: *Linux, tc: *Toolchain) !void {
+fn buildExtraOpts(self: *Linux, tc: *const Toolchain) !void {
     const gpa = tc.driver.comp.gpa;
     const target = tc.getTarget();
     const isAndroid = target.isAndroid();
@@ -70,7 +70,7 @@ fn findPaths(self: *Linux, tc: *Toolchain) !void {
     if (target.isAndroid()) {
         // TODO
     }
-    
+
     try tc.addPathIfExists(&.{ sysroot, "/usr", "lib", multiarchTriple }, .file);
     try tc.addPathIfExists(&.{ sysroot, "/usr", "lib", "..", osLibDir }, .file);
     try tc.addPathIfExists(&.{ sysroot, "/lib" }, .file);
@@ -195,7 +195,9 @@ pub fn buildLinkerArgs(self: *const Linux, tc: *const Toolchain, argv: *std.Arra
 
     // TODO add -L opts
     // TODO add -u opts
-    // TODO add filepath lib args
+
+    try tc.addFilePathLibArgs(argv);
+
     // TODO handle LTO
 
     try argv.appendSlice(d.linkObjects.items);
