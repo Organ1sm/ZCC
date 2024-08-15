@@ -74,7 +74,9 @@ pub fn discover(self: *Toolchain) !void {
 pub fn deinit(self: *Toolchain) void {
     const gpa = self.driver.comp.gpa;
     self.inner.deinit(gpa);
+    self.libaryPaths.deinit(gpa);
     self.programPaths.deinit(gpa);
+    self.filePaths.deinit(gpa);
 }
 
 /// Write linker path to `buf` and return a slice of it
@@ -252,8 +254,8 @@ const PathKind = enum {
 /// Join `components` into a path. If the path exists, dupe it into the toolchain arena and
 /// add it to the specified path list.
 pub fn addPathIfExists(self: *Toolchain, components: []const []const u8, destKind: PathKind) !void {
-    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
-    var fib = std.heap.FixedBufferAllocator.init(&path_buf);
+    var pathBuffer: [std.fs.max_path_bytes]u8 = undefined;
+    var fib = std.heap.FixedBufferAllocator.init(&pathBuffer);
 
     const candidate = try std.fs.path.join(fib.allocator(), components);
 

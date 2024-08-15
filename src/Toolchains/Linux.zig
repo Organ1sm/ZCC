@@ -65,12 +65,16 @@ fn findPaths(self: *Linux, tc: *Toolchain) !void {
     const multiarchTriple = getMultiarchTriple(target);
 
     try tc.addPathIfExists(&.{ sysroot, "/lib", multiarchTriple }, .file);
-    try tc.addPathIfExists(&.{ sysroot, "/lib/..", osLibDir }, .file);
-    try tc.addPathIfExists(&.{ sysroot, "/usr/lib", multiarchTriple }, .file);
-    try tc.addPathIfExists(&.{ sysroot, "/usr/lib/..", osLibDir }, .file);
+    try tc.addPathIfExists(&.{ sysroot, "/lib", "..", osLibDir }, .file);
 
+    if (target.isAndroid()) {
+        // TODO
+    }
+    
+    try tc.addPathIfExists(&.{ sysroot, "/usr", "lib", multiarchTriple }, .file);
+    try tc.addPathIfExists(&.{ sysroot, "/usr", "lib", "..", osLibDir }, .file);
     try tc.addPathIfExists(&.{ sysroot, "/lib" }, .file);
-    try tc.addPathIfExists(&.{ sysroot, "/usr/lib" }, .file);
+    try tc.addPathIfExists(&.{ sysroot, "/usr", "lib" }, .file);
 }
 
 pub fn deinit(self: *Linux, allocator: std.mem.Allocator) void {
