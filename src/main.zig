@@ -96,4 +96,5 @@ test "simple test" {
     _ = @import("Parser/InitList.zig");
     _ = @import("AST/AST.zig");
     _ = @import("AST/Type.zig");
+    _ = @import("Toolchains/GCCVersion.zig");
 }
