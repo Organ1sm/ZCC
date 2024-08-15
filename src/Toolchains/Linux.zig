@@ -4,6 +4,7 @@ const Compilation = @import("../Basic/Compilation.zig");
 const Toolchain = @import("../Toolchain.zig");
 const Driver = @import("../Driver.zig");
 const Distro = @import("../Driver/Distro.zig");
+const GCCDetector = @import("../Driver/GCCDetector.zig");
 const TargetUtil = @import("../Basic/Target.zig");
 const SystemDefaults = @import("system-defaults");
 
@@ -11,9 +12,14 @@ const Linux = @This();
 
 distro: Distro.Tag = .unknown,
 extraOpts: std.ArrayListUnmanaged([]const u8) = .{},
+gccDetector: GCCDetector = .{},
 
 pub fn discover(self: *Linux, tc: *Toolchain) !void {
     self.distro = Distro.detect(tc.getTarget());
+    try self.gccDetector.discover(tc);
+    tc.selectedMultilib = self.gccDetector.selected;
+
+    try self.gccDetector.appendToolPath(tc);
     try self.buildExtraOpts(tc);
     try self.findPaths(tc);
 }
@@ -55,14 +61,50 @@ fn buildExtraOpts(self: *Linux, tc: *const Toolchain) !void {
         try self.extraOpts.append(gpa, "--build-id");
 }
 
+fn addMultiLibPaths(self: *Linux, tc: *Toolchain, sysroot: []const u8, osLibDir: []const u8) !void {
+    if (!self.gccDetector.isValid) return;
+    const gccTriple = self.gccDetector.gccTriple;
+    const libPath = self.gccDetector.parentLibPath;
+
+    // Add lib/gcc/$triple/$version, with an optional /multilib suffix.
+    try tc.addPathIfExists(&.{ self.gccDetector.installPath, tc.selectedMultilib.gccSuffix }, .file);
+
+    // Add lib/gcc/$triple/$libdir
+    // For GCC built with --enable-version-specific-runtime-libs.
+    try tc.addPathIfExists(&.{ self.gccDetector.installPath, "..", osLibDir }, .file);
+
+    try tc.addPathIfExists(&.{ libPath, "..", gccTriple, "lib", "..", osLibDir, tc.selectedMultilib.osSuffix }, .file);
+
+    // If the GCC installation we found is inside of the sysroot, we want to
+    // prefer libraries installed in the parent prefix of the GCC installation.
+    // It is important to *not* use these paths when the GCC installation is
+    // outside of the system root as that can pick up unintended libraries.
+    // This usually happens when there is an external cross compiler on the
+    // host system, and a more minimal sysroot available that is the target of
+    // the cross. Note that GCC does include some of these directories in some
+    // configurations but this seems somewhere between questionable and simply
+    // a bug.
+    if (mem.startsWith(u8, libPath, sysroot))
+        try tc.addPathIfExists(&.{ libPath, "..", osLibDir }, .file);
+}
+
+fn addMultiArchPaths(self: *Linux, tc: *Toolchain) !void {
+    if (!self.gccDetector.isValid) return;
+    const libPath = self.gccDetector.parentLibPath;
+    const gccTriple = self.gccDetector.gccTriple;
+    const multilib = self.gccDetector.selected;
+    try tc.addPathIfExists(&.{ libPath, "..", gccTriple, "lib", multilib.osSuffix }, .file);
+}
+
 /// TODO: Very incomplete
 fn findPaths(self: *Linux, tc: *Toolchain) !void {
-    _ = self;
     const target = tc.getTarget();
     const sysroot = tc.getSysroot();
 
     const osLibDir = getOSLibDir(target);
     const multiarchTriple = getMultiarchTriple(target);
+
+    try self.addMultiLibPaths(tc, sysroot, osLibDir);
 
     try tc.addPathIfExists(&.{ sysroot, "/lib", multiarchTriple }, .file);
     try tc.addPathIfExists(&.{ sysroot, "/lib", "..", osLibDir }, .file);

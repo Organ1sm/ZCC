@@ -10,11 +10,13 @@ pub fn build(b: *std.Build) !void {
     const SkipRecordTests = b.option(bool, "skip-record-tests", "Skip record layout tests") orelse false;
     const DefaultLinker = b.option([]const u8, "default-linker", "Default linker zcc will use if none is supplied via -fuse-ld") orelse "ld";
     const DefaultSysroot = b.option([]const u8, "default-sysroot", "Default <path> to all compiler invocations for --sysroot=<path>.") orelse "";
+    const GCCInstallPrefix = b.option([]const u8, "gcc-install-prefix", "Directory where gcc is installed.") orelse "";
 
     const systemDefaults = b.addOptions();
     systemDefaults.addOption(bool, "enableLinkerBuildId", EnableLinkerBuildId);
     systemDefaults.addOption([]const u8, "linker", DefaultLinker);
     systemDefaults.addOption([]const u8, "sysroot", DefaultSysroot);
+    systemDefaults.addOption([]const u8, "gccInstallPrefix", GCCInstallPrefix);
 
     const depsModule = b.createModule(.{ .root_source_file = b.path("deps/lib.zig") });
     const zccModule = b.addModule("zcc", .{

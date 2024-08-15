@@ -5,6 +5,7 @@ const Compilation = @import("Basic/Compilation.zig");
 const util = @import("Basic/Util.zig");
 const SystemDefaults = @import("system-defaults");
 const Linux = @import("Toolchains/Linux.zig");
+const Multilib = @import("Driver/Multilib.zig");
 
 const Toolchain = @This();
 
@@ -33,6 +34,8 @@ filePaths: PathList = .{},
 
 /// The list of toolchain specific path prefixes to search for programs.
 programPaths: PathList = .{},
+
+selectedMultilib: Multilib = .{},
 
 inner: Inner = .{ .unknown = {} },
 
@@ -286,6 +289,18 @@ pub fn addPathIfExists(self: *Toolchain, components: []const []const u8, destKin
         };
         try dest.append(self.driver.comp.gpa, duped);
     }
+}
+
+/// Join `components` using the toolchain arena and add the resulting path to `dest_kind`. Does not check
+/// whether the path actually exists
+pub fn addPathFromComponents(self: *Toolchain, components: []const []const u8, destKind: PathKind) !void {
+    const fullPath = try std.fs.path.join(self.arena, components);
+    const dest = switch (destKind) {
+        .library => &self.libaryPaths,
+        .file => &self.filePaths,
+        .program => &self.programPaths,
+    };
+    try dest.append(self.driver.comp.gpa, fullPath);
 }
 
 pub fn buildLinkerArgs(self: *Toolchain, argv: *std.ArrayList([]const u8)) !void {
