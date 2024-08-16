@@ -6,6 +6,7 @@ const util = @import("Basic/Util.zig");
 const SystemDefaults = @import("system-defaults");
 const Linux = @import("Toolchains/Linux.zig");
 const Multilib = @import("Driver/Multilib.zig");
+const Filesystem = @import("Driver/Filesystem.zig").Filesystem;
 
 const Toolchain = @This();
 
@@ -23,6 +24,7 @@ const Inner = union(enum) {
     }
 };
 
+filesystem: Filesystem = .{ .real = {} },
 driver: *Driver,
 arena: mem.Allocator,
 
@@ -97,7 +99,7 @@ pub fn getLinkerPath(self: *const Toolchain, buf: []u8) ![]const u8 {
             if (std.fs.path.dirname(path) == null)
                 path = self.getProgramPath(path, buf);
 
-            if (util.canExecute(path))
+            if (self.filesystem.canExecute(path))
                 return path;
         }
         return self.driver.fatal(
@@ -122,7 +124,7 @@ pub fn getLinkerPath(self: *const Toolchain, buf: []u8) ![]const u8 {
         try self.driver.comp.addDiagnostic(.{ .tag = .fuse_ld_path }, &.{});
 
     if (std.fs.path.isAbsolute(useLinker)) {
-        if (util.canExecute(useLinker))
+        if (self.filesystem.canExecute(useLinker))
             return useLinker;
     } else {
         var linkerName = try std.ArrayList(u8).initCapacity(self.driver.comp.gpa, 5 + useLinker.len); // "ld64." ++ use_linker
@@ -135,7 +137,7 @@ pub fn getLinkerPath(self: *const Toolchain, buf: []u8) ![]const u8 {
 
         linkerName.appendSliceAssumeCapacity(useLinker);
         const linkerPath = self.getProgramPath(linkerName.items, buf);
-        if (util.canExecute(linkerPath)) {
+        if (self.filesystem.canExecute(linkerPath)) {
             return linkerPath;
         }
     }
@@ -199,12 +201,12 @@ fn getProgramPath(tc: *const Toolchain, name: []const u8, buf: []u8) []const u8 
             defer fib.reset();
 
             const candidate = std.fs.path.join(fib.allocator(), &.{ programPath, toolName }) catch continue;
-            if (util.canExecute(candidate) and candidate.len <= buf.len) {
+            if (tc.filesystem.canExecute(candidate) and candidate.len <= buf.len) {
                 @memcpy(buf[0..candidate.len], candidate);
                 return buf[0..candidate.len];
             }
         }
-        return util.findProgramByName(tc.driver.comp.gpa, name, buf) orelse continue;
+        return tc.filesystem.findProgramByName(tc.driver.comp.gpa, name, buf) orelse continue;
     }
 
     @memcpy(buf[0..name.len], name);
@@ -228,16 +230,16 @@ pub fn getFilePath(tc: *const Toolchain, name: []const u8) ![]const u8 {
     // todo check compiler RT path
 
     const candidate = try std.fs.path.join(allocator, &.{ tc.driver.zccDir, "..", name });
-    if (util.exists(candidate))
+    if (tc.filesystem.exists(candidate))
         return tc.arena.dupe(u8, candidate);
 
     fib.reset();
-    if (searchPaths(allocator, sysroot, tc.libaryPaths.items, name)) |path| {
+    if (tc.searchPaths(allocator, sysroot, tc.libaryPaths.items, name)) |path| {
         return tc.arena.dupe(u8, path);
     }
 
     fib.reset();
-    if (searchPaths(allocator, sysroot, tc.filePaths.items, name)) |path| {
+    if (tc.searchPaths(allocator, sysroot, tc.filePaths.items, name)) |path| {
         return try tc.arena.dupe(u8, path);
     }
 
@@ -247,6 +249,7 @@ pub fn getFilePath(tc: *const Toolchain, name: []const u8) ![]const u8 {
 /// Search a list of `path_prefixes` for the existence `name`
 /// Assumes that `fba` is a fixed-buffer allocator, so does not free joined path candidates
 fn searchPaths(
+    tc: *const Toolchain,
     fba: mem.Allocator,
     sysroot: []const u8,
     pathPrefixes: []const []const u8,
@@ -260,7 +263,7 @@ fn searchPaths(
         else
             std.fs.path.join(fba, &.{ path, name }) catch continue;
 
-        if (util.exists(candidate))
+        if (tc.filesystem.exists(candidate))
             return candidate;
     }
     return null;
@@ -280,7 +283,7 @@ pub fn addPathIfExists(self: *Toolchain, components: []const []const u8, destKin
 
     const candidate = try std.fs.path.join(fib.allocator(), components);
 
-    if (util.exists(candidate)) {
+    if (self.filesystem.exists(candidate)) {
         const duped = try self.arena.dupe(u8, candidate);
         const dest = switch (destKind) {
             .library => &self.libaryPaths,
@@ -303,6 +306,10 @@ pub fn addPathFromComponents(self: *Toolchain, components: []const []const u8, d
     try dest.append(self.driver.comp.gpa, fullPath);
 }
 
+/// Add linker args to `argv`. Does not add path to linker executable as first item;
+/// that must be handled separately
+/// Items added to `argv` will be string literals or owned by `tc.arena`
+/// so they must not be individually freed
 pub fn buildLinkerArgs(self: *Toolchain, argv: *std.ArrayList([]const u8)) !void {
     return switch (self.inner) {
         .linux => |*linux| linux.buildLinkerArgs(self, argv),

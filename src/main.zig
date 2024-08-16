@@ -89,7 +89,8 @@ test "simple test" {
     _ = @import("Basic/Compilation.zig");
     _ = @import("Basic/Target.zig");
     _ = @import("Driver/Distro.zig");
-    _ = @import("Driver//GCCVersion.zig");
+    _ = @import("Driver/GCCVersion.zig");
+    _ = @import("Driver/Filesystem.zig");
     _ = @import("Lexer/Lexer.zig");
     _ = @import("Lexer/Preprocessor.zig");
     _ = @import("Lexer/Pragma.zig");

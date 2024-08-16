@@ -1,5 +1,6 @@
 const std = @import("std");
 const util = @import("../Basic/Util.zig");
+const Filesystem = @import("Filesystem.zig").Filesystem;
 
 pub const Flags = std.BoundedArray([]const u8, 6);
 
@@ -8,10 +9,10 @@ pub const Detected = struct {
     selected: Multilib = .{},
     biarchSibling: ?Multilib = null,
 
-    pub fn filter(self: *Detected, multilibFilter: Filter) void {
+    pub fn filter(self: *Detected, multilibFilter: Filter, fs: Filesystem) void {
         var foundCount: usize = 0;
         for (self.multilibs.constSlice()) |multilib| {
-            if (multilibFilter.exists(multilib)) {
+            if (multilibFilter.exists(multilib, fs)) {
                 self.multilibs.set(foundCount, multilib);
                 foundCount += 1;
             }
@@ -49,8 +50,9 @@ pub const Detected = struct {
 pub const Filter = struct {
     base: [2][]const u8,
     file: []const u8,
-    pub fn exists(self: Filter, m: Multilib) bool {
-        return util.joinedExists(&.{ self.base[0], self.base[1], m.gccSuffix, self.file });
+
+    pub fn exists(self: Filter, m: Multilib, fs: Filesystem) bool {
+        return fs.joinedExists(&.{ self.base[0], self.base[1], m.gccSuffix, self.file });
     }
 };
 

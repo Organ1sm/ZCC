@@ -15,7 +15,7 @@ extraOpts: std.ArrayListUnmanaged([]const u8) = .{},
 gccDetector: GCCDetector = .{},
 
 pub fn discover(self: *Linux, tc: *Toolchain) !void {
-    self.distro = Distro.detect(tc.getTarget());
+    self.distro = Distro.detect(tc.getTarget(), tc.filesystem);
     try self.gccDetector.discover(tc);
     tc.selectedMultilib = self.gccDetector.selected;
 
@@ -155,43 +155,34 @@ pub fn getDefaultLinker(self: *const Linux, target: std.Target) []const u8 {
 
 pub fn buildLinkerArgs(self: *const Linux, tc: *const Toolchain, argv: *std.ArrayList([]const u8)) Compilation.Error!void {
     const d = tc.driver;
+    const target = tc.getTarget();
 
     const isPie = self.getPIE(d);
     const isStaticPie = try self.getStaticPIE(d);
     const isStatic = self.getStatic(d);
-    const isAndroid = d.comp.target.isAndroid();
-    const isIamcu = d.comp.target.os.tag == .elfiamcu;
+    const isAndroid = target.isAndroid();
+    const isIamcu = target.os.tag == .elfiamcu;
 
     if (isPie) try argv.append("-pie");
 
-    if (isStaticPie) {
-        try argv.ensureUnusedCapacity(5);
-        argv.appendAssumeCapacity("-static");
-        argv.appendAssumeCapacity("-pie");
-        argv.appendAssumeCapacity("--no-dynamic-linker");
-        argv.appendAssumeCapacity("-z");
-        argv.appendAssumeCapacity("text");
-    }
+    if (isStaticPie)
+        try argv.appendSlice(&.{ "-static", "-pie", "--no-dynamic-linker", "-z", "text" });
 
     if (d.rdynamic) try argv.append("-export-dynamic");
     if (d.strip) try argv.append("-s");
 
-    try argv.ensureUnusedCapacity(self.extraOpts.items.len);
-    argv.appendSliceAssumeCapacity(self.extraOpts.items);
-
+    try argv.appendSlice(self.extraOpts.items);
     try argv.append("--eh-frame-hdr");
 
     // Todo: Driver should parse `-EL`/`-EB` for arm to set endianness for arm targets
-    if (TargetUtil.ldEmulationOption(d.comp.target, null)) |emulation| {
-        try argv.ensureUnusedCapacity(2);
-        argv.appendAssumeCapacity("-m");
-        argv.appendAssumeCapacity(emulation);
+    if (TargetUtil.ldEmulationOption(target, null)) |emulation| {
+        try argv.appendSlice(&.{ "-m", emulation });
     } else {
         try d.err("Unknown target triple");
         return;
     }
 
-    if (d.comp.target.cpu.arch.isRISCV())
+    if (target.cpu.arch.isRISCV())
         try argv.append("-X");
 
     if (d.shared)
@@ -204,21 +195,17 @@ pub fn buildLinkerArgs(self: *const Linux, tc: *const Toolchain, argv: *std.Arra
             try argv.append("-export-dynamic");
 
         if (!d.shared and !isStaticPie and !d.relocatable) {
-            const dynamic_linker = d.comp.target.standardDynamicLinkerPath();
+            const dynamicLinker = target.standardDynamicLinkerPath();
             // todo: check for --dyld-prefix
-            if (dynamic_linker.get()) |path| {
-                try argv.ensureUnusedCapacity(2);
-                argv.appendAssumeCapacity("-dynamic-linker");
-                argv.appendAssumeCapacity(try tc.arena.dupe(u8, path));
+            if (dynamicLinker.get()) |path| {
+                try argv.appendSlice(&.{ "-dynamic-linker", try tc.arena.dupe(u8, path) });
             } else {
                 try d.err("Could not find dynamic linker path");
             }
         }
     }
 
-    try argv.ensureUnusedCapacity(2);
-    argv.appendAssumeCapacity("-o");
-    argv.appendAssumeCapacity(d.outputName orelse "a.out");
+    try argv.appendSlice(&.{ "-o", d.outputName orelse "a.out" });
 
     if (!d.nostdlib and !d.nostartfiles and !d.relocatable) {
         if (!isAndroid and !isIamcu) {

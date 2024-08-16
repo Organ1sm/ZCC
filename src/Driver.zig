@@ -60,6 +60,7 @@ nostdlib: bool = false,
 pie: ?bool = null,
 rdynamic: bool = false,
 relocatable: bool = false,
+rtlib: ?[]const u8 = null,
 shared: bool = false,
 static: bool = false,
 staticPie: bool = false,
@@ -113,6 +114,7 @@ const usage =
     \\                          Select which C compiler to emulate (default clang)
     \\  -o <file>               Write output to <file>
     \\  -pedantic               Warn on language extensions
+    \\  --rtlib=<arg>           Compiler runtime library to use (libgcc or compiler-rt)
     \\  -std=<standard>         Specify language standard
     \\  -S, --assemble          Only run preprocess and compilation step
     \\ --target=<value>         Generate code for the given target
@@ -296,6 +298,12 @@ pub fn parseArgs(
                 d.sysroot = sysroot;
             } else if (std.mem.eql(u8, arg, "-pedantic")) {
                 d.comp.diagnostics.options.pedantic = .warning;
+            } else if (option(arg, "--rtlib=")) |rtlib| {
+                if (mem.eql(u8, rtlib, "compiler-rt") or mem.eql(u8, rtlib, "libgcc") or mem.eql(u8, rtlib, "platform")) {
+                    d.rtlib = rtlib;
+                } else {
+                    try d.comp.addDiagnostic(.{ .tag = .invalid_rtlib, .extra = .{ .str = rtlib } }, &.{});
+                }
             } else if (std.mem.eql(u8, arg, "-Wall")) {
                 d.comp.diagnostics.setAll(.warning);
             } else if (std.mem.eql(u8, arg, "-Werror")) {

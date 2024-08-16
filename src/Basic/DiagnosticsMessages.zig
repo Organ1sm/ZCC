@@ -2178,3 +2178,8 @@ pub const fuse_ld_path = struct {
     pub const kind = .off;
     pub const opt = "fuse-ld-path";
 };
+pub const invalid_rtlib = struct {
+    pub const msg = "invalid runtime library name '{s}'";
+    pub const kind = .@"error";
+    pub const extra = .str;
+};
