@@ -4,6 +4,7 @@ const Driver = @import("Driver.zig");
 const Compilation = @import("Basic/Compilation.zig");
 const util = @import("Basic/Util.zig");
 const SystemDefaults = @import("system-defaults");
+const TargetUtil = @import("Basic/Target.zig");
 const Linux = @import("Toolchains/Linux.zig");
 const Multilib = @import("Driver/Multilib.zig");
 const Filesystem = @import("Driver/Filesystem.zig").Filesystem;
@@ -21,6 +22,18 @@ pub const FileKind = enum {
     object,
     static,
     shared,
+};
+
+pub const LibGCCKind = enum {
+    unspecified,
+    static,
+    shared,
+};
+
+pub const UnwindLibKind = enum {
+    none,
+    compiler_rt,
+    libgcc,
 };
 
 const Inner = union(enum) {
@@ -334,7 +347,7 @@ fn getDefaultRuntimeLibKind(self: *const Toolchain) RuntimeLibKind {
     return .libgcc;
 }
 
-pub fn getRuntimeLibType(self: *const Toolchain) RuntimeLibKind {
+pub fn getRuntimeLibKind(self: *const Toolchain) RuntimeLibKind {
     const libname = self.driver.rtlib orelse SystemDefaults.rtlib;
 
     if (mem.eql(u8, libname, "compiler-rt"))
@@ -351,4 +364,123 @@ pub fn getCompilerRt(tc: *const Toolchain, component: []const u8, fileKind: File
     _ = component;
     _ = tc;
     return "";
+}
+
+fn getLibGCCKind(tc: *const Toolchain) LibGCCKind {
+    const target = tc.getTarget();
+
+    if (tc.driver.staticLibgcc or tc.driver.static or tc.driver.staticPie or target.isAndroid())
+        return .static;
+
+    if (tc.driver.sharedLibgcc)
+        return .shared;
+
+    return .unspecified;
+}
+
+fn getUnwindLibKind(tc: *const Toolchain) !UnwindLibKind {
+    const libname = tc.driver.unwindlib orelse SystemDefaults.unwindlib;
+    if (libname.len == 0 or mem.eql(u8, libname, "platform")) {
+        switch (tc.getRuntimeLibKind()) {
+            .compiler_rt => {
+                const target = tc.getTarget();
+                if (target.isAndroid() or target.os.tag == .aix)
+                    return .compiler_rt
+                else
+                    return .none;
+            },
+            .libgcc => return .libgcc,
+        }
+    } else if (mem.eql(u8, libname, "none")) {
+        return .none;
+    } else if (mem.eql(u8, libname, "libgcc")) {
+        return .libgcc;
+    } else if (mem.eql(u8, libname, "libunwind")) {
+        if (tc.getRuntimeLibKind() == .libgcc)
+            try tc.driver.comp.addDiagnostic(.{ .tag = .incompatible_unwindlib }, &.{});
+
+        return .compiler_rt;
+    } else {
+        unreachable;
+    }
+}
+
+fn getAsNeededOption(isSolaris: bool, needed: bool) []const u8 {
+    if (isSolaris) {
+        return if (needed) "-zignore" else "-zrecord";
+    } else {
+        return if (needed) "--as-needed" else "--no-as-needed";
+    }
+}
+
+fn addLibGCC(tc: *const Toolchain, argv: *std.ArrayList([]const u8)) !void {
+    const libgccKind = tc.getLibGCCKind();
+    if (libgccKind == .static or libgccKind == .unspecified)
+        try argv.append("-lgcc");
+
+    try tc.addUnwindLibrary(argv);
+
+    if (libgccKind == .shared)
+        try argv.append("-lgcc");
+}
+
+fn addUnwindLibrary(tc: *const Toolchain, argv: *std.ArrayList([]const u8)) !void {
+    const unw = try tc.getUnwindLibKind();
+    const target = tc.getTarget();
+    if ((target.isAndroid() and unw == .libgcc) or
+        target.os.tag == .elfiamcu or
+        target.ofmt == .wasm or
+        TargetUtil.isWindowsMSVCEnvironment(target) or
+        unw == .none) return;
+
+    const lgk = tc.getLibGCCKind();
+    const asNeeded = (lgk == .unspecified) and !target.isAndroid() and !TargetUtil.isCygwinMinGW(target) and target.os.tag != .aix;
+    if (asNeeded)
+        try argv.append(getAsNeededOption(target.os.tag == .solaris, true));
+
+    switch (unw) {
+        .none => return,
+        .libgcc => if (lgk == .static) try argv.append("-lgcc_eh") else try argv.append("-lgcc_s"),
+        .compiler_rt => if (target.os.tag == .aix) {
+            if (lgk != .static)
+                try argv.append("-lunwind");
+        } else if (lgk == .static) {
+            try argv.append("-l:libunwind.a");
+        } else if (lgk == .shared) {
+            if (TargetUtil.isCygwinMinGW(target))
+                try argv.append("-l:libunwind.dll.a")
+            else
+                try argv.append("-l:libunwind.so");
+        } else {
+            try argv.append("-lunwind");
+        },
+    }
+
+    if (asNeeded)
+        try argv.append(getAsNeededOption(target.os.tag == .solaris, false));
+}
+
+pub fn addRuntimeLibs(tc: *const Toolchain, argv: *std.ArrayList([]const u8)) !void {
+    const target = tc.getTarget();
+    const rlt = tc.getRuntimeLibKind();
+    switch (rlt) {
+        .compiler_rt => {
+            // TODO
+        },
+        .libgcc => {
+            if (TargetUtil.isKnownWindowsMSVCEnvironment(target)) {
+                const rtlibStr = tc.driver.rtlib orelse SystemDefaults.rtlib;
+                if (!mem.eql(u8, rtlibStr, "platform"))
+                    try tc.driver.comp.addDiagnostic(
+                        .{ .tag = .unsupported_rtlib_gcc, .extra = .{ .str = "MSVC" } },
+                        &.{},
+                    );
+            } else {
+                try tc.addLibGCC(argv);
+            }
+        },
+    }
+
+    if (target.isAndroid() and !tc.driver.static and !tc.driver.staticPie)
+        try argv.append("-ldl");
 }

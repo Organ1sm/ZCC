@@ -62,9 +62,12 @@ rdynamic: bool = false,
 relocatable: bool = false,
 rtlib: ?[]const u8 = null,
 shared: bool = false,
+sharedLibgcc: bool = false,
 static: bool = false,
+staticLibgcc: bool = false,
 staticPie: bool = false,
 strip: bool = false,
+unwindlib: ?[]const u8 = null,
 
 pub fn deinit(d: *Driver) void {
     for (d.linkObjects.items[d.linkObjects.items.len - d.tempFileCount ..]) |obj| {
@@ -137,9 +140,11 @@ const usage =
     \\  -r                      Produce a relocatable object as output.
     \\  -rdynamic               Pass the flag -export-dynamic to the ELF linker, on targets that support it.
     \\  -s                      Remove all symbol table and relocation information from the executable.
-    \\  -shared                 Produce a shared object which can then be linked with other objects to form an executable.
+    \\  -shared-libgcc          On systems that provide libgcc as a shared library, force the use of the shared version
     \\  -static                 On systems that support dynamic linking, this overrides -pie and prevents linking with the shared libraries.
+    \\  -static-libgcc          On systems that provide libgcc as a shared library, force the use of the static version
     \\  -static-pie             Produce a static position independent executable on targets that support it.
+    \\  --unwindlib=<arg>       Unwind library to use ("none", "libgcc", or "libunwind") If not specified, will match runtime library
     \\
     \\Debug options:
     \\  -dump-pp               Dump preprocessor state
@@ -356,8 +361,12 @@ pub fn parseArgs(
                 d.relocatable = true;
             } else if (mem.eql(u8, arg, "-shared")) {
                 d.shared = true;
+            } else if (mem.eql(u8, arg, "-shared-libgcc")) {
+                d.sharedLibgcc = true;
             } else if (mem.eql(u8, arg, "-static")) {
                 d.static = true;
+            } else if (mem.eql(u8, arg, "-static-libgcc")) {
+                d.staticLibgcc = true;
             } else if (mem.eql(u8, arg, "-static-pie")) {
                 d.staticPie = true;
             } else if (mem.eql(u8, arg, "-pie")) {
@@ -376,6 +385,16 @@ pub fn parseArgs(
                 d.nostdlib = true;
             } else if (mem.eql(u8, arg, "-nostartfiles")) {
                 d.nostartfiles = true;
+            } else if (option(arg, "--unwindlib=")) |unwindlib| {
+                const validUnwindlibs: [5][]const u8 = .{ "", "none", "platform", "libunwind", "libgcc" };
+                for (validUnwindlibs) |name| {
+                    if (mem.eql(u8, name, unwindlib)) {
+                        d.unwindlib = unwindlib;
+                        break;
+                    }
+                } else {
+                    try d.comp.addDiagnostic(.{ .tag = .invalid_unwindlib, .extra = .{ .str = unwindlib } }, &.{});
+                }
             } else {
                 try d.comp.addDiagnostic(.{ .tag = .cli_unknown_arg, .extra = .{ .str = arg } }, &.{});
             }

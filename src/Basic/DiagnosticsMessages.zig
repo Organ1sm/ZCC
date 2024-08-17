@@ -2183,3 +2183,17 @@ pub const invalid_rtlib = struct {
     pub const kind = .@"error";
     pub const extra = .str;
 };
+pub const unsupported_rtlib_gcc = struct {
+    pub const msg = "unsupported runtime library 'libgcc' for platform '{s}'";
+    pub const kind = .@"error";
+    pub const extra = .str;
+};
+pub const invalid_unwindlib = struct {
+    pub const msg = "invalid unwind library name '{s}'";
+    pub const kind = .@"error";
+    pub const extra = .str;
+};
+pub const incompatible_unwindlib = struct {
+    pub const msg = "--rtlib=libgcc requires --unwindlib=libgcc";
+    pub const kind = .@"error";
+};

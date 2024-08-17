@@ -151,6 +151,18 @@ pub fn isTlsSupported(target: std.Target) bool {
     };
 }
 
+pub fn isKnownWindowsMSVCEnvironment(target: std.Target) bool {
+    return target.os.tag == .windows and target.abi == .msvc;
+}
+
+pub fn isWindowsMSVCEnvironment(target: std.Target) bool {
+    return target.os.tag == .windows and (target.abi == .msvc or target.abi == .none);
+}
+
+pub fn isCygwinMinGW(target: std.Target) bool {
+    return target.os.tag == .windows and (target.abi == .gnu or target.abi == .cygnus);
+}
+
 /// Determines whether to ignore the alignment requirements for non-zero-sized
 /// bitfield types for the given target architecture and operating system.
 pub fn ignoreNonZeroSizedBitfieldTypeAlignment(target: std.Target) bool {

@@ -11,6 +11,8 @@ pub fn build(b: *std.Build) !void {
     const DefaultLinker = b.option([]const u8, "default-linker", "Default linker zcc will use if none is supplied via -fuse-ld") orelse "ld";
     const DefaultSysroot = b.option([]const u8, "default-sysroot", "Default <path> to all compiler invocations for --sysroot=<path>.") orelse "";
     const DefaultRtlib = b.option([]const u8, "default-rtlib", "Default compiler runtime library if --rtlib is not specified") orelse "";
+    const DefaultUnwindlib = b.option([]const u8, "default-unwindlib", "Default unwind library to use (\"none\" \"libgcc\" or \"libunwind\", empty to match runtime library.)") orelse
+        if (std.mem.eql(u8, DefaultRtlib, "libgcc")) "libgcc" else "";
     const GCCInstallPrefix = b.option([]const u8, "gcc-install-prefix", "Directory where gcc is installed.") orelse "";
 
     const systemDefaults = b.addOptions();
@@ -19,6 +21,7 @@ pub fn build(b: *std.Build) !void {
     systemDefaults.addOption([]const u8, "sysroot", DefaultSysroot);
     systemDefaults.addOption([]const u8, "gccInstallPrefix", GCCInstallPrefix);
     systemDefaults.addOption([]const u8, "rtlib", DefaultRtlib);
+    systemDefaults.addOption([]const u8, "unwindlib", DefaultUnwindlib);
 
     const depsModule = b.createModule(.{ .root_source_file = b.path("deps/lib.zig") });
     const zccModule = b.addModule("zcc", .{
