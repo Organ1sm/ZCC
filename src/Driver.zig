@@ -443,8 +443,6 @@ pub fn main(d: *Driver, tc: *Toolchain, args: [][]const u8) !void {
     if (try parseArgs(d, stdOut, macroBuffer.writer(), args))
         return;
 
-    try tc.discover();
-
     const linking = !(d.onlyPreprocess or d.onlySyntax or d.onlyCompile or d.onlyPreprocessAndCompile);
 
     if (d.inputs.items.len == 0) {
@@ -675,6 +673,8 @@ fn dumpLinkerArgs(items: []const []const u8) !void {
 }
 
 fn invokeLinker(d: *Driver, tc: *Toolchain) !void {
+    try tc.discover();
+
     var argv = std.ArrayList([]const u8).init(d.comp.gpa);
     defer argv.deinit();
 
