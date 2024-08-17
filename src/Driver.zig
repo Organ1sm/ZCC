@@ -665,6 +665,15 @@ fn processSource(
     }
 }
 
+fn dumpLinkerArgs(items: []const []const u8) !void {
+    const stdout = std.io.getStdOut().writer();
+    for (items, 0..) |item, i| {
+        if (i > 0) try stdout.writeByte(' ');
+        try stdout.print("\"{}\"", .{std.zig.fmtEscapes(item)});
+    }
+    try stdout.writeByte('\n');
+}
+
 fn invokeLinker(d: *Driver, tc: *Toolchain) !void {
     var argv = std.ArrayList([]const u8).init(d.comp.gpa);
     defer argv.deinit();
@@ -676,8 +685,8 @@ fn invokeLinker(d: *Driver, tc: *Toolchain) !void {
     try tc.buildLinkerArgs(&argv);
 
     if (d.dumpLinkerArgs) {
-        const stdout = std.io.getStdOut().writer();
-        try stdout.print("{s}\n", .{argv.items});
+        dumpLinkerArgs(argv.items) catch |er|
+            return d.fatal("unable to dump linker args: {s}", .{Util.errorDescription(er)});
     }
 
     var child = std.process.Child.init(argv.items, d.comp.gpa);
