@@ -65,21 +65,21 @@ selectedMultilib: Multilib = .{},
 
 inner: Inner = .{ .unknown = {} },
 
-pub fn getTarget(self: *const Toolchain) std.Target {
-    return self.driver.comp.target;
+pub fn getTarget(tc: *const Toolchain) std.Target {
+    return tc.driver.comp.target;
 }
 
-fn getDefaultLinker(self: *const Toolchain) []const u8 {
-    return switch (self.inner) {
-        .linux => |linux| linux.getDefaultLinker(self.getTarget()),
+fn getDefaultLinker(tc: *const Toolchain) []const u8 {
+    return switch (tc.inner) {
+        .linux => |linux| linux.getDefaultLinker(tc.getTarget()),
         .unknown => "ld",
     };
 }
 
 /// Call this after driver has finished parsing command line arguments to find the toolchain
-pub fn discover(self: *Toolchain) !void {
-    const target = self.getTarget();
-    self.inner = switch (target.os.tag) {
+pub fn discover(tc: *Toolchain) !void {
+    const target = tc.getTarget();
+    tc.inner = switch (target.os.tag) {
         .elfiamcu,
         .linux,
         => if (target.cpu.arch == .hexagon)
@@ -94,39 +94,39 @@ pub fn discover(self: *Toolchain) !void {
             .{ .linux = .{} },
         else => .{ .unknown = {} }, // TODO
     };
-    return switch (self.inner) {
-        .linux => |*linux| linux.discover(self),
+    return switch (tc.inner) {
+        .linux => |*linux| linux.discover(tc),
         .unknown => {},
     };
 }
 
-pub fn deinit(self: *Toolchain) void {
-    const gpa = self.driver.comp.gpa;
-    self.inner.deinit(gpa);
-    self.libaryPaths.deinit(gpa);
-    self.programPaths.deinit(gpa);
-    self.filePaths.deinit(gpa);
+pub fn deinit(tc: *Toolchain) void {
+    const gpa = tc.driver.comp.gpa;
+    tc.inner.deinit(gpa);
+    tc.libaryPaths.deinit(gpa);
+    tc.programPaths.deinit(gpa);
+    tc.filePaths.deinit(gpa);
 }
 
 /// Write linker path to `buf` and return a slice of it
-pub fn getLinkerPath(self: *const Toolchain, buf: []u8) ![]const u8 {
+pub fn getLinkerPath(tc: *const Toolchain, buf: []u8) ![]const u8 {
     // --ld-path= takes precedence over -fuse-ld= and specifies the executable
     // name. -B, COMPILER_PATH and PATH are consulted if the value does not
     // contain a path component separator.
     // -fuse-ld=lld can be used with --ld-path= to indicate that the binary
     // that --ld-path= points to is lld.
-    const useLinker = self.driver.useLinker orelse SystemDefaults.linker;
+    const useLinker = tc.driver.useLinker orelse SystemDefaults.linker;
 
-    if (self.driver.linkerPath) |ld_path| {
+    if (tc.driver.linkerPath) |ld_path| {
         var path = ld_path;
         if (path.len > 0) {
             if (std.fs.path.dirname(path) == null)
-                path = self.getProgramPath(path, buf);
+                path = tc.getProgramPath(path, buf);
 
-            if (self.filesystem.canExecute(path))
+            if (tc.filesystem.canExecute(path))
                 return path;
         }
-        return self.driver.fatal(
+        return tc.driver.fatal(
             "invalid linker name in argument '--ld-path={s}'",
             .{path},
         );
@@ -135,9 +135,9 @@ pub fn getLinkerPath(self: *const Toolchain, buf: []u8) ![]const u8 {
     // If we're passed -fuse-ld= with no argument, or with the argument ld,
     // then use whatever the default system linker is.
     if (useLinker.len == 0 or mem.eql(u8, useLinker, "ld")) {
-        const default = self.getDefaultLinker();
+        const default = tc.getDefaultLinker();
         if (std.fs.path.isAbsolute(default)) return default;
-        return self.getProgramPath(default, buf);
+        return tc.getProgramPath(default, buf);
     }
 
     // Extending -fuse-ld= to an absolute or relative path is unexpected. Checking
@@ -145,35 +145,35 @@ pub fn getLinkerPath(self: *const Toolchain, buf: []u8) ![]const u8 {
     // to a relative path is surprising. This is more complex due to priorities
     // among -B, COMPILER_PATH and PATH. --ld-path= should be used instead.
     if (mem.indexOfScalar(u8, useLinker, '/') != null)
-        try self.driver.comp.addDiagnostic(.{ .tag = .fuse_ld_path }, &.{});
+        try tc.driver.comp.addDiagnostic(.{ .tag = .fuse_ld_path }, &.{});
 
     if (std.fs.path.isAbsolute(useLinker)) {
-        if (self.filesystem.canExecute(useLinker))
+        if (tc.filesystem.canExecute(useLinker))
             return useLinker;
     } else {
-        var linkerName = try std.ArrayList(u8).initCapacity(self.driver.comp.gpa, 5 + useLinker.len); // "ld64." ++ use_linker
+        var linkerName = try std.ArrayList(u8).initCapacity(tc.driver.comp.gpa, 5 + useLinker.len); // "ld64." ++ use_linker
         defer linkerName.deinit();
 
-        if (self.getTarget().isDarwin())
+        if (tc.getTarget().isDarwin())
             linkerName.appendSliceAssumeCapacity("ld64.")
         else
             linkerName.appendSliceAssumeCapacity("ld.");
 
         linkerName.appendSliceAssumeCapacity(useLinker);
-        const linkerPath = self.getProgramPath(linkerName.items, buf);
-        if (self.filesystem.canExecute(linkerPath)) {
+        const linkerPath = tc.getProgramPath(linkerName.items, buf);
+        if (tc.filesystem.canExecute(linkerPath)) {
             return linkerPath;
         }
     }
 
-    if (self.driver.useLinker) |linker| {
-        return self.driver.fatal(
+    if (tc.driver.useLinker) |linker| {
+        return tc.driver.fatal(
             "invalid linker name in argument '-fuse-ld={s}'",
             .{linker},
         );
     }
-    const defaultLinker = self.getDefaultLinker();
-    return self.getProgramPath(defaultLinker, buf);
+    const defaultLinker = tc.getDefaultLinker();
+    return tc.getProgramPath(defaultLinker, buf);
 }
 
 /// If an explicit target is provided, also check the prefixed tool-specific name
@@ -301,61 +301,61 @@ const PathKind = enum {
 
 /// Join `components` into a path. If the path exists, dupe it into the toolchain arena and
 /// add it to the specified path list.
-pub fn addPathIfExists(self: *Toolchain, components: []const []const u8, destKind: PathKind) !void {
+pub fn addPathIfExists(tc: *Toolchain, components: []const []const u8, destKind: PathKind) !void {
     var pathBuffer: [std.fs.max_path_bytes]u8 = undefined;
     var fib = std.heap.FixedBufferAllocator.init(&pathBuffer);
 
     const candidate = try std.fs.path.join(fib.allocator(), components);
 
-    if (self.filesystem.exists(candidate)) {
-        const duped = try self.arena.dupe(u8, candidate);
+    if (tc.filesystem.exists(candidate)) {
+        const duped = try tc.arena.dupe(u8, candidate);
         const dest = switch (destKind) {
-            .library => &self.libaryPaths,
-            .file => &self.filePaths,
-            .program => &self.programPaths,
+            .library => &tc.libaryPaths,
+            .file => &tc.filePaths,
+            .program => &tc.programPaths,
         };
-        try dest.append(self.driver.comp.gpa, duped);
+        try dest.append(tc.driver.comp.gpa, duped);
     }
 }
 
 /// Join `components` using the toolchain arena and add the resulting path to `dest_kind`. Does not check
 /// whether the path actually exists
-pub fn addPathFromComponents(self: *Toolchain, components: []const []const u8, destKind: PathKind) !void {
-    const fullPath = try std.fs.path.join(self.arena, components);
+pub fn addPathFromComponents(tc: *Toolchain, components: []const []const u8, destKind: PathKind) !void {
+    const fullPath = try std.fs.path.join(tc.arena, components);
     const dest = switch (destKind) {
-        .library => &self.libaryPaths,
-        .file => &self.filePaths,
-        .program => &self.programPaths,
+        .library => &tc.libaryPaths,
+        .file => &tc.filePaths,
+        .program => &tc.programPaths,
     };
-    try dest.append(self.driver.comp.gpa, fullPath);
+    try dest.append(tc.driver.comp.gpa, fullPath);
 }
 
 /// Add linker args to `argv`. Does not add path to linker executable as first item;
 /// that must be handled separately
 /// Items added to `argv` will be string literals or owned by `tc.arena`
 /// so they must not be individually freed
-pub fn buildLinkerArgs(self: *Toolchain, argv: *std.ArrayList([]const u8)) !void {
-    return switch (self.inner) {
-        .linux => |*linux| linux.buildLinkerArgs(self, argv),
+pub fn buildLinkerArgs(tc: *Toolchain, argv: *std.ArrayList([]const u8)) !void {
+    return switch (tc.inner) {
+        .linux => |*linux| linux.buildLinkerArgs(tc, argv),
         .unknown => @panic("This toolchain does not support linking yet"),
     };
 }
 
-fn getDefaultRuntimeLibKind(self: *const Toolchain) RuntimeLibKind {
-    if (self.getTarget().isAndroid())
+fn getDefaultRuntimeLibKind(tc: *const Toolchain) RuntimeLibKind {
+    if (tc.getTarget().isAndroid())
         return .compiler_rt;
     return .libgcc;
 }
 
-pub fn getRuntimeLibKind(self: *const Toolchain) RuntimeLibKind {
-    const libname = self.driver.rtlib orelse SystemDefaults.rtlib;
+pub fn getRuntimeLibKind(tc: *const Toolchain) RuntimeLibKind {
+    const libname = tc.driver.rtlib orelse SystemDefaults.rtlib;
 
     if (mem.eql(u8, libname, "compiler-rt"))
         return .compiler_rt
     else if (mem.eql(u8, libname, "libgcc"))
         return .libgcc
     else
-        return self.getDefaultRuntimeLibKind();
+        return tc.getDefaultRuntimeLibKind();
 }
 
 /// TODO
