@@ -162,6 +162,8 @@ pub fn buildLinkerArgs(self: *const Linux, tc: *const Toolchain, argv: *std.Arra
     const isStatic = self.getStatic(d);
     const isAndroid = target.isAndroid();
     const isIamcu = target.os.tag == .elfiamcu;
+    const isVe = target.cpu.arch == .ve;
+    const hasCrtBeginEndFiles = target.abi != .none; // TODO: clang checks for MIPS vendor
 
     if (isPie) try argv.append("-pie");
 
@@ -220,6 +222,33 @@ pub fn buildLinkerArgs(self: *const Linux, tc: *const Toolchain, argv: *std.Arra
             }
             try argv.append(try tc.getFilePath("crti.o"));
         }
+
+        if (isVe)
+            try argv.appendSlice(&.{ "-z", "max-page-size=0x4000000" });
+
+        if (isIamcu) {
+            try argv.append(try tc.getFilePath("crt0.o"));
+        } else if (hasCrtBeginEndFiles) {
+            var path: []const u8 = "";
+            if (tc.getRuntimeLibType() == .compiler_rt and !isAndroid) {
+                const crtBegin = try tc.getCompilerRt("crtbegin", .object);
+                if (tc.filesystem.exists(crtBegin))
+                    path = crtBegin;
+            }
+
+            if (path.len == 0) {
+                const crtBegin = if (tc.driver.shared)
+                    if (isAndroid) "crtbegin_so.o" else "crtbeginS.o"
+                else if (isStatic)
+                    if (isAndroid) "crtbegin_static.o" else "crtbeginT.o"
+                else if (isPie or isStaticPie)
+                    if (isAndroid) "crtbegin_dynamic.o" else "crtbeginS.o"
+                else if (isAndroid) "crtbegin_dynamic.o" else "crtbegin.o";
+
+                path = try tc.getFilePath(crtBegin);
+            }
+            try argv.append(path);
+        }
     }
 
     // TODO add -L opts
@@ -244,18 +273,36 @@ pub fn buildLinkerArgs(self: *const Linux, tc: *const Toolchain, argv: *std.Arra
                 try argv.append("-lgloss");
 
             if (isStatic or isStaticPie)
-                try argv.append("--end-group");
-
-            if (isIamcu) {
-                try argv.ensureUnusedCapacity(3);
-                argv.appendAssumeCapacity("--as-needed");
-                argv.appendAssumeCapacity("-lsoftfp");
-                argv.appendAssumeCapacity("--no-as-needed");
+                try argv.append("--end-group")
+            else {
+                // add runtime libs
             }
+
+            if (isIamcu)
+                try argv.appendSlice(&.{ "--as-needed", "-lsoftfp", "--no-as-needed" });
         }
 
         if (!d.nostartfiles and !isIamcu) {
-            // TODO: handle CRT begin/end files
+            if (hasCrtBeginEndFiles) {
+                var path: []const u8 = "";
+                if (tc.getRuntimeLibType() == .compiler_rt and !isAndroid) {
+                    const crtEnd = try tc.getCompilerRt("crtend", .object);
+                    if (tc.filesystem.exists(crtEnd))
+                        path = crtEnd;
+                }
+
+                if (path.len == 0) {
+                    const crtEnd = if (d.shared)
+                        if (isAndroid) "crtend_so.o" else "crtendS.o"
+                    else if (isPie or isStaticPie)
+                        if (isAndroid) "crtend_android.o" else "crtendS.o"
+                    else if (isAndroid) "crtend_android.o" else "crtend.o";
+                    path = try tc.getFilePath(crtEnd);
+                }
+
+                try argv.append(path);
+            }
+
             if (!isAndroid)
                 try argv.append(try tc.getFilePath("crtn.o"));
         }

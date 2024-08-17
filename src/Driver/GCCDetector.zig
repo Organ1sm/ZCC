@@ -251,14 +251,21 @@ pub fn discover(self: *GCCDetector, tc: *Toolchain) !void {
 
     var candidateLibDirs = PathPrefixes.init(0) catch unreachable;
     var candidateBiarchLibDirs = PathPrefixes.init(0) catch unreachable;
-    var candidateTripleAlases = PathPrefixes.init(0) catch unreachable;
+    var candidateTripleAliases = PathPrefixes.init(0) catch unreachable;
     var candidateBiarchTripleAliases = PathPrefixes.init(0) catch unreachable;
-    try self.collectLibDirsAndTriples(tc, &candidateLibDirs, &candidateBiarchLibDirs, &candidateTripleAlases, &candidateBiarchTripleAliases);
+
+    try self.collectLibDirsAndTriples(
+        tc,
+        &candidateLibDirs,
+        &candidateTripleAliases,
+        &candidateBiarchLibDirs,
+        &candidateBiarchTripleAliases,
+    );
 
     var targetBuffer: std.BoundedArray(u8, 32) = .{};
     try TargetUtil.toLLVMTriple(targetBuffer.writer(), target);
     const tripleStr = targetBuffer.constSlice();
-    candidateTripleAlases.appendAssumeCapacity(tripleStr);
+    candidateTripleAliases.appendAssumeCapacity(tripleStr);
 
     //   // Also include the multiarch variant if it's different.
     //   if (TargetTriple.str() != BiarchTriple.str())
@@ -298,7 +305,7 @@ pub fn discover(self: *GCCDetector, tc: *Toolchain) !void {
             const gccCrossDirExists = tc.filesystem.joinedExists(&.{ libDir, "/gcc-cross" });
 
             try self.scanLibDirForGCCTriple(tc, target, libDir, tripleStr, false, gccDirExists, gccCrossDirExists);
-            for (candidateTripleAlases.constSlice()) |candidate| {
+            for (candidateTripleAliases.constSlice()) |candidate| {
                 try self.scanLibDirForGCCTriple(tc, target, libDir, candidate, false, gccDirExists, gccCrossDirExists);
             }
         }
@@ -309,11 +316,14 @@ pub fn discover(self: *GCCDetector, tc: *Toolchain) !void {
 
             const gccDirExists = tc.filesystem.joinedExists(&.{ libDir, "/gcc" });
             const gccCrossDirExists = tc.filesystem.joinedExists(&.{ libDir, "/gcc-cross" });
+
             for (candidateBiarchTripleAliases.constSlice()) |candidate| {
                 try self.scanLibDirForGCCTriple(tc, target, libDir, candidate, true, gccDirExists, gccCrossDirExists);
             }
         }
-        if (self.version.order(v0) == .gt) break;
+
+        if (self.version.order(v0) == .gt)
+            break;
     }
 }
 

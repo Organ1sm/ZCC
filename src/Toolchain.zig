@@ -12,6 +12,17 @@ const Toolchain = @This();
 
 pub const PathList = std.ArrayListUnmanaged([]const u8);
 
+pub const RuntimeLibKind = enum {
+    compiler_rt,
+    libgcc,
+};
+
+pub const FileKind = enum {
+    object,
+    static,
+    shared,
+};
+
 const Inner = union(enum) {
     linux: Linux,
     unknown: void,
@@ -315,4 +326,29 @@ pub fn buildLinkerArgs(self: *Toolchain, argv: *std.ArrayList([]const u8)) !void
         .linux => |*linux| linux.buildLinkerArgs(self, argv),
         .unknown => @panic("This toolchain does not support linking yet"),
     };
+}
+
+fn getDefaultRuntimeLibKind(self: *const Toolchain) RuntimeLibKind {
+    if (self.getTarget().isAndroid())
+        return .compiler_rt;
+    return .libgcc;
+}
+
+pub fn getRuntimeLibType(self: *const Toolchain) RuntimeLibKind {
+    const libname = self.driver.rtlib orelse SystemDefaults.rtlib;
+
+    if (mem.eql(u8, libname, "compiler-rt"))
+        return .compiler_rt
+    else if (mem.eql(u8, libname, "libgcc"))
+        return .libgcc
+    else
+        return self.getDefaultRuntimeLibKind();
+}
+
+/// TODO
+pub fn getCompilerRt(tc: *const Toolchain, component: []const u8, fileKind: FileKind) ![]const u8 {
+    _ = fileKind;
+    _ = component;
+    _ = tc;
+    return "";
 }
