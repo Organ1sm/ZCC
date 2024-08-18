@@ -101,25 +101,19 @@ fn collectLibDirsAndTriples(
     };
 
     const RISCV32LibDirs: [2][]const u8 = .{ "/lib32", "/lib" };
-    _ = RISCV32LibDirs;
     const RISCV32Triples: [3][]const u8 = .{ "riscv32-unknown-linux-gnu", "riscv32-linux-gnu", "riscv32-unknown-elf" };
-    _ = RISCV32Triples;
     const RISCV64LibDirs: [2][]const u8 = .{ "/lib64", "/lib" };
-    _ = RISCV64LibDirs;
     const RISCV64Triples: [3][]const u8 = .{
         "riscv64-unknown-linux-gnu",
         "riscv64-linux-gnu",
         "riscv64-unknown-elf",
     };
-    _ = RISCV64Triples;
 
     const SystemZLibDirs: [2][]const u8 = .{ "/lib64", "/lib" };
-    _ = SystemZLibDirs;
     const SystemZTriples: [5][]const u8 = .{
         "s390x-linux-gnu",  "s390x-unknown-linux-gnu", "s390x-ibm-linux-gnu",
         "s390x-suse-linux", "s390x-redhat-linux",
     };
-    _ = SystemZTriples;
 
     const target = tc.getTarget();
     if (target.os.tag == .solaris) {
@@ -229,11 +223,24 @@ fn collectLibDirsAndTriples(
         .powerpcle => @panic("TODO"),
         .powerpc64 => @panic("TODO"),
         .powerpc64le => @panic("TODO"),
-        .riscv32 => @panic("TODO"),
-        .riscv64 => @panic("TODO"),
+        .riscv32 => {
+            libDirs.appendSliceAssumeCapacity(&RISCV32LibDirs);
+            tripleAliases.appendSliceAssumeCapacity(&RISCV32Triples);
+            biarchLibDirs.appendSliceAssumeCapacity(&RISCV64LibDirs);
+            biarchTripleAliases.appendAssumeCapacity(&RISCV64Triples);
+        },
+        .riscv64 => {
+            libDirs.appendSliceAssumeCapacity(&RISCV64LibDirs);
+            tripleAliases.appendSliceAssumeCapacity(&RISCV64Triples);
+            biarchLibDirs.appendSliceAssumeCapacity(&RISCV32LibDirs);
+            biarchTripleAliases.appendAssumeCapacity(&RISCV32Triples);
+        },
         .sparc => @panic("TODO"),
         .sparc64 => @panic("TODO"),
-        .s390x => @panic("TODO"),
+        .s390x => {
+            libDirs.appendSliceAssumeCapacity(&SystemZLibDirs);
+            tripleAliases.appendSliceAssumeCapacity(&SystemZTriples);
+        },
         else => {},
     }
 }
