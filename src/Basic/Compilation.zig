@@ -32,6 +32,9 @@ pub const Environment = struct {
     /// TODO: not implemented yet
     tmpdir: ?[]const u8 = null,
 
+    /// PATH environment variable used to search for programs
+    path: ?[]const u8 = null,
+
     /// Directories to try when searching for subprograms.
     /// TODO: not implemented yet
     compilerPath: ?[]const u8 = null,
@@ -53,7 +56,7 @@ pub const Environment = struct {
     /// UNIX timestamp to be used instead of the current date and time in the __DATE__ and __TIME__ macros
     sourceDateEpoch: ?[]const u8 = null,
 
-    /// Load all of the environment variables using the std.process API. 
+    /// Load all of the environment variables using the std.process API.
     /// Do not use if using zcc as a shared library on Linux without libc
     /// See https://github.com/ziglang/zig/issues/4524
     /// Assumes that `self` has been default-initialized
