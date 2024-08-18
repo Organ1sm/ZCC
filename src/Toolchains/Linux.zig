@@ -101,8 +101,12 @@ fn findPaths(self: *Linux, tc: *Toolchain) !void {
     const target = tc.getTarget();
     const sysroot = tc.getSysroot();
 
+    var targetBuffer: std.BoundedArray(u8, 32) = .{};
     const osLibDir = getOSLibDir(target);
-    const multiarchTriple = getMultiarchTriple(target);
+    const multiarchTriple = getMultiarchTriple(target) orelse blk: {
+        try TargetUtil.toLLVMTriple(targetBuffer.writer(), target);
+        break :blk targetBuffer.constSlice();
+    };
 
     try self.addMultiLibPaths(tc, sysroot, osLibDir);
 
@@ -312,17 +316,28 @@ pub fn buildLinkerArgs(self: *const Linux, tc: *const Toolchain, argv: *std.Arra
     // TODO add -T args
 }
 
-fn getMultiarchTriple(target: std.Target) []const u8 {
+fn getMultiarchTriple(target: std.Target) ?[]const u8 {
     const isAndroid = target.isAndroid();
+    const isMipsR6 = std.Target.mips.featureSetHas(target.cpu.features, .mips32r6);
 
     return switch (target.cpu.arch) {
         .aarch64 => if (isAndroid) "aarch64-linux-android" else "aarch64-linux-gnu",
         .aarch64_be => "aarch64_be-linux-gnu",
         .x86 => if (isAndroid) "i686-linux-android" else "i386-linux-gnu",
         .x86_64 => if (isAndroid) "x86_64-linux-android" else if (target.abi == .gnux32) "x86_64-linux-gnux32" else "x86_64-linux-gnu",
+        .m68k => "m68k-linux-gnu",
+        .mips => if (isMipsR6) "mipsisa32r6-linux-gnu" else "mips-linux-gnu",
+        .mipsel => if (isAndroid) "mipsel-linux-android" else if (isMipsR6) "mipsisa32r6el-linux-gnu" else "mipsel-linux-gnu",
+        .powerpcle => "powerpcle-linux-gnu",
+        .powerpc64 => "powerpc64-linux-gnu",
+        .powerpc64le => "powerpc64le-linux-gnu",
+        .riscv64 => "riscv64-linux-gnu",
+        .sparc => "sparc-linux-gnu",
+        .sparc64 => "sparc64-linux-gnu",
+        .s390x => "s390x-linux-gnu",
 
         // TODO: expand this
-        else => "",
+        else => null,
     };
 }
 
