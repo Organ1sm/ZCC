@@ -60,15 +60,12 @@ fn addDefaultGCCPrefixes(prefixes: *PathPrefixes, tc: *const Toolchain) !void {
 const PathPrefixes = std.BoundedArray([]const u8, 16);
 
 fn collectLibDirsAndTriples(
-    self: *GCCDetector,
     tc: *Toolchain,
     libDirs: *PathPrefixes,
     tripleAliases: *PathPrefixes,
     biarchLibDirs: *PathPrefixes,
     biarchTripleAliases: *PathPrefixes,
 ) !void {
-    _ = self;
-
     const AArch64LibDirs: [2][]const u8 = .{ "/lib64", "/lib" };
     const AArch64Triples: [4][]const u8 = .{ "aarch64-none-linux-gnu", "aarch64-linux-gnu", "aarch64-redhat-linux", "aarch64-suse-linux" };
     const AArch64beLibDirs: [1][]const u8 = .{"/lib"};
@@ -227,13 +224,13 @@ fn collectLibDirsAndTriples(
             libDirs.appendSliceAssumeCapacity(&RISCV32LibDirs);
             tripleAliases.appendSliceAssumeCapacity(&RISCV32Triples);
             biarchLibDirs.appendSliceAssumeCapacity(&RISCV64LibDirs);
-            biarchTripleAliases.appendAssumeCapacity(&RISCV64Triples);
+            biarchTripleAliases.appendSliceAssumeCapacity(&RISCV64Triples);
         },
         .riscv64 => {
             libDirs.appendSliceAssumeCapacity(&RISCV64LibDirs);
             tripleAliases.appendSliceAssumeCapacity(&RISCV64Triples);
             biarchLibDirs.appendSliceAssumeCapacity(&RISCV32LibDirs);
-            biarchTripleAliases.appendAssumeCapacity(&RISCV32Triples);
+            biarchTripleAliases.appendSliceAssumeCapacity(&RISCV32Triples);
         },
         .sparc => @panic("TODO"),
         .sparc64 => @panic("TODO"),
@@ -254,14 +251,13 @@ pub fn discover(self: *GCCDetector, tc: *Toolchain) !void {
         TargetUtil.get64BitArchVariant(target)
     else
         TargetUtil.get32BitArchVariant(target);
-    _ = biVariantTarget;
 
     var candidateLibDirs: PathPrefixes = .{};
     var candidateBiarchLibDirs: PathPrefixes = .{};
     var candidateTripleAliases: PathPrefixes = .{};
     var candidateBiarchTripleAliases: PathPrefixes = .{};
 
-    try self.collectLibDirsAndTriples(
+    try collectLibDirsAndTriples(
         tc,
         &candidateLibDirs,
         &candidateTripleAliases,
@@ -275,8 +271,13 @@ pub fn discover(self: *GCCDetector, tc: *Toolchain) !void {
     candidateTripleAliases.appendAssumeCapacity(tripleStr);
 
     //   // Also include the multiarch variant if it's different.
-    //   if (TargetTriple.str() != BiarchTriple.str())
-    //     BiarchTripleAliases.push_back(BiarchTriple.str());
+    var biarchBuffer: std.BoundedArray(u8, 32) = .{};
+    if (biVariantTarget) |biarchTarget| {
+        try TargetUtil.toLLVMTriple(biarchBuffer.writer(), biarchTarget);
+        const biarchTripleStr = biarchBuffer.constSlice();
+        if (!std.mem.eql(u8, biarchTripleStr, tripleStr))
+            candidateTripleAliases.appendAssumeCapacity(biarchTripleStr);
+    }
 
     var prefixes: PathPrefixes = .{};
     const gccToolchainDir = getGccToolchainDir(tc);
