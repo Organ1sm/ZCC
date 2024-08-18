@@ -335,11 +335,14 @@ fn findBiarchMultilibs(
     path: [2][]const u8,
     needsBiArchSuffix: bool,
 ) !bool {
-    const suff64 = if (target.os.tag == .solaris) switch (target.cpu.arch) {
-        .x86, .x86_64 => "/amd64",
-        .sparc => "/sparcv9",
-        else => "/64",
-    } else "/64";
+    const suff64 = if (target.os.tag == .solaris)
+        switch (target.cpu.arch) {
+            .x86, .x86_64 => "/amd64",
+            .sparc => "/sparcv9",
+            else => "/64",
+        }
+    else
+        "/64";
 
     _ = self;
     const alt64 = Multilib.init(suff64, suff64, &.{ "-m32", "+m64", "-mx32" });
@@ -388,10 +391,7 @@ fn findBiarchMultilibs(
     flags.appendAssumeCapacity(if (targetPtrWidth == 32) "+m32" else "-m32");
     flags.appendAssumeCapacity(if (targetPtrWidth == 64 and isX32) "+mx32" else "-mx32");
 
-    const success = result.select(flags);
-    if (!success) return false;
-
-    return true;
+    return result.select(flags);
 }
 
 fn scanGCCForMultilibs(
