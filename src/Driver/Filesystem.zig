@@ -59,7 +59,7 @@ fn findProgramByNamePosix(name: []const u8, path: ?[]const u8, buf: []u8) ?[]con
     const pathEnv = path orelse return null;
     var fib = std.heap.FixedBufferAllocator.init(buf);
 
-    var it = mem.tokenizeScalar(u8, pathEnv, ':');
+    var it = mem.tokenizeScalar(u8, pathEnv, std.fs.path.delimiter);
     while (it.next()) |pathDir| {
         defer fib.reset();
         const fullPath = std.fs.path.join(fib.allocator(), &.{ pathDir, name }) catch continue;
