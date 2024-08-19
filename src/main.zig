@@ -7,7 +7,7 @@ const Target = @import("Basic/Target.zig");
 
 var GeneralPurposeAllocator = std.heap.GeneralPurposeAllocator(.{}){};
 
-pub fn main() !u8 {
+pub fn main() u8 {
     const gpa = if (builtin.link_libc) std.heap.raw_c_allocator else GeneralPurposeAllocator.allocator();
     defer if (!builtin.link_libc) {
         _ = GeneralPurposeAllocator.deinit();
@@ -72,6 +72,11 @@ pub fn main() !u8 {
         },
         error.FatalError => {
             comp.renderErrors();
+            if (fastExit) std.process.exit(1);
+            return 1;
+        },
+        error.TooManyMultilibs => {
+            std.debug.print("found more than one multilib with the same priority\n", .{});
             if (fastExit) std.process.exit(1);
             return 1;
         },
