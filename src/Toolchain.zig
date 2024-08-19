@@ -258,15 +258,11 @@ pub fn getFilePath(tc: *const Toolchain, name: []const u8) ![]const u8 {
     if (tc.filesystem.exists(candidate))
         return tc.arena.dupe(u8, candidate);
 
-    fib.reset();
-    if (tc.searchPaths(allocator, sysroot, tc.libaryPaths.items, name)) |path| {
+    if (tc.searchPaths(&fib, sysroot, tc.libaryPaths.items, name)) |path|
         return tc.arena.dupe(u8, path);
-    }
 
-    fib.reset();
-    if (tc.searchPaths(allocator, sysroot, tc.filePaths.items, name)) |path| {
+    if (tc.searchPaths(&fib, sysroot, tc.filePaths.items, name)) |path|
         return try tc.arena.dupe(u8, path);
-    }
 
     return name;
 }
@@ -275,7 +271,7 @@ pub fn getFilePath(tc: *const Toolchain, name: []const u8) ![]const u8 {
 /// Assumes that `fba` is a fixed-buffer allocator, so does not free joined path candidates
 fn searchPaths(
     tc: *const Toolchain,
-    fba: mem.Allocator,
+    fib: *std.heap.FixedBufferAllocator,
     sysroot: []const u8,
     pathPrefixes: []const []const u8,
     name: []const u8,
@@ -284,9 +280,9 @@ fn searchPaths(
         if (path.len == 0) continue;
 
         const candidate = if (path[0] == '=')
-            std.fs.path.join(fba, &.{ sysroot, path[1..], name }) catch continue
+            std.fs.path.join(fib.allocator(), &.{ sysroot, path[1..], name }) catch continue
         else
-            std.fs.path.join(fba, &.{ path, name }) catch continue;
+            std.fs.path.join(fib.allocator(), &.{ path, name }) catch continue;
 
         if (tc.filesystem.exists(candidate))
             return candidate;
