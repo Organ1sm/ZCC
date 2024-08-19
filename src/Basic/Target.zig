@@ -433,7 +433,13 @@ pub fn get64BitArchVariant(target: std.Target) ?std.Target {
 }
 
 /// Adapted from Zig's src/codegen/llvm.zig
-pub fn toLLVMTriple(writer: anytype, target: std.Target) !void {
+pub fn toLLVMTriple(target: std.Target, buf: []u8) []const u8 {
+    // 64 bytes is assumed to be large enough to hold any target triple; increase if necessary
+    std.debug.assert(buf.len >= 64);
+
+    var stream = std.io.fixedBufferStream(buf);
+    const writer = stream.writer();
+
     const llvm_arch = switch (target.cpu.arch) {
         .arm => "arm",
         .armeb => "armeb",
@@ -484,8 +490,8 @@ pub fn toLLVMTriple(writer: anytype, target: std.Target) !void {
         .spu_2 => "spu_2",
     };
 
-    try writer.writeAll(llvm_arch);
-    try writer.writeByte('-');
+    writer.writeAll(llvm_arch) catch unreachable;
+    writer.writeByte('-') catch unreachable;
 
     const llvm_os = switch (target.os.tag) {
         .freestanding => "unknown",
@@ -534,17 +540,17 @@ pub fn toLLVMTriple(writer: anytype, target: std.Target) !void {
         .other,
         => "unknown",
     };
-    try writer.writeAll(llvm_os);
+    writer.writeAll(llvm_os) catch unreachable;
 
     if (target.os.tag.isDarwin()) {
         const minVersion = target.os.version_range.semver.min;
-        try writer.print("{d}.{d}.{d}", .{
+        writer.print("{d}.{d}.{d}", .{
             minVersion.major,
             minVersion.minor,
             minVersion.patch,
-        });
+        }) catch unreachable;
     }
-    try writer.writeByte('-');
+    writer.writeByte('-') catch unreachable;
 
     const LLVMAbi = switch (target.abi) {
         .none, .ilp32 => "unknown",
@@ -587,7 +593,8 @@ pub fn toLLVMTriple(writer: anytype, target: std.Target) !void {
         .amplification => "amplification",
         .ohos => "openhos",
     };
-    try writer.writeAll(LLVMAbi);
+    writer.writeAll(LLVMAbi) catch unreachable;
+    return stream.getWritten();
 }
 
 test "alignment functions - smoke test" {

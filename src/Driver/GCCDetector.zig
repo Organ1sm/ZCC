@@ -265,16 +265,14 @@ pub fn discover(self: *GCCDetector, tc: *Toolchain) !void {
         &candidateBiarchTripleAliases,
     );
 
-    var targetBuffer: std.BoundedArray(u8, 32) = .{};
-    try TargetUtil.toLLVMTriple(targetBuffer.writer(), target);
-    const tripleStr = targetBuffer.constSlice();
+    var targetBuffer: [64]u8 = undefined;
+    const tripleStr = TargetUtil.toLLVMTriple(target, &targetBuffer);
     candidateTripleAliases.appendAssumeCapacity(tripleStr);
 
     //   // Also include the multiarch variant if it's different.
-    var biarchBuffer: std.BoundedArray(u8, 32) = .{};
+    var biarchBuffer: [64]u8 = undefined;
     if (biVariantTarget) |biarchTarget| {
-        try TargetUtil.toLLVMTriple(biarchBuffer.writer(), biarchTarget);
-        const biarchTripleStr = biarchBuffer.constSlice();
+        const biarchTripleStr = TargetUtil.toLLVMTriple(biarchTarget, &biarchBuffer);
         if (!std.mem.eql(u8, biarchTripleStr, tripleStr))
             candidateTripleAliases.appendAssumeCapacity(biarchTripleStr);
     }

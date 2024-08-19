@@ -101,12 +101,9 @@ fn findPaths(self: *Linux, tc: *Toolchain) !void {
     const target = tc.getTarget();
     const sysroot = tc.getSysroot();
 
-    var targetBuffer: std.BoundedArray(u8, 32) = .{};
+    var output: [64]u8 = undefined;
     const osLibDir = getOSLibDir(target);
-    const multiarchTriple = getMultiarchTriple(target) orelse blk: {
-        try TargetUtil.toLLVMTriple(targetBuffer.writer(), target);
-        break :blk targetBuffer.constSlice();
-    };
+    const multiarchTriple = getMultiarchTriple(target) orelse TargetUtil.toLLVMTriple(target, &output);
 
     try self.addMultiLibPaths(tc, sysroot, osLibDir);
 
