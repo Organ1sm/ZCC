@@ -334,7 +334,6 @@ pub fn discover(self: *GCCDetector, tc: *Toolchain) !void {
 }
 
 fn findBiarchMultilibs(
-    self: *GCCDetector,
     tc: *const Toolchain,
     result: *Multilib.Detected,
     target: std.Target,
@@ -350,7 +349,6 @@ fn findBiarchMultilibs(
     else
         "/64";
 
-    _ = self;
     const alt64 = Multilib.init(suff64, suff64, &.{ "-m32", "+m64", "-mx32" });
     const alt32 = Multilib.init("/32", "/32", &.{ "+m32", "-m64", "-mx32" });
     const altX32 = Multilib.init("/x32", "/x32", &.{ "-m32", "-m64", "+mx32" });
@@ -418,7 +416,7 @@ fn scanGCCForMultilibs(
         // TODO
     } else if (target.cpu.arch == .avr) {
         // No multilibs
-    } else if (!try self.findBiarchMultilibs(tc, &detected, target, path, needsBiarchSuffix)) {
+    } else if (!try findBiarchMultilibs(tc, &detected, target, path, needsBiarchSuffix)) {
         return false;
     }
     self.selected = detected.selected;
@@ -455,7 +453,7 @@ fn scanLibDirForGCCTriple(
         defer parentDir.close();
 
         var it = parentDir.iterate();
-        while (try it.next()) |entry| {
+        while (it.next() catch continue) |entry| {
             if (entry.kind != .directory) continue;
 
             const versionText = entry.name;
