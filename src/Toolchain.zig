@@ -253,7 +253,8 @@ pub fn getFilePath(tc: *const Toolchain, name: []const u8) ![]const u8 {
     // todo check resource dir
     // todo check compiler RT path
 
-    const candidate = try std.fs.path.join(allocator, &.{ tc.driver.zccDir, "..", name });
+    const zccDir = std.fs.path.dirname(tc.driver.zccName) orelse "";
+    const candidate = try std.fs.path.join(allocator, &.{ zccDir, "..", name });
     if (tc.filesystem.exists(candidate))
         return tc.arena.dupe(u8, candidate);
 

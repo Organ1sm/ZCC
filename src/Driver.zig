@@ -44,8 +44,6 @@ dumpLinkerArgs: bool = false,
 
 /// name of the zcc executable
 zccName: []const u8 = "",
-/// Directory from which zcc was invoked
-zccDir: []const u8 = "",
 
 /// Value of --triple= passed via CLI
 rawTargetTriple: ?[]const u8 = null,
