@@ -31,6 +31,9 @@ pub const Tag = enum(u8) {
     ThreadlocalExternVar,
     ThreadlocalStaticVar,
 
+    /// __asm__("...") at file scope
+    FileScopeAsm,
+
     // typdef declaration
     TypeDef,
 

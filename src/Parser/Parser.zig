@@ -748,7 +748,10 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
                 continue;
             },
             else => |e| return e,
-        }) |_| continue;
+        }) |node| {
+            try p.declBuffer.append(node);
+            continue;
+        }
 
         if (p.eat(.Semicolon)) |tok| {
             try p.errToken(.extra_semi, tok);
@@ -1650,7 +1653,7 @@ fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec, attrBufferTop: usize) Er
     var ID = InitDeclarator{ .d = (try p.declarator(declSpec.type, .normal)) orelse return null };
 
     try p.attributeSpecifier(ID.d.name);
-    _ = try p.parseAssembly(.declLable);
+    _ = try p.parseAssembly(.declLabel);
     try p.attributeSpecifier(ID.d.name);
 
     var applyVarAttributes = false;
@@ -3892,7 +3895,7 @@ fn convertInitList(p: *Parser, il: InitList, initType: Type) Error!NodeIndex {
 }
 
 /// assembly : keyword_asm asm-qualifier* '(' asm-string ')'
-fn parseAssembly(p: *Parser, kind: enum { global, declLable, stmt }) Error!?NodeIndex {
+fn parseAssembly(p: *Parser, kind: enum { global, declLabel, stmt }) Error!?NodeIndex {
     const asmToken = p.tokenIdx;
     switch (p.getCurrToken()) {
         .KeywordGccAsm, .KeywordGccAsm1, .KeywordGccAsm2 => p.tokenIdx += 1,
@@ -3922,21 +3925,29 @@ fn parseAssembly(p: *Parser, kind: enum { global, declLable, stmt }) Error!?Node
     };
 
     const lparen = try p.expectToken(.LParen);
+    var resultNode: NodeIndex = .none;
     switch (kind) {
-        .declLable => {
+        .declLabel => {
             const str = (try p.parseAsmString()).value.data.bytes;
             const args = Attribute.Arguments{ .asm_label = .{ .name = str[0 .. str.len - 1] } };
             const attr = Attribute{ .tag = .asm_label, .args = args, .syntax = .keyword };
             try p.attrBuffer.append(p.gpa, .{ .attr = attr, .tok = asmToken });
         },
-        .global => _ = try p.parseAsmString(),
+        .global => {
+            const asmStr = try p.parseAsmString();
+            resultNode = try p.addNode(.{
+                .tag = .FileScopeAsm,
+                .type = Type.Void,
+                .data = .{ .decl = .{ .name = asmToken, .node = asmStr.node } },
+            });
+        },
         .stmt => return p.todo("assembly statements"),
     }
     try p.expectClosing(lparen, .RParen);
 
-    if (kind != .declLable)
+    if (kind != .declLabel)
         _ = try p.expectToken(.Semicolon);
-    return .none;
+    return resultNode;
 }
 
 /// Same as stringLiteral but errors on unicode and wide string literals

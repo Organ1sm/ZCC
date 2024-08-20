@@ -449,6 +449,11 @@ fn dumpNode(
 
     switch (tag) {
         .Invalid => unreachable,
+        .FileScopeAsm => {
+            try w.writeByteNTimes(' ', level + 1);
+            try tree.dumpNode(data.decl.node, level + delta, mapper, color, w);
+        },
+
         .StaticAssert => {
             try w.writeByteNTimes(' ', level + 1);
             try w.writeAll("condition:\n");
