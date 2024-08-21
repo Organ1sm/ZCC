@@ -2197,3 +2197,7 @@ pub const incompatible_unwindlib = struct {
     pub const msg = "--rtlib=libgcc requires --unwindlib=libgcc";
     pub const kind = .@"error";
 };
+pub const gnu_asm_disabled = struct {
+    pub const msg = "GNU-style inline assembly is disabled";
+    pub const kind = .@"error";
+};

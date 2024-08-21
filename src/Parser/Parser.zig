@@ -3935,6 +3935,12 @@ fn parseAssembly(p: *Parser, kind: enum { global, declLabel, stmt }) Error!?Node
         },
         .global => {
             const asmStr = try p.parseAsmString();
+            if (!p.comp.langOpts.allowedGnuAsm()) {
+                const str = asmStr.value.data.bytes;
+                if (str.len > 1)
+                    // Empty string (just a NUL byte) is ok because it does not emit any assembly
+                    try p.errToken(.gnu_asm_disabled, lparen);
+            }
             resultNode = try p.addNode(.{
                 .tag = .FileScopeAsm,
                 .type = Type.Void,
