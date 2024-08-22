@@ -33,6 +33,12 @@ pub fn deinit(tree: *AST) void {
     tree.valueMap.deinit();
 }
 
+pub const GNUAssemblyQualifiers = struct {
+    @"volatile": bool = false,
+    @"inline": bool = false,
+    goto: bool = false,
+};
+
 pub const Token = struct {
     id: TokenType,
     flags: packed struct {
@@ -452,6 +458,11 @@ fn dumpNode(
         .FileScopeAsm => {
             try w.writeByteNTimes(' ', level + 1);
             try tree.dumpNode(data.decl.node, level + delta, mapper, color, w);
+        },
+
+        .GNUAsmSimple => {
+            try w.writeByteNTimes(' ', level);
+            try tree.dumpNode(data.unExpr, level, mapper, color, w);
         },
 
         .StaticAssert => {

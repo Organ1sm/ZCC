@@ -3894,7 +3894,197 @@ fn convertInitList(p: *Parser, il: InitList, initType: Type) Error!NodeIndex {
     }
 }
 
-/// assembly : keyword_asm asm-qualifier* '(' asm-string ')'
+fn parseMSVCAsmStmt(p: *Parser) Error!?NodeIndex {
+    return p.todo("MSVC assembly statements");
+}
+
+/// asmOperand : ('[' Identifier ']')? asmStr '(' expr ')'
+fn parseAsmOperands(p: *Parser, names: *std.ArrayList(?TokenIndex), constraints: *NodeList, exprs: *NodeList) Error!void {
+    if (!p.getCurrToken().isStringLiteral() and p.getCurrToken() != .LBracket) {
+        // Empty
+        return;
+    }
+
+    while (true) {
+        if (p.eat(.LBracket)) |lbracket| {
+            const ident = (try p.eatIdentifier()) orelse {
+                try p.err(.expected_identifier);
+                return error.ParsingFailed;
+            };
+            try names.append(ident);
+            try p.expectClosing(lbracket, .RBracket);
+        } else {
+            try names.append(null);
+        }
+
+        const constraint = try p.parseAsmString();
+        try constraints.append(constraint.node);
+
+        const lparen = p.eat(.LParen) orelse {
+            try p.errExtra(.expected_token, p.tokenIdx, .{ .tokenId = .{ .actual = p.getCurrToken(), .expected = .LParen } });
+            return error.ParsingFailed;
+        };
+        const res = try p.parseExpr();
+        try p.expectClosing(lparen, .RParen);
+        try res.expect(p);
+        try exprs.append(res.node);
+        if (p.eat(.Comma) == null) return;
+    }
+}
+
+/// gnuAsmStmt
+///  : asmStr
+///  | asmStr ':' asmOperand*
+///  | asmStr ':' asmOperand* ':' asmOperand*
+///  | asmStr ':' asmOperand* ':' asmOperand* : asmStr? (',' asmStr)*
+///  | asmStr ':' asmOperand* ':' asmOperand* : asmStr? (',' asmStr)* : Identifier (',' Identifier)*
+fn parseGNUAsmStmt(p: *Parser, quals: AST.GNUAssemblyQualifiers, lparen: TokenIndex) Error!NodeIndex {
+    const asmString = try p.parseAsmString();
+    try p.checkAsmStr(asmString.value, lparen);
+
+    if (p.getCurrToken() == .RParen) {
+        return p.addNode(.{
+            .tag = .GNUAsmSimple,
+            .type = Type.Void,
+            .data = .{ .unExpr = asmString.node },
+        });
+    }
+
+    const expectedItems = 8; // arbitrarily chosen, most assembly will have fewer than 8 inputs/outputs/constraints/names
+    const bytesNeeded = expectedItems * @sizeOf(?TokenIndex) + expectedItems * 3 * @sizeOf(NodeIndex);
+
+    var stackFallback = std.heap.stackFallback(bytesNeeded, p.comp.gpa);
+    const allocator = stackFallback.get();
+
+    var names = std.ArrayList(?TokenIndex).initCapacity(allocator, expectedItems) catch unreachable;
+    var constraints = NodeList.initCapacity(allocator, expectedItems) catch unreachable;
+    var exprs = NodeList.initCapacity(allocator, expectedItems) catch unreachable;
+    var clobbers = NodeList.initCapacity(allocator, expectedItems) catch unreachable;
+
+    defer {
+        names.deinit();
+        constraints.deinit();
+        exprs.deinit();
+        clobbers.deinit();
+    }
+
+    // Outputs
+    var ateExtraColor = false;
+    if (p.eat(.Colon) orelse p.eat(.ColonColon)) |tokenIdx| {
+        ateExtraColor = p.tokenIds[tokenIdx] == .ColonColon;
+        if (!ateExtraColor) {
+            if (p.getCurrToken().isStringLiteral() or p.getCurrToken() == .LBracket) {
+                while (true) {
+                    try p.parseAsmOperands(&names, &constraints, &exprs);
+                    if (p.eat(.Comma) == null) break;
+                }
+            }
+        }
+    }
+
+    const numOutputs = names.items.len;
+
+    // Inputs
+    if (ateExtraColor or p.getCurrToken() == .Colon or p.getCurrToken() == .ColonColon) {
+        if (ateExtraColor) {
+            ateExtraColor = false;
+        } else {
+            ateExtraColor = p.getCurrToken() == .ColonColon;
+            p.tokenIdx += 1;
+        }
+
+        if (!ateExtraColor) {
+            if (p.getCurrToken().isStringLiteral() or p.getCurrToken() == .LBracket) {
+                while (true) {
+                    try p.parseAsmOperands(&names, &constraints, &exprs);
+                    if (p.eat(.Comma) == null) break;
+                }
+            }
+        }
+    }
+
+    std.debug.assert(names.items.len == constraints.items.len and constraints.items.len == exprs.items.len);
+    const numInputs = names.items.len - numOutputs;
+    _ = numInputs;
+
+    // Clobbers
+    if (ateExtraColor or p.getCurrToken() == .Colon or p.getCurrToken() == .ColonColon) {
+        if (ateExtraColor) {
+            ateExtraColor = false;
+        } else {
+            ateExtraColor = p.getCurrToken() == .ColonColon;
+            p.tokenIdx += 1;
+        }
+
+        if (!ateExtraColor and p.getCurrToken().isStringLiteral()) {
+            while (true) {
+                const clobber = try p.parseAsmString();
+                try clobbers.append(clobber.node);
+                if (p.eat(.Comma) == null) break;
+            }
+        }
+    }
+
+    if (!quals.goto and (p.getCurrToken() != .RParen or ateExtraColor)) {
+        try p.errExtra(.expected_token, p.tokenIdx, .{ .tokenId = .{ .actual = p.getCurrToken(), .expected = .RParen } });
+        return error.ParsingFailed;
+    }
+
+    // Goto labels
+    var numLabels: u32 = 0;
+    if (ateExtraColor or p.getCurrToken() == .Colon) {
+        if (!ateExtraColor) {
+            p.tokenIdx += 1;
+        }
+        while (true) {
+            const ident = (try p.eatIdentifier()) orelse {
+                try p.err(.expected_identifier);
+                return error.ParsingFailed;
+            };
+            const identStr = p.getTokenText(ident);
+            const label = p.findLabel(identStr) orelse blk: {
+                try p.labels.append(.{ .unresolvedGoto = ident });
+                break :blk ident;
+            };
+            try names.append(ident);
+
+            const elemTy = try p.arena.create(Type);
+            elemTy.* = Type.Void;
+            const resultTy = Type{ .specifier = .Pointer, .data = .{ .subType = elemTy } };
+
+            const labelAddrNode = try p.addNode(.{
+                .tag = .AddrOfLabel,
+                .data = .{ .declRef = label },
+                .type = resultTy,
+            });
+            try exprs.append(labelAddrNode);
+
+            numLabels += 1;
+            if (p.eat(.Comma) == null) break;
+        }
+    } else if (quals.goto) {
+        try p.errExtra(.expected_token, p.tokenIdx, .{ .tokenId = .{ .actual = p.getCurrToken(), .expected = .Colon } });
+        return error.ParsingFailed;
+    }
+
+    // TODO: validate and insert into AST
+    return .none;
+}
+
+fn checkAsmStr(p: *Parser, asmString: Value, tok: TokenIndex) !void {
+    if (!p.comp.langOpts.allowedGnuAsm()) {
+        const str = asmString.data.bytes;
+        if (str.len > 1) {
+            // Empty string (just a NUll byte) is ok because it does not emit any assembly
+            try p.errToken(.gnu_asm_disabled, tok);
+        }
+    }
+}
+
+/// assembly
+///  : keyword-asm asmQual* '(' asmStr ')'
+///  | keyword-asm asmQual* '(' gnuAsmStmt ')'
+///  | keyword-asm msvcAsmStmt
 fn parseAssembly(p: *Parser, kind: enum { global, declLabel, stmt }) Error!?NodeIndex {
     const asmToken = p.tokenIdx;
     switch (p.getCurrToken()) {
@@ -3902,24 +4092,25 @@ fn parseAssembly(p: *Parser, kind: enum { global, declLabel, stmt }) Error!?Node
         else => return null,
     }
 
-    var @"volatile" = false;
-    var @"inline" = false;
-    var goto = false;
+    if (!p.getCurrToken().canOpenGCCAsmStmt())
+        return p.parseMSVCAsmStmt();
+
+    var quals: AST.GNUAssemblyQualifiers = .{};
     while (true) : (p.tokenIdx += 1) switch (p.getCurrToken()) {
         .KeywordVolatile, .KeywordGccVolatile1, .KeywordGccVolatile2 => {
             if (kind != .stmt) try p.errStr(.meaningless_asm_qual, p.tokenIdx, "volatile");
-            if (@"volatile") try p.errStr(.duplicate_asm_qual, p.tokenIdx, "volatile");
-            @"volatile" = true;
+            if (quals.@"volatile") try p.errStr(.duplicate_asm_qual, p.tokenIdx, "volatile");
+            quals.@"volatile" = true;
         },
         .KeywordInline, .KeywordGccInline1, .KeywordGccInline2 => {
             if (kind != .stmt) try p.errStr(.meaningless_asm_qual, p.tokenIdx, "inline");
-            if (@"inline") try p.errStr(.duplicate_asm_qual, p.tokenIdx, "inline");
-            @"inline" = true;
+            if (quals.@"inline") try p.errStr(.duplicate_asm_qual, p.tokenIdx, "inline");
+            quals.@"inline" = true;
         },
         .KeywordGoto => {
             if (kind != .stmt) try p.errStr(.meaningless_asm_qual, p.tokenIdx, "goto");
-            if (goto) try p.errStr(.duplicate_asm_qual, p.tokenIdx, "goto");
-            goto = true;
+            if (quals.goto) try p.errStr(.duplicate_asm_qual, p.tokenIdx, "goto");
+            quals.goto = true;
         },
         else => break,
     };
@@ -3928,26 +4119,22 @@ fn parseAssembly(p: *Parser, kind: enum { global, declLabel, stmt }) Error!?Node
     var resultNode: NodeIndex = .none;
     switch (kind) {
         .declLabel => {
-            const str = (try p.parseAsmString()).value.data.bytes;
+            const asmString = try p.parseAsmString();
+            const str = asmString.value.data.bytes;
             const args = Attribute.Arguments{ .asm_label = .{ .name = str[0 .. str.len - 1] } };
             const attr = Attribute{ .tag = .asm_label, .args = args, .syntax = .keyword };
             try p.attrBuffer.append(p.gpa, .{ .attr = attr, .tok = asmToken });
         },
         .global => {
-            const asmStr = try p.parseAsmString();
-            if (!p.comp.langOpts.allowedGnuAsm()) {
-                const str = asmStr.value.data.bytes;
-                if (str.len > 1)
-                    // Empty string (just a NUL byte) is ok because it does not emit any assembly
-                    try p.errToken(.gnu_asm_disabled, lparen);
-            }
+            const asmString = try p.parseAsmString();
+            try p.checkAsmStr(asmString.value, lparen);
             resultNode = try p.addNode(.{
                 .tag = .FileScopeAsm,
                 .type = Type.Void,
-                .data = .{ .decl = .{ .name = asmToken, .node = asmStr.node } },
+                .data = .{ .decl = .{ .name = asmToken, .node = asmString.node } },
             });
         },
-        .stmt => return p.todo("assembly statements"),
+        .stmt => resultNode = try p.parseGNUAsmStmt(quals, lparen),
     }
     try p.expectClosing(lparen, .RParen);
 
@@ -4044,6 +4231,9 @@ fn parseStmt(p: *Parser) Error!NodeIndex {
     }
 
     if (try p.parseReturnStmt()) |some|
+        return some;
+
+    if (try p.parseAssembly(.stmt)) |some|
         return some;
 
     const exprStart = p.tokenIdx;

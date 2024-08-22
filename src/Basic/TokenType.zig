@@ -761,4 +761,31 @@ pub const TokenType = enum(u8) {
             else => false,
         };
     }
+
+    pub fn canOpenGCCAsmStmt(id: TokenType) bool {
+        return switch (id) {
+            .KeywordVolatile,
+            .KeywordGccVolatile1,
+            .KeywordGccVolatile2,
+            .KeywordInline,
+            .KeywordGccInline1,
+            .KeywordGccInline2,
+            .KeywordGoto,
+            .LParen,
+            => true,
+            else => false,
+        };
+    }
+
+    pub fn isStringLiteral(id: TokenType) bool {
+        return switch (id) {
+            .StringLiteral,
+            .StringLiteralUTF_8,
+            .StringLiteralUTF_16,
+            .StringLiteralUTF_32,
+            .StringLiteralWide,
+            => true,
+            else => false,
+        };
+    }
 };
