@@ -1080,21 +1080,21 @@ pub fn sizeof(ty: Type, comp: *const Compilation) ?u64 {
         => 1,
 
         .Char, .SChar, .UChar => 1,
-        .Short => comp.target.c_type_byte_size(.short),
-        .UShort => comp.target.c_type_byte_size(.ushort),
-        .Int => comp.target.c_type_byte_size(.int),
-        .UInt => comp.target.c_type_byte_size(.uint),
-        .Long => comp.target.c_type_byte_size(.long),
-        .ULong => comp.target.c_type_byte_size(.ulong),
-        .LongLong => comp.target.c_type_byte_size(.longlong),
-        .ULongLong => comp.target.c_type_byte_size(.ulonglong),
-        .LongDouble => comp.target.c_type_byte_size(.longdouble),
+        .Short => comp.target.cTypeByteSize(.short),
+        .UShort => comp.target.cTypeByteSize(.ushort),
+        .Int => comp.target.cTypeByteSize(.int),
+        .UInt => comp.target.cTypeByteSize(.uint),
+        .Long => comp.target.cTypeByteSize(.long),
+        .ULong => comp.target.cTypeByteSize(.ulong),
+        .LongLong => comp.target.cTypeByteSize(.longlong),
+        .ULongLong => comp.target.cTypeByteSize(.ulonglong),
+        .LongDouble => comp.target.cTypeByteSize(.longdouble),
 
         .Int128, .UInt128 => 16,
 
         .FP16 => 2,
-        .Float => comp.target.c_type_byte_size(.float),
-        .Double => comp.target.c_type_byte_size(.double),
+        .Float => comp.target.cTypeByteSize(.float),
+        .Double => comp.target.cTypeByteSize(.double),
         .Float80 => 16,
         .Float128 => 16,
 
@@ -1158,7 +1158,7 @@ pub fn bitSizeof(ty: Type, comp: *const Compilation) ?u64 {
         .TypeofExpr => ty.data.expr.ty.bitSizeof(comp),
         .Attributed => ty.data.attributed.base.bitSizeof(comp),
         .BitInt => return ty.data.int.bits,
-        .LongDouble => comp.target.c_type_bit_size(.longdouble),
+        .LongDouble => comp.target.cTypeBitSize(.longdouble),
         .Float80 => return 80,
         else => 8 * (ty.sizeof(comp) orelse return null),
     };
@@ -1227,14 +1227,14 @@ pub fn alignof(ty: Type, comp: *const Compilation) u29 {
         .ComplexBitInt,
         => return ty.makeReal().alignof(comp),
 
-        .Short => comp.target.c_type_alignment(.short),
-        .UShort => comp.target.c_type_alignment(.ushort),
-        .Int => comp.target.c_type_alignment(.int),
-        .UInt => comp.target.c_type_alignment(.uint),
-        .Long => comp.target.c_type_alignment(.long),
-        .ULong => comp.target.c_type_alignment(.ulong),
-        .LongLong => comp.target.c_type_alignment(.longlong),
-        .ULongLong => comp.target.c_type_alignment(.ulonglong),
+        .Short => comp.target.cTypeAlignment(.short),
+        .UShort => comp.target.cTypeAlignment(.ushort),
+        .Int => comp.target.cTypeAlignment(.int),
+        .UInt => comp.target.cTypeAlignment(.uint),
+        .Long => comp.target.cTypeAlignment(.long),
+        .ULong => comp.target.cTypeAlignment(.ulong),
+        .LongLong => comp.target.cTypeAlignment(.longlong),
+        .ULongLong => comp.target.cTypeAlignment(.ulonglong),
 
         .BitInt => {
             // https://www.open-std.org/jtc1/sc22/wg14/www/docs/n2709.pdf
@@ -1253,9 +1253,9 @@ pub fn alignof(ty: Type, comp: *const Compilation) u29 {
             comp.target.isGnu()) 8 else 16,
 
         .FP16 => 2,
-        .Float => comp.target.c_type_alignment(.float),
-        .Double => comp.target.c_type_alignment(.double),
-        .LongDouble => comp.target.c_type_alignment(.longdouble),
+        .Float => comp.target.cTypeAlignment(.float),
+        .Double => comp.target.cTypeAlignment(.double),
+        .LongDouble => comp.target.cTypeAlignment(.longdouble),
 
         .Float80, .Float128 => 16,
 
