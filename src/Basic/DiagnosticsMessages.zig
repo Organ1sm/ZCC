@@ -2201,3 +2201,9 @@ pub const gnu_asm_disabled = struct {
     pub const msg = "GNU-style inline assembly is disabled";
     pub const kind = .@"error";
 };
+pub const extension_token_used = struct {
+    pub const msg = "extension used";
+    pub const kind = .off;
+    pub const pedantic = true;
+    pub const opt = "language-extension-token";
+};

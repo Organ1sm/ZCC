@@ -4088,7 +4088,11 @@ fn checkAsmStr(p: *Parser, asmString: Value, tok: TokenIndex) !void {
 fn parseAssembly(p: *Parser, kind: enum { global, declLabel, stmt }) Error!?NodeIndex {
     const asmToken = p.tokenIdx;
     switch (p.getCurrToken()) {
-        .KeywordGccAsm, .KeywordGccAsm1, .KeywordGccAsm2 => p.tokenIdx += 1,
+        .KeywordGccAsm => {
+            try p.err(.extension_token_used);
+            p.tokenIdx += 1;
+        },
+        .KeywordGccAsm1, .KeywordGccAsm2 => p.tokenIdx += 1,
         else => return null,
     }
 
