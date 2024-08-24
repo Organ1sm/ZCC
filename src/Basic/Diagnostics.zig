@@ -163,6 +163,7 @@ pub const Options = packed struct {
     @"pointer-sign": Kind = .default,
     @"deprecated-non-prototype": Kind = .default,
     @"fuse-ld-path": Kind = .default,
+    @"language-extension-token": Kind = .default,
 };
 
 list: std.ArrayListUnmanaged(Message) = .{},

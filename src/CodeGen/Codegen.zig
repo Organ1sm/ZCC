@@ -80,6 +80,9 @@ pub fn generateTree(comp: *Compilation, tree: Tree) Compilation.Error!*Object {
                 error.CodegenFailed => continue,
             },
 
+            // TOOD
+            .FileScopeAsm => {},
+
             else => unreachable,
         }
     }

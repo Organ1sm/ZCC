@@ -377,10 +377,24 @@ void foo(void)
 }
 ```
 
-
-- **Inline Assembly**
+- [**Inline Assembly**](../test/cases/gnu-inline-assembly-statements.c)
 
     `__asm__ volatile`
+
+```c
+int add(void) 
+{
+    int src = 1;
+    int dst;
+
+    __asm__("mov %1, %0\n\t"
+        "add $1, %0"
+        : "=r" (dst)
+        : "r" (src));
+
+    return dst;
+}
+```
 
 - **Built-in Functions**
   - [x] [`__has_builtin()`](../test/cases/__has_builtin.c)

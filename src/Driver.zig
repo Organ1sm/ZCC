@@ -94,6 +94,8 @@ const usage =
     \\  -fno-color-diagnostics  Disable colors in diagnostics
     \\  -fdeclspec              Enable support for __declspec attributes
     \\  -fno-declspec           Disable support for __declspec attributes
+    \\  -fgnu-inline-asm        Enable GNU style inline asm (default: enabled)
+    \\  -fno-gnu-inline-asm     Disable GNU style inline asm
     \\  -fms-extensions         Enable support for Microsoft extensions
     \\  -fno-ms-extensions      Disable support for Microsoft extensions
     \\  -fdollars-in-identifiers        
@@ -239,6 +241,10 @@ pub fn parseArgs(
                 d.comp.langOpts.declSpecAttrs = true;
             } else if (std.mem.eql(u8, arg, "-fno-declspec")) {
                 d.comp.langOpts.declSpecAttrs = false;
+            } else if (mem.eql(u8, arg, "-fgnu-inline-asm")) {
+                d.comp.langOpts.gnuAsm = true;
+            } else if (mem.eql(u8, arg, "-fno-gnu-inline-asm")) {
+                d.comp.langOpts.gnuAsm = false;
             } else if (std.mem.eql(u8, arg, "-fms-extensions")) {
                 d.comp.langOpts.enableMSExtensions();
             } else if (std.mem.eql(u8, arg, "-fno-ms-extensions")) {

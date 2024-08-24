@@ -1,5 +1,5 @@
 pub const Tag = enum(u8) {
-    /// Must appear at index 0. 
+    /// Must appear at index 0.
     /// Also used as the tag for __builtin_types_compatible_p arguments, since the arguments are types
     /// Reaching it is always the result of a bug.
     Invalid,
@@ -30,6 +30,9 @@ pub const Tag = enum(u8) {
     ThreadlocalVar,
     ThreadlocalExternVar,
     ThreadlocalStaticVar,
+
+    /// __asm__("...") at file scope
+    FileScopeAsm,
 
     // typdef declaration
     TypeDef,
@@ -115,6 +118,8 @@ pub const Tag = enum(u8) {
     NullStmt,
     /// return first; first may be null
     ReturnStmt,
+    /// Assembly statement of the form __asm__("string literal")
+    GNUAsmSimple,
 
     // ====== Expr ======
     /// lhs , rhs
