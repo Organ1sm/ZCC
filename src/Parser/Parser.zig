@@ -6111,6 +6111,25 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
             if (!operand.ty.isInt() and !operand.ty.isFloat()) {
                 try p.errStr(.invalid_imag, imagToken, try p.typeStr(operand.ty));
             }
+
+            if (operand.ty.isReal()) {
+                switch (p.comp.langOpts.emulate) {
+                    .msvc => {},
+                    .gcc => {
+                        if (operand.ty.isInt())
+                            operand.value = Value.int(0)
+                        else if (operand.ty.isFloat())
+                            operand.value = Value.float(0);
+                    },
+                    .clang => {
+                        if (operand.value.tag == .int)
+                            operand.value = Value.int(0)
+                        else if (operand.value.tag == .float)
+                            operand.value = Value.float(0);
+                    },
+                }
+            }
+
             // convert _Complex F to F
             operand.ty = operand.ty.makeReal();
 
