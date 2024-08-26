@@ -2207,3 +2207,9 @@ pub const extension_token_used = struct {
     pub const pedantic = true;
     pub const opt = "language-extension-token";
 };
+pub const complex_component_init = struct {
+    pub const msg = "complex initialization specifying real and imaginary components is an extension";
+    pub const opt = "complex-component-init";
+    pub const kind = .off;
+    pub const pedantic = true;
+};
