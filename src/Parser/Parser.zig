@@ -5917,6 +5917,9 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
             if (!operand.ty.isScalar())
                 try p.errStr(.invalid_argument_un, token, try p.typeStr(operand.ty));
 
+            if (operand.ty.isComplex())
+                try p.errStr(.complex_prefix_postfix_op, p.tokenIdx, try p.typeStr(operand.ty));
+
             if (!p.tempTree().isLValue(operand.node) or operand.ty.isConst()) {
                 try p.errToken(.not_assignable, token);
                 return error.ParsingFailed;
@@ -5942,6 +5945,9 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
 
             if (!operand.ty.isScalar())
                 try p.errStr(.invalid_argument_un, token, try p.typeStr(operand.ty));
+
+            if (operand.ty.isComplex())
+                try p.errStr(.complex_prefix_postfix_op, p.tokenIdx, try p.typeStr(operand.ty));
 
             if (!p.tempTree().isLValue(operand.node) or operand.ty.isConst()) {
                 try p.errToken(.not_assignable, token);
@@ -6239,6 +6245,9 @@ fn parseSuffixExpr(p: *Parser, lhs: Result) Error!Result {
             if (!operand.ty.isScalar())
                 try p.errStr(.invalid_argument_un, p.tokenIdx, try p.typeStr(operand.ty));
 
+            if (operand.ty.isComplex())
+                try p.errStr(.complex_prefix_postfix_op, p.tokenIdx, try p.typeStr(operand.ty));
+
             if (!p.tempTree().isLValue(operand.node) or operand.ty.isConst()) {
                 try p.err(.not_assignable);
                 return error.ParsingFailed;
@@ -6256,6 +6265,9 @@ fn parseSuffixExpr(p: *Parser, lhs: Result) Error!Result {
 
             if (!operand.ty.isScalar())
                 try p.errStr(.invalid_argument_un, p.tokenIdx, try p.typeStr(operand.ty));
+
+            if (operand.ty.isComplex())
+                try p.errStr(.complex_prefix_postfix_op, p.tokenIdx, try p.typeStr(operand.ty));
 
             if (!p.tempTree().isLValue(operand.node) or operand.ty.isConst()) {
                 try p.err(.not_assignable);

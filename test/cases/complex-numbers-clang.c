@@ -7,6 +7,7 @@ void foo(int x, float y) {
     _Static_assert(__imag(y) == 0);
 
     _Complex double z = (_Complex double){1.0, 2.0};
+    z++;
 }
 
 #define EXPECTED_ERRORS "complex-numbers-clang.c:6:20: error: static_assert expression is not an integral constant expression" \

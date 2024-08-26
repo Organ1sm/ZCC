@@ -2213,3 +2213,10 @@ pub const complex_component_init = struct {
     pub const kind = .off;
     pub const pedantic = true;
 };
+pub const complex_prefix_postfix_op = struct {
+    pub const msg = "ISO C does not support '++'/'--' on complex type '{s}'";
+    pub const opt = "pedantic";
+    pub const extra = .str;
+    pub const kind = .off;
+    pub const pedantic = true;
+};
