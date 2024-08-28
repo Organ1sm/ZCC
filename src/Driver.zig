@@ -470,19 +470,19 @@ pub fn main(d: *Driver, tc: *Toolchain, args: [][]const u8) !void {
     const fastExit = @import("builtin").mode != .Debug;
     if (fastExit and d.inputs.items.len == 1) {
         processSource(tc, d.inputs.items[0], builtinMacros, userDefinedMacros, fastExit) catch |e| switch (e) {
-            error.OutOfMemory => return error.OutOfMemory,
             error.FatalError => {
                 d.comp.renderErrors();
                 d.exitWithCleanup(1);
             },
+            else => |er| return er,
         };
         unreachable;
     }
 
     for (d.inputs.items) |source| {
         d.processSource(tc, source, builtinMacros, userDefinedMacros, fastExit) catch |e| switch (e) {
-            error.OutOfMemory => return error.OutOfMemory,
             error.FatalError => d.comp.renderErrors(),
+            else => |er| return er,
         };
     }
 
