@@ -688,6 +688,38 @@ pub fn isReal(ty: Type) bool {
     };
 }
 
+pub fn isComplex(ty: Type) bool {
+    return switch (ty.specifier) {
+        .ComplexFloat,
+        .ComplexDouble,
+        .ComplexLongDouble,
+        .ComplexFP16,
+        .ComplexFloat80,
+        .ComplexFloat128,
+        .ComplexChar,
+        .ComplexSChar,
+        .ComplexUChar,
+        .ComplexShort,
+        .ComplexUShort,
+        .ComplexInt,
+        .ComplexUInt,
+        .ComplexLong,
+        .ComplexULong,
+        .ComplexLongLong,
+        .ComplexULongLong,
+        .ComplexInt128,
+        .ComplexUInt128,
+        .ComplexBitInt,
+        => true,
+
+        .TypeofType => ty.data.subType.isComplex(),
+        .TypeofExpr => ty.data.expr.ty.isComplex(),
+        .Attributed => ty.data.attributed.base.isComplex(),
+
+        else => false,
+    };
+}
+
 pub fn isTypeof(ty: Type) bool {
     return switch (ty.specifier) {
         .TypeofType, .TypeofExpr => true,
@@ -854,6 +886,28 @@ pub fn getElemType(ty: Type) Type {
 
         .Attributed => ty.data.attributed.base.getElemType(),
 
+        .ComplexFloat,
+        .ComplexDouble,
+        .ComplexLongDouble,
+        .ComplexFP16,
+        .ComplexFloat80,
+        .ComplexFloat128,
+        .ComplexChar,
+        .ComplexSChar,
+        .ComplexUChar,
+        .ComplexShort,
+        .ComplexUShort,
+        .ComplexInt,
+        .ComplexUInt,
+        .ComplexLong,
+        .ComplexULong,
+        .ComplexLongLong,
+        .ComplexULongLong,
+        .ComplexInt128,
+        .ComplexUInt128,
+        .ComplexBitInt,
+        => ty.makeReal(),
+
         .Invalid => Type.Invalid,
         else => unreachable,
     };
@@ -895,6 +949,11 @@ pub fn arrayLen(ty: Type) ?u64 {
         .Attributed => ty.data.attributed.base.arrayLen(),
         else => null,
     };
+}
+
+/// Complex numbers are scalars but they can be initialized with a 2-element initList
+pub fn expectedInitListSize(ty: Type) ?u64 {
+    return if (ty.isComplex()) 2 else ty.arrayLen();
 }
 
 pub fn containAnyQual(ty: Type) bool {

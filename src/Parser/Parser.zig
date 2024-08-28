@@ -3295,6 +3295,8 @@ pub fn initializerItem(p: *Parser, il: *InitList, initType: Type) Error!bool {
     };
 
     const isScalar = initType.isScalar();
+    const isComplex = initType.isComplex();
+    const scalarInitsNeeds: usize = if (isComplex) 2 else 1;
     if (p.eat(.RBrace)) |_| {
         if (isScalar)
             try p.errToken(.empty_scalar_init, lb);
@@ -3410,7 +3412,7 @@ pub fn initializerItem(p: *Parser, il: *InitList, initType: Type) Error!bool {
         } else if (count == 0 and p.isStringInit(initType)) {
             isStrInit = true;
             saw = try p.initializerItem(il, initType);
-        } else if (isScalar and count != 0) {
+        } else if (isScalar and count >= scalarInitsNeeds) {
             // discard further scalars
             var tempIL = InitList{};
             defer tempIL.deinit(p.gpa);
@@ -3468,12 +3470,17 @@ pub fn initializerItem(p: *Parser, il: *InitList, initType: Type) Error!bool {
             break;
         } else if (count == 1) {
             if (isStrInit) try p.errToken(.excess_str_init, firstToken);
-            if (isScalar) try p.errToken(.excess_scalar_init, firstToken);
+            if (isScalar and !isComplex) try p.errToken(.excess_scalar_init, firstToken);
+        } else if (count == 2) {
+            if (isScalar and isComplex) try p.errToken(.excess_scalar_init, firstToken);
         }
 
         if (p.eat(.Comma) == null) break;
     }
     try p.expectClosing(lb, .RBrace);
+
+    if (isComplex and count == 1) // count of 1 means we saw exactly 2 items in the initializer list
+        try p.errToken(.complex_component_init, lb);
 
     if (isScalar or isStrInit)
         return true;
@@ -3550,13 +3557,13 @@ fn findScalarInitializer(
     actualTy: Type,
     firstToken: TokenIndex,
 ) Error!bool {
-    if (ty.isArray()) {
+    if (ty.isArray() or ty.isComplex()) {
         if (il.*.node != .none) return false;
         const startIdx = il.*.list.items.len;
         var index = if (startIdx != 0) il.*.list.items[startIdx - 1].index else startIdx;
 
         const arrayType = ty.*;
-        const elemCount = arrayType.arrayLen() orelse std.math.maxInt(u64);
+        const elemCount = arrayType.expectedInitListSize() orelse std.math.maxInt(u64);
         if (elemCount == 0) {
             try p.errToken(.empty_aggregate_init_braces, firstToken);
             return error.ParsingFailed;
@@ -3751,18 +3758,14 @@ fn isStringInit(p: *Parser, ty: Type) bool {
 
 /// Convert InitList into an AST
 fn convertInitList(p: *Parser, il: InitList, initType: Type) Error!NodeIndex {
-    if (initType.isScalar()) {
-        if (il.node == .none) {
-            return p.addNode(.{
-                .tag = .DefaultInitExpr,
-                .type = initType,
-                .data = undefined,
-            });
-        }
+    const isComplex = initType.isComplex();
+    if (initType.isScalar() and !isComplex) {
+        if (il.node == .none)
+            return p.addNode(.{ .tag = .DefaultInitExpr, .type = initType, .data = undefined });
         return il.node;
     } else if (initType.is(.VariableLenArray)) {
         return error.ParsingFailed; // vla invalid, reported earlier
-    } else if (initType.isArray()) {
+    } else if (initType.isArray() or isComplex) {
         if (il.node != .none)
             return il.node;
 
@@ -3770,7 +3773,7 @@ fn convertInitList(p: *Parser, il: InitList, initType: Type) Error!NodeIndex {
         defer p.listBuffer.items.len = listBuffTop;
 
         const elemType = initType.getElemType();
-        const maxItems = initType.arrayLen() orelse std.math.maxInt(usize);
+        const maxItems: u64 = initType.expectedInitListSize() orelse std.math.maxInt(usize);
         var start: u64 = 0;
         for (il.list.items) |*init| {
             if (init.index > start) {
@@ -5914,6 +5917,9 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
             if (!operand.ty.isScalar())
                 try p.errStr(.invalid_argument_un, token, try p.typeStr(operand.ty));
 
+            if (operand.ty.isComplex())
+                try p.errStr(.complex_prefix_postfix_op, p.tokenIdx, try p.typeStr(operand.ty));
+
             if (!p.tempTree().isLValue(operand.node) or operand.ty.isConst()) {
                 try p.errToken(.not_assignable, token);
                 return error.ParsingFailed;
@@ -5939,6 +5945,9 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
 
             if (!operand.ty.isScalar())
                 try p.errStr(.invalid_argument_un, token, try p.typeStr(operand.ty));
+
+            if (operand.ty.isComplex())
+                try p.errStr(.complex_prefix_postfix_op, p.tokenIdx, try p.typeStr(operand.ty));
 
             if (!p.tempTree().isLValue(operand.node) or operand.ty.isConst()) {
                 try p.errToken(.not_assignable, token);
@@ -6111,6 +6120,25 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
             if (!operand.ty.isInt() and !operand.ty.isFloat()) {
                 try p.errStr(.invalid_imag, imagToken, try p.typeStr(operand.ty));
             }
+
+            if (operand.ty.isReal()) {
+                switch (p.comp.langOpts.emulate) {
+                    .msvc => {},
+                    .gcc => {
+                        if (operand.ty.isInt())
+                            operand.value = Value.int(0)
+                        else if (operand.ty.isFloat())
+                            operand.value = Value.float(0);
+                    },
+                    .clang => {
+                        if (operand.value.tag == .int)
+                            operand.value = Value.int(0)
+                        else if (operand.value.tag == .float)
+                            operand.value = Value.float(0);
+                    },
+                }
+            }
+
             // convert _Complex F to F
             operand.ty = operand.ty.makeReal();
 
@@ -6217,6 +6245,9 @@ fn parseSuffixExpr(p: *Parser, lhs: Result) Error!Result {
             if (!operand.ty.isScalar())
                 try p.errStr(.invalid_argument_un, p.tokenIdx, try p.typeStr(operand.ty));
 
+            if (operand.ty.isComplex())
+                try p.errStr(.complex_prefix_postfix_op, p.tokenIdx, try p.typeStr(operand.ty));
+
             if (!p.tempTree().isLValue(operand.node) or operand.ty.isConst()) {
                 try p.err(.not_assignable);
                 return error.ParsingFailed;
@@ -6234,6 +6265,9 @@ fn parseSuffixExpr(p: *Parser, lhs: Result) Error!Result {
 
             if (!operand.ty.isScalar())
                 try p.errStr(.invalid_argument_un, p.tokenIdx, try p.typeStr(operand.ty));
+
+            if (operand.ty.isComplex())
+                try p.errStr(.complex_prefix_postfix_op, p.tokenIdx, try p.typeStr(operand.ty));
 
             if (!p.tempTree().isLValue(operand.node) or operand.ty.isConst()) {
                 try p.err(.not_assignable);

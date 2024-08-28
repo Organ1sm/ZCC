@@ -164,6 +164,7 @@ pub const Options = packed struct {
     @"deprecated-non-prototype": Kind = .default,
     @"fuse-ld-path": Kind = .default,
     @"language-extension-token": Kind = .default,
+    @"complex-component-init": Kind = .default,
 };
 
 list: std.ArrayListUnmanaged(Message) = .{},

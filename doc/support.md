@@ -430,6 +430,8 @@ enum E6: char {
 };
 ```
 
+- [Allow initializer list initialization of complex numbers](../test/cases/complex-init.c)
+
 ### MSVC
 
 - [x] `_int64, __int64`
