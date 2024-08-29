@@ -9,6 +9,7 @@ const Value = @import("../AST/Value.zig");
 const IR = @This();
 
 pool: Interner,
+strings: []const u8,
 // decls: std.StringArrayHashMapUnmanaged(Decl),
 
 instructions: std.MultiArrayList(Inst),
@@ -589,7 +590,7 @@ fn writeValue(ir: IR, valRe: Interner.Ref, color: bool, w: anytype) !void {
     switch (v.tag) {
         .unavailable => try w.writeAll(" unavailable"),
         .int => try w.print("{d}", .{v.data.int}),
-        .bytes => try w.print("\"{s}\"", .{v.data.bytes}),
+        .bytes => try w.print("\"{s}\"", .{v.data.bytes.slice(ir.strings)}),
         // std.fmt does @as instead of @floatCast
         .float => try w.print("{d}", .{@as(f64, @floatCast(v.data.float))}),
         else => try w.print("({s})", .{@tagName(v.tag)}),

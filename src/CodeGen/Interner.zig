@@ -79,7 +79,8 @@ pub const Key = union(enum) {
                     .int => return lhsInfo.data.int == rhsInfo.data.int,
                     .float => return lhsInfo.data.float == rhsInfo.data.float,
                     .array => @panic("TODO"),
-                    .bytes => return std.mem.eql(u8, lhsInfo.data.bytes, rhsInfo.data.bytes),
+                    .bytes => return (lhsInfo.data.bytes.start == rhsInfo.data.bytes.start) and
+                        (lhsInfo.data.bytes.end == rhsInfo.data.bytes.end),
                 }
             },
 

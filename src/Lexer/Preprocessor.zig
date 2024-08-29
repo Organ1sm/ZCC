@@ -742,6 +742,7 @@ fn expr(pp: *Preprocessor, lexer: *Lexer) MacroError!bool {
         .arena = pp.arena.allocator(),
         .inMacro = true,
         .data = undefined,
+        .retainedStrings = undefined,
         .labels = undefined,
         .strings = undefined,
         .valueMap = undefined,
