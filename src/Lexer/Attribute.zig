@@ -44,7 +44,6 @@ pub const ArgumentType = enum {
     int,
     alignment,
     float,
-    array,
     expression,
     nullptrTy,
 
@@ -55,7 +54,6 @@ pub const ArgumentType = enum {
             .int, .alignment => "an integer constant",
             .nullptrTy => "nullptr",
             .float => "a floating point number",
-            .array => "an array",
             .expression => "an expression",
         };
     }
@@ -80,7 +78,6 @@ pub const ArgumentType = enum {
             .bytes => .string,
             .unavailable => .expression,
             .float => .float,
-            .array => .array,
             .nullptrTy => .nullptrTy,
         };
     }

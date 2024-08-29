@@ -28,11 +28,10 @@ tag: Tag = .unavailable,
 
 /// The content of the value, which varies based on what `tag` is set to.
 data: union {
-    none: void, // Represents no value.
+    none: void,
     int: u64, // Used to store integer, boolean, and pointer values as u64.
-    float: f64, // Used to store floating point values as f64.
-    array: []Value, // An array of `Value` items.
-    bytes: ByteRange, // Used to store raw bytes.
+    float: f64,
+    bytes: ByteRange,
 } = .{ .none = {} },
 
 /// Defines the possible types of values that the `Value` can be tagged as.
@@ -40,9 +39,8 @@ const Tag = enum {
     unavailable, // Value is not available or uninitialized.
     nullptrTy,
     int, // `int` is used to store integer, boolean and pointer values.
-    float, // For floating-point values.
-    array, // For arrays of values.
-    bytes, // For raw byte data.
+    float,
+    bytes,
 };
 
 pub fn isUnavailable(v: Value) bool {
@@ -356,7 +354,6 @@ pub fn isZero(v: Value) bool {
         .nullptrTy => false,
         .int => v.data.int == 0,
         .float => v.data.float == 0,
-        .array => false,
         .bytes => false,
     };
 }
@@ -367,7 +364,6 @@ pub fn getBool(v: Value) bool {
         .nullptrTy => false,
         .int => v.data.int != 0,
         .float => v.data.float != 0,
-        .array => false,
         .bytes => false,
     };
 }
