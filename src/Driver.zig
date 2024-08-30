@@ -491,11 +491,8 @@ pub fn main(d: *Driver, tc: *Toolchain, args: [][]const u8) !void {
         return;
     }
 
-    if (linking) {
-        try d.invokeLinker(tc);
-        if (fastExit)
-            d.exitWithCleanup(0);
-    }
+    if (linking)
+        try d.invokeLinker(tc, fastExit);
 
     if (fastExit)
         std.process.exit(0);
@@ -661,10 +658,9 @@ fn processSource(
     try d.linkObjects.ensureUnusedCapacity(d.comp.gpa, 1);
     d.linkObjects.appendAssumeCapacity(try d.comp.gpa.dupe(u8, outFileName));
     d.tempFileCount += 1;
-    if (fastExit) {
-        try invokeLinker(tc);
-        d.exitWithCleanup(0);
-    }
+
+    if (fastExit)
+        try invokeLinker(tc, fastExit);
 }
 
 fn dumpLinkerArgs(items: []const []const u8) !void {
@@ -676,7 +672,7 @@ fn dumpLinkerArgs(items: []const []const u8) !void {
     try stdout.writeByte('\n');
 }
 
-fn invokeLinker(d: *Driver, tc: *Toolchain) !void {
+fn invokeLinker(d: *Driver, tc: *Toolchain, comptime fastExit: bool) !void {
     try tc.discover();
 
     var argv = std.ArrayList([]const u8).init(d.comp.gpa);
@@ -707,8 +703,8 @@ fn invokeLinker(d: *Driver, tc: *Toolchain) !void {
         else => std.process.abort(),
     }
 
-    if (@import("builtin").mode != .Debug)
-        d.exitWithCleanup(1);
+    if (fastExit)
+        d.exitWithCleanup(0);
 }
 
 fn exitWithCleanup(d: *Driver, code: u8) noreturn {
