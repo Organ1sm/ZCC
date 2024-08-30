@@ -25,6 +25,7 @@ pub const Error = error{
 } || Allocator.Error;
 
 pub const BitIntMaxBits = 128;
+const PathBufferStackLimit = 1024;
 
 /// Environment variables used during compilation / linking.
 pub const Environment = struct {
@@ -801,7 +802,8 @@ pub fn getCharSignedness(comp: *const Compilation) std.builtin.Signedness {
 /// - SelfExeNotFound: Failed to obtain self executable path
 /// - ZccIncludeNotFound: Did not find system include directory
 pub fn defineSystemIncludes(comp: *Compilation, zccDir: []const u8) !void {
-    var buf: [std.fs.max_path_bytes]u8 = undefined;
+    var stackFallback = std.heap.stackFallback(PathBufferStackLimit, comp.gpa);
+    const allocator = stackFallback.get();
     var searchPath = zccDir;
 
     while (std.fs.path.dirname(searchPath)) |dirname| : (searchPath = dirname) {
@@ -818,9 +820,11 @@ pub fn defineSystemIncludes(comp: *Compilation, zccDir: []const u8) !void {
     } else return error.ZccIncludeNotFound;
 
     if (comp.target.os.tag == .linux) {
-        var fib = std.heap.FixedBufferAllocator.init(&buf);
-        const tripleStr = try comp.target.linuxTriple(fib.allocator());
-        const multiarchPath = try std.fs.path.join(fib.allocator(), &.{ "/usr/include", tripleStr });
+        const tripleStr = try comp.target.linuxTriple(allocator);
+        defer allocator.free(tripleStr);
+
+        const multiarchPath = try std.fs.path.join(allocator, &.{ "/usr/include", tripleStr });
+        defer allocator.free(multiarchPath);
 
         if (!std.meta.isError(std.fs.accessAbsolute(multiarchPath, .{}))) {
             const duped = try comp.gpa.dupe(u8, multiarchPath);
@@ -1056,9 +1060,6 @@ pub const IncludeDirIterator = struct {
     includeDirsIndex: usize = 0,
     /// Index tracking the next system include directory to iterate over.
     sysIncludeDirsIndex: usize = 0,
-    /// nextWithFile will use this to hold the full path for its return value
-    /// not required if `nextWithFile` is not used
-    pathBuffer: []u8 = undefined,
 
     /// Retrieves the next include directory path.
     /// If a current working directory source ID is set, it returns its directory path
@@ -1089,12 +1090,10 @@ pub const IncludeDirIterator = struct {
         return null;
     }
 
-    /// Return value is invalidated by subsequent calls to nextWithFile
-    fn nextWithFile(self: *IncludeDirIterator, filename: []const u8) ?[]const u8 {
-        var fib = std.heap.FixedBufferAllocator.init(self.pathBuffer);
-        while (self.next()) |dir| : (fib.end_index = 0) {
-            const path = std.fs.path.join(fib.allocator(), &.{ dir, filename }) catch continue;
-            return path;
+    /// Returned value must be freed by allocator
+    fn nextWithFile(self: *IncludeDirIterator, filename: []const u8, allocator: Allocator) !?[]const u8 {
+        while (self.next()) |dir| {
+            return std.fs.path.join(allocator, &.{ dir, filename }) catch continue;
         }
         return null;
     }
@@ -1127,7 +1126,7 @@ pub fn hasInclude(
     includerTokenSource: Source.ID, // include token belong to which source
     includeType: IncludeType, // angle bracket or quotes
     which: WhichInclude, // __has_include or __has_include_next
-) bool {
+) !bool {
     const cwd = std.fs.cwd();
     if (std.fs.path.isAbsolute(filename)) {
         if (which == .Next) return false;
@@ -1135,17 +1134,16 @@ pub fn hasInclude(
     }
 
     const cwdSourceID = getCwdSourceID(includerTokenSource, includeType, which);
-    var pathBuffer: [std.fs.max_path_bytes]u8 = undefined;
-    var it = IncludeDirIterator{
-        .comp = comp,
-        .cwdSourceID = cwdSourceID,
-        .pathBuffer = &pathBuffer,
-    };
+    var it = IncludeDirIterator{ .comp = comp, .cwdSourceID = cwdSourceID };
 
     if (which == .Next)
         it.skipUntilDirMatch(includerTokenSource);
 
-    while (it.nextWithFile(filename)) |path| {
+    var stackFallback = std.heap.stackFallback(PathBufferStackLimit, comp.gpa);
+    const sfAllocator = stackFallback.get();
+
+    while (try it.nextWithFile(filename, sfAllocator)) |path| {
+        defer sfAllocator.free(path);
         if (!std.meta.isError(cwd.access(path, .{}))) return true;
     }
     return false;
@@ -1178,7 +1176,6 @@ pub fn findEmbed(
     /// angle bracket vs quotes
     includeType: IncludeType,
 ) !?[]const u8 {
-    var pathBuffer: [std.fs.max_path_bytes]u8 = undefined;
     if (std.fs.path.isAbsolute(filename)) {
         return if (comp.getFileContents(filename)) |some|
             some
@@ -1192,9 +1189,13 @@ pub fn findEmbed(
         .Quotes => includerTokenSource,
         .AngleBrackets => null,
     };
-    var it = IncludeDirIterator{ .comp = comp, .cwdSourceID = cwdSourceId, .pathBuffer = &pathBuffer };
+    var it = IncludeDirIterator{ .comp = comp, .cwdSourceID = cwdSourceId };
 
-    while (it.nextWithFile(filename)) |path| {
+    var stackFallback = std.heap.stackFallback(PathBufferStackLimit, comp.gpa);
+    const sfAllocator = stackFallback.get();
+
+    while (try it.nextWithFile(filename, sfAllocator)) |path| {
+        defer sfAllocator.free(path);
         if (comp.getFileContents(path)) |some|
             return some
         else |err| switch (err) {
@@ -1212,8 +1213,6 @@ pub fn findInclude(
     includeType: IncludeType, // angle bracket or quotes
     which: WhichInclude, // include or include_next
 ) !?Source {
-    var pathBuffer: [std.fs.max_path_bytes]u8 = undefined;
-
     if (std.fs.path.isAbsolute(filename)) {
         if (which == .Next) return null;
         return if (comp.addSourceFromPath(filename)) |some|
@@ -1225,16 +1224,16 @@ pub fn findInclude(
     }
 
     const cwdSourceID = getCwdSourceID(includeTokenSource, includeType, which);
-    var it = IncludeDirIterator{
-        .comp = comp,
-        .cwdSourceID = cwdSourceID,
-        .pathBuffer = &pathBuffer,
-    };
+    var it = IncludeDirIterator{ .comp = comp, .cwdSourceID = cwdSourceID };
 
     if (which == .Next)
         it.skipUntilDirMatch(includeTokenSource);
 
-    while (it.nextWithFile(filename)) |path| {
+    var stackFallback = std.heap.stackFallback(PathBufferStackLimit, comp.gpa);
+    const sfAllocator = stackFallback.get();
+
+    while (try it.nextWithFile(filename, sfAllocator)) |path| {
+        defer sfAllocator.free(path);
         if (comp.addSourceFromPath(path)) |some|
             return some
         else |err| switch (err) {
