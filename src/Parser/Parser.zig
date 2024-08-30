@@ -65,11 +65,12 @@ tokenIdx: u32 = 0,
 arena: Allocator,
 nodes: AST.Node.List = .{},
 data: NodeList,
-strings: std.ArrayList(u8),
+retainedStrings: std.ArrayList(u8),
 valueMap: AST.ValueMap,
 
 // buffers used during compilation
 symStack: SymbolStack = .{},
+strings: std.ArrayList(u8),
 labels: std.ArrayList(Label),
 listBuffer: NodeList,
 declBuffer: NodeList,
@@ -459,7 +460,8 @@ fn checkDeprecatedUnavailable(p: *Parser, ty: Type, usageToken: TokenIndex, decl
         defer p.strings.items.len = stringsTop;
 
         const w = p.strings.writer();
-        try w.print("call to '{s}' declared with attribute error: {s}", .{ p.getTokenText(@"error".__name_token), @"error".msg });
+        const msgStr = p.retainedString(@"error".msg);
+        try w.print("call to '{s}' declared with attribute error: {s}", .{ p.getTokenText(@"error".__name_token), msgStr });
         const str = try p.comp.diagnostics.arena.allocator().dupe(u8, p.strings.items[stringsTop..]);
         try p.errStr(.error_attribute, usageToken, str);
     }
@@ -469,7 +471,8 @@ fn checkDeprecatedUnavailable(p: *Parser, ty: Type, usageToken: TokenIndex, decl
         defer p.strings.items.len = stringsTop;
 
         const w = p.strings.writer();
-        try w.print("call to '{s}' declared with attribute warning: {s}", .{ p.getTokenText(warning.__name_token), warning.msg });
+        const msgStr = p.retainedString(warning.msg);
+        try w.print("call to '{s}' declared with attribute warning: {s}", .{ p.getTokenText(warning.__name_token), msgStr });
         const str = try p.comp.diagnostics.arena.allocator().dupe(u8, p.strings.items[stringsTop..]);
         try p.errStr(.warning_attribute, usageToken, str);
     }
@@ -488,6 +491,11 @@ fn checkDeprecatedUnavailable(p: *Parser, ty: Type, usageToken: TokenIndex, decl
     }
 }
 
+/// Returned slice is invalidated if additional strings are added to p.retainedStrings
+fn retainedString(p: *Parser, range: Value.ByteRange) []const u8 {
+    return range.slice(p.retainedStrings.items);
+}
+
 /// Reports deprecated or unavailable usage of code based on the diagnostic tag.
 /// It constructs an error message and then calls `errStr` to handle the error.
 ///
@@ -496,29 +504,25 @@ fn checkDeprecatedUnavailable(p: *Parser, ty: Type, usageToken: TokenIndex, decl
 /// @param tokenIdx  The index of the token related to the deprecation.
 /// @param msg       Optional message providing additional information about the deprecation.
 /// @return          An error indicating that the parsing should be aborted on failure.
-fn errDeprecated(p: *Parser, tag: Diagnostics.Tag, tokenIdx: TokenIndex, msg: ?[]const u8) Compilation.Error!void {
+fn errDeprecated(p: *Parser, tag: Diagnostics.Tag, tokenIdx: TokenIndex, msg: ?Value.ByteRange) Compilation.Error!void {
     const stringsTop = p.strings.items.len;
     defer p.strings.items.len = stringsTop;
 
     const w = p.strings.writer();
     try w.print("'{s}' is ", .{p.getTokenText(tokenIdx)});
-    // Determine the reason for deprecation based on the provided tag.
     const reason: []const u8 = switch (tag) {
-        .unavailable => "unavailable", // The feature is not available.
-        .deprecated_declarations => "deprecated", // The feature is deprecated.
-        else => unreachable, // Other cases should be unreachable.
+        .unavailable => "unavailable",
+        .deprecated_declarations => "deprecated",
+        else => unreachable,
     };
 
-    // Write the reason to the buffer.
     try w.writeAll(reason);
-    // If a custom message is provided, append it to the buffer.
     if (msg) |m| {
-        try w.print(": {s}", .{m}); // Append the custom message.
+        const str = p.retainedString(m);
+        try w.print(": {s}", .{str});
     }
 
-    // Duplicate the constructed string from the buffer and prepare the error message.
     const str = try p.comp.diagnostics.arena.allocator().dupe(u8, p.strings.items[stringsTop..]);
-    // Report the error with the constructed message.
     return p.errStr(tag, tokenIdx, str);
 }
 
@@ -644,6 +648,7 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
         .tokenIds = pp.tokens.items(.id),
         .data = NodeList.init(pp.comp.gpa),
         .labels = std.ArrayList(Label).init(pp.comp.gpa),
+        .retainedStrings = std.ArrayList(u8).init(pp.comp.gpa),
         .strings = std.ArrayList(u8).init(pp.comp.gpa),
         .valueMap = AST.ValueMap.init(pp.comp.gpa),
         .listBuffer = NodeList.init(pp.comp.gpa),
@@ -660,6 +665,7 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
 
     errdefer {
         p.nodes.deinit(pp.comp.gpa);
+        p.retainedStrings.deinit();
         p.valueMap.deinit();
     }
 
@@ -770,11 +776,13 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
     if (rootDecls.len == 0)
         try p.errToken(.empty_translation_unit, p.tokenIdx - 1);
 
+    pp.comp.pragmaEvent(.AfterParse);
+
     const data = try p.data.toOwnedSlice();
     errdefer pp.comp.gpa.free(data);
 
-    pp.comp.pragmaEvent(.AfterParse);
-
+    const strings = try p.retainedStrings.toOwnedSlice();
+    errdefer pp.comp.gpa.free(strings);
     return AST{
         .comp = pp.comp,
         .tokens = pp.tokens.slice(),
@@ -783,6 +791,7 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
         .nodes = p.nodes.toOwnedSlice(),
         .data = data,
         .rootDecls = rootDecls,
+        .strings = strings,
         .valueMap = p.valueMap,
     };
 }
@@ -1208,8 +1217,9 @@ fn staticAssertMessage(p: *Parser, condNode: NodeIndex, message: Result) !?[]con
             try buf.append(' ');
 
         const data = message.value.data.bytes;
-        try buf.ensureUnusedCapacity(data.len);
+        try buf.ensureUnusedCapacity(data.len());
         try AST.dumpString(
+            p.retainedStrings.items,
             data,
             p.nodes.items(.tag)[@intFromEnum(message.node)],
             buf.writer(),
@@ -1535,7 +1545,7 @@ fn diagnose(p: *Parser, attr: Attribute.Tag, arguments: *Attribute.Arguments, ar
         return Attribute.diagnoseAlignment(attr, arguments, argIdx, res.value, res.ty, p.comp);
 
     const node = p.nodes.get(@intFromEnum(res.node));
-    return Attribute.diagnose(attr, arguments, argIdx, res.value, node);
+    return Attribute.diagnose(attr, arguments, argIdx, res.value, node, p.retainedStrings.items);
 }
 
 fn handleAttr(p: *Parser, format: Attribute.Kind, namespace: ?[]const u8) Error!void {
@@ -4077,7 +4087,7 @@ fn parseGNUAsmStmt(p: *Parser, quals: AST.GNUAssemblyQualifiers, lparen: TokenIn
 fn checkAsmStr(p: *Parser, asmString: Value, tok: TokenIndex) !void {
     if (!p.comp.langOpts.allowedGnuAsm()) {
         const str = asmString.data.bytes;
-        if (str.len > 1) {
+        if (str.len() > 1) {
             // Empty string (just a NUll byte) is ok because it does not emit any assembly
             try p.errToken(.gnu_asm_disabled, tok);
         }
@@ -4127,8 +4137,8 @@ fn parseAssembly(p: *Parser, kind: enum { global, declLabel, stmt }) Error!?Node
     switch (kind) {
         .declLabel => {
             const asmString = try p.parseAsmString();
-            const str = asmString.value.data.bytes;
-            const args = Attribute.Arguments{ .asm_label = .{ .name = str[0 .. str.len - 1] } };
+            const str = asmString.value.data.bytes.trim(1); // remove null teriminator
+            const args = Attribute.Arguments{ .asm_label = .{ .name = str } };
             const attr = Attribute{ .tag = .asm_label, .args = args, .syntax = .keyword };
             try p.attrBuffer.append(p.gpa, .{ .attr = attr, .tok = asmToken });
         },
@@ -4857,6 +4867,7 @@ pub fn tempTree(p: *Parser) AST {
         .arena = undefined,
         .generated = undefined,
         .tokens = undefined,
+        .strings = undefined,
         .rootDecls = undefined,
     };
 }
@@ -6703,16 +6714,16 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
                 ty = some.ty;
                 tok = p.nodes.items(.data)[@intFromEnum(some.node)].decl.name;
             } else if (p.func.type) |_| {
-                p.strings.items.len = 0;
-                try p.strings.appendSlice(p.getTokenText(p.func.name));
-                try p.strings.append(0);
-                const predef = try p.makePredefinedIdentifier();
+                const start: u32 = @intCast(p.retainedStrings.items.len);
+                try p.retainedStrings.appendSlice(p.getTokenText(p.func.name));
+                try p.retainedStrings.append(0);
+                const predef = try p.makePredefinedIdentifier(start);
                 ty = predef.ty;
                 p.func.ident = predef;
             } else {
-                p.strings.items.len = 0;
-                try p.strings.append(0);
-                const predef = try p.makePredefinedIdentifier();
+                const start: u32 = @intCast(p.retainedStrings.items.len);
+                try p.retainedStrings.append(0);
+                const predef = try p.makePredefinedIdentifier(start);
                 ty = predef.ty;
                 p.func.ident = predef;
                 try p.declBuffer.append(predef.node);
@@ -6738,16 +6749,16 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
                 ty = some.ty;
             } else if (p.func.type) |funcType| {
                 const mapper = p.comp.stringInterner.getSlowTypeMapper();
-                p.strings.items.len = 0;
-                try Type.printNamed(funcType, p.getTokenText(p.func.name), mapper, p.comp.langOpts, p.strings.writer());
-                try p.strings.append(0);
-                const predef = try p.makePredefinedIdentifier();
+                const start: u32 = @intCast(p.retainedStrings.items.len);
+                try Type.printNamed(funcType, p.getTokenText(p.func.name), mapper, p.comp.langOpts, p.retainedStrings.writer());
+                try p.retainedStrings.append(0);
+                const predef = try p.makePredefinedIdentifier(start);
                 ty = predef.ty;
                 p.func.prettyIdent = predef;
             } else {
-                p.strings.items.len = 0;
-                try p.strings.appendSlice("top level\x00");
-                const predef = try p.makePredefinedIdentifier();
+                const start: u32 = @intCast(p.retainedStrings.items.len);
+                try p.retainedStrings.appendSlice("top level\x00");
+                const predef = try p.makePredefinedIdentifier(start);
                 ty = predef.ty;
                 p.func.prettyIdent = predef;
                 try p.declBuffer.append(predef.node);
@@ -6824,15 +6835,14 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
     }
 }
 
-fn makePredefinedIdentifier(p: *Parser) !Result {
-    const slice = p.strings.items;
-
+fn makePredefinedIdentifier(p: *Parser, start: u32) !Result {
+    const end: u32 = @intCast(p.retainedStrings.items.len);
     const elemType = .{ .specifier = .Char, .qual = .{ .@"const" = true } };
     const arrType = try p.arena.create(Type.Array);
-    arrType.* = .{ .elem = elemType, .len = slice.len };
+    arrType.* = .{ .elem = elemType, .len = end - start };
     const ty: Type = .{ .specifier = .Array, .data = .{ .array = arrType } };
 
-    const val = Value.bytes(try p.arena.dupe(u8, slice));
+    const val = Value.bytes(start, end);
     const strLit = try p.addNode(.{ .tag = .StringLiteralExpr, .type = ty, .data = undefined });
 
     if (!p.inMacro) try p.valueMap.put(strLit, val);
@@ -7411,13 +7421,13 @@ fn parseStringLiteral(p: *Parser) Error!Result {
     if (width.? != 8)
         return p.todo("unicode string literals");
 
-    p.strings.items.len = 0;
+    const stringStart = p.retainedStrings.items.len;
     while (start < p.tokenIdx) : (start += 1) {
         var slice = p.getTokenText(start);
         slice = slice[0 .. slice.len - 1];
         var i = std.mem.indexOf(u8, slice, "\"").? + 1;
 
-        try p.strings.ensureUnusedCapacity(slice.len);
+        try p.retainedStrings.ensureUnusedCapacity(slice.len);
         while (i < slice.len) : (i += 1) {
             switch (slice[i]) {
                 '\\' => {
@@ -7425,33 +7435,33 @@ fn parseStringLiteral(p: *Parser) Error!Result {
                     switch (slice[i]) {
                         '\n' => i += 1,
                         '\r' => i += 2,
-                        '\'', '\"', '\\', '?' => |c| p.strings.appendAssumeCapacity(c),
-                        'n' => p.strings.appendAssumeCapacity('\n'),
-                        'r' => p.strings.appendAssumeCapacity('\r'),
-                        't' => p.strings.appendAssumeCapacity('\t'),
-                        'a' => p.strings.appendAssumeCapacity(0x07),
-                        'b' => p.strings.appendAssumeCapacity(0x08),
+                        '\'', '\"', '\\', '?' => |c| p.retainedStrings.appendAssumeCapacity(c),
+                        'n' => p.retainedStrings.appendAssumeCapacity('\n'),
+                        'r' => p.retainedStrings.appendAssumeCapacity('\r'),
+                        't' => p.retainedStrings.appendAssumeCapacity('\t'),
+                        'a' => p.retainedStrings.appendAssumeCapacity(0x07),
+                        'b' => p.retainedStrings.appendAssumeCapacity(0x08),
                         'e' => {
                             try p.errExtra(.non_standard_escape_char, start, .{ .unsigned = i - 1 });
-                            p.strings.appendAssumeCapacity(0x1B);
+                            p.retainedStrings.appendAssumeCapacity(0x1B);
                         },
-                        'f' => p.strings.appendAssumeCapacity(0x0C),
-                        'v' => p.strings.appendAssumeCapacity(0x0B),
-                        'x' => p.strings.appendAssumeCapacity(try p.parseNumberEscape(start, 16, slice, &i)),
-                        '0'...'7' => p.strings.appendAssumeCapacity(try p.parseNumberEscape(start, 8, slice, &i)),
+                        'f' => p.retainedStrings.appendAssumeCapacity(0x0C),
+                        'v' => p.retainedStrings.appendAssumeCapacity(0x0B),
+                        'x' => p.retainedStrings.appendAssumeCapacity(try p.parseNumberEscape(start, 16, slice, &i)),
+                        '0'...'7' => p.retainedStrings.appendAssumeCapacity(try p.parseNumberEscape(start, 8, slice, &i)),
 
                         'u' => try p.parseUnicodeEscape(start, 4, slice, &i),
                         'U' => try p.parseUnicodeEscape(start, 8, slice, &i),
                         else => unreachable,
                     }
                 },
-                else => |c| p.strings.appendAssumeCapacity(c),
+                else => |c| p.retainedStrings.appendAssumeCapacity(c),
             }
         }
     }
 
-    try p.strings.append(0);
-    const slice = p.strings.items;
+    try p.retainedStrings.append(0);
+    const slice = p.retainedStrings.items[stringStart..];
 
     const arrayType = try p.arena.create(Type.Array);
     const specifier: Type.Specifier = if (isU8Literal and p.comp.langOpts.hasChar8_t()) .UChar else .Char;
@@ -7459,7 +7469,7 @@ fn parseStringLiteral(p: *Parser) Error!Result {
 
     var res: Result = .{
         .ty = .{ .specifier = .Array, .data = .{ .array = arrayType } },
-        .value = Value.bytes(try p.arena.dupe(u8, slice)),
+        .value = Value.bytes(@intCast(stringStart), @intCast(p.retainedStrings.items.len)),
     };
 
     res.node = try p.addNode(.{ .tag = .StringLiteralExpr, .type = res.ty, .data = undefined });
@@ -7499,7 +7509,7 @@ fn parseUnicodeEscape(p: *Parser, tok: TokenIndex, count: u8, slice: []const u8,
 
     var buf: [4]u8 = undefined;
     const toWrite = std.unicode.utf8Encode(c, &buf) catch unreachable; // validated above
-    p.strings.appendSliceAssumeCapacity(buf[0..toWrite]);
+    p.retainedStrings.appendSliceAssumeCapacity(buf[0..toWrite]);
 }
 
 /// Run a parser function but do not evaluate the result

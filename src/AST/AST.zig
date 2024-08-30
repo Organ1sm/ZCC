@@ -23,11 +23,13 @@ tokens: Token.List.Slice,
 nodes: Node.List.Slice,
 data: []const NodeIndex,
 rootDecls: []const NodeIndex,
+strings: []const u8,
 valueMap: ValueMap,
 
 pub fn deinit(tree: *AST) void {
     tree.comp.gpa.free(tree.rootDecls);
     tree.comp.gpa.free(tree.data);
+    tree.comp.gpa.free(tree.strings);
     tree.nodes.deinit(tree.comp.gpa);
     tree.arena.deinit();
     tree.valueMap.deinit();
@@ -305,9 +307,13 @@ pub fn isLValueExtra(tree: *const AST, node: NodeIndex, isConst: *bool) bool {
     }
 }
 
-pub fn dumpString(bytes: []const u8, tag: AstTag, writer: anytype) !void {
+pub fn dumpString(retainedStrings: []const u8, range: Value.ByteRange, tag: AstTag, writer: anytype) !void {
     switch (tag) {
-        .StringLiteralExpr => try writer.print("\"{}\"", .{std.zig.fmtEscapes(bytes[0 .. bytes.len - 1])}),
+        .StringLiteralExpr => {
+            const litRange = range.trim(1); // remove null-terminator
+            const str = litRange.slice(retainedStrings);
+            try writer.print("\"{}\"", .{std.zig.fmtEscapes(str)});
+        },
         else => unreachable,
     }
 }
@@ -338,15 +344,15 @@ pub fn dump(tree: AST, color: bool, writer: anytype) @TypeOf(writer).Error!void 
     }
 }
 
-fn dumpFieldAttributes(attributes: []const Attribute, level: u32, writer: anytype) !void {
+fn dumpFieldAttributes(attributes: []const Attribute, level: u32, strings: []const u8, writer: anytype) !void {
     for (attributes) |attr| {
         try writer.writeByteNTimes(' ', level);
         try writer.print("field attr: {s}", .{@tagName(attr.tag)});
-        try dumpAttribute(attr, writer);
+        try dumpAttribute(attr, strings, writer);
     }
 }
 
-fn dumpAttribute(attr: Attribute, writer: anytype) !void {
+fn dumpAttribute(attr: Attribute, strings: []const u8, writer: anytype) !void {
     switch (attr.tag) {
         inline else => |tag| {
             const args = @field(attr.args, @tagName(tag));
@@ -363,8 +369,8 @@ fn dumpAttribute(attr: Attribute, writer: anytype) !void {
                 try writer.writeAll(f.name);
                 try writer.writeAll(": ");
                 switch (f.type) {
-                    []const u8 => try writer.print("\"{s}\"", .{@field(args, f.name)}),
-                    ?[]const u8 => try writer.print("\"{?s}\"", .{@field(args, f.name)}),
+                    Value.ByteRange => try writer.print("\"{s}\"", .{@field(args, f.name).slice(strings)}),
+                    ?Value.ByteRange => try writer.print("\"{?s}\"", .{if (@field(args, f.name)) |range| range.slice(strings) else null}),
                     else => switch (@typeInfo(f.type)) {
                         .Enum => try writer.writeAll(@tagName(@field(args, f.name))),
                         else => try writer.print("{any}", .{@field(args, f.name)}),
@@ -429,7 +435,7 @@ fn dumpNode(
     if (tree.valueMap.get(node)) |val| {
         if (color) util.setColor(LITERAL, w);
         try w.writeAll(" (value: ");
-        try val.dump(ty, tree.comp, w);
+        try val.dump(ty, tree.comp, tree.strings, w);
         try w.writeByte(')');
     }
 
@@ -447,7 +453,7 @@ fn dumpNode(
         for (ty.data.attributed.attributes) |attr| {
             try w.writeByteNTimes(' ', level + half);
             try w.print("attr: {s}", .{@tagName(attr.tag)});
-            try dumpAttribute(attr, w);
+            try dumpAttribute(attr, tree.strings, w);
         }
 
         if (color) util.setColor(.reset, w);
@@ -523,7 +529,7 @@ fn dumpNode(
                     if (fieldAttrs[i].len == 0) continue;
 
                     if (color) util.setColor(ATTRIBUTE, w);
-                    try dumpFieldAttributes(fieldAttrs[i], level + delta + half, w);
+                    try dumpFieldAttributes(fieldAttrs[i], level + delta + half, tree.strings, w);
                     if (color) util.setColor(.reset, w);
                 }
             }
@@ -549,7 +555,7 @@ fn dumpNode(
                 try tree.dumpNode(data.binExpr.lhs, level + delta, mapper, color, w);
                 if (fieldAttrs[0].len > 0) {
                     if (color) util.setColor(ATTRIBUTE, w);
-                    try dumpFieldAttributes(fieldAttrs[0], level + delta + half, w);
+                    try dumpFieldAttributes(fieldAttrs[0], level + delta + half, tree.strings, w);
                     if (color) util.setColor(.reset, w);
                 }
             }
@@ -558,7 +564,7 @@ fn dumpNode(
                 try tree.dumpNode(data.binExpr.rhs, level + delta, mapper, color, w);
                 if (fieldAttrs[1].len > 0) {
                     if (color) util.setColor(ATTRIBUTE, w);
-                    try dumpFieldAttributes(fieldAttrs[1], level + delta + half, w);
+                    try dumpFieldAttributes(fieldAttrs[1], level + delta + half, tree.strings, w);
                     if (color) util.setColor(.reset, w);
                 }
             }

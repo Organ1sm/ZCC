@@ -5,16 +5,33 @@ const Type = @import("Type.zig");
 
 const Value = @This();
 
+pub const ByteRange = struct {
+    start: u32,
+    end: u32,
+
+    pub fn len(self: ByteRange) u32 {
+        return self.end - self.start;
+    }
+
+    pub fn trim(self: ByteRange, amount: u32) ByteRange {
+        std.debug.assert(self.start <= self.end - amount);
+        return .{ .start = self.start, .end = self.end - amount };
+    }
+
+    pub fn slice(self: ByteRange, allBytes: []const u8) []const u8 {
+        return allBytes[self.start..self.end];
+    }
+};
+
 /// The current kind of value that `Value` is representing.
 tag: Tag = .unavailable,
 
 /// The content of the value, which varies based on what `tag` is set to.
 data: union {
-    none: void, // Represents no value.
+    none: void,
     int: u64, // Used to store integer, boolean, and pointer values as u64.
-    float: f64, // Used to store floating point values as f64.
-    array: []Value, // An array of `Value` items.
-    bytes: []u8, // Used to store raw bytes.
+    float: f64,
+    bytes: ByteRange,
 } = .{ .none = {} },
 
 /// Defines the possible types of values that the `Value` can be tagged as.
@@ -22,9 +39,8 @@ const Tag = enum {
     unavailable, // Value is not available or uninitialized.
     nullptrTy,
     int, // `int` is used to store integer, boolean and pointer values.
-    float, // For floating-point values.
-    array, // For arrays of values.
-    bytes, // For raw byte data.
+    float,
+    bytes,
 };
 
 pub fn isUnavailable(v: Value) bool {
@@ -75,8 +91,8 @@ pub fn float(v: anytype) Value {
     return .{ .tag = .float, .data = .{ .float = v } };
 }
 
-pub fn bytes(v: anytype) Value {
-    return .{ .tag = .bytes, .data = .{ .bytes = v } };
+pub fn bytes(start: u32, end: u32) Value {
+    return .{ .tag = .bytes, .data = .{ .bytes = .{ .start = start, .end = end } } };
 }
 
 /// Performs a sign extension on the given value `v` based on its type `oldTy`.
@@ -338,7 +354,6 @@ pub fn isZero(v: Value) bool {
         .nullptrTy => false,
         .int => v.data.int == 0,
         .float => v.data.float == 0,
-        .array => false,
         .bytes => false,
     };
 }
@@ -349,7 +364,6 @@ pub fn getBool(v: Value) bool {
         .nullptrTy => false,
         .int => v.data.int != 0,
         .float => v.data.float != 0,
-        .array => false,
         .bytes => false,
     };
 }
@@ -652,7 +666,7 @@ pub fn hash(v: Value) u64 {
     }
 }
 
-pub fn dump(v: Value, ty: Type, comp: *Compilation, w: anytype) !void {
+pub fn dump(v: Value, ty: Type, comp: *Compilation, strings: []const u8, w: anytype) !void {
     switch (v.tag) {
         .unavailable => try w.writeAll("unavailable"),
         .int => if (ty.is(.Bool) and comp.langOpts.standard.atLeast(.c2x)) {
@@ -662,7 +676,7 @@ pub fn dump(v: Value, ty: Type, comp: *Compilation, w: anytype) !void {
         } else {
             try w.print("{d}", .{v.signExtend(ty, comp)});
         },
-        .bytes => try w.print("\"{s}\"", .{v.data.bytes}),
+        .bytes => try w.print("\"{s}\"", .{v.data.bytes.slice(strings)}),
         // std.fmt does @as instead of @floatCast
         .float => try w.print("{d}", .{@as(f64, @floatCast(v.data.float))}),
         else => try w.print("({s})", .{@tagName(v.tag)}),
