@@ -73,14 +73,7 @@ fn testOne(allocator: std.mem.Allocator, path: []const u8, testDir: []const u8) 
     _ = try pp.preprocess(bulitinMacros);
     _ = try pp.preprocess(userMacros);
 
-    const eof = pp.preprocess(file) catch |err| {
-        if (!std.unicode.utf8ValidateSlice(file.buf)) {
-            if (comp.diagnostics.list.items.len > 0 and comp.diagnostics.list.items[comp.diagnostics.list.items.len - 1].tag == .invalid_utf8) {
-                return;
-            }
-        }
-        return err;
-    };
+    const eof = pp.preprocess(file);
     try pp.tokens.append(allocator, eof);
 
     var tree = try zcc.Parser.parse(&pp);

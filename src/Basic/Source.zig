@@ -156,23 +156,3 @@ fn codepointWidth(cp: u32) u32 {
         else => 1, // Full-width characters
     };
 }
-
-/// Returns the first offset, if any, in buf where an invalid utf8 sequence
-/// is found.
-fn offsetOfInvalidUtf8(buffer: []const u8) ?u32 {
-    assert(buffer.len <= std.math.maxInt(u32));
-    var i: u32 = 0;
-    while (i < buffer.len) {
-        if (std.unicode.utf8ByteSequenceLength(buffer[i])) |cpLen| {
-            if (i + cpLen > buffer.len) return i;
-            if (std.meta.isError(std.unicode.utf8Decode(buffer[i .. i + cpLen]))) return i;
-            i += cpLen;
-        } else |_| return i;
-    }
-    return null;
-}
-
-pub fn checkUtf8(source: *Source) void {
-    if (offsetOfInvalidUtf8(source.buffer)) |offset|
-        source.invalidUTF8Loc = Location{ .id = source.id, .byteOffset = offset };
-}

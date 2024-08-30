@@ -849,7 +849,7 @@ pub fn getSource(comp: *const Compilation, id: Source.ID) Source {
 }
 
 /// Creates a Source from the contents of `reader` and adds it to the Compilation
-/// Performs newline splicing, line-ending normalization to '\n', and UTF-8 validation.
+/// Performs newline splicing and line-ending normalization to '\n'
 /// caller retains ownership of `path`
 /// `expected_size` will be allocated to hold the contents of `reader` and *must* be at least
 /// as large as the entire contents of `reader`.
@@ -985,14 +985,13 @@ pub fn addSourceFromReader(comp: *Compilation, reader: anytype, path: []const u8
     if (i != contents.len)
         contents = try comp.gpa.realloc(contents, i);
 
-    var source = Source{
+    const source = Source{
         .id = sourceId,
         .path = dupedPath,
         .buffer = contents,
         .spliceLocs = spliceLocs,
     };
 
-    source.checkUtf8();
     try comp.sources.put(dupedPath, source);
     return source;
 }
