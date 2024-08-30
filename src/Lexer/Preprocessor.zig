@@ -95,6 +95,7 @@ preserveWhitespace: bool = false,
 const BuiltinMacros = struct {
     const args = [1][]const u8{"X"};
     const hasAttribute = [1]RawToken{makeFeatCheckMacro(.MacroParamHasAttribute)};
+    const hasDeclspecAttribute = [1]RawToken{makeFeatCheckMacro(.MacroParamHasDeclspecAttribute)};
     const hasWarning = [1]RawToken{makeFeatCheckMacro(.MacroParamHasWarning)};
     const hasFeature = [1]RawToken{makeFeatCheckMacro(.MacroParamHasFeature)};
     const hasExtension = [1]RawToken{makeFeatCheckMacro(.MacroParamHasExtension)};
@@ -128,6 +129,7 @@ pub fn addBuiltinMacro(pp: *Preprocessor, name: []const u8, isFunc: bool, tokens
 
 pub fn addBuiltinMacros(pp: *Preprocessor) !void {
     try pp.addBuiltinMacro("__has_attribute", true, &BuiltinMacros.hasAttribute);
+    try pp.addBuiltinMacro("__has_declspec_attribute", true, &BuiltinMacros.hasDeclspecAttribute);
     try pp.addBuiltinMacro("__has_warning", true, &BuiltinMacros.hasWarning);
     try pp.addBuiltinMacro("__has_feature", true, &BuiltinMacros.hasFeature);
     try pp.addBuiltinMacro("__has_extension", true, &BuiltinMacros.hasExtension);
@@ -1174,6 +1176,7 @@ fn handleBuiltinMacro(
 ) Error!bool {
     switch (builtin) {
         .MacroParamHasAttribute,
+        .MacroParamHasDeclspecAttribute,
         .MacroParamHasFeature,
         .MacroParamHasExtension,
         .MacroParamHasBuiltin,
@@ -1202,6 +1205,12 @@ fn handleBuiltinMacro(
 
             return switch (builtin) {
                 .MacroParamHasAttribute => Attribute.fromString(.gnu, null, identifierStr) != null,
+                .MacroParamHasDeclspecAttribute => {
+                    return if (pp.comp.langOpts.declSpecAttrs)
+                        Attribute.fromString(.declspec, null, identifierStr) != null
+                    else
+                        false;
+                },
                 .MacroParamHasFeature => Features.hasFeature(pp.comp, identifierStr),
                 .MacroParamHasExtension => Features.hasExtension(pp.comp, identifierStr),
                 .MacroParamHasBuiltin => pp.comp.builtins.hasBuiltin(identifierStr),
@@ -1378,6 +1387,7 @@ fn expandFuncMacro(
             },
 
             .MacroParamHasAttribute,
+            .MacroParamHasDeclspecAttribute,
             .MacroParamHasWarning,
             .MacroParamHasFeature,
             .MacroParamHasExtension,

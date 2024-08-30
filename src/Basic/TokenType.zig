@@ -98,6 +98,8 @@ pub const TokenType = enum(u8) {
     MacroWS,
     /// Special token for implementing __has_attribute
     MacroParamHasAttribute,
+    /// Special token for implementing __has_declspec_attribute
+    MacroParamHasDeclspecAttribute,
     /// Special token for implementing __has_warning
     MacroParamHasWarning,
     /// Special token for implementing __has_feature
@@ -488,6 +490,7 @@ pub const TokenType = enum(u8) {
             .MacroParam,
             .MacroParamNoExpand,
             .MacroParamHasAttribute,
+            .MacroParamHasDeclspecAttribute,
             .MacroParamHasWarning,
             .MacroParamHasFeature,
             .MacroParamHasExtension,

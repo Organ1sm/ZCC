@@ -1022,11 +1022,12 @@ fn fromStringC23(namespace: ?[]const u8, name: []const u8) ?Tag {
 }
 
 fn fromStringDeclspec(name: []const u8) ?Tag {
+    const normalized = normalize(name);
     const decls = @typeInfo(attributes).Struct.decls;
     inline for (decls, 0..) |decl, i| {
         const field = @field(attributes, decl.name);
         if (@hasDecl(field, "declspec")) {
-            if (mem.eql(u8, field.declspec, name)) {
+            if (mem.eql(u8, field.declspec, normalized)) {
                 return @enumFromInt(i);
             }
         }

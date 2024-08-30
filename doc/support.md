@@ -442,6 +442,7 @@ enum E6: char {
 - [ ] `__thiscall, _thiscall`
 - [ ] `__vectorcall, _vectorcall`
 - [x] [`__declspec`](../test/cases/declspec.c)
+- [x] [`__has_declspec_attribute()`](../test/cases/declspec.c)
 
 ```c
 __declspec(align(16)) int bar;
