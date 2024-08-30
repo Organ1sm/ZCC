@@ -401,7 +401,7 @@ const attributes = struct {
 
         const Args = struct {
             alignment: ?Alignment = null,
-            __name_token: TokenIndex = undefined,
+            __name_token: TokenIndex,
         };
     };
     pub const alloc_align = struct {
@@ -481,7 +481,7 @@ const attributes = struct {
         const c23 = "deprecated";
         const Args = struct {
             msg: ?Value.ByteRange = null,
-            __name_token: TokenIndex = undefined,
+            __name_token: TokenIndex,
         };
     };
     pub const designated_init = struct {
@@ -503,7 +503,7 @@ const attributes = struct {
         const gnu = "error";
         const Args = struct {
             msg: Value.ByteRange,
-            __name_token: TokenIndex = undefined,
+            __name_token: TokenIndex,
         };
     };
     pub const externally_visible = struct {
@@ -824,7 +824,7 @@ const attributes = struct {
         const gnu = "unavailable";
         const Args = struct {
             msg: ?Value.ByteRange = null,
-            __name_token: TokenIndex = undefined,
+            __name_token: TokenIndex,
         };
     };
     pub const uninitialized = struct {
@@ -880,7 +880,7 @@ const attributes = struct {
         const gnu = "warning";
         const Args = struct {
             msg: Value.ByteRange,
-            __name_token: TokenIndex = undefined,
+            __name_token: TokenIndex,
         };
     };
     pub const weak = struct {
@@ -964,9 +964,11 @@ pub fn initArguments(tag: Tag, nameToken: TokenIndex) Arguments {
     switch (tag) {
         inline else => |argTag| {
             const tagName = @tagName(argTag);
-            const field = @field(attributes, tagName); // get nested field
-            var args = @unionInit(Arguments, tagName, undefined);
-            if (@hasDecl(field, "Args") and @hasField(field.Args, "__name_token")) {
+            const unionElement = @field(attributes, tagName); // get nested field
+            const hasArgs = @hasDecl(unionElement, "Args");
+            const init = if (hasArgs) std.mem.zeroInit(unionElement.Args, .{}) else {};
+            var args = @unionInit(Arguments, tagName, init);
+            if (@hasDecl(unionElement, "Args") and @hasField(unionElement.Args, "__name_token")) {
                 @field(args, tagName).__name_token = nameToken;
             }
             return args;
