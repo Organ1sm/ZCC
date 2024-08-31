@@ -2534,7 +2534,7 @@ fn findIncludeSource(
         .MacroString => .AngleBrackets,
         else => unreachable,
     };
-    return (try pp.comp.findInclude(filename, first.source, includeType, which)) orelse
+    return (try pp.comp.findInclude(filename, first, includeType, which)) orelse
         pp.fatal(first, "'{s}' not found", .{filename});
 }
 

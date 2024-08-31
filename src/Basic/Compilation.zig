@@ -113,6 +113,7 @@ types: struct {
 } = undefined,
 
 stringInterner: StringInterner = .{},
+msCwdSourceId: ?Source.ID = null,
 
 pub fn init(gpa: Allocator) Compilation {
     return .{
@@ -1020,18 +1021,6 @@ pub fn addSourceFromBuffer(comp: *Compilation, path: []const u8, buffer: []const
 /// sources map, keyed by the path.
 ///
 /// If the source already exists, it will be returned immediately.
-///
-/// Params:
-///     compilation: The Compilation instance
-///     path: The file path to add
-///
-/// Returns: The Source object added
-///
-/// Errors:
-///     FileOpenError: If the file failed to open
-///     FileReadError: If reading the file contents failed
-///     OutOfMemory: If allocation failed
-///     FileNotFound: If not found the file
 pub fn addSourceFromPath(comp: *Compilation, path: []const u8) !Source {
     if (comp.sources.get(path)) |some| return some;
 
@@ -1059,6 +1048,7 @@ pub const IncludeDirIterator = struct {
     includeDirsIndex: usize = 0,
     /// Index tracking the next system include directory to iterate over.
     sysIncludeDirsIndex: usize = 0,
+    triedMSCwd: bool = false,
 
     /// Retrieves the next include directory path.
     /// If a current working directory source ID is set, it returns its directory path
@@ -1083,6 +1073,13 @@ pub const IncludeDirIterator = struct {
         if (self.sysIncludeDirsIndex < self.comp.systemIncludeDirs.items.len) {
             defer self.sysIncludeDirsIndex += 1;
             return self.comp.systemIncludeDirs.items[self.sysIncludeDirsIndex];
+        }
+
+        if (self.comp.msCwdSourceId) |sourceId| {
+            if (self.triedMSCwd) return null;
+            self.triedMSCwd = true;
+            const path = self.comp.getSource(sourceId).path;
+            return std.fs.path.dirname(path) orelse ".";
         }
 
         // If no more directories are left, return null.
@@ -1214,7 +1211,7 @@ pub fn findEmbed(
 pub fn findInclude(
     comp: *Compilation,
     filename: []const u8,
-    includeTokenSource: Source.ID, // include token belong to which source
+    includeToken: Token, // include token belong to which source
     includeType: IncludeType, // angle bracket or quotes
     which: WhichInclude, // include or include_next
 ) !?Source {
@@ -1228,20 +1225,27 @@ pub fn findInclude(
         };
     }
 
-    const cwdSourceID = getCwdSourceID(includeTokenSource, includeType, which);
+    const cwdSourceID = getCwdSourceID(includeToken.source, includeType, which);
     var it = IncludeDirIterator{ .comp = comp, .cwdSourceID = cwdSourceID };
 
     if (which == .Next)
-        it.skipUntilDirMatch(includeTokenSource);
+        it.skipUntilDirMatch(includeToken.source);
 
     var stackFallback = std.heap.stackFallback(PathBufferStackLimit, comp.gpa);
     const sfAllocator = stackFallback.get();
 
     while (try it.nextWithFile(filename, sfAllocator)) |path| {
         defer sfAllocator.free(path);
-        if (comp.addSourceFromPath(path)) |some|
-            return some
-        else |err| switch (err) {
+        if (comp.addSourceFromPath(path)) |some| {
+            if (it.triedMSCwd) {
+                try comp.addDiagnostic(.{
+                    .tag = .ms_search_rule,
+                    .extra = .{ .str = some.path },
+                    .loc = .{ .id = includeToken.source, .byteOffset = includeToken.start, .line = includeToken.line },
+                }, &.{});
+            }
+            return some;
+        } else |err| switch (err) {
             error.OutOfMemory => return error.OutOfMemory,
             else => {},
         }

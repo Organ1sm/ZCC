@@ -165,6 +165,7 @@ pub const Options = packed struct {
     @"fuse-ld-path": Kind = .default,
     @"language-extension-token": Kind = .default,
     @"complex-component-init": Kind = .default,
+    @"microsoft-include": Kind = .default,
 };
 
 list: std.ArrayListUnmanaged(Message) = .{},

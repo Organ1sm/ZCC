@@ -2220,3 +2220,9 @@ pub const complex_prefix_postfix_op = struct {
     pub const kind = .off;
     pub const pedantic = true;
 };
+pub const ms_search_rule = struct {
+    pub const msg = "#include resolved using non-portable Microsoft search rules as: {s}";
+    pub const extra = .str;
+    pub const opt = "microsoft-include";
+    pub const kind = .warning;
+};

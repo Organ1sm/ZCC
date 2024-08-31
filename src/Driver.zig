@@ -510,6 +510,9 @@ fn processSource(
     var pp = Preprocessor.init(d.comp);
     defer pp.deinit();
 
+    if (d.comp.langOpts.msExtensions)
+        d.comp.msCwdSourceId = source.id;
+
     if (d.dumpPP) pp.verbose = true;
     if (d.onlyPreprocess) pp.preserveWhitespace = true;
     try pp.addBuiltinMacros();
