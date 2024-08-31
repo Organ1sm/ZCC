@@ -1124,7 +1124,7 @@ fn reconstructIncludeString(pp: *Preprocessor, paramTokens: []const Token) !?[]c
     }
 
     for (params) |tok| {
-        const str = pp.expandedSliceExtra(tok, .PreserveMacroWS);
+        const str = pp.expandedSliceExtra(tok, .PreserveMacroWS, false);
         try pp.charBuffer.appendSlice(str);
     }
 
@@ -1920,10 +1920,15 @@ fn expandMacro(pp: *Preprocessor, lexer: *Lexer, raw: RawToken) MacroError!void 
 
 /// Get expanded token source string.
 pub fn expandedSlice(pp: *Preprocessor, tok: Token) []const u8 {
-    return pp.expandedSliceExtra(tok, .SingleMacroWS);
+    return pp.expandedSliceExtra(tok, .SingleMacroWS, false);
 }
 
-pub fn expandedSliceExtra(pp: *Preprocessor, token: Token, macroWSHandling: enum { SingleMacroWS, PreserveMacroWS }) []const u8 {
+pub fn expandedSliceExtra(
+    pp: *Preprocessor,
+    token: Token,
+    macroWSHandling: enum { SingleMacroWS, PreserveMacroWS },
+    pathEscapes: bool,
+) []const u8 {
     if (token.id.getTokenText()) |some|
         if (!(token.id == .MacroWS and macroWSHandling == .PreserveMacroWS))
             return some;
@@ -1933,6 +1938,7 @@ pub fn expandedSliceExtra(pp: *Preprocessor, token: Token, macroWSHandling: enum
         .comp = pp.comp,
         .index = token.loc.byteOffset,
         .source = .generated,
+        .pathEscapes = pathEscapes,
     };
 
     if (token.id == .MacroString) {
@@ -2128,6 +2134,9 @@ fn define(pp: *Preprocessor, lexer: *Lexer) Error!void {
 
 /// Handle an #embed directive
 fn embed(pp: *Preprocessor, lexer: *Lexer) MacroError!void {
+    lexer.pathEscapes = true;
+    defer lexer.pathEscapes = false;
+
     const first = lexer.nextNoWhiteSpace();
     const fileNameToken = pp.findIncludeFilenameToken(first, lexer, .expectNlEof) catch |er| switch (er) {
         error.InvalidInclude => return,
@@ -2135,7 +2144,7 @@ fn embed(pp: *Preprocessor, lexer: *Lexer) MacroError!void {
     };
 
     // Check for empty filename.
-    const tokSlice = pp.expandedSlice(fileNameToken);
+    const tokSlice = pp.expandedSliceExtra(fileNameToken, .SingleMacroWS, true);
     if (tokSlice.len < 3) {
         try pp.addError(first, .empty_filename);
         return;
@@ -2345,6 +2354,8 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: RawToken, lParen: Raw
 }
 
 fn include(pp: *Preprocessor, lexer: *Lexer, which: Compilation.WhichInclude) MacroError!void {
+    lexer.pathEscapes = true;
+    defer lexer.pathEscapes = false;
     const first = lexer.nextNoWhiteSpace();
     const newSource = pp.findIncludeSource(lexer, first, which) catch |er| switch (er) {
         error.InvalidInclude => return,
@@ -2510,7 +2521,7 @@ fn findIncludeSource(
     const filenameToken = try pp.findIncludeFilenameToken(first, lexer, .expectNlEof);
 
     // check for empty filename
-    const tkSlice = pp.expandedSlice(filenameToken);
+    const tkSlice = pp.expandedSliceExtra(filenameToken, .SingleMacroWS, true);
     if (tkSlice.len < 3) {
         try pp.addError(first, .empty_filename);
         return error.InvalidInclude;

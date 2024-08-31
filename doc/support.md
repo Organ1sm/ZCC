@@ -456,6 +456,12 @@ void fib() {
 }
 ```
 
+- [**support backslashes in filenames**](../test/cases/ms-extensions.c)
+
+```c
+#include "include\other.h"
+```
+
 - **zero size arrray**
 
 ---

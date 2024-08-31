@@ -16,6 +16,8 @@ source: Source.ID,
 comp: *const Compilation,
 /// current line number
 line: u32 = 1,
+///used to parse include string with windows style paths
+pathEscapes: bool = false,
 
 const State = enum {
     start,
@@ -25,6 +27,7 @@ const State = enum {
     U,
     L,
     string_literal,
+    path_escape,
     char_literal_start,
     char_literal,
     char_escape_sequence,
@@ -259,7 +262,7 @@ pub fn next(self: *Lexer) Token {
             .string_literal => switch (c) {
                 '\\' => {
                     returnState = .string_literal;
-                    state = .escape_sequence;
+                    state = if (self.pathEscapes) .path_escape else .escape_sequence;
                 },
                 '"' => {
                     self.index += 1;
@@ -271,6 +274,10 @@ pub fn next(self: *Lexer) Token {
                 },
                 '\r' => unreachable,
                 else => {},
+            },
+
+            .path_escape => {
+                state = .string_literal;
             },
 
             .char_literal_start => switch (c) {
@@ -730,6 +737,7 @@ pub fn next(self: *Lexer) Token {
 
             .period2,
             .string_literal,
+            .path_escape,
             .char_literal_start,
             .char_literal,
             .escape_sequence,
