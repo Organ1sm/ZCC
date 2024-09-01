@@ -666,7 +666,7 @@ fn processSource(
         try invokeLinker(tc, fastExit);
 }
 
-fn dumpLinkerArgs(items: []const []const u8) !void {
+fn printLinkerArgs(items: []const []const u8) !void {
     const stdout = std.io.getStdOut().writer();
     for (items, 0..) |item, i| {
         if (i > 0) try stdout.writeByte(' ');
@@ -688,7 +688,7 @@ fn invokeLinker(d: *Driver, tc: *Toolchain, comptime fastExit: bool) !void {
     try tc.buildLinkerArgs(&argv);
 
     if (d.dumpLinkerArgs) {
-        dumpLinkerArgs(argv.items) catch |er|
+        printLinkerArgs(argv.items) catch |er|
             return d.fatal("unable to dump linker args: {s}", .{Util.errorDescription(er)});
     }
 

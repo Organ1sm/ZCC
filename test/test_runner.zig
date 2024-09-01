@@ -37,7 +37,7 @@ fn addCommandLineArgs(comp: *zcc.Compilation, file: zcc.Source, macroBuffer: any
             var parts = std.mem.splitScalar(u8, some, '=');
             const name = parts.next().?;
             const val = parts.next() orelse "";
-            inline for (@typeInfo(zcc.Compilation.Environment).Struct.fields) |field| {
+            inline for (@typeInfo(zcc.Compilation.Environment).@"struct".fields) |field| {
                 var envVarBuffer: [field.name.len]u8 = undefined;
                 const varName = std.ascii.lowerString(&envVarBuffer, field.name);
                 if (std.ascii.eqlIgnoreCase(name, varName))

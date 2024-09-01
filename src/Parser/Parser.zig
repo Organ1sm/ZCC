@@ -358,12 +358,12 @@ pub fn errExpectedToken(p: *Parser, expected: TokenType, actual: TokenType) Erro
 }
 
 pub fn errStr(p: *Parser, tag: Diagnostics.Tag, index: TokenIndex, str: []const u8) Compilation.Error!void {
-    @setCold(true);
+    @branchHint(.cold);
     return p.errExtra(tag, index, .{ .str = str });
 }
 
 pub fn errExtra(p: *Parser, tag: Diagnostics.Tag, index: TokenIndex, extra: Diagnostics.Message.Extra) Compilation.Error!void {
-    @setCold(true);
+    @branchHint(.cold);
     const token = p.pp.tokens.get(index);
     var loc = token.loc;
 
@@ -380,12 +380,12 @@ pub fn errExtra(p: *Parser, tag: Diagnostics.Tag, index: TokenIndex, extra: Diag
 }
 
 pub fn errToken(p: *Parser, tag: Diagnostics.Tag, index: TokenIndex) Compilation.Error!void {
-    @setCold(true);
+    @branchHint(.cold);
     return p.errExtra(tag, index, .{ .none = {} });
 }
 
 pub fn err(p: *Parser, tag: Diagnostics.Tag) Compilation.Error!void {
-    @setCold(true);
+    @branchHint(.cold);
     return p.errExtra(tag, p.tokenIdx, .{ .none = {} });
 }
 
@@ -600,7 +600,7 @@ fn pragma(p: *Parser) Compilation.Error!bool {
 
 /// Issue errors for top-level definitions whose type was never completed.
 fn diagnoseIncompleteDefinitions(p: *Parser) !void {
-    @setCold(true);
+    @branchHint(.cold);
 
     const nodeslice = p.nodes.slice();
     const tags = nodeslice.items(.tag);
@@ -1745,10 +1745,10 @@ fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec, attrBufferTop: usize) Er
                 try p.errStr(.tentative_array, name, try p.typeStr(ID.d.type));
                 break :incomplete;
             } else if (ID.d.type.getRecord()) |record| {
-                _ = try p.tentativeDefs.getOrPutValue(p.comp.gpa, record.name, ID.d.name);
+                _ = try p.tentativeDefs.getOrPutValue(p.gpa, record.name, ID.d.name);
                 break :incomplete;
             } else if (ID.d.type.get(.Enum)) |e| {
-                _ = try p.tentativeDefs.getOrPutValue(p.comp.gpa, e.data.@"enum".name, ID.d.name);
+                _ = try p.tentativeDefs.getOrPutValue(p.gpa, e.data.@"enum".name, ID.d.name);
                 break :incomplete;
             }
         }
@@ -3592,7 +3592,7 @@ fn findScalarInitializer(
         return false;
     } else if (ty.get(.Struct)) |structType| {
         if (il.*.node != .none) return false;
-        if (actualTy.eql(ty.*, p.pp.comp, false)) return true;
+        if (actualTy.eql(ty.*, p.comp, false)) return true;
 
         const startIdx = il.*.list.items.len;
         var index = if (startIdx != 0) il.*.list.items[startIdx - 1].index + 1 else startIdx;
@@ -3616,7 +3616,7 @@ fn findScalarInitializer(
     } else if (ty.get(.Union)) |unionType| {
         if (il.*.node != .none)
             return false;
-        if (actualTy.eql(ty.*, p.pp.comp, false))
+        if (actualTy.eql(ty.*, p.comp, false))
             return true;
         if (unionType.data.record.fields.len == 0) {
             try p.errToken(.empty_aggregate_init_braces, firstToken);
@@ -3966,7 +3966,7 @@ fn parseGNUAsmStmt(p: *Parser, quals: AST.GNUAssemblyQualifiers, lparen: TokenIn
     const expectedItems = 8; // arbitrarily chosen, most assembly will have fewer than 8 inputs/outputs/constraints/names
     const bytesNeeded = expectedItems * @sizeOf(?TokenIndex) + expectedItems * 3 * @sizeOf(NodeIndex);
 
-    var stackFallback = std.heap.stackFallback(bytesNeeded, p.comp.gpa);
+    var stackFallback = std.heap.stackFallback(bytesNeeded, p.gpa);
     const allocator = stackFallback.get();
 
     var names = std.ArrayList(?TokenIndex).initCapacity(allocator, expectedItems) catch unreachable;
@@ -7071,11 +7071,12 @@ fn parseInt(
     }
     return res;
 }
+
 fn bitInt(p: *Parser, base: u8, buf: []const u8, suffix: NumberSuffix, tokenIdx: TokenIndex) Error!Result {
     try p.errStr(.pre_c2x_compat, tokenIdx, "'_BitInt' suffix for literals");
     try p.errToken(.bitint_suffix, tokenIdx);
 
-    var managed = try big.int.Managed.init(p.comp.gpa);
+    var managed = try big.int.Managed.init(p.gpa);
     defer managed.deinit();
 
     managed.setString(base, buf) catch |e| switch (e) {

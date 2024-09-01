@@ -64,7 +64,7 @@ pub const Environment = struct {
     pub fn loadAll(self: *Environment, allocator: std.mem.Allocator) !void {
         errdefer self.deinit(allocator);
 
-        inline for (@typeInfo(@TypeOf(self.*)).Struct.fields) |field| {
+        inline for (@typeInfo(@TypeOf(self.*)).@"struct".fields) |field| {
             std.debug.assert(@field(self, field.name) == null);
 
             var envVarBuffer: [field.name.len]u8 = undefined;
@@ -80,7 +80,7 @@ pub const Environment = struct {
 
     /// Use this only if environment slices were allocated with `allocator` (such as via `loadAll`)
     pub fn deinit(self: *Environment, allocator: std.mem.Allocator) void {
-        inline for (@typeInfo(@TypeOf(self.*)).Struct.fields) |field| {
+        inline for (@typeInfo(@TypeOf(self.*)).@"struct".fields) |field| {
             if (@field(self, field.name)) |slice| {
                 allocator.free(slice);
             }

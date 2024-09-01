@@ -12,9 +12,9 @@ fn findProgramByNameFake(allocator: std.mem.Allocator, name: []const u8, path: ?
 }
 
 fn canExecuteFake(paths: []const []const u8, path: []const u8) bool {
+    @branchHint(.cold);
     _ = path;
     _ = paths;
-    @setCold(true);
     @panic("TODO");
 }
 

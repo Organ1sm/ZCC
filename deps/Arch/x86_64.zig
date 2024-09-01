@@ -187,7 +187,7 @@ pub const Encoder = struct {
     pub fn writeIntLittle(self: Self, comptime T: type, value: T) void {
         mem.writeInt(
             T,
-            self.code.addManyAsArrayAssumeCapacity(@divExact(@typeInfo(T).Int.bits, 8)),
+            self.code.addManyAsArrayAssumeCapacity(@divExact(@typeInfo(T).int.bits, 8)),
             value,
             .little,
         );

@@ -84,7 +84,7 @@ fn parserHandler(pragma: *Pragma, p: *Parser, startIdx: TokenIndex) Compilation.
                         }
                     }
                     if (action == .push) {
-                        try pack.stack.append(p.comp.gpa, .{ .label = label orelse "", .val = p.pragmaPack orelse 8 });
+                        try pack.stack.append(p.gpa, .{ .label = label orelse "", .val = p.pragmaPack orelse 8 });
                     } else {
                         pack.pop(p, label);
                         if (newVal != null) {
@@ -110,7 +110,7 @@ fn parserHandler(pragma: *Pragma, p: *Parser, startIdx: TokenIndex) Compilation.
             const new_val = (try packInt(p, arg)) orelse return;
             idx += 1;
             if (appleOrXL) {
-                try pack.stack.append(p.comp.gpa, .{ .label = "", .val = p.pragmaPack });
+                try pack.stack.append(p.gpa, .{ .label = "", .val = p.pragmaPack });
             }
             p.pragmaPack = new_val;
         },

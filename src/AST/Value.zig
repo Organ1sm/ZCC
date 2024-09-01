@@ -78,7 +78,7 @@ pub fn int(v: anytype) Value {
     const info = @typeInfo(@TypeOf(v));
 
     // Check if v is a comptime integer or unsigned runtime integer
-    if (info == .ComptimeInt or info.Int.signedness == .unsigned) {
+    if (info == .comptime_int or info.int.signedness == .unsigned) {
         // Directly store the integer in the Value
         return .{ .tag = .int, .data = .{ .int = v } };
     } else {
@@ -380,7 +380,7 @@ pub fn getBool(v: Value) bool {
 /// @return   The value of `v` as type `T`.
 pub fn getInt(v: Value, comptime T: type) T {
     if (T == u64) return v.data.int;
-    return if (@typeInfo(T).Int.signedness == .unsigned)
+    return if (@typeInfo(T).int.signedness == .unsigned)
         @as(T, @truncate(v.data.int))
     else
         @as(T, @truncate(@as(i64, @bitCast(v.data.int))));
@@ -489,7 +489,7 @@ const bin_ops = struct {
         const a_val = a.getInt(T);
         const b_val = b.getInt(T);
 
-        if (@typeInfo(T).Int.signedness == .signed) {
+        if (@typeInfo(T).int.signedness == .signed) {
             if (a_val == std.math.minInt(T) and b_val == -1) {
                 return Value{ .tag = .unavailable, .data = .{ .none = {} } };
             } else {
@@ -521,7 +521,7 @@ const bin_ops = struct {
 
     inline fn shl(comptime T: type, a: Value, b: Value) Value {
         const ShiftT = std.math.Log2Int(T);
-        const info = @typeInfo(T).Int;
+        const info = @typeInfo(T).int;
         const UT = std.meta.Int(.unsigned, info.bits);
         const b_val = b.getInt(T);
 
@@ -538,7 +538,7 @@ const bin_ops = struct {
 
     inline fn shr(comptime T: type, a: Value, b: Value) Value {
         const ShiftT = std.math.Log2Int(T);
-        const UT = std.meta.Int(.unsigned, @typeInfo(T).Int.bits);
+        const UT = std.meta.Int(.unsigned, @typeInfo(T).int.bits);
 
         const b_val = b.getInt(T);
         if (b_val > std.math.maxInt(ShiftT)) return Value.int(0);

@@ -375,7 +375,7 @@ fn dumpAttribute(attr: Attribute, strings: []const u8, writer: anytype) !void {
                 return;
             }
             try writer.writeByte(' ');
-            inline for (@typeInfo(@TypeOf(args)).Struct.fields, 0..) |f, i| {
+            inline for (@typeInfo(@TypeOf(args)).@"struct".fields, 0..) |f, i| {
                 if (comptime std.mem.eql(u8, f.name, "__name_token")) continue;
                 if (i != 0)
                     try writer.writeAll(", ");
@@ -386,7 +386,7 @@ fn dumpAttribute(attr: Attribute, strings: []const u8, writer: anytype) !void {
                     Value.ByteRange => try writer.print("\"{s}\"", .{@field(args, f.name).slice(strings)}),
                     ?Value.ByteRange => try writer.print("\"{?s}\"", .{if (@field(args, f.name)) |range| range.slice(strings) else null}),
                     else => switch (@typeInfo(f.type)) {
-                        .Enum => try writer.writeAll(@tagName(@field(args, f.name))),
+                        .@"enum" => try writer.writeAll(@tagName(@field(args, f.name))),
                         else => try writer.print("{any}", .{@field(args, f.name)}),
                     },
                 }
