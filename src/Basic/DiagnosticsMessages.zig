@@ -189,6 +189,10 @@ pub const missing_type_specifier = struct {
     pub const kind = .warning;
     pub const all = true;
 };
+pub const missing_type_specifier_c2x = struct {
+    pub const msg = "a type specifier is required for all declarations";
+    pub const kind = .@"error";
+};
 pub const multiple_storage_class = struct {
     pub const msg = "cannot combine with previous '{s}' declaration specifier";
     pub const extra = .str;

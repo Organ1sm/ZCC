@@ -296,7 +296,10 @@ pub fn finish(b: @This(), p: *Parser) Parser.Error!Type {
                 ty = typeof;
             } else {
                 ty.specifier = .Int;
-                try p.err(.missing_type_specifier);
+                if (p.comp.langOpts.standard.atLeast(.c2x))
+                    try p.err(.missing_type_specifier_c2x)
+                else
+                    try p.err(.missing_type_specifier);
             }
         },
 

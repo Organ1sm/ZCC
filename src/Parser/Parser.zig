@@ -703,10 +703,12 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
 
         const elemTy = try p.arena.create(Type);
         elemTy.* = Type.Char;
-        try p.symStack.defineTypedef(try p.comp.intern("__builtin_ms_va_list"), .{
-            .specifier = .Pointer,
-            .data = .{ .subType = elemTy },
-        }, 0, .none);
+        try p.symStack.defineTypedef(
+            try p.comp.intern("__builtin_ms_va_list"),
+            .{ .specifier = .Pointer, .data = .{ .subType = elemTy } },
+            0,
+            .none,
+        );
 
         const ty = &pp.comp.types.vaList;
         try p.symStack.defineTypedef(try p.comp.intern("__builtin_va_list"), ty.*, 0, .none);
