@@ -2218,11 +2218,16 @@ pub const complex_prefix_postfix_op = struct {
     pub const opt = "pedantic";
     pub const extra = .str;
     pub const kind = .off;
-    pub const pedantic = true;
 };
 pub const ms_search_rule = struct {
     pub const msg = "#include resolved using non-portable Microsoft search rules as: {s}";
     pub const extra = .str;
     pub const opt = "microsoft-include";
     pub const kind = .warning;
+};
+pub const ctrl_z_eof = struct {
+    pub const msg = "treating Ctrl-Z as end-of-file is a Microsoft extension";
+    pub const opt = "microsoft-end-of-file";
+    pub const kind = .off;
+    pub const pedantic = true;
 };

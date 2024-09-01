@@ -180,6 +180,14 @@ pub fn next(self: *Lexer) Token {
                     self.index += 1;
                     break;
                 },
+                0x1A => if (self.comp.langOpts.msExtensions) { // ctrl-z
+                    id = .Eof;
+                    break;
+                } else {
+                    id = .Invalid;
+                    self.index += 1;
+                    break;
+                },
                 0x80...0xFF => state = .extended_identifier,
                 else => {
                     id = .Invalid;

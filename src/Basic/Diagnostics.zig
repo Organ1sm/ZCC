@@ -166,6 +166,7 @@ pub const Options = packed struct {
     @"language-extension-token": Kind = .default,
     @"complex-component-init": Kind = .default,
     @"microsoft-include": Kind = .default,
+    @"microsoft-end-of-file": Kind = .default,
 };
 
 list: std.ArrayListUnmanaged(Message) = .{},

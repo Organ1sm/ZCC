@@ -105,6 +105,20 @@ pub const Token = struct {
         return copy;
     }
 
+    pub fn checkMsEof(tok: Token, source: Source, comp: *Compilation) !void {
+        std.debug.assert(tok.id == .Eof);
+        if (source.buffer.len > tok.loc.byteOffset and source.buffer[tok.loc.byteOffset] == 0x1A) {
+            try comp.addDiagnostic(.{
+                .tag = .ctrl_z_eof,
+                .loc = .{
+                    .id = source.id,
+                    .byteOffset = tok.loc.byteOffset,
+                    .line = tok.loc.line,
+                },
+            }, &.{});
+        }
+    }
+
     /// How many source locations do we track for each token.
     /// Must be at least 2.
     pub const List = std.MultiArrayList(Token);

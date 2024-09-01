@@ -197,11 +197,13 @@ fn findIncludeGuard(pp: *Preprocessor, source: Source) ?[]const u8 {
 
 /// Preprocess a source file, returns eof token.
 pub fn preprocess(pp: *Preprocessor, source: Source) Error!Token {
-    return pp.preprocessExtra(source) catch |err| switch (err) {
+    const eof = pp.preprocessExtra(source) catch |err| switch (err) {
         // This cannot occur in the main file and is handled in `include`.
         error.StopPreprocessing => unreachable,
         else => |e| return e,
     };
+    try eof.checkMsEof(source, pp.comp);
+    return eof;
 }
 
 fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!Token {
@@ -2380,10 +2382,11 @@ fn include(pp: *Preprocessor, lexer: *Lexer, which: Compilation.WhichInclude) Ma
     if (pp.verbose)
         pp.verboseLog(first, "include file {s}", .{newSource.path});
 
-    _ = pp.preprocessExtra(newSource) catch |err| switch (err) {
-        error.StopPreprocessing => {},
+    const eof = pp.preprocessExtra(newSource) catch |err| switch (err) {
+        error.StopPreprocessing => return,
         else => |e| return e,
     };
+    try eof.checkMsEof(newSource, pp.comp);
 }
 
 /// tokens that are part of a pragma directive can happen in 3 ways:
