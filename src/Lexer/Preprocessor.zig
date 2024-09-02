@@ -92,7 +92,7 @@ includeGuards: std.AutoHashMapUnmanaged(Source.ID, []const u8) = .{},
 verbose: bool = false,
 preserveWhitespace: bool = false,
 
-/// linemarker tokens. Must only be true in -E mode (parser does not handle linemarkers)
+/// linemarker tokens. Must be .none unless in -E mode (parser does not handle linemarkers)
 linemarkers: enum {
     /// No linemarker tokens. Required setting if parser will run
     None,
@@ -217,6 +217,13 @@ pub fn preprocess(pp: *Preprocessor, source: Source) Error!Token {
 }
 
 fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!Token {
+    if (pp.linemarkers != .None) {
+        try pp.tokens.append(pp.gpa, .{
+            .id = .IncludeStart,
+            .loc = .{ .id = source.id, .byteOffset = std.math.maxInt(u32), .line = 1 },
+        });
+    }
+
     var guardName = pp.findIncludeGuard(source);
     pp.preprocessCount += 1;
     var lexer = Lexer{
@@ -535,7 +542,7 @@ pub fn tokenize(pp: *Preprocessor, source: Source) Error!Token {
 /// Get raw token source string.
 /// Returned slice is invalidated when comp.generatedBuffer is updated.
 pub fn getTokenSlice(pp: *Preprocessor, token: RawToken) []const u8 {
-    if (token.id.getTokenText()) |some|
+    if (token.id.lexeme()) |some|
         return some;
 
     const source = pp.comp.getSource(token.source);
@@ -1941,7 +1948,7 @@ pub fn expandedSliceExtra(
     macroWSHandling: enum { SingleMacroWS, PreserveMacroWS },
     pathEscapes: bool,
 ) []const u8 {
-    if (token.id.getTokenText()) |some|
+    if (token.id.lexeme()) |some|
         if (!(token.id == .MacroWS and macroWSHandling == .PreserveMacroWS))
             return some;
 
@@ -2397,6 +2404,17 @@ fn include(pp: *Preprocessor, lexer: *Lexer, which: Compilation.WhichInclude) Ma
         else => |e| return e,
     };
     try eof.checkMsEof(newSource, pp.comp);
+
+    if (pp.linemarkers != .None) {
+        try pp.tokens.append(pp.gpa, .{
+            .id = .IncludeResume,
+            .loc = .{
+                .id = first.source,
+                .byteOffset = std.math.maxInt(u32),
+                .line = first.line + 1,
+            },
+        });
+    }
 }
 
 /// tokens that are part of a pragma directive can happen in 3 ways:
@@ -2553,6 +2571,9 @@ fn findIncludeSource(
 
 /// pretty print tokens and try to preserve whitespace
 pub fn prettyPrintTokens(pp: *Preprocessor, w: anytype) !void {
+    const rootSrc = pp.comp.getSource(@enumFromInt(2));
+    try w.print("# 1 \"{s}\"\n", .{rootSrc.path});
+
     var i: u32 = 0;
     while (true) : (i += 1) {
         var cur: Token = pp.tokens.get(i);
@@ -2597,6 +2618,16 @@ pub fn prettyPrintTokens(pp: *Preprocessor, w: anytype) !void {
                 }
                 for (slice) |_|
                     try w.writeByte(' ');
+            },
+
+            .IncludeStart => {
+                const source = pp.comp.getSource(cur.loc.id);
+                try w.print("# {d} \"{s}\" 1\n", .{ cur.loc.line, source.path });
+            },
+
+            .IncludeResume => {
+                const source = pp.comp.getSource(cur.loc.id);
+                try w.print("# {d} \"{s}\" 2\n", .{ cur.loc.line, source.path });
             },
 
             else => {
@@ -2776,10 +2807,10 @@ test "Include guards" {
 
             var writer = buf.writer();
             switch (tokenID) {
-                .KeywordInclude, .KeywordIncludeNext => try writer.print(template, .{ tokenID.getTokenText().?, " \"bar.h\"" }),
-                .KeywordDefine, .KeywordUndef => try writer.print(template, .{ tokenID.getTokenText().?, " BAR" }),
-                .KeywordIfndef, .KeywordIfdef => try writer.print(template, .{ tokenID.getTokenText().?, " BAR\n#endif" }),
-                else => try writer.print(template, .{ tokenID.getTokenText().?, "" }),
+                .KeywordInclude, .KeywordIncludeNext => try writer.print(template, .{ tokenID.lexeme().?, " \"bar.h\"" }),
+                .KeywordDefine, .KeywordUndef => try writer.print(template, .{ tokenID.lexeme().?, " BAR" }),
+                .KeywordIfndef, .KeywordIfdef => try writer.print(template, .{ tokenID.lexeme().?, " BAR\n#endif" }),
+                else => try writer.print(template, .{ tokenID.lexeme().?, "" }),
             }
 
             const source = try comp.addSourceFromBuffer("test.h", buf.items);

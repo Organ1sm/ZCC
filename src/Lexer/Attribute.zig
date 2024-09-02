@@ -1258,11 +1258,11 @@ pub fn applyFunctionAttributes(p: *Parser, ty: Type, attrBufferStart: usize) !Ty
             .C => continue,
             .stdcall, .thiscall => switch (p.comp.target.cpu.arch) {
                 .x86 => try p.attrApplicationBuffer.append(p.gpa, attr),
-                else => try p.errStr(.callconv_not_supported, tok, p.tokenIds[tok].getTokenText().?),
+                else => try p.errStr(.callconv_not_supported, tok, p.tokenIds[tok].lexeme().?),
             },
             .vectorcall => switch (p.comp.target.cpu.arch) {
                 .x86, .aarch64, .aarch64_be => try p.attrApplicationBuffer.append(p.gpa, attr),
-                else => try p.errStr(.callconv_not_supported, tok, p.tokenIds[tok].getTokenText().?),
+                else => try p.errStr(.callconv_not_supported, tok, p.tokenIds[tok].lexeme().?),
             },
         },
 
