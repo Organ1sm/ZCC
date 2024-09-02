@@ -93,14 +93,24 @@ verbose: bool = false,
 preserveWhitespace: bool = false,
 
 /// linemarker tokens. Must be .none unless in -E mode (parser does not handle linemarkers)
-linemarkers: enum {
+linemarkers: LineMarkers = .None,
+
+pub const LineMarkers = enum {
     /// No linemarker tokens. Required setting if parser will run
     None,
     /// #line <num> "filename" flags
-    LineDirective,
+    LineDirectives,
     /// # <num> "filename" flags
-    NumericDirective,
-} = .None,
+    NumericDirectives,
+
+    fn directiveString(self: LineMarkers) []const u8 {
+        return switch (self) {
+            .None => unreachable,
+            .LineDirectives => "line",
+            .NumericDirectives => "",
+        };
+    }
+};
 
 const BuiltinMacros = struct {
     const args = [1][]const u8{"X"};
@@ -119,10 +129,7 @@ const BuiltinMacros = struct {
     const pragmaOperator = [1]RawToken{makeFeatCheckMacro(.MacroParamPragmaOperator)};
 
     fn makeFeatCheckMacro(id: TokenType) RawToken {
-        return .{
-            .id = id,
-            .source = .generated,
-        };
+        return .{ .id = id, .source = .generated };
     }
 };
 
@@ -2572,7 +2579,8 @@ fn findIncludeSource(
 /// pretty print tokens and try to preserve whitespace
 pub fn prettyPrintTokens(pp: *Preprocessor, w: anytype) !void {
     const rootSrc = pp.comp.getSource(@enumFromInt(2));
-    try w.print("# 1 \"{s}\"\n", .{rootSrc.path});
+    if (pp.linemarkers != .None)
+        try w.print("#{s} 1 \"{s}\"\n", .{ pp.linemarkers.directiveString(), rootSrc.path });
 
     var i: u32 = 0;
     while (true) : (i += 1) {
@@ -2622,12 +2630,12 @@ pub fn prettyPrintTokens(pp: *Preprocessor, w: anytype) !void {
 
             .IncludeStart => {
                 const source = pp.comp.getSource(cur.loc.id);
-                try w.print("# {d} \"{s}\" 1\n", .{ cur.loc.line, source.path });
+                try w.print("#{s} {d} \"{s}\" 1\n", .{ pp.linemarkers.directiveString(), cur.loc.line, source.path });
             },
 
             .IncludeResume => {
                 const source = pp.comp.getSource(cur.loc.id);
-                try w.print("# {d} \"{s}\" 2\n", .{ cur.loc.line, source.path });
+                try w.print("#{s} {d} \"{s}\" 2\n", .{ pp.linemarkers.directiveString(), cur.loc.line, source.path });
             },
 
             else => {
@@ -2680,6 +2688,7 @@ test "Preserve pragma tokens sometimes" {
             defer pp.deinit();
 
             pp.preserveWhitespace = true;
+            assert(pp.linemarkers == .None);
 
             const test_runner_macros = try comp.addSourceFromBuffer("<test_runner>", source_text);
             const eof = try pp.preprocess(test_runner_macros);

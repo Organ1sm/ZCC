@@ -1,4 +1,4 @@
-//zcc-args -E
+//zcc-args -E -P
 #define LINE __LINE__
 
 void foo(void) {

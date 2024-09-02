@@ -1,4 +1,4 @@
-//zcc-args -E
+//zcc-args -E -P
 
 #define EMPTY()
 #define LOOP_INDIRECTION() LOOP

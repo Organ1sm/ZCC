@@ -30,7 +30,7 @@ outputName: ?[]const u8 = null,
 sysroot: ?[]const u8 = null,
 tempFileCount: u32 = 0,
 /// If false, do not emit line directives in -E mode
-lineCommands: bool = false,
+lineCommands: bool = true,
 /// If true, use `#line <num>` instead of `# <num>` for line directives
 useLineDirectives: bool = false,
 
@@ -531,7 +531,7 @@ fn processSource(
     if (d.onlyPreprocess) {
         pp.preserveWhitespace = true;
         if (d.lineCommands)
-            pp.linemarkers = if (d.useLineDirectives) .LineDirective else .NumericDirective;
+            pp.linemarkers = if (d.useLineDirectives) .LineDirectives else .NumericDirectives;
     }
 
     try pp.addBuiltinMacros();

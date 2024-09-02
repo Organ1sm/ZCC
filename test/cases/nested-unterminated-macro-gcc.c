@@ -1,4 +1,4 @@
-//zcc-args -E --emulate=gcc
+//zcc-args -E --emulate=gcc -P
 #define str(s) # s
 #define xstr(s) str(s)
 #define INCFILE(n) str(strcmp(

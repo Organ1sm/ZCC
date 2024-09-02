@@ -1,4 +1,4 @@
-//zcc-args -E
+//zcc-args -E -P
 
 #define FIRST(x) x
 #define SECOND FIRST

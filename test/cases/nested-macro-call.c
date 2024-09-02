@@ -1,4 +1,4 @@
-//zcc-args -E
+//zcc-args -E -P
 
 #define A(x) x
 #define B(x) A(x)

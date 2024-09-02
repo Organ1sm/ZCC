@@ -1,4 +1,4 @@
-//zcc-args -E -Wno-integer-overflow
+//zcc-args -E -P -Wno-integer-overflow 
 
 #if defined FOO & !defined(BAZ)
 void

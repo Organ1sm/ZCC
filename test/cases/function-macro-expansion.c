@@ -1,4 +1,4 @@
-//zcc-args -E 
+//zcc-args -E -P
 
 #define HE HI
 #define LLO _THERE

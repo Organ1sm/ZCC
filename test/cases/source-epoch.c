@@ -1,4 +1,4 @@
-//zcc-args -E
+//zcc-args -E -P
 //zcc-env SourceDateEpoch=0
 
 __DATE__
