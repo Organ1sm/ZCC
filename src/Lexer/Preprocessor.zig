@@ -92,6 +92,16 @@ includeGuards: std.AutoHashMapUnmanaged(Source.ID, []const u8) = .{},
 verbose: bool = false,
 preserveWhitespace: bool = false,
 
+/// linemarker tokens. Must only be true in -E mode (parser does not handle linemarkers)
+linemarkers: enum {
+    /// No linemarker tokens. Required setting if parser will run
+    None,
+    /// #line <num> "filename" flags
+    LineDirective,
+    /// # <num> "filename" flags
+    NumericDirective,
+} = .None,
+
 const BuiltinMacros = struct {
     const args = [1][]const u8{"X"};
     const hasAttribute = [1]RawToken{makeFeatCheckMacro(.MacroParamHasAttribute)};
