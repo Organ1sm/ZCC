@@ -2630,12 +2630,22 @@ pub fn prettyPrintTokens(pp: *Preprocessor, w: anytype) !void {
 
             .IncludeStart => {
                 const source = pp.comp.getSource(cur.loc.id);
-                try w.print("#{s} {d} \"{s}\" 1\n", .{ pp.linemarkers.directiveString(), cur.loc.line, source.path });
+                try w.print("#{s} {d} \"{s}\" 1{s}\n", .{
+                    pp.linemarkers.directiveString(),
+                    cur.loc.line,
+                    source.path,
+                    source.kind.preprocessorFlags(),
+                });
             },
 
             .IncludeResume => {
                 const source = pp.comp.getSource(cur.loc.id);
-                try w.print("#{s} {d} \"{s}\" 2\n", .{ pp.linemarkers.directiveString(), cur.loc.line, source.path });
+                try w.print("#{s} {d} \"{s}\" 2{s}\n", .{
+                    pp.linemarkers.directiveString(),
+                    cur.loc.line,
+                    source.path,
+                    source.kind.preprocessorFlags(),
+                });
             },
 
             else => {
