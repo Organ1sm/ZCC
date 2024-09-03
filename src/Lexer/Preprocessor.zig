@@ -2417,7 +2417,7 @@ fn include(pp: *Preprocessor, lexer: *Lexer, which: Compilation.WhichInclude) Ma
             .id = .IncludeResume,
             .loc = .{
                 .id = first.source,
-                .byteOffset = std.math.maxInt(u32),
+                .byteOffset = first.end,
                 .line = first.line + 1,
             },
         });
@@ -2582,6 +2582,7 @@ pub fn prettyPrintTokens(pp: *Preprocessor, w: anytype) !void {
     if (pp.linemarkers != .None)
         try w.print("#{s} 1 \"{s}\"\n", .{ pp.linemarkers.directiveString(), rootSrc.path });
 
+    var expectedLine: usize = 1;
     var i: u32 = 0;
     while (true) : (i += 1) {
         var cur: Token = pp.tokens.get(i);
@@ -2591,7 +2592,10 @@ pub fn prettyPrintTokens(pp: *Preprocessor, w: anytype) !void {
                     try w.writeByte('\n');
                 break;
             },
-            .NewLine => try w.writeAll("\n"),
+            .NewLine => {
+                try w.writeAll("\n");
+                expectedLine += 1;
+            },
             .KeywordPragma => {
                 const pragmaName = pp.expandedSlice(pp.tokens.get(i + 1));
                 const endIdx = std.mem.indexOfScalarPos(TokenType, pp.tokens.items(.id), i, .NewLine) orelse i + 1;
@@ -2610,6 +2614,7 @@ pub fn prettyPrintTokens(pp: *Preprocessor, w: anytype) !void {
                     cur = pp.tokens.get(i);
                     if (cur.id == .NewLine) {
                         try w.writeByte('\n');
+                        expectedLine += 1;
                         break;
                     }
                     try w.writeByte(' ');
@@ -2622,6 +2627,7 @@ pub fn prettyPrintTokens(pp: *Preprocessor, w: anytype) !void {
                 var slice = pp.expandedSlice(cur);
                 while (std.mem.indexOfScalar(u8, slice, '\n')) |some| {
                     try w.writeByte('\n');
+                    expectedLine += 1;
                     slice = slice[some + 1 ..];
                 }
                 for (slice) |_|
@@ -2632,7 +2638,7 @@ pub fn prettyPrintTokens(pp: *Preprocessor, w: anytype) !void {
                 const source = pp.comp.getSource(cur.loc.id);
                 try w.print("#{s} {d} \"{s}\" 1{s}\n", .{
                     pp.linemarkers.directiveString(),
-                    cur.loc.line,
+                    1,
                     source.path,
                     source.kind.preprocessorFlags(),
                 });
@@ -2640,15 +2646,29 @@ pub fn prettyPrintTokens(pp: *Preprocessor, w: anytype) !void {
 
             .IncludeResume => {
                 const source = pp.comp.getSource(cur.loc.id);
+                const lineCol = source.getLineCol(cur.loc);
                 try w.print("#{s} {d} \"{s}\" 2{s}\n", .{
                     pp.linemarkers.directiveString(),
-                    cur.loc.line,
+                    lineCol.lineNO,
                     source.path,
                     source.kind.preprocessorFlags(),
                 });
             },
 
             else => {
+                if (pp.linemarkers != .None) {
+                    const source = pp.comp.getSource(cur.loc.id);
+                    const lineCol = source.getLineCol(cur.loc);
+                    if (expectedLine != lineCol.lineNO) {
+                        try w.print("#{s} {d} \"{s}\"{s}\n", .{
+                            pp.linemarkers.directiveString(),
+                            lineCol.lineNO,
+                            source.path,
+                            source.kind.preprocessorFlags(),
+                        });
+                        expectedLine = lineCol.lineNO;
+                    }
+                }
                 const slice = pp.expandedSlice(cur);
                 try w.writeAll(slice);
             },
