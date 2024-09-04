@@ -851,21 +851,28 @@ pub fn getSource(comp: *const Compilation, id: Source.ID) Source {
 }
 
 /// Creates a Source from the contents of `reader` and adds it to the Compilation
+pub fn addSourceFromReader(comp: *Compilation, reader: anytype, path: []const u8, kind: Source.Kind) !Source {
+    const contents = try reader.readAllAlloc(comp.gpa, std.math.maxInt(u32));
+    errdefer comp.gpa.free(contents);
+    return comp.addSourceFromOwnedBuffer(contents, path, kind);
+}
+
+/// Creates a Source from `buf` and adds it to the Compilation
 /// Performs newline splicing and line-ending normalization to '\n'
+/// `buf` will be modified and the allocation will be resized if newline splicing
+/// or line-ending changes happen.
 /// caller retains ownership of `path`
-/// `expected_size` will be allocated to hold the contents of `reader` and *must* be at least
-/// as large as the entire contents of `reader`.
-/// To add a pre-existing buffer as a Source, see addSourceFromBuffer
+/// To add the contents of an arbitrary reader as a Source, see addSourceFromReader
 /// To add a file's contents given its path, see addSourceFromPath
-pub fn addSourceFromReader(
+pub fn addSourceFromOwnedBuffer(
     comp: *Compilation,
-    reader: anytype,
+    buffer: []u8,
     path: []const u8,
-    expectedSize: u32,
     kind: Source.Kind,
 ) !Source {
-    var contents = try comp.gpa.alloc(u8, expectedSize);
-    errdefer comp.gpa.free(contents);
+    try comp.sources.ensureUnusedCapacity(1);
+
+    var contents = buffer;
 
     const dupedPath = try comp.gpa.dupe(u8, path);
     errdefer comp.gpa.free(dupedPath);
@@ -889,11 +896,7 @@ pub fn addSourceFromReader(
     } = .beginning_of_file;
     var line: u32 = 1;
 
-    while (true) {
-        const byte = reader.readByte() catch |err| switch (err) {
-            error.EndOfStream => break,
-            else => |e| return e,
-        };
+    for (contents) |byte| {
         contents[i] = byte;
 
         switch (byte) {
@@ -990,8 +993,8 @@ pub fn addSourceFromReader(
     const spliceLocs = try spliceList.toOwnedSlice();
     errdefer comp.gpa.free(spliceLocs);
 
-    if (i != contents.len)
-        contents = try comp.gpa.realloc(contents, i);
+    if (i != contents.len) contents = try comp.gpa.realloc(contents, i);
+    errdefer @compileError("errdefers in callers would possibly free the realloced slice using the original len");
 
     const source = Source{
         .id = sourceId,
@@ -1001,23 +1004,25 @@ pub fn addSourceFromReader(
         .kind = kind,
     };
 
-    try comp.sources.put(dupedPath, source);
+    comp.sources.putAssumeCapacityNoClobber(dupedPath, source);
     return source;
 }
 
 /// Caller retains ownership of `path` and `buffer`.
+/// Dupes the source buffer; if it is acceptable to modify the source buffer and possibly resize
+/// the allocation, please use `addSourceFromOwnedBuffer`
 pub fn addSourceFromBuffer(comp: *Compilation, path: []const u8, buffer: []const u8) !Source {
     if (comp.sources.get(path)) |some| return some;
+    if (@as(u64, buffer.len) > std.math.maxInt(u32)) return error.StreamTooLong;
 
-    if (@as(u64, buffer.len) > std.math.maxInt(u32))
-        return error.StreamTooLong;
+    const contents = try comp.gpa.dupe(u8, buffer);
+    errdefer comp.gpa.free(contents);
 
-    const size = std.math.cast(u32, buffer.len) orelse return error.StreamTooLong;
+    return comp.addSourceFromOwnedBuffer(contents, path, .User);
+}
 
-    var stream = std.io.fixedBufferStream(buffer);
-    const reader = stream.reader();
-
-    return comp.addSourceFromReader(reader, path, size, .User);
+pub fn addSourceFromPath(comp: *Compilation, path: []const u8) !Source {
+    return comp.addSourceFromPathExtra(path, .User);
 }
 
 /// Add a source file to the compilation accord to the given path.
@@ -1038,17 +1043,13 @@ pub fn addSourceFromPathExtra(comp: *Compilation, path: []const u8, kind: Source
     const file = try std.fs.cwd().openFile(path, .{});
     defer file.close();
 
-    const size = std.math.cast(u32, try file.getEndPos()) orelse
-        return error.StreamTooLong;
+    const contents = file.readToEndAlloc(comp.gpa, std.math.maxInt(u32)) catch |err| switch (err) {
+        error.FileTooBig => return error.StreamTooLong,
+        else => |e| return e,
+    };
+    errdefer comp.gpa.free(contents);
 
-    var bufferReader = std.io.bufferedReader(file.reader());
-    const reader = bufferReader.reader();
-
-    return comp.addSourceFromReader(reader, path, size, kind);
-}
-
-pub fn addSourceFromPath(comp: *Compilation, path: []const u8) !Source {
-    return comp.addSourceFromPathExtra(path, .User);
+    return comp.addSourceFromOwnedBuffer(contents, path, kind);
 }
 
 pub const IncludeDirIterator = struct {
@@ -1332,7 +1333,7 @@ test "addSourceFromReader" {
 
             var stream = std.io.fixedBufferStream(str);
             const reader = stream.reader();
-            const source = try comp.addSourceFromReader(reader, "path", @intCast(str.len), .User);
+            const source = try comp.addSourceFromReader(reader, "path", .User);
 
             try std.testing.expectEqualStrings(expected, source.buffer);
             try std.testing.expectEqual(warningCount, @as(u32, @intCast(comp.diagnostics.list.items.len)));
@@ -1415,7 +1416,7 @@ test "ignore BOM at beginning of file" {
             defer comp.deinit();
 
             var buff = std.io.fixedBufferStream(buf);
-            const source = try comp.addSourceFromReader(buff.reader(), "file.c", @intCast(buf.len), .User);
+            const source = try comp.addSourceFromReader(buff.reader(), "file.c", .User);
             const expectedOutput = if (std.mem.startsWith(u8, buf, BOM)) buf[BOM.len..] else buf;
             try std.testing.expectEqualStrings(expectedOutput, source.buffer);
         }

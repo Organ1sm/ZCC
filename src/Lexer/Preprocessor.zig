@@ -549,6 +549,8 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!Token {
 
 /// Tokenize a file without any preprocessing, returns eof token.
 pub fn tokenize(pp: *Preprocessor, source: Source) Error!Token {
+    assert(pp.linemarkers == .None);
+    assert(pp.preserveWhitespace == false);
     var tokenizer = Lexer{
         .buffer = source.buffer,
         .comp = pp.comp,
