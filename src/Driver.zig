@@ -536,8 +536,16 @@ fn processSource(
 
     try pp.addBuiltinMacros();
 
+    try pp.addIncludeStart(source);
+
+    try pp.addIncludeStart(builtinMacro);
     _ = try pp.preprocess(builtinMacro);
+
+    try pp.addIncludeStart(userDefinedMacros);
     _ = try pp.preprocess(userDefinedMacros);
+
+    try pp.addIncludeResume(source.id, 0, 0);
+
     if (d.dumpRawTokens) {
         _ = try pp.tokenize(source);
     } else {

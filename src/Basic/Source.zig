@@ -33,14 +33,6 @@ pub const Kind = enum {
     System,
     /// Included from an "implicit extern C" directory
     ExternCSystem,
-
-    pub fn preprocessorFlags(self: Kind) []const u8 {
-        return switch (self) {
-            .User => "",
-            .System => " 3",
-            .ExternCSystem => " 3 4",
-        };
-    }
 };
 
 /// source file path
