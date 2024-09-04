@@ -1,4 +1,4 @@
-//zcc-args -E
+//zcc-args -E -P
 #define str(s) # s
 #define xstr(s) str(s)
 #define INCFILE(n) str(strcmp(

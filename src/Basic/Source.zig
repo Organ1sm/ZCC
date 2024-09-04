@@ -25,6 +25,16 @@ pub const ID = enum(u32) {
     _,
 };
 
+/// Classifies the file for line marker output in -E mode
+pub const Kind = enum {
+    /// regular file
+    User,
+    /// Included from a system include directory
+    System,
+    /// Included from an "implicit extern C" directory
+    ExternCSystem,
+};
+
 /// source file path
 path: []const u8,
 /// source file content buffer
@@ -38,6 +48,7 @@ invalidUTF8Loc: ?Location = null,
 /// from the original raw buffer. The same position can appear multiple times if multiple
 /// consecutive splices happened. Guaranteed to be non-decreasing
 spliceLocs: []const u32,
+kind: Kind,
 
 /// Todo: binary search instead of scanning entire `spliceLocs`.
 pub fn numSplicesBefore(source: Source, byteOffset: u32) u32 {

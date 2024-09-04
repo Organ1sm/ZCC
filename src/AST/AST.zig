@@ -333,7 +333,7 @@ pub fn dumpString(retainedStrings: []const u8, range: Value.ByteRange, tag: AstT
 }
 
 pub fn getTokenSlice(tree: AST, index: TokenIndex) []const u8 {
-    if (tree.tokens.items(.id)[index].getTokenText()) |some|
+    if (tree.tokens.items(.id)[index].lexeme()) |some|
         return some;
 
     const loc = tree.tokens.items(.loc)[index];

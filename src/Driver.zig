@@ -29,6 +29,10 @@ linkObjects: std.ArrayListUnmanaged([]const u8) = .{},
 outputName: ?[]const u8 = null,
 sysroot: ?[]const u8 = null,
 tempFileCount: u32 = 0,
+/// If false, do not emit line directives in -E mode
+lineCommands: bool = true,
+/// If true, use `#line <num>` instead of `# <num>` for line directives
+useLineDirectives: bool = false,
 
 // debug options
 onlyPreprocess: bool = false,
@@ -109,6 +113,9 @@ const usage =
     \\  -fsyntax-only           Only run the preprocessor parser, and semantic analysis stages
     \\  -funsigned-char         "char" is unsigned
     \\  -fno-unsigned-char      "char" is signed
+    \\  -fuse-line-directives   Use `#line <num>` linemarkers in preprocessed output
+    \\  -fno-use-line-directives
+    \\                          Use `# <num>` linemarkers in preprocessed output
     \\  -fmacro-backtrace-limit=<limit>
     \\                          Set limit on how many macro expansion traces are shown in errors (default 6)
     \\  -I <dir>                Add directory to include search path
@@ -116,6 +123,7 @@ const usage =
     \\  --emulate=[clang|gcc|msvc]
     \\                          Select which C compiler to emulate (default clang)
     \\  -o <file>               Write output to <file>
+    \\  -P, --no-line-commands  Disable linemarker output in -E mode
     \\  -pedantic               Warn on language extensions
     \\  --rtlib=<arg>           Compiler runtime library to use (libgcc or compiler-rt)
     \\  -std=<standard>         Specify language standard
@@ -217,6 +225,12 @@ pub fn parseArgs(
                 d.onlyCompile = true;
             } else if (std.mem.eql(u8, arg, "-E")) {
                 d.onlyPreprocess = true;
+            } else if (std.mem.eql(u8, arg, "-P") or std.mem.eql(u8, arg, "--no-line-commands")) {
+                d.lineCommands = false;
+            } else if (std.mem.eql(u8, arg, "-fuse-line-directives")) {
+                d.useLineDirectives = true;
+            } else if (std.mem.eql(u8, arg, "-fno-use-line-directives")) {
+                d.useLineDirectives = false;
             } else if (mem.eql(u8, arg, "-fchar8_t")) {
                 d.comp.langOpts.hasChar8tOverride = true;
             } else if (mem.eql(u8, arg, "-fno-char8_t")) {
@@ -514,11 +528,24 @@ fn processSource(
         d.comp.msCwdSourceId = source.id;
 
     if (d.dumpPP) pp.verbose = true;
-    if (d.onlyPreprocess) pp.preserveWhitespace = true;
+    if (d.onlyPreprocess) {
+        pp.preserveWhitespace = true;
+        if (d.lineCommands)
+            pp.linemarkers = if (d.useLineDirectives) .LineDirectives else .NumericDirectives;
+    }
+
     try pp.addBuiltinMacros();
 
+    try pp.addIncludeStart(source);
+
+    try pp.addIncludeStart(builtinMacro);
     _ = try pp.preprocess(builtinMacro);
+
+    try pp.addIncludeStart(userDefinedMacros);
     _ = try pp.preprocess(userDefinedMacros);
+
+    try pp.addIncludeResume(source.id, 0, 0);
+
     if (d.dumpRawTokens) {
         _ = try pp.tokenize(source);
     } else {

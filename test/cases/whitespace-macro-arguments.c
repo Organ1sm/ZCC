@@ -1,4 +1,4 @@
-//zcc-args -E
+//zcc-args -E -P
 
 #define h() 1
 #define g(x) x

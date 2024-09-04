@@ -1,4 +1,4 @@
-//zcc-args -E
+//zcc-args -E -P
 /* comment **/
 
 int I_exist;

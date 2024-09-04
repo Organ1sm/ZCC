@@ -1,4 +1,4 @@
-//zcc-args -E
+//zcc-args -E -P
 
 #define X(a) Foo_ ## a = a,
 enum Foo {

@@ -1,4 +1,4 @@
-//zcc-args -E
+//zcc-args -E -P
 
 #define TWO_ARGS(A, B) A B
 

@@ -328,7 +328,7 @@ fn errOverflow(p: *Parser, op_tok: TokenIndex, res: Result) !void {
 }
 
 pub fn getTokenText(p: *Parser, index: TokenIndex) []const u8 {
-    if (p.tokenIds[index].getTokenText()) |some|
+    if (p.tokenIds[index].lexeme()) |some|
         return some;
 
     const loc = p.pp.tokens.items(.loc)[index];
@@ -635,6 +635,7 @@ fn diagnoseIncompleteDefinitions(p: *Parser) !void {
 
 /// root : (decl | inline assembly ';' | static-assert-declaration)*
 pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
+    assert(pp.linemarkers == .None);
     pp.comp.pragmaEvent(.BeforeParse);
 
     var arena = std.heap.ArenaAllocator.init(pp.comp.gpa);
@@ -1386,19 +1387,19 @@ fn parseDeclSpec(p: *Parser) Error!?DeclSpec {
                 if (d.threadLocal != null) {
                     switch (token) {
                         .KeywordExtern, .KeywordStatic => {},
-                        else => try p.errStr(.cannot_combine_spec, p.tokenIdx, token.getTokenText().?),
+                        else => try p.errStr(.cannot_combine_spec, p.tokenIdx, token.lexeme().?),
                     }
                     if (d.constexpr) |tok|
-                        try p.errStr(.cannot_combine_spec, p.tokenIdx, p.tokenIds[tok].getTokenText().?);
+                        try p.errStr(.cannot_combine_spec, p.tokenIdx, p.tokenIds[tok].lexeme().?);
                 }
 
                 if (d.constexpr != null) {
                     switch (token) {
                         .KeywordAuto, .KeywordRegister, .KeywordStatic => {},
-                        else => try p.errStr(.cannot_combine_spec, p.tokenIdx, token.getTokenText().?),
+                        else => try p.errStr(.cannot_combine_spec, p.tokenIdx, token.lexeme().?),
                     }
                     if (d.threadLocal) |tok|
-                        try p.errStr(.cannot_combine_spec, p.tokenIdx, p.tokenIds[tok].getTokenText().?);
+                        try p.errStr(.cannot_combine_spec, p.tokenIdx, p.tokenIds[tok].lexeme().?);
                 }
 
                 switch (token) {
@@ -1413,10 +1414,10 @@ fn parseDeclSpec(p: *Parser) Error!?DeclSpec {
 
             .KeywordThreadLocal, .KeywordC23ThreadLocal => {
                 if (d.threadLocal != null)
-                    try p.errStr(.duplicate_declspec, p.tokenIdx, token.getTokenText().?);
+                    try p.errStr(.duplicate_declspec, p.tokenIdx, token.lexeme().?);
 
                 if (d.constexpr) |tok|
-                    try p.errStr(.cannot_combine_spec, p.tokenIdx, p.tokenIds[tok].getTokenText().?);
+                    try p.errStr(.cannot_combine_spec, p.tokenIdx, p.tokenIds[tok].lexeme().?);
 
                 switch (d.storageClass) {
                     .@"extern", .none, .static => {},
@@ -1428,10 +1429,10 @@ fn parseDeclSpec(p: *Parser) Error!?DeclSpec {
 
             .KeywordConstexpr => {
                 if (d.constexpr != null)
-                    try p.errStr(.duplicate_declspec, p.tokenIdx, token.getTokenText().?);
+                    try p.errStr(.duplicate_declspec, p.tokenIdx, token.lexeme().?);
 
                 if (d.threadLocal) |tok|
-                    try p.errStr(.cannot_combine_spec, p.tokenIdx, p.tokenIds[tok].getTokenText().?);
+                    try p.errStr(.cannot_combine_spec, p.tokenIdx, p.tokenIds[tok].lexeme().?);
 
                 switch (d.storageClass) {
                     .auto, .register, .none, .static => {},

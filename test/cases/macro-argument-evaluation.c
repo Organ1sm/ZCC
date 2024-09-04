@@ -1,4 +1,4 @@
-//zcc-args -E
+//zcc-args -E -P
 #define FOO(X) X##OK
 #define BAR FOO
 

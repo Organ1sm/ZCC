@@ -285,11 +285,15 @@ pub const TokenType = enum(u8) {
     /// See C99 6.10.3.3.2
     PlaceMarker,
 
+    /// Virtual linemarker token output from preprocessor to indicate start of a new include
+    IncludeStart,
+
+    /// Virtual linemarker token output from preprocessor to indicate resuming a file after
+    /// completion of the preceding #include
+    IncludeResume,
+
     /// This function checks if the provided `id` matches any of the predefined macro-related token types,
     /// and returns `true` if it does, indicating that it is a macro identifier.
-    ///
-    /// # Arguments
-    /// - `id`: The `TokenType` to be checked for macro identifier status.
     ///
     /// # Returns
     /// Returns `true` if the `id` corresponds to a macro identifier, otherwise returns `false`.
@@ -464,8 +468,10 @@ pub const TokenType = enum(u8) {
         simplifyMacroKeywordExtra(id, false);
     }
 
-    pub fn getTokenText(id: TokenType) ?[]const u8 {
+    pub fn lexeme(id: TokenType) ?[]const u8 {
         return switch (id) {
+            .IncludeStart, .IncludeResume => unreachable,
+
             .Invalid,
             .Identifier,
             .ExtendedIdentifier,
@@ -725,7 +731,7 @@ pub const TokenType = enum(u8) {
 
             .PPNumber, .EmbedByte => "A number",
 
-            else => id.getTokenText().?, // handled in getTokenText();
+            else => id.lexeme().?, // handled in getTokenText();
         };
     }
 

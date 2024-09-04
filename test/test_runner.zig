@@ -11,9 +11,14 @@ const AllocatorError = std.mem.Allocator.Error;
 
 var general_purpose_allocator = std.heap.GeneralPurposeAllocator(.{}){};
 
-/// Return true if saw -E option
-fn addCommandLineArgs(comp: *zcc.Compilation, file: zcc.Source, macroBuffer: anytype) !bool {
+/// Returns onlyPreprocess and lineMarkers settings if saw -E
+fn addCommandLineArgs(
+    comp: *zcc.Compilation,
+    file: zcc.Source,
+    macroBuffer: anytype,
+) !struct { bool, zcc.Preprocessor.LineMarkers } {
     var onlyPreprocess = false;
+    var lineMarkers: zcc.Preprocessor.LineMarkers = .None;
     if (std.mem.startsWith(u8, file.buffer, "//zcc-args")) {
         var testArgs = std.ArrayList([]const u8).init(comp.gpa);
         defer testArgs.deinit();
@@ -27,6 +32,10 @@ fn addCommandLineArgs(comp: *zcc.Compilation, file: zcc.Source, macroBuffer: any
 
         _ = try driver.parseArgs(std.io.null_writer, macroBuffer, testArgs.items);
         onlyPreprocess = driver.onlyPreprocess;
+        if (onlyPreprocess) {
+            if (driver.lineCommands)
+                lineMarkers = if (driver.useLineDirectives) .LineDirectives else .NumericDirectives;
+        }
     }
 
     if (std.mem.indexOf(u8, file.buffer, "//zcc-env")) |idx| {
@@ -46,7 +55,7 @@ fn addCommandLineArgs(comp: *zcc.Compilation, file: zcc.Source, macroBuffer: any
         }
     }
 
-    return onlyPreprocess;
+    return .{ onlyPreprocess, lineMarkers };
 }
 
 fn testOne(allocator: std.mem.Allocator, path: []const u8, testDir: []const u8) !void {
@@ -214,7 +223,7 @@ pub fn main() !void {
         var macroBuffer = std.ArrayList(u8).init(comp.gpa);
         defer macroBuffer.deinit();
 
-        const onlyPreprocess = try addCommandLineArgs(&comp, file, macroBuffer.writer());
+        const onlyPreprocess, const lineMarkers = try addCommandLineArgs(&comp, file, macroBuffer.writer());
         const userMacros = try comp.addSourceFromBuffer("<command line>", macroBuffer.items);
 
         const builtinMacros = try comp.generateBuiltinMacros();
@@ -223,7 +232,10 @@ pub fn main() !void {
         var pp = zcc.Preprocessor.init(&comp);
         defer pp.deinit();
 
-        if (onlyPreprocess) pp.preserveWhitespace = true;
+        if (onlyPreprocess) {
+            pp.preserveWhitespace = true;
+            pp.linemarkers = lineMarkers;
+        }
         try pp.addBuiltinMacros();
 
         if (comp.langOpts.msExtensions)

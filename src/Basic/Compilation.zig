@@ -845,6 +845,7 @@ pub fn getSource(comp: *const Compilation, id: Source.ID) Source {
         .buffer = comp.generatedBuffer.items,
         .id = .generated,
         .spliceLocs = &.{},
+        .kind = .User,
     };
     return comp.sources.values()[@intFromEnum(id) - 2];
 }
@@ -856,7 +857,13 @@ pub fn getSource(comp: *const Compilation, id: Source.ID) Source {
 /// as large as the entire contents of `reader`.
 /// To add a pre-existing buffer as a Source, see addSourceFromBuffer
 /// To add a file's contents given its path, see addSourceFromPath
-pub fn addSourceFromReader(comp: *Compilation, reader: anytype, path: []const u8, expectedSize: u32) !Source {
+pub fn addSourceFromReader(
+    comp: *Compilation,
+    reader: anytype,
+    path: []const u8,
+    expectedSize: u32,
+    kind: Source.Kind,
+) !Source {
     var contents = try comp.gpa.alloc(u8, expectedSize);
     errdefer comp.gpa.free(contents);
 
@@ -991,6 +998,7 @@ pub fn addSourceFromReader(comp: *Compilation, reader: anytype, path: []const u8
         .path = dupedPath,
         .buffer = contents,
         .spliceLocs = spliceLocs,
+        .kind = kind,
     };
 
     try comp.sources.put(dupedPath, source);
@@ -1009,7 +1017,7 @@ pub fn addSourceFromBuffer(comp: *Compilation, path: []const u8, buffer: []const
     var stream = std.io.fixedBufferStream(buffer);
     const reader = stream.reader();
 
-    return comp.addSourceFromReader(reader, path, size);
+    return comp.addSourceFromReader(reader, path, size, .User);
 }
 
 /// Add a source file to the compilation accord to the given path.
@@ -1021,7 +1029,7 @@ pub fn addSourceFromBuffer(comp: *Compilation, path: []const u8, buffer: []const
 /// sources map, keyed by the path.
 ///
 /// If the source already exists, it will be returned immediately.
-pub fn addSourceFromPath(comp: *Compilation, path: []const u8) !Source {
+pub fn addSourceFromPathExtra(comp: *Compilation, path: []const u8, kind: Source.Kind) !Source {
     if (comp.sources.get(path)) |some| return some;
 
     if (std.mem.indexOfScalar(u8, path, 0) != null)
@@ -1036,11 +1044,14 @@ pub fn addSourceFromPath(comp: *Compilation, path: []const u8) !Source {
     var bufferReader = std.io.bufferedReader(file.reader());
     const reader = bufferReader.reader();
 
-    return comp.addSourceFromReader(reader, path, size);
+    return comp.addSourceFromReader(reader, path, size, kind);
+}
+
+pub fn addSourceFromPath(comp: *Compilation, path: []const u8) !Source {
+    return comp.addSourceFromPathExtra(path, .User);
 }
 
 pub const IncludeDirIterator = struct {
-    /// A reference to the Compilation instance.
     comp: *const Compilation,
     /// An optional Source.ID representing the current working directory's source.
     cwdSourceID: ?Source.ID,
@@ -1050,52 +1061,57 @@ pub const IncludeDirIterator = struct {
     sysIncludeDirsIndex: usize = 0,
     triedMSCwd: bool = false,
 
+    const FoundSource = struct {
+        path: []const u8,
+        kind: Source.Kind,
+    };
+
     /// Retrieves the next include directory path.
     /// If a current working directory source ID is set, it returns its directory path
     /// and clears the source ID. Then it iterates over the include directories and system
     /// include directories of the Compilation instance until all are visited.
     /// @return  The next directory path or null if there are no more directories.
-    fn next(self: *IncludeDirIterator) ?[]const u8 {
+    fn next(self: *IncludeDirIterator) ?FoundSource {
         // If cwdSourceID is set, return the directory of the corresponding source and unset it.
         if (self.cwdSourceID) |sourceID| {
             self.cwdSourceID = null;
             const path = self.comp.getSource(sourceID).path;
-            return std.fs.path.dirname(path) orelse ".";
+            return .{ .path = std.fs.path.dirname(path) orelse ".", .kind = .User };
         }
 
         // Iterate over the include directories and return the next one if available.
         if (self.includeDirsIndex < self.comp.includeDirs.items.len) {
             defer self.includeDirsIndex += 1;
-            return self.comp.includeDirs.items[self.includeDirsIndex];
+            return .{ .path = self.comp.includeDirs.items[self.includeDirsIndex], .kind = .System };
         }
 
         // Iterate over the system include directories and return the next one if available.
         if (self.sysIncludeDirsIndex < self.comp.systemIncludeDirs.items.len) {
             defer self.sysIncludeDirsIndex += 1;
-            return self.comp.systemIncludeDirs.items[self.sysIncludeDirsIndex];
+            return .{ .path = self.comp.systemIncludeDirs.items[self.sysIncludeDirsIndex], .kind = .User };
         }
 
         if (self.comp.msCwdSourceId) |sourceId| {
             if (self.triedMSCwd) return null;
             self.triedMSCwd = true;
             const path = self.comp.getSource(sourceId).path;
-            return std.fs.path.dirname(path) orelse ".";
+            return .{ .path = std.fs.path.dirname(path) orelse ".", .kind = .User };
         }
 
         // If no more directories are left, return null.
         return null;
     }
 
-    /// Returned value must be freed by allocator
-    fn nextWithFile(self: *IncludeDirIterator, filename: []const u8, allocator: Allocator) !?[]const u8 {
-        while (self.next()) |dir| {
-            const path = try std.fs.path.join(allocator, &.{ dir, filename });
+    /// Returned value's path field must be freed by allocator
+    fn nextWithFile(self: *IncludeDirIterator, filename: []const u8, allocator: Allocator) !?FoundSource {
+        while (self.next()) |found| {
+            const path = try std.fs.path.join(allocator, &.{ found.path, filename });
             if (self.comp.langOpts.msExtensions) {
                 for (path) |*c| {
                     if (c.* == '\\') c.* = '/';
                 }
             }
-            return path;
+            return .{ .path = path, .kind = found.kind };
         }
         return null;
     }
@@ -1105,8 +1121,8 @@ pub const IncludeDirIterator = struct {
     fn skipUntilDirMatch(self: *IncludeDirIterator, source: Source.ID) void {
         const path = self.comp.getSource(source).path;
         const includerPath = std.fs.path.dirname(path) orelse ".";
-        while (self.next()) |dir| {
-            if (std.mem.eql(u8, includerPath, dir)) break;
+        while (self.next()) |found| {
+            if (std.mem.eql(u8, includerPath, found.path)) break;
         }
     }
 };
@@ -1144,9 +1160,9 @@ pub fn hasInclude(
     var stackFallback = std.heap.stackFallback(PathBufferStackLimit, comp.gpa);
     const sfAllocator = stackFallback.get();
 
-    while (try it.nextWithFile(filename, sfAllocator)) |path| {
-        defer sfAllocator.free(path);
-        if (!std.meta.isError(cwd.access(path, .{}))) return true;
+    while (try it.nextWithFile(filename, sfAllocator)) |found| {
+        defer sfAllocator.free(found.path);
+        if (!std.meta.isError(cwd.access(found.path, .{}))) return true;
     }
     return false;
 }
@@ -1196,9 +1212,9 @@ pub fn findEmbed(
     var stackFallback = std.heap.stackFallback(PathBufferStackLimit, comp.gpa);
     const sfAllocator = stackFallback.get();
 
-    while (try it.nextWithFile(filename, sfAllocator)) |path| {
-        defer sfAllocator.free(path);
-        if (comp.getFileContents(path)) |some|
+    while (try it.nextWithFile(filename, sfAllocator)) |found| {
+        defer sfAllocator.free(found.path);
+        if (comp.getFileContents(found.path)) |some|
             return some
         else |err| switch (err) {
             error.OutOfMemory => return error.OutOfMemory,
@@ -1234,9 +1250,9 @@ pub fn findInclude(
     var stackFallback = std.heap.stackFallback(PathBufferStackLimit, comp.gpa);
     const sfAllocator = stackFallback.get();
 
-    while (try it.nextWithFile(filename, sfAllocator)) |path| {
-        defer sfAllocator.free(path);
-        if (comp.addSourceFromPath(path)) |some| {
+    while (try it.nextWithFile(filename, sfAllocator)) |found| {
+        defer sfAllocator.free(found.path);
+        if (comp.addSourceFromPathExtra(found.path, found.kind)) |some| {
             if (it.triedMSCwd) {
                 try comp.addDiagnostic(.{
                     .tag = .ms_search_rule,
@@ -1316,7 +1332,7 @@ test "addSourceFromReader" {
 
             var stream = std.io.fixedBufferStream(str);
             const reader = stream.reader();
-            const source = try comp.addSourceFromReader(reader, "path", @intCast(str.len));
+            const source = try comp.addSourceFromReader(reader, "path", @intCast(str.len), .User);
 
             try std.testing.expectEqualStrings(expected, source.buffer);
             try std.testing.expectEqual(warningCount, @as(u32, @intCast(comp.diagnostics.list.items.len)));
@@ -1399,7 +1415,7 @@ test "ignore BOM at beginning of file" {
             defer comp.deinit();
 
             var buff = std.io.fixedBufferStream(buf);
-            const source = try comp.addSourceFromReader(buff.reader(), "file.c", @intCast(buf.len));
+            const source = try comp.addSourceFromReader(buff.reader(), "file.c", @intCast(buf.len), .User);
             const expectedOutput = if (std.mem.startsWith(u8, buf, BOM)) buf[BOM.len..] else buf;
             try std.testing.expectEqualStrings(expectedOutput, source.buffer);
         }
