@@ -211,7 +211,7 @@ pub fn addIncludeStart(pp: *Preprocessor, source: Source) !void {
         .loc = .{
             .id = source.id,
             .byteOffset = std.math.maxInt(u32),
-            .line = 1,
+            .line = 0,
         },
     });
 }
@@ -223,7 +223,7 @@ pub fn addIncludeResume(pp: *Preprocessor, source: Source.ID, offset: u32, line:
         .loc = .{
             .id = source,
             .byteOffset = offset,
-            .line = line + 1,
+            .line = line,
         },
     });
 }
@@ -427,7 +427,10 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!Token {
                     },
 
                     .KeywordDefine => try pp.define(&lexer),
-                    .KeywordInclude => try pp.include(&lexer, .First),
+                    .KeywordInclude => {
+                        try pp.include(&lexer, .First);
+                        continue;
+                    },
                     .KeywordIncludeNext => {
                         try pp.comp.addDiagnostic(.{
                             .tag = .include_next,
@@ -445,7 +448,10 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!Token {
                     },
 
                     .KeywordEmbed => try pp.embed(&lexer),
-                    .KeywordPragma => try pp.pragma(&lexer, directive, null, &.{}),
+                    .KeywordPragma => {
+                        try pp.pragma(&lexer, directive, null, &.{});
+                        continue;
+                    },
 
                     .KeywordLine => {
                         const digits = lexer.nextNoWhiteSpace();
@@ -493,6 +499,10 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!Token {
                         try pp.addError(token, .invalid_preprocessing_directive);
                         skipToNewLine(&lexer);
                     },
+                }
+                if (pp.preserveWhitespace) {
+                    token.id = .NewLine;
+                    try pp.tokens.append(pp.gpa, tokenFromRaw(token));
                 }
             },
 
@@ -912,6 +922,12 @@ fn skip(
             lineStart = true;
             lexer.index += 1;
             lexer.line += 1;
+            if (pp.preserveWhitespace) {
+                try pp.tokens.append(pp.gpa, .{
+                    .id = .NewLine,
+                    .loc = .{ .id = lexer.source, .line = lexer.line },
+                });
+            }
         } else {
             lineStart = false;
             lexer.index += 1;
@@ -1949,7 +1965,10 @@ fn expandMacro(pp: *Preprocessor, lexer: *Lexer, raw: RawToken) MacroError!void 
     if (pp.preserveWhitespace) {
         try pp.tokens.ensureUnusedCapacity(pp.gpa, pp.addExpansionNL);
         while (pp.addExpansionNL > 0) : (pp.addExpansionNL -= 1) {
-            pp.tokens.appendAssumeCapacity(.{ .id = .NewLine, .loc = .{ .id = .generated } });
+            pp.tokens.appendAssumeCapacity(.{ .id = .NewLine, .loc = .{
+                .id = lexer.source,
+                .line = lexer.line,
+            } });
         }
     }
 }
@@ -2416,14 +2435,32 @@ fn include(pp: *Preprocessor, lexer: *Lexer, which: Compilation.WhichInclude) Ma
     if (pp.verbose)
         pp.verboseLog(first, "include file {s}", .{newSource.path});
 
+    const tokenStart = pp.tokens.len;
     try pp.addIncludeStart(newSource);
     const eof = pp.preprocessExtra(newSource) catch |err| switch (err) {
-        error.StopPreprocessing => return,
+        error.StopPreprocessing => {
+            for (pp.tokens.items(.expansionLocs)[tokenStart..]) |loc| Token.free(loc, pp.gpa);
+            pp.tokens.len = tokenStart;
+            return;
+        },
         else => |e| return e,
     };
     try eof.checkMsEof(newSource, pp.comp);
 
-    try pp.addIncludeResume(first.source, first.end, first.line);
+    if (pp.preserveWhitespace and pp.tokens.items(.id)[pp.tokens.len - 1] != .NewLine) {
+        try pp.tokens.append(pp.gpa, .{ .id = .NewLine, .loc = .{ .id = lexer.source, .line = lexer.line } });
+    }
+
+    if (pp.linemarkers == .None) return;
+    var next = first;
+    while (true) {
+        var tmp = lexer.*;
+        next = tmp.nextNoWhiteSpace();
+        if (next.id != .NewLine) break;
+        lexer.* = tmp;
+    }
+
+    try pp.addIncludeResume(next.source, next.end, next.line);
 }
 
 /// tokens that are part of a pragma directive can happen in 3 ways:
@@ -2581,13 +2618,14 @@ fn findIncludeSource(
 fn printLinemarker(
     pp: *Preprocessor,
     w: anytype,
-    line_no: u32,
+    lineNO: u32,
     source: Source,
     start_resume: enum(u8) { start, @"resume", none },
 ) !void {
     try w.writeByte('#');
     if (pp.linemarkers == .LineDirectives) try w.writeAll("line");
-    try w.print(" {d} \"{s}\"", .{ line_no, source.path });
+    // lineNo is 0 indexed.
+    try w.print(" {d} \"{s}\"", .{ lineNO + 1, source.path });
     if (pp.linemarkers == .NumericDirectives) {
         switch (start_resume) {
             .none => {},
@@ -2659,6 +2697,7 @@ pub fn prettyPrintTokens(pp: *Preprocessor, w: anytype) !void {
 
                 if (pp.comp.getPragma(pragmaName)) |prag| {
                     if (!prag.shouldPreserveTokens(pp, i + 1)) {
+                        try w.writeByte('\n');
                         i += pragmaLen;
                         cur = pp.tokens.get(i);
                         continue;
@@ -2692,7 +2731,7 @@ pub fn prettyPrintTokens(pp: *Preprocessor, w: anytype) !void {
 
             .IncludeStart => {
                 const source = pp.comp.getSource(cur.loc.id);
-                try pp.printLinemarker(w, 1, source, .start);
+                try pp.printLinemarker(w, 0, source, .start);
                 lastNewline = true;
             },
 
@@ -2789,13 +2828,13 @@ test "Preserve pragma tokens sometimes" {
         \\#pragma once
         \\
     ;
-    try Test.check(omit_once, "int x;\n");
+    try Test.check(omit_once, "\nint x;\n\n");
 
     const omit_poison =
         \\#pragma GCC poison foobar
         \\
     ;
-    try Test.check(omit_poison, "");
+    try Test.check(omit_poison, "\n");
 }
 
 test "destringify" {
