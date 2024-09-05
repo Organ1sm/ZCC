@@ -108,6 +108,7 @@ pub const Options = packed struct {
     @"empty-translation-unit": Kind = .default,
     @"implicitly-unsigned-literal": Kind = .default,
     @"c99-compat": Kind = .default,
+    unicode: Kind = .default,
     @"unicode-zero-width": Kind = .default,
     @"unicode-homoglyph": Kind = .default,
     @"return-type": Kind = .default,
@@ -167,6 +168,8 @@ pub const Options = packed struct {
     @"complex-component-init": Kind = .default,
     @"microsoft-include": Kind = .default,
     @"microsoft-end-of-file": Kind = .default,
+    @"invalid-source-encoding": Kind = .default,
+    @"four-char-constants": Kind = .default,
 };
 
 list: std.ArrayListUnmanaged(Message) = .{},

@@ -639,15 +639,20 @@ pub const invalid_universal_character = struct {
     pub const msg = "invalid universal character";
     pub const kind = .@"error";
 };
-pub const multichar_literal = struct {
+pub const incomplete_universal_character = struct {
+    pub const msg = "incomplete universal character name";
+    pub const kind = .@"error";
+};
+pub const multichar_literal_warning = struct {
     pub const msg = "multi-character character constant";
     pub const opt = "multichar";
     pub const kind = .warning;
     pub const all = true;
 };
-pub const unicode_multichar_literal = struct {
-    pub const msg = "Unicode character literals may not contain multiple characters";
+pub const invalid_multichar_literal = struct {
+    pub const msg = "{s} character literals may not contain multiple characters";
     pub const kind = .@"error";
+    pub const extra = .str;
 };
 pub const wide_multichar_literal = struct {
     pub const msg = "extraneous characters in character constant ignored";
@@ -2234,4 +2239,54 @@ pub const ctrl_z_eof = struct {
     pub const opt = "microsoft-end-of-file";
     pub const kind = .off;
     pub const pedantic = true;
+};
+pub const illegal_char_encoding_warning = struct {
+    pub const msg = "illegal character encoding in character literal";
+    pub const opt = "invalid-source-encoding";
+    pub const kind = .warning;
+};
+pub const illegal_char_encoding_error = struct {
+    pub const msg = "illegal character encoding in character literal";
+    pub const kind = .@"error";
+};
+pub const non_hex_ucn = struct {
+    pub const msg = "\\{c} used with no following hex digits";
+    pub const kind = .@"error";
+};
+pub const ucn_basic_char_error = struct {
+    pub const msg = "character '{c}' cannot be specified by a universal character name";
+    pub const kind = .@"error";
+    pub const extra = .ascii;
+};
+pub const ucn_basic_char_warning = struct {
+    pub const msg = "specifying character '{c}' with a universal character name is incompatible with C standards before C2x";
+    pub const kind = .off;
+    pub const extra = .ascii;
+    pub const suppress_unless_version = .c2x;
+    pub const opt = "pre-c2x-compat";
+};
+pub const ucn_control_char_error = struct {
+    pub const msg = "universal character name refers to a control character";
+    pub const kind = .@"error";
+};
+pub const ucn_control_char_warning = struct {
+    pub const msg = "universal character name referring to a control character is incompatible with C standards before C2x";
+    pub const kind = .off;
+    pub const suppress_unless_version = .c2x;
+    pub const opt = "pre-c2x-compat";
+};
+pub const c89_ucn_in_literal = struct {
+    pub const msg = "universal character names are only valid in C99 or later";
+    pub const suppress_version = .c99;
+    pub const kind = .warning;
+    pub const opt = "unicode";
+};
+pub const four_char_char_literal = struct {
+    pub const msg = "multi-character character constant";
+    pub const opt = "four-char-constants";
+    pub const kind = .off;
+};
+pub const multi_char_char_literal = struct {
+    pub const msg = "multi-character character constant";
+    pub const kind = .off;
 };
