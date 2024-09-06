@@ -103,6 +103,8 @@ generatedBuffer: std.ArrayList(u8),
 builtins: Builtins = .{},
 types: struct {
     wchar: Type = undefined,
+    uintLeast16Ty: Type = undefined,
+    uintLeast32Ty: Type = undefined,
     ptrdiff: Type = undefined,
     size: Type = undefined,
     vaList: Type = undefined,
@@ -519,6 +521,8 @@ fn generateBuiltinTypes(comp: *Compilation) !void {
         .intptr = intptr,
         .int16 = int16,
         .int64 = int64,
+        .uintLeast16Ty = comp.intLeastN(16, .unsigned),
+        .uintLeast32Ty = comp.intLeastN(32, .unsigned),
     };
 }
 

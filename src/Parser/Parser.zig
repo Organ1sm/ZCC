@@ -7239,8 +7239,8 @@ fn parseCharLiteral(p: *Parser) Error!Result {
         .CharLiteral => Type.Int,
         .CharLiteralWide => p.comp.types.wchar,
         .CharLiteralUTF_8 => Type.UChar,
-        .CharLiteralUTF_16 => Type.UShort,
-        .CharLiteralUTF_32 => Type.ULong,
+        .CharLiteralUTF_16 => p.comp.types.uintLeast16Ty,
+        .CharLiteralUTF_32 => p.comp.types.uintLeast32Ty,
         else => unreachable,
     };
 
