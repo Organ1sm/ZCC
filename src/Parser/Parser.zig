@@ -7235,28 +7235,12 @@ fn parseCharLiteral(p: *Parser) Error!Result {
     defer p.tokenIdx += 1;
 
     const tokenId = p.getCurrToken();
-    const ty: Type = switch (tokenId) {
-        .CharLiteral => Type.Int,
-        .CharLiteralWide => p.comp.types.wchar,
-        .CharLiteralUTF_8 => Type.UChar,
-        .CharLiteralUTF_16 => p.comp.types.uintLeast16Ty,
-        .CharLiteralUTF_32 => p.comp.types.uintLeast32Ty,
-        else => unreachable,
-    };
-
-    const max: u32 = switch (tokenId) {
-        .CharLiteral => std.math.maxInt(u7),
-        .CharLiteralWide => @intCast(p.comp.types.wchar.maxInt(p.comp)),
-        .CharLiteralUTF_8 => std.math.maxInt(u7),
-        .CharLiteralUTF_16 => std.math.maxInt(u16),
-        .CharLiteralUTF_32 => 0x10FFFF,
-        else => unreachable,
-    };
+    const charKind = CharLiteral.Kind.classify(tokenId);
 
     const slice = p.getTokenText(p.tokenIdx);
     const start = std.mem.indexOf(u8, slice, "\'").? + 1;
 
-    var CharLiteralParser = CharLiteral.Parser.init(slice[start .. slice.len - 1], p.comp.langOpts.standard);
+    var CharLiteralParser = CharLiteral.Parser.init(slice[start .. slice.len - 1], charKind, p.comp);
     const maxCharsExpected = 4;
 
     var stackFallback = std.heap.stackFallback(maxCharsExpected * @sizeOf(u32), p.comp.gpa);
@@ -7267,7 +7251,7 @@ fn parseCharLiteral(p: *Parser) Error!Result {
         switch (item) {
             .value => |c| try chars.append(c),
             .improperlyEncoded => |s| {
-                const shouldError = (tokenId != .CharLiteral);
+                const shouldError = (charKind != .char);
                 const tag: Diagnostics.Tag = if (shouldError) .illegal_char_encoding_error else .illegal_char_encoding_warning;
                 try p.err(tag);
                 if (!shouldError) {
@@ -7279,7 +7263,7 @@ fn parseCharLiteral(p: *Parser) Error!Result {
             .utf8Text => |view| {
                 var it = view.iterator();
                 while (it.nextCodepoint()) |c| {
-                    if (c > max)
+                    if (c > CharLiteralParser.maxCodepoint)
                         CharLiteralParser.err(.char_too_large, .{ .none = {} });
                     try chars.append(c);
                 }
@@ -7291,14 +7275,14 @@ fn parseCharLiteral(p: *Parser) Error!Result {
 
     const isMultichar = chars.items.len > 1;
     if (isMultichar) {
-        if (tokenId == .CharLiteral and chars.items.len == 4) {
+        if (charKind == .char and chars.items.len == 4) {
             try p.err(.four_char_char_literal);
-        } else if (tokenId == .CharLiteral) {
+        } else if (charKind == .char) {
             try p.err(.multichar_literal_warning);
         } else {
-            const kind = switch (tokenId) {
-                .CharLiteralWide => "wide",
-                .CharLiteralUTF_8, .CharLiteralUTF_16, .CharLiteralUTF_32 => "Unicode",
+            const kind = switch (charKind) {
+                .wide => "wide",
+                .utf8, .utf16, .utf32 => "Unicode",
                 else => unreachable,
             };
             try p.errExtra(.invalid_multichar_literal, p.tokenIdx, .{ .str = kind });
@@ -7307,7 +7291,7 @@ fn parseCharLiteral(p: *Parser) Error!Result {
 
     var multicharOverflow = false;
     var val: u32 = 0;
-    if (tokenId == .CharLiteral and isMultichar) {
+    if (charKind == .char and isMultichar) {
         for (chars.items) |item| {
             val, const overflowed = @shlWithOverflow(val, 8);
             multicharOverflow = multicharOverflow or overflowed != 0;
@@ -7320,8 +7304,9 @@ fn parseCharLiteral(p: *Parser) Error!Result {
     if (multicharOverflow)
         try p.err(.char_lit_too_wide);
 
+    const ty = charKind.charLiteralType(p.comp);
     // This is the type the literal will have if we're in a macro; macros always operate on intmax_t/uintmax_t values
-    const macroTy = if (ty.isUnsignedInt(p.comp) or (tokenId == .CharLiteral and p.comp.getCharSignedness() == .unsigned))
+    const macroTy = if (ty.isUnsignedInt(p.comp) or (charKind == .char and p.comp.getCharSignedness() == .unsigned))
         p.comp.types.intmax.makeIntegerUnsigned()
     else
         p.comp.types.intmax;

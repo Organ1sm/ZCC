@@ -1,10 +1,13 @@
 const std = @import("std");
+const Compilation = @import("../Basic/Compilation.zig");
 const Diagnostics = @import("../Basic/Diagnostics.zig");
+const TokenType = @import("../Basic//TokenType.zig").TokenType;
+const Type = @import("../AST/Type.zig");
 const LangOpts = @import("../Basic/LangOpts.zig");
 const mem = std.mem;
 
 pub const Item = union(enum) {
-    /// hex/octal escape
+    /// decoded escape
     value: u32,
     /// CharLiteral in the sourct text is not utf8 encoded
     improperlyEncoded: []const u8,
@@ -12,6 +15,68 @@ pub const Item = union(enum) {
     utf8Text: std.unicode.Utf8View,
 
     const replacement: Item = .{ .value = 0xFFFD };
+};
+pub const Kind = enum {
+    char,
+    wide,
+    utf8,
+    utf16,
+    utf32,
+
+    pub fn classify(id: TokenType) Kind {
+        return switch (id) {
+            .CharLiteral,
+            .StringLiteral,
+            => .char,
+            .CharLiteralUTF_8,
+            .StringLiteralUTF_8,
+            => .utf8,
+            .CharLiteralWide,
+            .StringLiteralWide,
+            => .wide,
+            .CharLiteralUTF_16,
+            .StringLiteralUTF_16,
+            => .utf16,
+            .CharLiteralUTF_32,
+            .StringLiteralUTF_32,
+            => .utf32,
+            else => unreachable,
+        };
+    }
+
+    /// Largest unicode codepoint that can be represented by this character kind
+    /// May be smaller than the largest value that can be represented.
+    /// For example u8 char literals may only specify 0-127 via literals or
+    /// character escapes, but may specify up to \xFF via hex escapes.
+    fn maxCodepoint(kind: Kind, comp: *const Compilation) u21 {
+        return @intCast(switch (kind) {
+            .char => std.math.maxInt(u7),
+            .wide => @min(0x10FFFF, comp.types.wchar.maxInt(comp)),
+            .utf8 => std.math.maxInt(u7),
+            .utf16 => std.math.maxInt(u16),
+            .utf32 => 0x10FFFF,
+        });
+    }
+
+    /// Largest integer that can be represented by this character kind
+    fn maxInt(kind: Kind, comp: *const Compilation) u32 {
+        return @intCast(switch (kind) {
+            .char, .utf8 => std.math.maxInt(u8),
+            .wide => comp.types.wchar.sizeof(comp).?,
+            .utf16 => std.math.maxInt(u16),
+            .utf32 => std.math.maxInt(u32),
+        });
+    }
+
+    pub fn charLiteralType(kind: Kind, comp: *const Compilation) Type {
+        return switch (kind) {
+            .char => Type.Int,
+            .wide => comp.types.wchar,
+            .utf8 => Type.UChar,
+            .utf16 => comp.types.uintLeast16Ty,
+            .utf32 => comp.types.uintLeast32Ty,
+        };
+    }
 };
 
 const CharDiagnostics = struct {
@@ -22,17 +87,19 @@ const CharDiagnostics = struct {
 pub const Parser = struct {
     literal: []const u8,
     i: usize = 0,
+    maxCodepoint: u21,
+    maxInt: u32,
     /// We only want to issue a max of 1 error per char literal
     errored: bool = false,
     errors: std.BoundedArray(CharDiagnostics, 4) = .{},
-    standard: LangOpts.Standard,
-    codepointBuffer: [4]u8,
+    comp: *const Compilation,
 
-    pub fn init(literal: []const u8, standard: LangOpts.Standard) Parser {
+    pub fn init(literal: []const u8, kind: Kind, comp: *const Compilation) Parser {
         return .{
             .literal = literal,
-            .standard = standard,
-            .codepointBuffer = undefined,
+            .comp = comp,
+            .maxInt = kind.maxInt(comp),
+            .maxCodepoint = kind.maxCodepoint(comp),
         };
     }
 
@@ -99,7 +166,7 @@ pub const Parser = struct {
         }
         self.i += expectedLen;
 
-        if (overflowed) {
+        if (overflowed or val > self.maxCodepoint) {
             self.err(.escape_sequence_overflow, .{ .unsigned = start });
             return Item.replacement;
         }
@@ -115,7 +182,7 @@ pub const Parser = struct {
         }
 
         if (val < 0xA0 and (val != '$' and val != '@' and val != '`')) {
-            const isError = !self.standard.atLeast(.c2x);
+            const isError = !self.comp.langOpts.standard.atLeast(.c2x);
             if (val >= 0x20 and val <= 0x7F) {
                 if (isError)
                     self.err(.ucn_basic_char_error, .{ .ascii = @intCast(val) })
@@ -130,7 +197,6 @@ pub const Parser = struct {
         }
 
         self.warn(.c89_ucn_in_literal, .{ .none = {} });
-
         return .{ .value = val };
     }
 
