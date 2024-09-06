@@ -4,8 +4,6 @@ const LangOpts = @import("../Basic/LangOpts.zig");
 const mem = std.mem;
 
 pub const Item = union(enum) {
-    /// unicode escape
-    codepoint: u21,
     /// hex/octal escape
     value: u32,
     /// CharLiteral in the sourct text is not utf8 encoded
@@ -20,6 +18,7 @@ const CharDiagnostics = struct {
     tag: Diagnostics.Tag,
     extra: Diagnostics.Message.Extra,
 };
+
 pub const Parser = struct {
     literal: []const u8,
     i: usize = 0,
@@ -27,17 +26,17 @@ pub const Parser = struct {
     errored: bool = false,
     errors: std.BoundedArray(CharDiagnostics, 4) = .{},
     standard: LangOpts.Standard,
+    codepointBuffer: [4]u8,
 
     pub fn init(literal: []const u8, standard: LangOpts.Standard) Parser {
-        const start = mem.indexOfScalar(u8, literal, '\'').? + 1; // trim leading quote + specifier if any
         return .{
-            .literal = literal[start .. literal.len - 1], // trim trailing quote
-            .i = 0,
+            .literal = literal,
             .standard = standard,
+            .codepointBuffer = undefined,
         };
     }
 
-    fn err(self: *Parser, tag: Diagnostics.Tag, extra: Diagnostics.Message.Extra) void {
+    pub fn err(self: *Parser, tag: Diagnostics.Tag, extra: Diagnostics.Message.Extra) void {
         if (self.errored) return;
         self.errored = true;
         self.errors.append(.{ .tag = tag, .extra = extra }) catch {};
@@ -132,7 +131,7 @@ pub const Parser = struct {
 
         self.warn(.c89_ucn_in_literal, .{ .none = {} });
 
-        return .{ .codepoint = @intCast(val) };
+        return .{ .value = val };
     }
 
     fn parseEscapedChar(self: *Parser) Item {
@@ -150,7 +149,7 @@ pub const Parser = struct {
             'b' => return .{ .value = 0x08 },
             'e' => {
                 self.warn(.non_standard_escape_char, .{ .unsigned = self.i });
-                return .{ .codepoint = 0x1B };
+                return .{ .value = 0x1B };
             },
             'f' => return .{ .value = 0x0C },
             'v' => return .{ .value = 0x0B },

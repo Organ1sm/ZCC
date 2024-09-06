@@ -7253,7 +7253,10 @@ fn parseCharLiteral(p: *Parser) Error!Result {
         else => unreachable,
     };
 
-    var CharLiteralParser = CharLiteral.Parser.init(p.getTokenText(p.tokenIdx), p.comp.langOpts.standard);
+    const slice = p.getTokenText(p.tokenIdx);
+    const start = std.mem.indexOf(u8, slice, "\'").? + 1;
+
+    var CharLiteralParser = CharLiteral.Parser.init(slice[start .. slice.len - 1], p.comp.langOpts.standard);
     const maxCharsExpected = 4;
 
     var stackFallback = std.heap.stackFallback(maxCharsExpected * @sizeOf(u32), p.comp.gpa);
@@ -7262,11 +7265,6 @@ fn parseCharLiteral(p: *Parser) Error!Result {
 
     while (CharLiteralParser.next()) |item|
         switch (item) {
-            .codepoint => |c| {
-                if (c > max)
-                    try p.err(.char_too_large);
-                try chars.append(c);
-            },
             .value => |c| try chars.append(c),
             .improperlyEncoded => |s| {
                 const shouldError = (tokenId != .CharLiteral);
@@ -7282,7 +7280,7 @@ fn parseCharLiteral(p: *Parser) Error!Result {
                 var it = view.iterator();
                 while (it.nextCodepoint()) |c| {
                     if (c > max)
-                        try p.err(.char_too_large);
+                        CharLiteralParser.err(.char_too_large, .{ .none = {} });
                     try chars.append(c);
                 }
             },
