@@ -7237,10 +7237,9 @@ fn parseCharLiteral(p: *Parser) Error!Result {
     const tokenId = p.getCurrToken();
     const charKind = CharLiteral.Kind.classify(tokenId);
 
-    const slice = p.getTokenText(p.tokenIdx);
-    const start = std.mem.indexOf(u8, slice, "\'").? + 1;
+    const slice = charKind.contentSlice(p.getTokenText(p.tokenIdx));
 
-    var CharLiteralParser = CharLiteral.Parser.init(slice[start .. slice.len - 1], charKind, p.comp);
+    var CharLiteralParser = CharLiteral.Parser.init(slice, charKind, p.comp);
     const maxCharsExpected = 4;
 
     var stackFallback = std.heap.stackFallback(maxCharsExpected * @sizeOf(u32), p.comp.gpa);

@@ -75,6 +75,19 @@ pub const Kind = enum {
             .utf32 => comp.types.uintLeast32Ty,
         };
     }
+
+    /// Return the actual contents of the string literal with leading / trailing quotes and
+    /// specifiers removed
+    pub fn contentSlice(kind: Kind, delimited: []const u8) []const u8 {
+        const end = delimited.len - 1; // remove trailing quote
+        return switch (kind) {
+            .char => delimited[1..end],
+            .wide => delimited[2..end],
+            .utf8 => delimited[3..end],
+            .utf16 => delimited[2..end],
+            .utf32 => delimited[2..end],
+        };
+    }
 };
 
 const CharDiagnostics = struct {
