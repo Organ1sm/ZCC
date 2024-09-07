@@ -166,7 +166,7 @@ pub const Parser = struct {
         }
         self.i += expectedLen;
 
-        if (overflowed or val > self.maxCodepoint) {
+        if (overflowed) {
             self.err(.escape_sequence_overflow, .{ .unsigned = start });
             return Item.replacement;
         }
@@ -180,6 +180,9 @@ pub const Parser = struct {
             self.err(.invalid_universal_character, .{ .unsigned = start });
             return Item.replacement;
         }
+
+        if (val > self.maxCodepoint)
+            self.err(.char_too_large, .{ .none = {} });
 
         if (val < 0xA0 and (val != '$' and val != '@' and val != '`')) {
             const isError = !self.comp.langOpts.standard.atLeast(.c2x);
@@ -202,7 +205,6 @@ pub const Parser = struct {
 
     fn parseEscapedChar(self: *Parser) Item {
         self.i += 1;
-        defer self.i += 1;
 
         switch (self.literal[self.i]) {
             '\n' => unreachable, // removed by line splicing
@@ -219,44 +221,50 @@ pub const Parser = struct {
             },
             'f' => return .{ .value = 0x0C },
             'v' => return .{ .value = 0x0B },
-            'x' => return .{ .value = self.parseHexEscape() },
-            '0'...'7' => return .{ .value = self.parseOctalEscape() },
+            'x' => return .{ .value = self.parseNumberEscape(.hex) },
+            '0'...'7' => return .{ .value = self.parseNumberEscape(.octal) },
             'u', 'U' => unreachable, // handled by parseUnicodeEscape
             else => unreachable,
         }
     }
 
-    fn parseHexEscape(self: *Parser) u32 {
+    fn parseNumberEscape(self: *Parser, base: EscapeBase) u32 {
         var val: u32 = 0;
         var count: usize = 0;
         var overflowed = false;
         defer self.i += count;
 
-        for (self.literal[self.i + 1 ..]) |c| {
-            const char = std.fmt.charToDigit(c, 16) catch break;
-            val, const overflow = @shlWithOverflow(val, 4);
+        const slice = switch (base) {
+            .octal => self.literal[self.i..@min(self.literal.len, self.i + 3)], // max 3 chars
+            .hex => blk: {
+                self.i += 1;
+                break :blk self.literal[self.i..];
+            },
+        };
+
+        for (slice) |c| {
+            const char = std.fmt.charToDigit(c, @intFromEnum(base)) catch break;
+            val, const overflow = @shlWithOverflow(val, base.log2());
             if (overflow != 0) overflowed = true;
             val += char;
             count += 1;
         }
-        if (overflowed) {
-            std.debug.print("overflowed!\n", .{});
-        }
+
+        if (overflowed or val > self.maxInt)
+            self.err(.escape_sequence_overflow, .{ .unsigned = 0 });
+
         return val;
     }
+};
 
-    fn parseOctalEscape(self: *Parser) u32 {
-        var val: u32 = 0;
-        var count: usize = 0;
-        defer self.i += count - 1;
+const EscapeBase = enum(u8) {
+    octal = 8,
+    hex = 16,
 
-        for (self.literal[self.i..], 0..) |c, i| {
-            if (i == 3) break;
-            const char = std.fmt.charToDigit(c, 8) catch break;
-            val <<= 3;
-            val += char;
-            count += 1;
-        }
-        return val;
+    fn log2(base: EscapeBase) u4 {
+        return switch (base) {
+            .octal => 3,
+            .hex => 4,
+        };
     }
 };
