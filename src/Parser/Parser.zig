@@ -7261,11 +7261,13 @@ fn parseCharLiteral(p: *Parser) Error!Result {
             },
             .utf8Text => |view| {
                 var it = view.iterator();
+                var maxcodepoint: u21 = 0;
                 while (it.nextCodepoint()) |c| {
-                    if (c > CharLiteralParser.maxCodepoint)
-                        CharLiteralParser.err(.char_too_large, .{ .none = {} });
+                    maxcodepoint = @max(maxcodepoint, c);
                     try chars.append(c);
                 }
+                if (maxcodepoint > CharLiteralParser.maxCodepoint)
+                    CharLiteralParser.err(.char_too_large, .{ .none = {} });
             },
         };
 
@@ -7389,7 +7391,11 @@ fn parseStringLiteral(p: *Parser) Error!Result {
                         'a' => p.retainedStrings.appendAssumeCapacity(0x07),
                         'b' => p.retainedStrings.appendAssumeCapacity(0x08),
                         'e' => {
-                            try p.errExtra(.non_standard_escape_char, start, .{ .unsigned = i - 1 });
+                            try p.errExtra(
+                                .non_standard_escape_char,
+                                start,
+                                .{ .invalidEscape = .{ .char = 'e', .offset = @intCast(i) } },
+                            );
                             p.retainedStrings.appendAssumeCapacity(0x1B);
                         },
                         'f' => p.retainedStrings.appendAssumeCapacity(0x0C),

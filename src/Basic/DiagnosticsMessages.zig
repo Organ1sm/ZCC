@@ -1620,9 +1620,10 @@ pub const empty_case_range = struct {
     pub const kind = .warning;
 };
 pub const non_standard_escape_char = struct {
-    pub const msg = "use of non-standard escape character";
+    pub const msg = "use of non-standard escape character '\\{s}'";
     pub const kind = .off;
     pub const opt = "pedantic";
+    pub const extra = .invalid_escape;
 };
 pub const invalid_pp_stringify_escape = struct {
     pub const msg = "invalid string literal, ignoring final '\\'";
@@ -2295,5 +2296,5 @@ pub const unknown_escape_sequence = struct {
     pub const msg = "unknown escape sequence '\\{s}'";
     pub const kind = .warning;
     pub const opt = "unknown-escape-sequence";
-    pub const extra = .maybe_unprintable;
+    pub const extra = .invalid_escape;
 };
