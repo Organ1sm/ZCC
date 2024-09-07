@@ -7270,22 +7270,19 @@ fn parseCharLiteral(p: *Parser) Error!Result {
             },
         };
 
-    for (CharLiteralParser.errors.constSlice()) |item|
-        try p.errExtra(item.tag, p.tokenIdx, item.extra);
-
     const isMultichar = chars.items.len > 1;
     if (isMultichar) {
         if (charKind == .char and chars.items.len == 4) {
-            try p.err(.four_char_char_literal);
+            CharLiteralParser.warn(.four_char_char_literal, .{ .none = {} });
         } else if (charKind == .char) {
-            try p.err(.multichar_literal_warning);
+            CharLiteralParser.warn(.multichar_literal_warning, .{ .none = {} });
         } else {
             const kind = switch (charKind) {
                 .wide => "wide",
                 .utf8, .utf16, .utf32 => "Unicode",
                 else => unreachable,
             };
-            try p.errExtra(.invalid_multichar_literal, p.tokenIdx, .{ .str = kind });
+            CharLiteralParser.err(.invalid_multichar_literal, .{ .str = kind });
         }
     }
 
@@ -7302,7 +7299,10 @@ fn parseCharLiteral(p: *Parser) Error!Result {
     }
 
     if (multicharOverflow)
-        try p.err(.char_lit_too_wide);
+        CharLiteralParser.err(.char_lit_too_wide, .{ .none = {} });
+
+    for (CharLiteralParser.errors.constSlice()) |item|
+        try p.errExtra(item.tag, p.tokenIdx, item.extra);
 
     const ty = charKind.charLiteralType(p.comp);
     // This is the type the literal will have if we're in a macro; macros always operate on intmax_t/uintmax_t values

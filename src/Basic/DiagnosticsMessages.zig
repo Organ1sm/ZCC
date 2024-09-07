@@ -2290,3 +2290,7 @@ pub const multi_char_char_literal = struct {
     pub const msg = "multi-character character constant";
     pub const kind = .off;
 };
+pub const missing_hex_escape = struct {
+    pub const msg = "\\x used with no following hex digits";
+    pub const kind = .@"error";
+};
