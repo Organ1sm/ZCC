@@ -2294,3 +2294,9 @@ pub const missing_hex_escape = struct {
     pub const msg = "\\x used with no following hex digits";
     pub const kind = .@"error";
 };
+pub const unknown_escape_sequence = struct {
+    pub const msg = "unknown escape sequence '\\{s}'";
+    pub const kind = .warning;
+    pub const opt = "unknown-escape-sequence";
+    pub const extra = .maybe_unprintable;
+};

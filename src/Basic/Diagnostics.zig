@@ -53,6 +53,7 @@ pub const Message = struct {
         },
         actualCodePoint: u21,
         ascii: u7,
+        maybeUnprintable: u8,
         pow2AsString: u8,
         unsigned: u64,
         signed: i64,
@@ -170,6 +171,7 @@ pub const Options = packed struct {
     @"microsoft-end-of-file": Kind = .default,
     @"invalid-source-encoding": Kind = .default,
     @"four-char-constants": Kind = .default,
+    @"unknown-escape-sequence": Kind = .default,
 };
 
 list: std.ArrayListUnmanaged(Message) = .{},
@@ -432,6 +434,16 @@ pub fn renderMessage(comp: *Compilation, m: anytype, msg: Message) void {
                         @tagName(msg.extra.ignoredRecordAttr.tag),
                         @tagName(msg.extra.ignoredRecordAttr.specifier),
                     }),
+                    .maybe_unprintable => {
+                        if (std.ascii.isPrint(msg.extra.maybeUnprintable)) {
+                            const str: [1]u8 = .{msg.extra.maybeUnprintable};
+                            m.print(info.msg, .{&str});
+                        } else {
+                            var buf: [3]u8 = undefined;
+                            _ = std.fmt.bufPrint(&buf, "x{x}", .{std.fmt.fmtSliceHexLower(&.{msg.extra.maybeUnprintable})}) catch unreachable;
+                            m.print(info.msg, .{&buf});
+                        }
+                    },
                     else => @compileError("invalid extra kind " ++ @tagName(info.extra)),
                 }
             } else {
