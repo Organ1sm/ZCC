@@ -217,7 +217,7 @@ pub const Parser = struct {
             't' => return .{ .value = '\t' },
             'a' => return .{ .value = 0x07 },
             'b' => return .{ .value = 0x08 },
-            'e' => {
+            'e', 'E' => {
                 self.warn(.non_standard_escape_char, .{ .unsigned = self.i });
                 return .{ .value = 0x1B };
             },
@@ -226,6 +226,10 @@ pub const Parser = struct {
             'x' => return .{ .value = self.parseNumberEscape(.hex) },
             '0'...'7' => return .{ .value = self.parseNumberEscape(.octal) },
             'u', 'U' => unreachable, // handled by parseUnicodeEscape
+            '(', '{', '[', '%' => {
+                self.warn(.non_standard_escape_char, .{ .unsigned = self.i });
+                return .{ .value = c };
+            },
             else => {
                 self.warn(.unknown_escape_sequence, .{ .maybeUnprintable = c });
                 return .{ .value = c };

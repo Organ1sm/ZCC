@@ -40,6 +40,10 @@ int S = '\x';
 int T = '\xg';
 int U = '\8';
 int V = '\	'; // tab character
+_Static_assert('\(' == '(', "");
+_Static_assert('\[' == '[', "");
+_Static_assert('\{' == '{', "");
+_Static_assert('\%' == '%', "");
 
 #define EXPECTED_ERRORS "wide-character-constants.c:9:27: error: character too large for enclosing character literal type" \
     "wide-character-constants.c:10:16: error: wide character literals may not contain multiple characters" \
