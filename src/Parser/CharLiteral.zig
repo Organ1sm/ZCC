@@ -142,7 +142,7 @@ pub const Parser = struct {
 
         self.i += 2;
         if (self.i >= self.literal.len or !std.ascii.isHex(self.literal[self.i])) {
-            self.err(.non_hex_ucn, .{ .ascii = @intCast(kind) });
+            self.err(.missing_hex_escape, .{ .ascii = @intCast(kind) });
             return null;
         }
         const expectedLen: usize = if (kind == 'u') 4 else 8;
@@ -264,7 +264,7 @@ pub const Parser = struct {
 
         if (count == 0) {
             std.debug.assert(base == .hex);
-            self.err(.missing_hex_escape, .{ .none = {} });
+            self.err(.missing_hex_escape, .{ .ascii = 'x' });
         }
 
         return val;
