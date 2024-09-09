@@ -70,7 +70,6 @@ pub fn next(self: *Lexer) Token {
     var id: TokenType = .Eof;
     var counter: u32 = 0;
 
-    var returnState = state;
     while (self.index < self.buffer.len) : (self.index += 1) {
         const c = self.buffer[self.index];
         switch (state) {
@@ -269,7 +268,6 @@ pub fn next(self: *Lexer) Token {
 
             .string_literal => switch (c) {
                 '\\' => {
-                    returnState = .string_literal;
                     state = if (self.pathEscapes) .path_escape else .escape_sequence;
                 },
                 '"' => {
@@ -324,12 +322,9 @@ pub fn next(self: *Lexer) Token {
 
             .escape_sequence => switch (c) {
                 '\'', '"', '?', '\\', 'a', 'b', 'e', 'f', 'n', 'r', 't', 'v' => {
-                    state = returnState;
+                    state = .string_literal;
                 },
-                '\n' => {
-                    state = returnState;
-                    self.line += 1;
-                },
+                '\n', '\r' => unreachable, // removed by line splicing
                 '0'...'7' => {
                     counter = 1;
                     state = .octal_escape;
@@ -353,11 +348,11 @@ pub fn next(self: *Lexer) Token {
                 '0'...'7' => {
                     counter += 1;
                     if (counter == 3)
-                        state = returnState;
+                        state = .string_literal;
                 },
                 else => {
                     self.index -= 1;
-                    state = returnState;
+                    state = .string_literal;
                 },
             },
 
@@ -365,7 +360,7 @@ pub fn next(self: *Lexer) Token {
                 '0'...'9', 'a'...'f', 'A'...'F' => {},
                 else => {
                     self.index -= 1;
-                    state = returnState;
+                    state = .string_literal;
                 },
             },
 
@@ -373,7 +368,7 @@ pub fn next(self: *Lexer) Token {
                 '0'...'9', 'a'...'f', 'A'...'F' => {
                     counter -= 1;
                     if (counter == 0)
-                        state = returnState;
+                        state = .string_literal;
                 },
                 else => {
                     id = .Invalid;
