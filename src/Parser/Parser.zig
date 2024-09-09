@@ -2754,6 +2754,8 @@ fn enumerator(p: *Parser, e: *Enumerator) Error!?EnumFieldAndNode {
         .data = .{ .decl = .{ .name = nameToken, .node = res.node } },
     });
 
+    try p.valueMap.put(node, e.res.value);
+
     return EnumFieldAndNode{
         .field = .{
             .name = internedName,

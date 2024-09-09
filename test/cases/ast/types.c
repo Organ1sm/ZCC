@@ -64,13 +64,13 @@ FnDef: 'fn (a: d[2]const int, b: d[2]const int) void'
     ImplicitReturn: 'void'
 
 EnumDeclTwo: 'enum E: unsigned int'
-  EnumFieldDecl: 'int'
+  EnumFieldDecl: 'int' (value: 2)
    name: D
    value:
     ImplicitCast: (IntCast) 'int'
       ExplicitCast: (IntCast) 'char' (value: 2)
         IntLiteral: 'int' (value: 2)
-  EnumFieldDecl: 'int'
+  EnumFieldDecl: 'int' (value: 3)
    name: E
    value:
     ImplicitCast: (IntCast) 'int'
