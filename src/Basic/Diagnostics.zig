@@ -51,6 +51,10 @@ pub const Message = struct {
             tag: Attribute.Tag,
             specifier: enum { @"struct", @"union", @"enum" },
         },
+        invalidEscape: struct {
+            offset: u32,
+            char: u8,
+        },
         actualCodePoint: u21,
         ascii: u7,
         pow2AsString: u8,
@@ -108,6 +112,7 @@ pub const Options = packed struct {
     @"empty-translation-unit": Kind = .default,
     @"implicitly-unsigned-literal": Kind = .default,
     @"c99-compat": Kind = .default,
+    unicode: Kind = .default,
     @"unicode-zero-width": Kind = .default,
     @"unicode-homoglyph": Kind = .default,
     @"return-type": Kind = .default,
@@ -167,6 +172,9 @@ pub const Options = packed struct {
     @"complex-component-init": Kind = .default,
     @"microsoft-include": Kind = .default,
     @"microsoft-end-of-file": Kind = .default,
+    @"invalid-source-encoding": Kind = .default,
+    @"four-char-constants": Kind = .default,
+    @"unknown-escape-sequence": Kind = .default,
 };
 
 list: std.ArrayListUnmanaged(Message) = .{},
@@ -365,9 +373,11 @@ pub fn renderMessage(comp: *Compilation, m: anytype, msg: Message) void {
         switch (msg.tag) {
             .escape_sequence_overflow,
             .invalid_universal_character,
-            .non_standard_escape_char,
             // use msg.extra.unsigned for index into string literal
             => loc.byteOffset += @as(u32, @truncate(msg.extra.unsigned)),
+            .non_standard_escape_char,
+            .unknown_escape_sequence,
+            => loc.byteOffset += msg.extra.invalidEscape.offset,
             else => {},
         }
 
@@ -429,6 +439,16 @@ pub fn renderMessage(comp: *Compilation, m: anytype, msg: Message) void {
                         @tagName(msg.extra.ignoredRecordAttr.tag),
                         @tagName(msg.extra.ignoredRecordAttr.specifier),
                     }),
+                    .invalid_escape => {
+                        if (std.ascii.isPrint(msg.extra.invalidEscape.char)) {
+                            const str: [1]u8 = .{msg.extra.invalidEscape.char};
+                            m.print(info.msg, .{&str});
+                        } else {
+                            var buf: [3]u8 = undefined;
+                            _ = std.fmt.bufPrint(&buf, "x{x}", .{std.fmt.fmtSliceHexLower(&.{msg.extra.invalidEscape.char})}) catch unreachable;
+                            m.print(info.msg, .{&buf});
+                        }
+                    },
                     else => @compileError("invalid extra kind " ++ @tagName(info.extra)),
                 }
             } else {
