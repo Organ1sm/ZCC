@@ -111,7 +111,10 @@ pub fn getLineCol(source: Source, loc: Location) LineCol {
             i += 1; // Skip invalid UTF-8 sequence and continue.
             continue;
         };
-        const cp = std.unicode.utf8Decode(source.buffer[i..][0..len]) catch unreachable;
+        const cp = std.unicode.utf8Decode(source.buffer[i..][0..len]) catch {
+            i += 1;
+            continue;
+        };
         width += codepointWidth(cp); // Add the visual width of the code point.
 
         i += len; // Advance by the length of the UTF-8 sequence.
