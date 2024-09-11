@@ -461,7 +461,7 @@ fn checkDeprecatedUnavailable(p: *Parser, ty: Type, usageToken: TokenIndex, decl
         defer p.strings.items.len = stringsTop;
 
         const w = p.strings.writer();
-        const msgStr = p.retainedString(@"error".msg);
+        const msgStr = p.attributeMessageString(@"error".msg);
         try w.print("call to '{s}' declared with attribute error: {s}", .{ p.getTokenText(@"error".__name_token), msgStr });
         const str = try p.comp.diagnostics.arena.allocator().dupe(u8, p.strings.items[stringsTop..]);
         try p.errStr(.error_attribute, usageToken, str);
@@ -472,7 +472,7 @@ fn checkDeprecatedUnavailable(p: *Parser, ty: Type, usageToken: TokenIndex, decl
         defer p.strings.items.len = stringsTop;
 
         const w = p.strings.writer();
-        const msgStr = p.retainedString(warning.msg);
+        const msgStr = p.attributeMessageString(warning.msg);
         try w.print("call to '{s}' declared with attribute warning: {s}", .{ p.getTokenText(warning.__name_token), msgStr });
         const str = try p.comp.diagnostics.arena.allocator().dupe(u8, p.strings.items[stringsTop..]);
         try p.errStr(.warning_attribute, usageToken, str);
@@ -493,7 +493,7 @@ fn checkDeprecatedUnavailable(p: *Parser, ty: Type, usageToken: TokenIndex, decl
 }
 
 /// Returned slice is invalidated if additional strings are added to p.retainedStrings
-fn retainedString(p: *Parser, range: Value.ByteRange) []const u8 {
+fn attributeMessageString(p: *Parser, range: Value.ByteRange) []const u8 {
     return range.slice(p.retainedStrings.items, .@"1");
 }
 
@@ -519,7 +519,7 @@ fn errDeprecated(p: *Parser, tag: Diagnostics.Tag, tokenIdx: TokenIndex, msg: ?V
 
     try w.writeAll(reason);
     if (msg) |m| {
-        const str = p.retainedString(m);
+        const str = p.attributeMessageString(m);
         try w.print(": {s}", .{str});
     }
 
