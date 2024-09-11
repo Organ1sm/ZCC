@@ -7238,70 +7238,74 @@ fn parseCharLiteral(p: *Parser) Error!Result {
 
     const tokenId = p.getCurrToken();
     const charKind = TextLiteral.Kind.classify(tokenId, .CharLiteral).?;
+    var val: u32 = 0;
 
     const slice = charKind.contentSlice(p.getTokenText(p.tokenIdx));
 
-    const maxCodepoint = charKind.maxCodepoint(p.comp);
-    var CharLiteralParser = TextLiteral.Parser.init(slice, charKind, maxCodepoint, p.comp);
-    const maxCharsExpected = 4;
+    if (slice.len == 1 and std.ascii.isASCII(slice[0])) {
+        val = slice[0];
+    } else {
+        const maxCodepoint = charKind.maxCodepoint(p.comp);
+        var CharLiteralParser = TextLiteral.Parser.init(slice, charKind, maxCodepoint, p.comp);
+        const maxCharsExpected = 4;
 
-    var stackFallback = std.heap.stackFallback(maxCharsExpected * @sizeOf(u32), p.comp.gpa);
-    var chars = std.ArrayList(u32).initCapacity(stackFallback.get(), maxCharsExpected) catch unreachable;
-    defer chars.deinit();
+        var stackFallback = std.heap.stackFallback(maxCharsExpected * @sizeOf(u32), p.comp.gpa);
+        var chars = std.ArrayList(u32).initCapacity(stackFallback.get(), maxCharsExpected) catch unreachable;
+        defer chars.deinit();
 
-    while (CharLiteralParser.next()) |item|
-        switch (item) {
-            .value => |v| try chars.append(v),
-            .codepoint => |c| try chars.append(c),
-            .improperlyEncoded => |s| {
-                try chars.ensureUnusedCapacity(s.len);
-                for (s) |c| chars.appendAssumeCapacity(c);
-            },
-            .utf8Text => |view| {
-                var it = view.iterator();
-                var maxcodepointSeen: u21 = 0;
-                while (it.nextCodepoint()) |c| {
-                    maxcodepointSeen = @max(maxcodepointSeen, c);
-                    try chars.append(c);
-                }
-                if (maxcodepointSeen > maxCodepoint)
-                    CharLiteralParser.err(.char_too_large, .{ .none = {} });
-            },
-        };
-
-    const isMultichar = chars.items.len > 1;
-    if (isMultichar) {
-        if (charKind == .char and chars.items.len == 4) {
-            CharLiteralParser.warn(.four_char_char_literal, .{ .none = {} });
-        } else if (charKind == .char) {
-            CharLiteralParser.warn(.multichar_literal_warning, .{ .none = {} });
-        } else {
-            const kind = switch (charKind) {
-                .wide => "wide",
-                .utf8, .utf16, .utf32 => "Unicode",
-                else => unreachable,
+        while (CharLiteralParser.next()) |item|
+            switch (item) {
+                .value => |v| try chars.append(v),
+                .codepoint => |c| try chars.append(c),
+                .improperlyEncoded => |s| {
+                    try chars.ensureUnusedCapacity(s.len);
+                    for (s) |c| chars.appendAssumeCapacity(c);
+                },
+                .utf8Text => |view| {
+                    var it = view.iterator();
+                    var maxcodepointSeen: u21 = 0;
+                    while (it.nextCodepoint()) |c| {
+                        maxcodepointSeen = @max(maxcodepointSeen, c);
+                        try chars.append(c);
+                    }
+                    if (maxcodepointSeen > maxCodepoint)
+                        CharLiteralParser.err(.char_too_large, .{ .none = {} });
+                },
             };
-            CharLiteralParser.err(.invalid_multichar_literal, .{ .str = kind });
+
+        const isMultichar = chars.items.len > 1;
+        if (isMultichar) {
+            if (charKind == .char and chars.items.len == 4) {
+                CharLiteralParser.warn(.four_char_char_literal, .{ .none = {} });
+            } else if (charKind == .char) {
+                CharLiteralParser.warn(.multichar_literal_warning, .{ .none = {} });
+            } else {
+                const kind = switch (charKind) {
+                    .wide => "wide",
+                    .utf8, .utf16, .utf32 => "Unicode",
+                    else => unreachable,
+                };
+                CharLiteralParser.err(.invalid_multichar_literal, .{ .str = kind });
+            }
         }
-    }
 
-    var multicharOverflow = false;
-    var val: u32 = 0;
-    if (charKind == .char and isMultichar) {
-        for (chars.items) |item| {
-            val, const overflowed = @shlWithOverflow(val, 8);
-            multicharOverflow = multicharOverflow or overflowed != 0;
-            val += @as(u8, @truncate(item));
+        var multicharOverflow = false;
+        if (charKind == .char and isMultichar) {
+            for (chars.items) |item| {
+                val, const overflowed = @shlWithOverflow(val, 8);
+                multicharOverflow = multicharOverflow or overflowed != 0;
+                val += @as(u8, @truncate(item));
+            }
+        } else if (chars.items.len > 0) {
+            val = chars.items[chars.items.len - 1];
         }
-    } else if (chars.items.len > 0) {
-        val = chars.items[chars.items.len - 1];
+
+        if (multicharOverflow)
+            CharLiteralParser.err(.char_lit_too_wide, .{ .none = {} });
+
+        for (CharLiteralParser.errors.constSlice()) |item|
+            try p.errExtra(item.tag, p.tokenIdx, item.extra);
     }
-
-    if (multicharOverflow)
-        CharLiteralParser.err(.char_lit_too_wide, .{ .none = {} });
-
-    for (CharLiteralParser.errors.constSlice()) |item|
-        try p.errExtra(item.tag, p.tokenIdx, item.extra);
 
     const ty = charKind.charLiteralType(p.comp);
     // This is the type the literal will have if we're in a macro; macros always operate on intmax_t/uintmax_t values
