@@ -60,7 +60,7 @@ pub const ArgumentType = enum {
 
     fn fromType(comptime T: type) ArgumentType {
         return switch (T) {
-            []const u8 => .string,
+            Value.ByteRange => .string,
             Identifier => .identifier,
             u32 => .int,
             Alignment => .alignment,
@@ -290,10 +290,19 @@ fn diagnoseField(
         .bytes => {
             const bytes = val.data.bytes.trim(1); // remove null terminator
             if (wanted == Value.ByteRange) {
+                std.debug.assert(node.tag == .StringLiteralExpr);
+                const nodeElemTy = node.type.getElemType();
+
+                if (!nodeElemTy.is(.Char) and !nodeElemTy.is(.UChar)) {
+                    return Diagnostics.Message{
+                        .tag = .attribute_requires_string,
+                        .extra = .{ .str = decl.name },
+                    };
+                }
                 @field(@field(arguments, decl.name), field.name) = bytes;
                 return null;
             } else if (@typeInfo(wanted) == .@"enum" and @hasDecl(wanted, "opts") and wanted.opts.enum_kind == .string) {
-                const str = bytes.slice(strings);
+                const str = bytes.slice(strings, .@"1");
                 if (std.meta.stringToEnum(wanted, str)) |enum_val| {
                     @field(@field(arguments, decl.name), field.name) = enum_val;
                     return null;

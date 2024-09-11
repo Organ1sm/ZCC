@@ -187,7 +187,7 @@ fn genNode(func: *Fn, node: Tree.NodeIndex) Codegen.Error!Value {
         .IntLiteral => return Value{ .immediate = @intCast(data.int) },
         .StringLiteralExpr => {
             const range = func.c.tree.valueMap.get(node).?.data.bytes;
-            const strBytes = range.slice(func.c.tree.strings);
+            const strBytes = range.slice(func.c.tree.strings, .@"1");
             const section = try func.c.obj.getSection(.strings);
             const start = section.items.len;
             try section.appendSlice(strBytes);

@@ -494,7 +494,7 @@ fn checkDeprecatedUnavailable(p: *Parser, ty: Type, usageToken: TokenIndex, decl
 
 /// Returned slice is invalidated if additional strings are added to p.retainedStrings
 fn retainedString(p: *Parser, range: Value.ByteRange) []const u8 {
-    return range.slice(p.retainedStrings.items);
+    return range.slice(p.retainedStrings.items, .@"1");
 }
 
 /// Reports deprecated or unavailable usage of code based on the diagnostic tag.
@@ -1220,14 +1220,9 @@ fn staticAssertMessage(p: *Parser, condNode: NodeIndex, message: Result) !?[]con
         if (buf.items.len > 0)
             try buf.append(' ');
 
-        const data = message.value.data.bytes;
-        try buf.ensureUnusedCapacity(data.len());
-        try AST.dumpString(
-            p.retainedStrings.items,
-            data,
-            p.nodes.items(.tag)[@intFromEnum(message.node)],
-            buf.writer(),
-        );
+        const byteRange = message.value.data.bytes;
+        try buf.ensureUnusedCapacity(byteRange.len());
+        try byteRange.dumpString(message.ty, p.comp, p.retainedStrings.items, buf.writer());
     }
     return try p.comp.diagnostics.arena.allocator().dupe(u8, buf.items);
 }

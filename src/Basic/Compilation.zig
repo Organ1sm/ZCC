@@ -1326,7 +1326,7 @@ pub fn pragmaEvent(comp: *Compilation, event: PragmaEvent) void {
     }
 }
 
-pub const CharUnitSize = enum(usize) {
+pub const CharUnitSize = enum(u32) {
     @"1" = 1,
     @"2" = 2,
     @"4" = 4,

@@ -2298,3 +2298,8 @@ pub const unknown_escape_sequence = struct {
     pub const opt = "unknown-escape-sequence";
     pub const extra = .invalid_escape;
 };
+pub const attribute_requires_string = struct {
+    pub const msg = "attribute '{s}' requires an ordinary string";
+    pub const kind = .@"error";
+    pub const extra = .str;
+};
