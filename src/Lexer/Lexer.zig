@@ -31,10 +31,7 @@ const State = enum {
     char_literal_start,
     char_literal,
     char_escape_sequence,
-    escape_sequence,
-    octal_escape,
-    hex_escape,
-    unicode_escape,
+    string_escape_sequence,
     identifier,
     extended_identifier,
     equal,
@@ -68,7 +65,6 @@ pub fn next(self: *Lexer) Token {
     var state: State = .start;
     var start = self.index;
     var id: TokenType = .Eof;
-    var counter: u32 = 0;
 
     while (self.index < self.buffer.len) : (self.index += 1) {
         const c = self.buffer[self.index];
@@ -268,7 +264,7 @@ pub fn next(self: *Lexer) Token {
 
             .string_literal => switch (c) {
                 '\\' => {
-                    state = if (self.pathEscapes) .path_escape else .escape_sequence;
+                    state = if (self.pathEscapes) .path_escape else .string_escape_sequence;
                 },
                 '"' => {
                     self.index += 1;
@@ -320,60 +316,9 @@ pub fn next(self: *Lexer) Token {
                 else => state = .char_literal,
             },
 
-            .escape_sequence => switch (c) {
-                '\'', '"', '?', '\\', 'a', 'b', 'e', 'f', 'n', 'r', 't', 'v' => {
-                    state = .string_literal;
-                },
+            .string_escape_sequence => switch (c) {
                 '\n', '\r' => unreachable, // removed by line splicing
-                '0'...'7' => {
-                    counter = 1;
-                    state = .octal_escape;
-                },
-                'x' => state = .hex_escape,
-                'u' => {
-                    counter = 4;
-                    state = .unicode_escape;
-                },
-                'U' => {
-                    counter = 8;
-                    state = .unicode_escape;
-                },
-                else => {
-                    id = .Invalid;
-                    break;
-                },
-            },
-
-            .octal_escape => switch (c) {
-                '0'...'7' => {
-                    counter += 1;
-                    if (counter == 3)
-                        state = .string_literal;
-                },
-                else => {
-                    self.index -= 1;
-                    state = .string_literal;
-                },
-            },
-
-            .hex_escape => switch (c) {
-                '0'...'9', 'a'...'f', 'A'...'F' => {},
-                else => {
-                    self.index -= 1;
-                    state = .string_literal;
-                },
-            },
-
-            .unicode_escape => switch (c) {
-                '0'...'9', 'a'...'f', 'A'...'F' => {
-                    counter -= 1;
-                    if (counter == 0)
-                        state = .string_literal;
-                },
-                else => {
-                    id = .Invalid;
-                    break;
-                },
+                else => state = .string_literal,
             },
 
             .identifier, .extended_identifier => switch (c) {
@@ -743,11 +688,8 @@ pub fn next(self: *Lexer) Token {
             .path_escape,
             .char_literal_start,
             .char_literal,
-            .escape_sequence,
+            .string_escape_sequence,
             .char_escape_sequence,
-            .octal_escape,
-            .hex_escape,
-            .unicode_escape,
             .multi_line_comment,
             .multi_line_comment_asterisk,
             => id = TokenType.Invalid,
@@ -849,7 +791,7 @@ test "extended identifiers" {
     try expectTokens("0x0\u{E0000}", &.{ .PPNumber, .ExtendedIdentifier });
     try expectTokens("\"\\0\u{E0000}\"", &.{.StringLiteral});
     try expectTokens("\"\\x\u{E0000}\"", &.{.StringLiteral});
-    try expectTokens("\"\\u\u{E0000}\"", &.{ .Invalid, .ExtendedIdentifier, .Invalid });
+    try expectTokens("\"\\u\u{E0000}\"", &.{.StringLiteral});
     try expectTokens("1e\u{E0000}", &.{ .PPNumber, .ExtendedIdentifier });
     try expectTokens("1e1\u{E0000}", &.{ .PPNumber, .ExtendedIdentifier });
 }
