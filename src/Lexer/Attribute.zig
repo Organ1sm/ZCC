@@ -1340,7 +1340,7 @@ pub fn applyStatementAttributes(p: *Parser, ty: Type, exprStart: TokenIndex, att
     p.attrApplicationBuffer.items.len = 0;
 
     for (attrs, toks) |attr, tok| switch (attr.tag) {
-        .fallthrough => if (p.getCurrToken() != .KeywordCase and p.getCurrToken() != .KeywordDefault) {
+        .fallthrough => if (p.currToken() != .KeywordCase and p.currToken() != .KeywordDefault) {
             // TODO: this condition is not completely correct; the last statement of a compound
             // statement is also valid if it precedes a switch label (so intervening '}' are ok,
             // but only if they close a compound statement)

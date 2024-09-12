@@ -154,6 +154,14 @@ pub const Parser = struct {
         };
     }
 
+    fn prefixLen(self: *const Parser) usize {
+        return switch (self.kind) {
+            .char => 0,
+            .utf8 => 2,
+            .wide, .utf16, .utf32 => 1,
+        };
+    }
+
     pub fn err(self: *Parser, tag: Diagnostics.Tag, extra: Diagnostics.Message.Extra) void {
         if (self.errored) return;
         self.errored = true;
@@ -227,7 +235,7 @@ pub const Parser = struct {
         self.i += expectedLen;
 
         if (overflowed) {
-            self.err(.escape_sequence_overflow, .{ .unsigned = start });
+            self.err(.escape_sequence_overflow, .{ .unsigned = start + self.prefixLen() });
             return null;
         }
 
@@ -237,7 +245,7 @@ pub const Parser = struct {
         }
 
         if (val > std.math.maxInt(u21) or !std.unicode.utf8ValidCodepoint(@intCast(val))) {
-            self.err(.invalid_universal_character, .{ .unsigned = start });
+            self.err(.invalid_universal_character, .{ .unsigned = start + self.prefixLen() });
             return null;
         }
 
@@ -303,6 +311,7 @@ pub const Parser = struct {
         var val: u32 = 0;
         var count: usize = 0;
         var overflowed = false;
+        const start = self.i;
         defer self.i += count;
 
         const slice = switch (base) {
@@ -322,7 +331,7 @@ pub const Parser = struct {
         }
 
         if (overflowed or val > self.kind.maxInt(self.comp)) {
-            self.err(.escape_sequence_overflow, .{ .unsigned = 0 });
+            self.err(.escape_sequence_overflow, .{ .unsigned = start + self.prefixLen() });
             return 0;
         }
 
