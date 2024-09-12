@@ -2303,3 +2303,12 @@ pub const attribute_requires_string = struct {
     pub const kind = .@"error";
     pub const extra = .str;
 };
+pub const unterminated_string_literal_warning = struct {
+    pub const msg = "missing terminating '\"' character";
+    pub const kind = .warning;
+    pub const opt = "invalid-pp-token";
+};
+pub const unterminated_string_literal_error = struct {
+    pub const msg = "missing terminating '\"' character";
+    pub const kind = .@"error";
+};

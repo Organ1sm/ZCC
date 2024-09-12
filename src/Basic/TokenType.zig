@@ -16,6 +16,10 @@ pub const TokenType = enum(u8) {
     StringLiteralUTF_16,
     StringLiteralUTF_32,
 
+    /// Any string literal with an embedded newline or EOF
+    /// Always a parser error
+    UnterminatedStringLiteral,
+
     // char literals with prefixes
     CharLiteral,
     CharLiteralWide,
@@ -480,6 +484,7 @@ pub const TokenType = enum(u8) {
             .StringLiteralUTF_16,
             .StringLiteralUTF_32,
             .StringLiteralWide,
+            .UnterminatedStringLiteral,
             .CharLiteral,
             .CharLiteralUTF_8,
             .CharLiteralUTF_16,

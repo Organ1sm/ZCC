@@ -23,6 +23,8 @@ pub const Kind = enum {
     utf8,
     utf16,
     utf32,
+    /// Errorr kind that halts parsing
+    unterminated,
 
     pub fn classify(id: TokenType, context: enum { StringLiteral, CharLiteral }) ?Kind {
         return switch (context) {
@@ -32,6 +34,7 @@ pub const Kind = enum {
                 .StringLiteralUTF_8 => .utf8,
                 .StringLiteralUTF_16 => .utf16,
                 .StringLiteralUTF_32 => .utf32,
+                .UnterminatedStringLiteral => .unterminated,
                 else => null,
             },
             .CharLiteral => switch (id) {
@@ -56,6 +59,7 @@ pub const Kind = enum {
             .utf8 => std.math.maxInt(u7),
             .utf16 => std.math.maxInt(u16),
             .utf32 => 0x10FFFF,
+            .unterminated => unreachable,
         });
     }
 
@@ -66,12 +70,14 @@ pub const Kind = enum {
             .wide => comp.types.wchar.maxInt(comp),
             .utf16 => std.math.maxInt(u16),
             .utf32 => std.math.maxInt(u32),
+            .unterminated => unreachable,
         });
     }
 
     /// Should only be called for string literals. Determines the result kind of two adjacent string
     /// literals
     pub fn concat(self: Kind, other: Kind) !Kind {
+        if (self == .unterminated or other == .unterminated) return .unterminated;
         if (self == other) return self; // can always concat with own kind
         if (self == .char) return other; // char + X -> X
         if (other == .char) return self; // X + char -> X
@@ -86,6 +92,7 @@ pub const Kind = enum {
             .utf8 => delimited[3..end],
             .utf16 => delimited[2..end],
             .utf32 => delimited[2..end],
+            .unterminated => unreachable,
         };
     }
 
@@ -97,8 +104,10 @@ pub const Kind = enum {
             .utf8 => Type.UChar,
             .utf16 => comp.types.uintLeast16Ty,
             .utf32 => comp.types.uintLeast32Ty,
+            .unterminated => unreachable,
         };
     }
+
     /// The size of a character unit for a string literal of this kind
     pub fn charUnitSize(kind: Kind, comp: *const Compilation) Compilation.CharUnitSize {
         return switch (kind) {
@@ -111,6 +120,7 @@ pub const Kind = enum {
             .utf8 => .@"1",
             .utf16 => .@"2",
             .utf32 => .@"4",
+            .unterminated => unreachable,
         };
     }
 
@@ -123,6 +133,7 @@ pub const Kind = enum {
 
     pub fn elementType(kind: Kind, comp: *const Compilation) Type {
         return switch (kind) {
+            .unterminated => unreachable,
             .char => Type.Char,
             .utf8 => if (comp.langOpts.hasChar8_t()) Type.UChar else Type.Char,
             else => kind.charLiteralType(comp),
@@ -156,6 +167,7 @@ pub const Parser = struct {
 
     fn prefixLen(self: *const Parser) usize {
         return switch (self.kind) {
+            .unterminated => unreachable,
             .char => 0,
             .utf8 => 2,
             .wide, .utf16, .utf32 => 1,

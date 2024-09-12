@@ -530,6 +530,11 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!Token {
                 if (token.id.isMacroIdentifier() and pp.poisonedIdentifiers.get(pp.getTokenSlice(token)) != null)
                     try pp.addError(token, .poisoned_identifier);
 
+                switch (token.id) {
+                    .UnterminatedStringLiteral => try pp.addError(token, .unterminated_string_literal_warning),
+                    else => {},
+                }
+
                 if (std.mem.eql(u8, lexer.buffer[token.start..token.end], "__has_include")) {
                     token.id.simplifyMacroKeyword();
                     try pp.comp.addDiagnostic(.{
@@ -2173,6 +2178,10 @@ fn define(pp: *Preprocessor, lexer: *Lexer) Error!void {
                     needWS = false;
                     try pp.tokenBuffer.append(.{ .id = .MacroWS, .source = .generated });
                 }
+
+                if (token.id == .UnterminatedStringLiteral)
+                    try pp.addError(token, .unterminated_string_literal_warning);
+
                 try pp.tokenBuffer.append(token);
             },
         }
@@ -2369,10 +2378,14 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: RawToken, lParen: Raw
             },
 
             else => {
+                if (token.id == .UnterminatedStringLiteral)
+                    try pp.addError(token, .unterminated_string_literal_warning);
+
                 if (token.id != .WhiteSpace and needWS) {
                     needWS = false;
                     try pp.tokenBuffer.append(.{ .id = .MacroWS, .source = .generated });
                 }
+
                 if (varArgs and token.id == .KeywordVarArgs) {
                     // do nothing
                 } else if (token.id.isMacroIdentifier()) {

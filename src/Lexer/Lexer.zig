@@ -271,7 +271,7 @@ pub fn next(self: *Lexer) Token {
                     break;
                 },
                 '\n' => {
-                    id = .Invalid;
+                    id = .UnterminatedStringLiteral;
                     break;
                 },
                 '\r' => unreachable,
@@ -684,7 +684,6 @@ pub fn next(self: *Lexer) Token {
             .multi_line_comment_done => id = .WhiteSpace,
 
             .period2,
-            .string_literal,
             .path_escape,
             .char_literal_start,
             .char_literal,
@@ -693,6 +692,8 @@ pub fn next(self: *Lexer) Token {
             .multi_line_comment,
             .multi_line_comment_asterisk,
             => id = TokenType.Invalid,
+
+            .string_literal => id = .UnterminatedStringLiteral,
 
             .equal => id = TokenType.Equal,
             .bang => id = TokenType.Bang,

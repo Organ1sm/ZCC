@@ -175,6 +175,7 @@ pub const Options = packed struct {
     @"invalid-source-encoding": Kind = .default,
     @"four-char-constants": Kind = .default,
     @"unknown-escape-sequence": Kind = .default,
+    @"invalid-pp-token": Kind = .default,
 };
 
 list: std.ArrayListUnmanaged(Message) = .{},

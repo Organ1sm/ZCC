@@ -1243,6 +1243,7 @@ fn parseStaticAssert(p: *Parser) Error!bool {
             .StringLiteralUTF_16,
             .StringLiteralUTF_32,
             .StringLiteralWide,
+            .UnterminatedStringLiteral,
             => try p.parseStringLiteral(),
 
             else => {
@@ -4165,7 +4166,7 @@ fn parseAssembly(p: *Parser, kind: enum { global, declLabel, stmt }) Error!?Node
 fn parseAsmString(p: *Parser) Error!Result {
     var i = p.tokenIdx;
     while (true) : (i += 1) switch (p.tokenIds[i]) {
-        .StringLiteral => {},
+        .StringLiteral, .UnterminatedStringLiteral => {},
         .StringLiteralUTF_8, .StringLiteralUTF_16, .StringLiteralUTF_32 => {
             try p.errStr(.invalid_asm_str, p.tokenIdx, "unicode");
             return error.ParsingFailed;
@@ -6783,6 +6784,7 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
         .StringLiteralUTF_16,
         .StringLiteralUTF_32,
         .StringLiteralWide,
+        .UnterminatedStringLiteral,
         => return p.parseStringLiteral(),
 
         .CharLiteral,
@@ -7329,6 +7331,12 @@ fn parseStringLiteral(p: *Parser) Error!Result {
             while (p.currToken().isStringLiteral()) : (p.tokenIdx += 1) {}
             return error.ParsingFailed;
         };
+
+        if (stringKind == .unterminated) {
+            try p.errToken(.unterminated_string_literal_error, stringEnd);
+            p.tokenIdx = stringEnd + 1;
+            return error.ParsingFailed;
+        }
     }
 
     assert(stringEnd > p.tokenIdx);
