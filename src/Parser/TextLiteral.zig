@@ -120,6 +120,14 @@ pub const Kind = enum {
             inline else => |size| @alignOf(size.Type()),
         };
     }
+
+    pub fn elementType(kind: Kind, comp: *const Compilation) Type {
+        return switch (kind) {
+            .char => Type.Char,
+            .utf8 => if (comp.langOpts.hasChar8_t()) Type.UChar else Type.Char,
+            else => kind.charLiteralType(comp),
+        };
+    }
 };
 
 const CharDiagnostics = struct {
@@ -149,7 +157,11 @@ pub const Parser = struct {
     pub fn err(self: *Parser, tag: Diagnostics.Tag, extra: Diagnostics.Message.Extra) void {
         if (self.errored) return;
         self.errored = true;
-        self.errors.append(.{ .tag = tag, .extra = extra }) catch {};
+        const diagnostic = .{ .tag = tag, .extra = extra };
+        self.errors.append(diagnostic) catch {
+            _ = self.errors.pop();
+            self.errors.append(diagnostic) catch unreachable;
+        };
     }
 
     pub fn warn(self: *Parser, tag: Diagnostics.Tag, extra: Diagnostics.Message.Extra) void {

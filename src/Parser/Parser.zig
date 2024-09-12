@@ -7386,7 +7386,7 @@ fn parseStringLiteral(p: *Parser) Error!Result {
                         const destLen = if (capacitySlice.len % 2 == 0) capacitySlice.len else capacitySlice.len - 1;
                         const dest = std.mem.bytesAsSlice(u16, capacitySlice[0..destLen]);
                         const wordsWritten = std.unicode.utf8ToUtf16Le(dest, view.bytes) catch unreachable;
-                        p.retainedStrings.items.len += wordsWritten * 2;
+                        p.retainedStrings.resize(p.retainedStrings.items.len + wordsWritten * 2) catch unreachable;
                     },
                     .@"4" => {
                         var it = view.iterator();
@@ -7407,12 +7407,7 @@ fn parseStringLiteral(p: *Parser) Error!Result {
     const slice = p.retainedStrings.items[retainStart..];
 
     const arrayType = try p.arena.create(Type.Array);
-    const specifier: Type.Specifier = switch (stringKind) {
-        .char => .Char,
-        .utf8 => if (p.comp.langOpts.hasChar8_t()) .UChar else .Char,
-        else => stringKind.charLiteralType(p.comp).specifier,
-    };
-    arrayType.* = .{ .elem = .{ .specifier = specifier }, .len = @divExact(slice.len, @intFromEnum(charWidth)) };
+    arrayType.* = .{ .elem = stringKind.elementType(p.comp), .len = @divExact(slice.len, @intFromEnum(charWidth)) };
 
     var res: Result = .{
         .ty = .{ .specifier = .Array, .data = .{ .array = arrayType } },
