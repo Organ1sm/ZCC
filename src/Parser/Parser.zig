@@ -6792,6 +6792,8 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
         .CharLiteralUTF_16,
         .CharLiteralUTF_32,
         .CharLiteralWide,
+        .EmptyCharLiteral,
+        .UnterminatedCharLiteral,
         => return p.parseCharLiteral(),
 
         .Zero => {
@@ -7234,7 +7236,21 @@ fn parseCharLiteral(p: *Parser) Error!Result {
     defer p.tokenIdx += 1;
 
     const tokenId = p.currToken();
-    const charKind = TextLiteral.Kind.classify(tokenId, .CharLiteral).?;
+    const charKind = TextLiteral.Kind.classify(tokenId, .CharLiteral) orelse {
+        if (tokenId == .EmptyCharLiteral)
+            try p.err(.empty_char_literal_error)
+        else if (tokenId == .UnterminatedCharLiteral)
+            try p.err(.unterminated_char_literal_error)
+        else
+            unreachable;
+
+        return .{
+            .ty = Type.Int,
+            .value = Value.int(0),
+            .node = try p.addNode(.{ .tag = .CharLiteral, .type = Type.Int, .data = undefined }),
+        };
+    };
+
     var val: u32 = 0;
 
     const slice = charKind.contentSlice(p.getTokenText(p.tokenIdx));

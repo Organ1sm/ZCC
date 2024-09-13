@@ -2312,3 +2312,21 @@ pub const unterminated_string_literal_error = struct {
     pub const msg = "missing terminating '\"' character";
     pub const kind = .@"error";
 };
+pub const empty_char_literal_warning = struct {
+    pub const msg = "empty character constant";
+    pub const kind = .warning;
+    pub const opt = "invalid-pp-token";
+};
+pub const empty_char_literal_error = struct {
+    pub const msg = "empty character constant";
+    pub const kind = .@"error";
+};
+pub const unterminated_char_literal_warning = struct {
+    pub const msg = "missing terminating ' character";
+    pub const kind = .warning;
+    pub const opt = "invalid-pp-token";
+};
+pub const unterminated_char_literal_error = struct {
+    pub const msg = "missing terminating ' character";
+    pub const kind = .@"error";
+};

@@ -17,7 +17,7 @@ pub const TokenType = enum(u8) {
     StringLiteralUTF_32,
 
     /// Any string literal with an embedded newline or EOF
-    /// Always a parser error
+    /// Always a parser error, by default just a warning from preprocessor
     UnterminatedStringLiteral,
 
     // char literals with prefixes
@@ -26,6 +26,14 @@ pub const TokenType = enum(u8) {
     CharLiteralUTF_8,
     CharLiteralUTF_16,
     CharLiteralUTF_32,
+
+    /// Any character literal with nothing inside the quotes
+    /// Always a parser error, by default just a warning from preprocessor
+    EmptyCharLiteral,
+
+    /// Any character literal with an embedded newline or EOF
+    /// Always a parser error, by default just a warning from preprocessor
+    UnterminatedCharLiteral,
 
     /// "! !=  = =="
     Bang,
@@ -490,6 +498,8 @@ pub const TokenType = enum(u8) {
             .CharLiteralUTF_16,
             .CharLiteralUTF_32,
             .CharLiteralWide,
+            .UnterminatedCharLiteral,
+            .EmptyCharLiteral,
             .MacroString,
             .WhiteSpace,
             .PPNumber,

@@ -286,9 +286,13 @@ pub fn next(self: *Lexer) Token {
                 '\\' => {
                     state = .char_escape_sequence;
                 },
-
-                '\'', '\n' => {
-                    id = .Invalid;
+                '\'' => {
+                    id = .EmptyCharLiteral;
+                    self.index += 1;
+                    break;
+                },
+                '\n' => {
+                    id = .UnterminatedCharLiteral;
                     break;
                 },
                 else => {
@@ -305,7 +309,7 @@ pub fn next(self: *Lexer) Token {
                     break;
                 },
                 '\n' => {
-                    id = .Invalid;
+                    id = .UnterminatedCharLiteral;
                     break;
                 },
                 else => {},
@@ -685,15 +689,12 @@ pub fn next(self: *Lexer) Token {
 
             .period2,
             .path_escape,
-            .char_literal_start,
-            .char_literal,
-            .string_escape_sequence,
-            .char_escape_sequence,
             .multi_line_comment,
             .multi_line_comment_asterisk,
             => id = TokenType.Invalid,
 
-            .string_literal => id = .UnterminatedStringLiteral,
+            .char_escape_sequence, .char_literal_start, .char_literal => id = .UnterminatedCharLiteral,
+            .string_escape_sequence, .string_literal => id = .UnterminatedStringLiteral,
 
             .equal => id = TokenType.Equal,
             .bang => id = TokenType.Bang,

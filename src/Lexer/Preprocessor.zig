@@ -532,6 +532,8 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!Token {
 
                 switch (token.id) {
                     .UnterminatedStringLiteral => try pp.addError(token, .unterminated_string_literal_warning),
+                    .UnterminatedCharLiteral => try pp.addError(token, .unterminated_char_literal_warning),
+                    .EmptyCharLiteral => try pp.addError(token, .empty_char_literal_warning),
                     else => {},
                 }
 
@@ -2173,15 +2175,23 @@ fn define(pp: *Preprocessor, lexer: *Lexer) Error!void {
             },
             .NewLine, .Eof => break token.start,
             .WhiteSpace => needWS = true,
+            .UnterminatedStringLiteral => {
+                try pp.addError(token, .unterminated_string_literal_warning);
+                try pp.tokenBuffer.append(token);
+            },
+            .UnterminatedCharLiteral => {
+                try pp.addError(token, .unterminated_char_literal_warning);
+                try pp.tokenBuffer.append(token);
+            },
+            .EmptyCharLiteral => {
+                try pp.addError(token, .empty_char_literal_warning);
+                try pp.tokenBuffer.append(token);
+            },
             else => {
                 if (token.id != .WhiteSpace and needWS) {
                     needWS = false;
                     try pp.tokenBuffer.append(.{ .id = .MacroWS, .source = .generated });
                 }
-
-                if (token.id == .UnterminatedStringLiteral)
-                    try pp.addError(token, .unterminated_string_literal_warning);
-
                 try pp.tokenBuffer.append(token);
             },
         }
@@ -2377,10 +2387,22 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: RawToken, lParen: Raw
                 try pp.tokenBuffer.append(token);
             },
 
-            else => {
-                if (token.id == .UnterminatedStringLiteral)
-                    try pp.addError(token, .unterminated_string_literal_warning);
+            .UnterminatedStringLiteral => {
+                try pp.addError(token, .unterminated_string_literal_warning);
+                try pp.tokenBuffer.append(token);
+            },
 
+            .UnterminatedCharLiteral => {
+                try pp.addError(token, .unterminated_char_literal_warning);
+                try pp.tokenBuffer.append(token);
+            },
+
+            .EmptyCharLiteral => {
+                try pp.addError(token, .empty_char_literal_warning);
+                try pp.tokenBuffer.append(token);
+            },
+
+            else => {
                 if (token.id != .WhiteSpace and needWS) {
                     needWS = false;
                     try pp.tokenBuffer.append(.{ .id = .MacroWS, .source = .generated });
