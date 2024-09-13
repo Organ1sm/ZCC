@@ -2330,3 +2330,7 @@ pub const unterminated_char_literal_error = struct {
     pub const msg = "missing terminating ' character";
     pub const kind = .@"error";
 };
+pub const unterminated_comment = struct {
+    pub const msg = "unterminated comment";
+    pub const kind = .@"error";
+};

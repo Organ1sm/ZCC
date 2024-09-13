@@ -682,19 +682,22 @@ pub fn next(self: *Lexer) Token {
         switch (state) {
             .start, .line_comment => {},
             .u, .u8, .U, .L, .identifier => id = Token.getTokenId(self.comp, self.buffer[start..self.index]),
-            .extended_identifier => id = .ExtendedIdentifier,
+            .extended_identifier => id = TokenType.ExtendedIdentifier,
 
-            .whitespace => id = .WhiteSpace,
-            .multi_line_comment_done => id = .WhiteSpace,
+            .whitespace,
+            .multi_line_comment_done,
+            => id = TokenType.WhiteSpace,
 
             .period2,
             .path_escape,
-            .multi_line_comment,
-            .multi_line_comment_asterisk,
             => id = TokenType.Invalid,
 
-            .char_escape_sequence, .char_literal_start, .char_literal => id = .UnterminatedCharLiteral,
-            .string_escape_sequence, .string_literal => id = .UnterminatedStringLiteral,
+            .multi_line_comment,
+            .multi_line_comment_asterisk,
+            => id = TokenType.UnterminatedComment,
+
+            .char_escape_sequence, .char_literal_start, .char_literal => id = TokenType.UnterminatedCharLiteral,
+            .string_escape_sequence, .string_literal => id = TokenType.UnterminatedStringLiteral,
 
             .equal => id = TokenType.Equal,
             .bang => id = TokenType.Bang,

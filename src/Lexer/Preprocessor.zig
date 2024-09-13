@@ -534,6 +534,10 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!Token {
                     .UnterminatedStringLiteral => try pp.addError(token, .unterminated_string_literal_warning),
                     .UnterminatedCharLiteral => try pp.addError(token, .unterminated_char_literal_warning),
                     .EmptyCharLiteral => try pp.addError(token, .empty_char_literal_warning),
+                    .UnterminatedComment => {
+                        try pp.addError(token, .unterminated_comment);
+                        continue;
+                    },
                     else => {},
                 }
 
@@ -2187,6 +2191,7 @@ fn define(pp: *Preprocessor, lexer: *Lexer) Error!void {
                 try pp.addError(token, .empty_char_literal_warning);
                 try pp.tokenBuffer.append(token);
             },
+            .UnterminatedComment => try pp.addError(token, .unterminated_comment),
             else => {
                 if (token.id != .WhiteSpace and needWS) {
                     needWS = false;
@@ -2401,6 +2406,8 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: RawToken, lParen: Raw
                 try pp.addError(token, .empty_char_literal_warning);
                 try pp.tokenBuffer.append(token);
             },
+
+            .UnterminatedComment => try pp.addError(token, .unterminated_comment),
 
             else => {
                 if (token.id != .WhiteSpace and needWS) {
