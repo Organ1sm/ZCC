@@ -168,6 +168,7 @@ void foo(int a, ...)
   - [ ] Non-constant initializers
   - [ ] Designated initializers
 - [x] Variadic macros
+- [x] [wide string literal](../test/cases/wide-strings.c)
 
 ---
 
@@ -182,9 +183,9 @@ void foo(int a, ...)
 - [x] `_Noreturn`
 - [x] `va_list, va_start, va_arg, va_copy, va_end`
 - [x] Anonymous struct and union members
-- [ ] Unicode support
-  - [ ] u/U character constants
-  - [ ] u8/u/U string literals
+- [x] Unicode support
+  - [x] u/U character constants
+  - [x] u8/u/U string literals
 
 ---
 

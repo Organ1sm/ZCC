@@ -7,38 +7,44 @@ const LangOpts = @import("../Basic/LangOpts.zig");
 const mem = std.mem;
 
 pub const Item = union(enum) {
-    /// decoded escape
+    /// decoded hex or character escape
     value: u32,
+    /// validated unicode codepoint
+    codepoint: u21,
     /// CharLiteral in the sourct text is not utf8 encoded
     improperlyEncoded: []const u8,
     /// 1 or more unescaped bytes
     utf8Text: std.unicode.Utf8View,
 };
+
 pub const Kind = enum {
     char,
     wide,
     utf8,
     utf16,
     utf32,
+    /// Errorr kind that halts parsing
+    unterminated,
 
-    pub fn classify(id: TokenType) Kind {
-        return switch (id) {
-            .CharLiteral,
-            .StringLiteral,
-            => .char,
-            .CharLiteralUTF_8,
-            .StringLiteralUTF_8,
-            => .utf8,
-            .CharLiteralWide,
-            .StringLiteralWide,
-            => .wide,
-            .CharLiteralUTF_16,
-            .StringLiteralUTF_16,
-            => .utf16,
-            .CharLiteralUTF_32,
-            .StringLiteralUTF_32,
-            => .utf32,
-            else => unreachable,
+    pub fn classify(id: TokenType, context: enum { StringLiteral, CharLiteral }) ?Kind {
+        return switch (context) {
+            .StringLiteral => switch (id) {
+                .StringLiteral => .char,
+                .StringLiteralWide => .wide,
+                .StringLiteralUTF_8 => .utf8,
+                .StringLiteralUTF_16 => .utf16,
+                .StringLiteralUTF_32 => .utf32,
+                .UnterminatedStringLiteral => .unterminated,
+                else => null,
+            },
+            .CharLiteral => switch (id) {
+                .CharLiteral => .char,
+                .CharLiteralWide => .wide,
+                .CharLiteralUTF_8 => .utf8,
+                .CharLiteralUTF_16 => .utf16,
+                .CharLiteralUTF_32 => .utf32,
+                else => null,
+            },
         };
     }
 
@@ -46,38 +52,38 @@ pub const Kind = enum {
     /// May be smaller than the largest value that can be represented.
     /// For example u8 char literals may only specify 0-127 via literals or
     /// character escapes, but may specify up to \xFF via hex escapes.
-    fn maxCodepoint(kind: Kind, comp: *const Compilation) u21 {
+    pub fn maxCodepoint(kind: Kind, comp: *const Compilation) u21 {
         return @intCast(switch (kind) {
             .char => std.math.maxInt(u7),
             .wide => @min(0x10FFFF, comp.types.wchar.maxInt(comp)),
             .utf8 => std.math.maxInt(u7),
             .utf16 => std.math.maxInt(u16),
             .utf32 => 0x10FFFF,
+            .unterminated => unreachable,
         });
     }
 
     /// Largest integer that can be represented by this character kind
-    fn maxInt(kind: Kind, comp: *const Compilation) u32 {
+    pub fn maxInt(kind: Kind, comp: *const Compilation) u32 {
         return @intCast(switch (kind) {
             .char, .utf8 => std.math.maxInt(u8),
             .wide => comp.types.wchar.maxInt(comp),
             .utf16 => std.math.maxInt(u16),
             .utf32 => std.math.maxInt(u32),
+            .unterminated => unreachable,
         });
     }
 
-    pub fn charLiteralType(kind: Kind, comp: *const Compilation) Type {
-        return switch (kind) {
-            .char => Type.Int,
-            .wide => comp.types.wchar,
-            .utf8 => Type.UChar,
-            .utf16 => comp.types.uintLeast16Ty,
-            .utf32 => comp.types.uintLeast32Ty,
-        };
+    /// Should only be called for string literals. Determines the result kind of two adjacent string
+    /// literals
+    pub fn concat(self: Kind, other: Kind) !Kind {
+        if (self == .unterminated or other == .unterminated) return .unterminated;
+        if (self == other) return self; // can always concat with own kind
+        if (self == .char) return other; // char + X -> X
+        if (other == .char) return self; // X + char -> X
+        return error.CannotConcat;
     }
 
-    /// Return the actual contents of the string literal with leading / trailing quotes and
-    /// specifiers removed
     pub fn contentSlice(kind: Kind, delimited: []const u8) []const u8 {
         const end = delimited.len - 1; // remove trailing quote
         return switch (kind) {
@@ -86,6 +92,51 @@ pub const Kind = enum {
             .utf8 => delimited[3..end],
             .utf16 => delimited[2..end],
             .utf32 => delimited[2..end],
+            .unterminated => unreachable,
+        };
+    }
+
+    /// The C type of a character literal of this kind
+    pub fn charLiteralType(kind: Kind, comp: *const Compilation) Type {
+        return switch (kind) {
+            .char => Type.Int,
+            .wide => comp.types.wchar,
+            .utf8 => Type.UChar,
+            .utf16 => comp.types.uintLeast16Ty,
+            .utf32 => comp.types.uintLeast32Ty,
+            .unterminated => unreachable,
+        };
+    }
+
+    /// The size of a character unit for a string literal of this kind
+    pub fn charUnitSize(kind: Kind, comp: *const Compilation) Compilation.CharUnitSize {
+        return switch (kind) {
+            .char => .@"1",
+            .wide => switch (comp.types.wchar.sizeof(comp).?) {
+                2 => .@"2",
+                4 => .@"4",
+                else => unreachable,
+            },
+            .utf8 => .@"1",
+            .utf16 => .@"2",
+            .utf32 => .@"4",
+            .unterminated => unreachable,
+        };
+    }
+
+    /// Required alignment within zcc (on compiler host); not on compilation target
+    pub fn internalStorageAlignment(kind: Kind, comp: *const Compilation) usize {
+        return switch (kind.charUnitSize(comp)) {
+            inline else => |size| @alignOf(size.Type()),
+        };
+    }
+
+    pub fn elementType(kind: Kind, comp: *const Compilation) Type {
+        return switch (kind) {
+            .unterminated => unreachable,
+            .char => Type.Char,
+            .utf8 => if (comp.langOpts.hasChar8_t()) Type.UChar else Type.Char,
+            else => kind.charLiteralType(comp),
         };
     }
 };
@@ -98,26 +149,39 @@ const CharDiagnostics = struct {
 pub const Parser = struct {
     literal: []const u8,
     i: usize = 0,
+    kind: Kind,
     maxCodepoint: u21,
-    maxInt: u32,
     /// We only want to issue a max of 1 error per char literal
     errored: bool = false,
     errors: std.BoundedArray(CharDiagnostics, 4) = .{},
     comp: *const Compilation,
 
-    pub fn init(literal: []const u8, kind: Kind, comp: *const Compilation) Parser {
+    pub fn init(literal: []const u8, kind: Kind, maxCodepoint: u21, comp: *const Compilation) Parser {
         return .{
             .literal = literal,
             .comp = comp,
-            .maxInt = kind.maxInt(comp),
-            .maxCodepoint = kind.maxCodepoint(comp),
+            .kind = kind,
+            .maxCodepoint = maxCodepoint,
+        };
+    }
+
+    fn prefixLen(self: *const Parser) usize {
+        return switch (self.kind) {
+            .unterminated => unreachable,
+            .char => 0,
+            .utf8 => 2,
+            .wide, .utf16, .utf32 => 1,
         };
     }
 
     pub fn err(self: *Parser, tag: Diagnostics.Tag, extra: Diagnostics.Message.Extra) void {
         if (self.errored) return;
         self.errored = true;
-        self.errors.append(.{ .tag = tag, .extra = extra }) catch {};
+        const diagnostic = .{ .tag = tag, .extra = extra };
+        self.errors.append(diagnostic) catch {
+            _ = self.errors.pop();
+            self.errors.append(diagnostic) catch unreachable;
+        };
     }
 
     pub fn warn(self: *Parser, tag: Diagnostics.Tag, extra: Diagnostics.Message.Extra) void {
@@ -134,6 +198,11 @@ pub const Parser = struct {
             const unescapedSlice = self.literal[start..self.i];
 
             const view = std.unicode.Utf8View.init(unescapedSlice) catch {
+                if (self.kind != .char) {
+                    self.err(.illegal_char_encoding_error, .{ .none = {} });
+                    return null;
+                }
+                self.warn(.illegal_char_encoding_warning, .{ .none = {} });
                 return .{ .improperlyEncoded = self.literal[start..self.i] };
             };
             return .{ .utf8Text = view };
@@ -178,7 +247,7 @@ pub const Parser = struct {
         self.i += expectedLen;
 
         if (overflowed) {
-            self.err(.escape_sequence_overflow, .{ .unsigned = start });
+            self.err(.escape_sequence_overflow, .{ .unsigned = start + self.prefixLen() });
             return null;
         }
 
@@ -188,7 +257,7 @@ pub const Parser = struct {
         }
 
         if (val > std.math.maxInt(u21) or !std.unicode.utf8ValidCodepoint(@intCast(val))) {
-            self.err(.invalid_universal_character, .{ .unsigned = start });
+            self.err(.invalid_universal_character, .{ .unsigned = start + self.prefixLen() });
             return null;
         }
 
@@ -211,7 +280,7 @@ pub const Parser = struct {
         }
 
         self.warn(.c89_ucn_in_literal, .{ .none = {} });
-        return .{ .value = val };
+        return .{ .codepoint = @intCast(val) };
     }
 
     fn parseEscapedChar(self: *Parser) Item {
@@ -254,6 +323,7 @@ pub const Parser = struct {
         var val: u32 = 0;
         var count: usize = 0;
         var overflowed = false;
+        const start = self.i;
         defer self.i += count;
 
         const slice = switch (base) {
@@ -272,8 +342,10 @@ pub const Parser = struct {
             count += 1;
         }
 
-        if (overflowed or val > self.maxInt)
-            self.err(.escape_sequence_overflow, .{ .unsigned = 0 });
+        if (overflowed or val > self.kind.maxInt(self.comp)) {
+            self.err(.escape_sequence_overflow, .{ .unsigned = start + self.prefixLen() });
+            return 0;
+        }
 
         if (count == 0) {
             std.debug.assert(base == .hex);

@@ -2298,3 +2298,39 @@ pub const unknown_escape_sequence = struct {
     pub const opt = "unknown-escape-sequence";
     pub const extra = .invalid_escape;
 };
+pub const attribute_requires_string = struct {
+    pub const msg = "attribute '{s}' requires an ordinary string";
+    pub const kind = .@"error";
+    pub const extra = .str;
+};
+pub const unterminated_string_literal_warning = struct {
+    pub const msg = "missing terminating '\"' character";
+    pub const kind = .warning;
+    pub const opt = "invalid-pp-token";
+};
+pub const unterminated_string_literal_error = struct {
+    pub const msg = "missing terminating '\"' character";
+    pub const kind = .@"error";
+};
+pub const empty_char_literal_warning = struct {
+    pub const msg = "empty character constant";
+    pub const kind = .warning;
+    pub const opt = "invalid-pp-token";
+};
+pub const empty_char_literal_error = struct {
+    pub const msg = "empty character constant";
+    pub const kind = .@"error";
+};
+pub const unterminated_char_literal_warning = struct {
+    pub const msg = "missing terminating ' character";
+    pub const kind = .warning;
+    pub const opt = "invalid-pp-token";
+};
+pub const unterminated_char_literal_error = struct {
+    pub const msg = "missing terminating ' character";
+    pub const kind = .@"error";
+};
+pub const unterminated_comment = struct {
+    pub const msg = "unterminated comment";
+    pub const kind = .@"error";
+};

@@ -19,7 +19,7 @@ const Result = @import("Result.zig");
 const InitList = @import("InitList.zig");
 const Attribute = @import("../Lexer/Attribute.zig");
 const CharInfo = @import("../Basic/CharInfo.zig");
-const CharLiteral = @import("../Parser/CharLiteral.zig");
+const TextLiteral = @import("../Parser/TextLiteral.zig");
 const Value = @import("../AST/Value.zig");
 const StringId = @import("../Basic/StringInterner.zig").StringId;
 const RecordLayout = @import("../Basic/RecordLayout.zig");
@@ -190,7 +190,7 @@ fn checkIdentifierCodepointWarnings(comp: *Compilation, codepoint: u21, loc: Sou
 /// true means consider the token to actually be an identifier
 /// false means it is not
 fn validateExtendedIdentifier(p: *Parser) !bool {
-    assert(p.getCurrToken() == .ExtendedIdentifier);
+    assert(p.currToken() == .ExtendedIdentifier);
 
     const slice = p.getTokenText(p.tokenIdx);
     const view = std.unicode.Utf8View.init(slice) catch {
@@ -248,7 +248,7 @@ fn validateExtendedIdentifier(p: *Parser) !bool {
 }
 
 fn eatIdentifier(p: *Parser) !?TokenIndex {
-    switch (p.getCurrToken()) {
+    switch (p.currToken()) {
         .Identifier => {},
         .ExtendedIdentifier => {
             if (!try p.validateExtendedIdentifier()) {
@@ -262,7 +262,7 @@ fn eatIdentifier(p: *Parser) !?TokenIndex {
 
     // Handle illegal '$' characters in identifiers
     if (!p.comp.langOpts.dollarsInIdentifiers) {
-        if (p.getCurrToken() == .Invalid and p.getTokenText(p.tokenIdx)[0] == '$') {
+        if (p.currToken() == .Invalid and p.getTokenText(p.tokenIdx)[0] == '$') {
             try p.err(.dollars_in_identifiers);
             p.tokenIdx += 1;
             return error.ParsingFailed;
@@ -273,7 +273,7 @@ fn eatIdentifier(p: *Parser) !?TokenIndex {
 }
 
 fn expectIdentifier(p: *Parser) Error!TokenIndex {
-    const actual = p.getCurrToken();
+    const actual = p.currToken();
     if (actual != .Identifier and actual != .ExtendedIdentifier)
         return p.errExpectedToken(.Identifier, actual);
 
@@ -282,13 +282,13 @@ fn expectIdentifier(p: *Parser) Error!TokenIndex {
 
 fn eat(p: *Parser, expected: TokenType) ?TokenIndex {
     assert(expected != .Identifier and expected != .ExtendedIdentifier); // use eatIdentifier
-    if (p.getCurrToken() == expected) {
+    if (p.currToken() == expected) {
         defer p.tokenIdx += 1;
         return p.tokenIdx;
     } else return null;
 }
 
-pub fn getCurrToken(p: *Parser) TokenType {
+pub fn currToken(p: *Parser) TokenType {
     return p.lookAhead(0);
 }
 
@@ -299,7 +299,7 @@ pub fn lookAhead(p: *Parser, n: u32) TokenType {
 
 fn expectToken(p: *Parser, expected: TokenType) Error!TokenIndex {
     assert(expected != .Identifier and expected != .ExtendedIdentifier); // use eatIdentifier
-    const actual = p.getCurrToken();
+    const actual = p.currToken();
     if (actual != expected)
         return p.errExpectedToken(expected, actual);
 
@@ -461,7 +461,7 @@ fn checkDeprecatedUnavailable(p: *Parser, ty: Type, usageToken: TokenIndex, decl
         defer p.strings.items.len = stringsTop;
 
         const w = p.strings.writer();
-        const msgStr = p.retainedString(@"error".msg);
+        const msgStr = p.attributeMessageString(@"error".msg);
         try w.print("call to '{s}' declared with attribute error: {s}", .{ p.getTokenText(@"error".__name_token), msgStr });
         const str = try p.comp.diagnostics.arena.allocator().dupe(u8, p.strings.items[stringsTop..]);
         try p.errStr(.error_attribute, usageToken, str);
@@ -472,7 +472,7 @@ fn checkDeprecatedUnavailable(p: *Parser, ty: Type, usageToken: TokenIndex, decl
         defer p.strings.items.len = stringsTop;
 
         const w = p.strings.writer();
-        const msgStr = p.retainedString(warning.msg);
+        const msgStr = p.attributeMessageString(warning.msg);
         try w.print("call to '{s}' declared with attribute warning: {s}", .{ p.getTokenText(warning.__name_token), msgStr });
         const str = try p.comp.diagnostics.arena.allocator().dupe(u8, p.strings.items[stringsTop..]);
         try p.errStr(.warning_attribute, usageToken, str);
@@ -493,8 +493,8 @@ fn checkDeprecatedUnavailable(p: *Parser, ty: Type, usageToken: TokenIndex, decl
 }
 
 /// Returned slice is invalidated if additional strings are added to p.retainedStrings
-fn retainedString(p: *Parser, range: Value.ByteRange) []const u8 {
-    return range.slice(p.retainedStrings.items);
+fn attributeMessageString(p: *Parser, range: Value.ByteRange) []const u8 {
+    return range.slice(p.retainedStrings.items, .@"1");
 }
 
 /// Reports deprecated or unavailable usage of code based on the diagnostic tag.
@@ -519,7 +519,7 @@ fn errDeprecated(p: *Parser, tag: Diagnostics.Tag, tokenIdx: TokenIndex, msg: ?V
 
     try w.writeAll(reason);
     if (msg) |m| {
-        const str = p.retainedString(m);
+        const str = p.attributeMessageString(m);
         try w.print(": {s}", .{str});
     }
 
@@ -737,7 +737,7 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
             if (try p.parseOrNextDecl(parseDeclaration))
                 continue;
 
-            switch (p.getCurrToken()) {
+            switch (p.currToken()) {
                 .Semicolon => p.tokenIdx += 1,
                 .KeywordStaticAssert,
                 .KeywordC23StaticAssert,
@@ -814,7 +814,7 @@ fn parseOrNextDecl(p: *Parser, comptime func: fn (*Parser) Error!bool) Compilati
 fn nextExternDecl(p: *Parser) void {
     var parens: u32 = 0;
     while (true) : (p.tokenIdx += 1) {
-        switch (p.getCurrToken()) {
+        switch (p.currToken()) {
             .LParen, .LBrace, .LBracket => parens += 1,
             .RParen, .RBrace, .RBracket => if (parens != 0) {
                 parens -= 1;
@@ -871,8 +871,8 @@ fn nextExternDecl(p: *Parser) void {
 
 fn skipToPragmaSentinel(p: *Parser) void {
     while (true) : (p.tokenIdx += 1) {
-        if (p.getCurrToken() == .NewLine) return;
-        if (p.getCurrToken() == .Eof) {
+        if (p.currToken() == .NewLine) return;
+        if (p.currToken() == .Eof) {
             p.tokenIdx -= 1;
             return;
         }
@@ -882,11 +882,11 @@ fn skipToPragmaSentinel(p: *Parser) void {
 fn skipTo(p: *Parser, id: TokenType) void {
     var parens: u32 = 0;
     while (true) : (p.tokenIdx += 1) {
-        if (p.getCurrToken() == id and parens == 0) {
+        if (p.currToken() == id and parens == 0) {
             p.tokenIdx += 1;
             return;
         }
-        switch (p.getCurrToken()) {
+        switch (p.currToken()) {
             .LParen, .LBrace, .LBracket => parens += 1,
             .RParen, .RBrace, .RBracket => if (parens != 0) {
                 parens -= 1;
@@ -986,7 +986,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
             return error.ParsingFailed;
         }
 
-        switch (p.getCurrToken()) {
+        switch (p.currToken()) {
             .Comma, .Semicolon => break :fndef,
             .LBrace => {},
             else => {
@@ -1220,14 +1220,9 @@ fn staticAssertMessage(p: *Parser, condNode: NodeIndex, message: Result) !?[]con
         if (buf.items.len > 0)
             try buf.append(' ');
 
-        const data = message.value.data.bytes;
-        try buf.ensureUnusedCapacity(data.len());
-        try AST.dumpString(
-            p.retainedStrings.items,
-            data,
-            p.nodes.items(.tag)[@intFromEnum(message.node)],
-            buf.writer(),
-        );
+        const byteRange = message.value.data.bytes;
+        try buf.ensureUnusedCapacity(byteRange.len());
+        try byteRange.dumpString(message.ty, p.comp, p.retainedStrings.items, buf.writer());
     }
     return try p.comp.diagnostics.arena.allocator().dupe(u8, buf.items);
 }
@@ -1242,12 +1237,13 @@ fn parseStaticAssert(p: *Parser) Error!bool {
     const resNode = res.node;
 
     const str = if (p.eat(.Comma) != null)
-        switch (p.getCurrToken()) {
+        switch (p.currToken()) {
             .StringLiteral,
             .StringLiteralUTF_8,
             .StringLiteralUTF_16,
             .StringLiteralUTF_32,
             .StringLiteralWide,
+            .UnterminatedStringLiteral,
             => try p.parseStringLiteral(),
 
             else => {
@@ -1300,7 +1296,7 @@ fn parseStaticAssert(p: *Parser) Error!bool {
 ///   : `typeof` '(' type-name ')'
 ///   | `typeof` '(' expr ')'
 fn typeof(p: *Parser) Error!?Type {
-    switch (p.getCurrToken()) {
+    switch (p.currToken()) {
         .KeywordTypeof, .KeywordTypeof1, .KeywordTypeof2 => p.tokenIdx += 1,
         else => return null,
     }
@@ -1372,7 +1368,7 @@ fn parseDeclSpec(p: *Parser) Error!?DeclSpec {
         if (try p.parseTypeSpec(&spec))
             continue;
 
-        const token = p.getCurrToken();
+        const token = p.currToken();
         switch (token) {
             .KeywordTypedef,
             .KeywordExtern,
@@ -1475,7 +1471,7 @@ fn parseDeclSpec(p: *Parser) Error!?DeclSpec {
 ///  | attrIdentifier '(' (expr (',' expr)*)? ')'
 fn attribute(p: *Parser, kind: Attribute.Kind, namespace: ?[]const u8) Error!?TentativeAttribute {
     const nameToken = p.tokenIdx;
-    switch (p.getCurrToken()) {
+    switch (p.currToken()) {
         .KeywordConst, .KeywordGccConst1, .KeywordGccConst2 => p.tokenIdx += 1,
         else => _ = try p.expectIdentifier(),
     }
@@ -1491,7 +1487,7 @@ fn attribute(p: *Parser, kind: Attribute.Kind, namespace: ?[]const u8) Error!?Te
     var arguments = Attribute.initArguments(attr, nameToken);
     var argIdx: u32 = 0;
 
-    switch (p.getCurrToken()) {
+    switch (p.currToken()) {
         .Comma, .RParen => {}, // will be consumed in attributeList
         .LParen => blk: {
             p.tokenIdx += 1;
@@ -1559,18 +1555,18 @@ fn handleAttr(p: *Parser, format: Attribute.Kind, namespace: ?[]const u8) Error!
 
 /// attribute-list : (attribute (',' attribute)*)?
 fn parseGNUAttrList(p: *Parser) Error!void {
-    if (p.getCurrToken() == .RParen)
+    if (p.currToken() == .RParen)
         return;
 
     try p.handleAttr(.gnu, null);
-    while (p.getCurrToken() != .RParen) {
+    while (p.currToken() != .RParen) {
         _ = try p.expectToken(.Comma);
         try p.handleAttr(.gnu, null);
     }
 }
 
 fn parseC23AttrList(p: *Parser) Error!void {
-    while (p.getCurrToken() != .RBracket) { // ']'
+    while (p.currToken() != .RBracket) { // ']'
         const namespaceTok = try p.expectIdentifier();
         var namespace: ?[]const u8 = null;
         if (p.eat(.ColonColon)) |_| // '::'
@@ -1584,7 +1580,7 @@ fn parseC23AttrList(p: *Parser) Error!void {
 }
 
 fn parseMSVCAttrList(p: *Parser) Error!void {
-    while (p.getCurrToken() != .RParen) {
+    while (p.currToken() != .RParen) {
         try p.handleAttr(.declspec, null);
         _ = p.eat(.Comma); // ','
     }
@@ -1618,7 +1614,7 @@ fn msvcAttribute(p: *Parser) !bool {
 
 /// (__attribute | __attribute__) '((' gnu-attribute-list  '))'
 fn gnuAttribute(p: *Parser) !bool {
-    switch (p.getCurrToken()) {
+    switch (p.currToken()) {
         .KeywordAttribute1, .KeywordAttribute2 => p.tokenIdx += 1,
         else => return false,
     }
@@ -1804,7 +1800,7 @@ fn parseTypeSpec(p: *Parser, ty: *TypeBuilder) Error!bool {
         if (try p.parseTypeQual(&ty.qual))
             continue;
 
-        switch (p.getCurrToken()) {
+        switch (p.currToken()) {
             .KeywordVoid => try ty.combine(p, .Void, p.tokenIdx),
             .KeywordAutoType => {
                 try p.errToken(.auto_type_extension, p.tokenIdx);
@@ -1902,7 +1898,7 @@ fn parseTypeSpec(p: *Parser, ty: *TypeBuilder) Error!bool {
                     .tag = .calling_convention,
                     .args = .{
                         .calling_convention = .{
-                            .cc = switch (p.getCurrToken()) {
+                            .cc = switch (p.currToken()) {
                                 .KeywordStdCall, .KeywordStdCall2 => .stdcall,
                                 .KeywordThisCall, .KeywordThisCall2 => .thiscall,
                                 .KeywordVectorCall, .KeywordVectorCall2 => .vectorcall,
@@ -2033,7 +2029,7 @@ fn parseRecordSpec(p: *Parser) Error!Type {
 
         // check if this is a reference to a previous type
         const internedName = try p.getInternString(ident);
-        if (try p.symStack.findTag(internedName, p.tokenIds[kindToken], ident, p.getCurrToken())) |prev| {
+        if (try p.symStack.findTag(internedName, p.tokenIds[kindToken], ident, p.currToken())) |prev| {
             return prev.type;
         } else {
             // this is a forward declaration, create a new record type.
@@ -2369,7 +2365,7 @@ fn parseRecordDeclarator(p: *Parser) Error!bool {
     }
 
     if (p.eat(.Semicolon) == null) {
-        const curToken = p.getCurrToken();
+        const curToken = p.currToken();
         if (curToken == .RBrace)
             try p.err(.missing_semicolon)
         else
@@ -2445,7 +2441,7 @@ fn parseEnumSpec(p: *Parser) Error!Type {
 
         // check if this is a reference to a previous type
         const internedName = try p.getInternString(ident);
-        if (try p.symStack.findTag(internedName, .KeywordEnum, ident, p.getCurrToken())) |prev| {
+        if (try p.symStack.findTag(internedName, .KeywordEnum, ident, p.currToken())) |prev| {
             try p.checkEnumFixedTy(fixedTy, ident, prev);
             return prev.type;
         } else {
@@ -2702,7 +2698,7 @@ const EnumFieldAndNode = struct { field: Type.Enum.Field, node: NodeIndex };
 fn enumerator(p: *Parser, e: *Enumerator) Error!?EnumFieldAndNode {
     _ = try p.pragma();
     const nameToken = try p.eatIdentifier() orelse {
-        if (p.getCurrToken() == .RBrace) return null;
+        if (p.currToken() == .RBrace) return null;
         try p.err(.expected_identifier);
         p.skipTo(.RBrace);
         return error.ParsingFailed;
@@ -2777,7 +2773,7 @@ fn enumerator(p: *Parser, e: *Enumerator) Error!?EnumFieldAndNode {
 fn parseTypeQual(p: *Parser, b: *Type.Qualifiers.Builder) Error!bool {
     var any = false;
     while (true) {
-        switch (p.getCurrToken()) {
+        switch (p.currToken()) {
             .KeywordRestrict,
             .KeywordGccRestrict1,
             .KeywordGccRestrict2,
@@ -2914,7 +2910,7 @@ fn declarator(p: *Parser, baseType: Type, kind: DeclaratorKind) Error!?Declarato
 ///  | '(' param-decls? ')'
 fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: DeclaratorKind) Error!Type {
     if (p.eat(.LBracket)) |lb| {
-        if (p.getCurrToken() == .LBracket) {
+        if (p.currToken() == .LBracket) {
             switch (kind) {
                 .normal, .record => if (p.comp.langOpts.standard.atLeast(.c2x)) {
                     p.tokenIdx -= 1;
@@ -3059,9 +3055,9 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: Declarator
             funcType.params = params;
             if (p.eat(.Ellipsis)) |_|
                 specifier = .VarArgsFunc;
-        } else if (p.getCurrToken() == .RParen) {
+        } else if (p.currToken() == .RParen) {
             specifier = .OldStyleFunc;
-        } else if (p.getCurrToken() == .Identifier or p.getCurrToken() == .ExtendedIdentifier) {
+        } else if (p.currToken() == .Identifier or p.currToken() == .ExtendedIdentifier) {
             d.oldTypeFunc = p.tokenIdx;
 
             const paramBufferTop = p.paramBuffer.items.len;
@@ -3146,7 +3142,7 @@ fn parseParamDecls(p: *Parser, d: *Declarator) Error!?[]Type.Function.Param {
         const paramDeclSpec = if (try p.parseDeclSpec()) |some|
             some
         else if (p.comp.langOpts.standard.atLeast(.c2x) and
-            (p.getCurrToken() == .Identifier or p.getCurrToken() == .ExtendedIdentifier))
+            (p.currToken() == .Identifier or p.currToken() == .ExtendedIdentifier))
         {
             // handle deprecated K&R style parameters
             const identifier = try p.expectIdentifier();
@@ -3162,7 +3158,7 @@ fn parseParamDecls(p: *Parser, d: *Declarator) Error!?[]Type.Function.Param {
             });
 
             if (p.eat(.Comma) == null) break;
-            if (p.getCurrToken() == .Ellipsis) break;
+            if (p.currToken() == .Ellipsis) break;
 
             continue;
         } else if (p.paramBuffer.items.len == paramBufferTop) {
@@ -3205,7 +3201,7 @@ fn parseParamDecls(p: *Parser, d: *Declarator) Error!?[]Type.Function.Param {
         } else if (paramType.is(.Void)) {
             // validate void parameters
             if (p.paramBuffer.items.len == paramBufferTop) {
-                if (p.getCurrToken() != .RParen) {
+                if (p.currToken() != .RParen) {
                     try p.err(.void_only_param);
                     if (paramType.containAnyQual())
                         try p.err(.void_param_qualified);
@@ -3229,7 +3225,7 @@ fn parseParamDecls(p: *Parser, d: *Declarator) Error!?[]Type.Function.Param {
         if (p.eat(.Comma) == null)
             break;
 
-        if (p.getCurrToken() == .Ellipsis)
+        if (p.currToken() == .Ellipsis)
             break;
     }
 
@@ -3258,7 +3254,7 @@ fn parseTypeName(p: *Parser) Error!?Type {
 ///  | '{' initializerItems '}'
 pub fn initializer(p: *Parser, initType: Type) Error!Result {
     // fast path for non-braced initializers
-    if (p.getCurrToken() != .LBrace) {
+    if (p.currToken() != .LBrace) {
         const token = p.tokenIdx;
         var res = try p.parseAssignExpr();
         try res.expect(p);
@@ -3433,7 +3429,7 @@ pub fn initializerItem(p: *Parser, il: *InitList, initType: Type) Error!bool {
             var tempIL = InitList{};
             defer tempIL.deinit(p.gpa);
             saw = try p.initializerItem(&tempIL, Type.Void);
-        } else if (p.getCurrToken() == .LBrace) {
+        } else if (p.currToken() == .LBrace) {
             if (designation) {
                 // designation overrides previous value, let existing mechanism handle it
                 saw = try p.initializerItem(curIL, curType);
@@ -3919,7 +3915,7 @@ fn parseMSVCAsmStmt(p: *Parser) Error!?NodeIndex {
 
 /// asmOperand : ('[' Identifier ']')? asmStr '(' expr ')'
 fn parseAsmOperands(p: *Parser, names: *std.ArrayList(?TokenIndex), constraints: *NodeList, exprs: *NodeList) Error!void {
-    if (!p.getCurrToken().isStringLiteral() and p.getCurrToken() != .LBracket) {
+    if (!p.currToken().isStringLiteral() and p.currToken() != .LBracket) {
         // Empty
         return;
     }
@@ -3940,7 +3936,7 @@ fn parseAsmOperands(p: *Parser, names: *std.ArrayList(?TokenIndex), constraints:
         try constraints.append(constraint.node);
 
         const lparen = p.eat(.LParen) orelse {
-            try p.errExtra(.expected_token, p.tokenIdx, .{ .tokenId = .{ .actual = p.getCurrToken(), .expected = .LParen } });
+            try p.errExtra(.expected_token, p.tokenIdx, .{ .tokenId = .{ .actual = p.currToken(), .expected = .LParen } });
             return error.ParsingFailed;
         };
         const res = try p.parseExpr();
@@ -3961,7 +3957,7 @@ fn parseGNUAsmStmt(p: *Parser, quals: AST.GNUAssemblyQualifiers, lparen: TokenIn
     const asmString = try p.parseAsmString();
     try p.checkAsmStr(asmString.value, lparen);
 
-    if (p.getCurrToken() == .RParen) {
+    if (p.currToken() == .RParen) {
         return p.addNode(.{
             .tag = .GNUAsmSimple,
             .type = Type.Void,
@@ -3992,7 +3988,7 @@ fn parseGNUAsmStmt(p: *Parser, quals: AST.GNUAssemblyQualifiers, lparen: TokenIn
     if (p.eat(.Colon) orelse p.eat(.ColonColon)) |tokenIdx| {
         ateExtraColor = p.tokenIds[tokenIdx] == .ColonColon;
         if (!ateExtraColor) {
-            if (p.getCurrToken().isStringLiteral() or p.getCurrToken() == .LBracket) {
+            if (p.currToken().isStringLiteral() or p.currToken() == .LBracket) {
                 while (true) {
                     try p.parseAsmOperands(&names, &constraints, &exprs);
                     if (p.eat(.Comma) == null) break;
@@ -4004,16 +4000,16 @@ fn parseGNUAsmStmt(p: *Parser, quals: AST.GNUAssemblyQualifiers, lparen: TokenIn
     const numOutputs = names.items.len;
 
     // Inputs
-    if (ateExtraColor or p.getCurrToken() == .Colon or p.getCurrToken() == .ColonColon) {
+    if (ateExtraColor or p.currToken() == .Colon or p.currToken() == .ColonColon) {
         if (ateExtraColor) {
             ateExtraColor = false;
         } else {
-            ateExtraColor = p.getCurrToken() == .ColonColon;
+            ateExtraColor = p.currToken() == .ColonColon;
             p.tokenIdx += 1;
         }
 
         if (!ateExtraColor) {
-            if (p.getCurrToken().isStringLiteral() or p.getCurrToken() == .LBracket) {
+            if (p.currToken().isStringLiteral() or p.currToken() == .LBracket) {
                 while (true) {
                     try p.parseAsmOperands(&names, &constraints, &exprs);
                     if (p.eat(.Comma) == null) break;
@@ -4027,15 +4023,15 @@ fn parseGNUAsmStmt(p: *Parser, quals: AST.GNUAssemblyQualifiers, lparen: TokenIn
     _ = numInputs;
 
     // Clobbers
-    if (ateExtraColor or p.getCurrToken() == .Colon or p.getCurrToken() == .ColonColon) {
+    if (ateExtraColor or p.currToken() == .Colon or p.currToken() == .ColonColon) {
         if (ateExtraColor) {
             ateExtraColor = false;
         } else {
-            ateExtraColor = p.getCurrToken() == .ColonColon;
+            ateExtraColor = p.currToken() == .ColonColon;
             p.tokenIdx += 1;
         }
 
-        if (!ateExtraColor and p.getCurrToken().isStringLiteral()) {
+        if (!ateExtraColor and p.currToken().isStringLiteral()) {
             while (true) {
                 const clobber = try p.parseAsmString();
                 try clobbers.append(clobber.node);
@@ -4044,14 +4040,14 @@ fn parseGNUAsmStmt(p: *Parser, quals: AST.GNUAssemblyQualifiers, lparen: TokenIn
         }
     }
 
-    if (!quals.goto and (p.getCurrToken() != .RParen or ateExtraColor)) {
-        try p.errExtra(.expected_token, p.tokenIdx, .{ .tokenId = .{ .actual = p.getCurrToken(), .expected = .RParen } });
+    if (!quals.goto and (p.currToken() != .RParen or ateExtraColor)) {
+        try p.errExtra(.expected_token, p.tokenIdx, .{ .tokenId = .{ .actual = p.currToken(), .expected = .RParen } });
         return error.ParsingFailed;
     }
 
     // Goto labels
     var numLabels: u32 = 0;
-    if (ateExtraColor or p.getCurrToken() == .Colon) {
+    if (ateExtraColor or p.currToken() == .Colon) {
         if (!ateExtraColor) {
             p.tokenIdx += 1;
         }
@@ -4082,7 +4078,7 @@ fn parseGNUAsmStmt(p: *Parser, quals: AST.GNUAssemblyQualifiers, lparen: TokenIn
             if (p.eat(.Comma) == null) break;
         }
     } else if (quals.goto) {
-        try p.errExtra(.expected_token, p.tokenIdx, .{ .tokenId = .{ .actual = p.getCurrToken(), .expected = .Colon } });
+        try p.errExtra(.expected_token, p.tokenIdx, .{ .tokenId = .{ .actual = p.currToken(), .expected = .Colon } });
         return error.ParsingFailed;
     }
 
@@ -4106,7 +4102,7 @@ fn checkAsmStr(p: *Parser, asmString: Value, tok: TokenIndex) !void {
 ///  | keyword-asm msvcAsmStmt
 fn parseAssembly(p: *Parser, kind: enum { global, declLabel, stmt }) Error!?NodeIndex {
     const asmToken = p.tokenIdx;
-    switch (p.getCurrToken()) {
+    switch (p.currToken()) {
         .KeywordGccAsm => {
             try p.err(.extension_token_used);
             p.tokenIdx += 1;
@@ -4115,11 +4111,11 @@ fn parseAssembly(p: *Parser, kind: enum { global, declLabel, stmt }) Error!?Node
         else => return null,
     }
 
-    if (!p.getCurrToken().canOpenGCCAsmStmt())
+    if (!p.currToken().canOpenGCCAsmStmt())
         return p.parseMSVCAsmStmt();
 
     var quals: AST.GNUAssemblyQualifiers = .{};
-    while (true) : (p.tokenIdx += 1) switch (p.getCurrToken()) {
+    while (true) : (p.tokenIdx += 1) switch (p.currToken()) {
         .KeywordVolatile, .KeywordGccVolatile1, .KeywordGccVolatile2 => {
             if (kind != .stmt) try p.errStr(.meaningless_asm_qual, p.tokenIdx, "volatile");
             if (quals.@"volatile") try p.errStr(.duplicate_asm_qual, p.tokenIdx, "volatile");
@@ -4170,7 +4166,7 @@ fn parseAssembly(p: *Parser, kind: enum { global, declLabel, stmt }) Error!?Node
 fn parseAsmString(p: *Parser) Error!Result {
     var i = p.tokenIdx;
     while (true) : (i += 1) switch (p.tokenIds[i]) {
-        .StringLiteral => {},
+        .StringLiteral, .UnterminatedStringLiteral => {},
         .StringLiteralUTF_8, .StringLiteralUTF_16, .StringLiteralUTF_32 => {
             try p.errStr(.invalid_asm_str, p.tokenIdx, "unicode");
             return error.ParsingFailed;
@@ -4621,8 +4617,8 @@ fn parseDefaultStmt(p: *Parser, defaultToken: u32) Error!?NodeIndex {
 /// | case-statement
 /// | default-statement
 fn parseLabeledStmt(p: *Parser) Error!?NodeIndex {
-    if ((p.getCurrToken() == .Identifier or
-        p.getCurrToken() == .ExtendedIdentifier) and
+    if ((p.currToken() == .Identifier or
+        p.currToken() == .ExtendedIdentifier) and
         p.lookAhead(1) == .Colon)
     {
         const nameToken = p.expectIdentifier() catch unreachable;
@@ -4891,7 +4887,7 @@ fn parseOrNextStmt(p: *Parser, comptime func: fn (*Parser) Error!bool, lbrace: T
 fn nextStmt(p: *Parser, lBrace: TokenIndex) !void {
     var parens: u32 = 0;
     while (p.tokenIdx < p.tokenIds.len) : (p.tokenIdx += 1) {
-        switch (p.getCurrToken()) {
+        switch (p.currToken()) {
             .LParen, .LBrace, .LBracket => parens += 1,
             .RParen, .RBracket => if (parens != 0) {
                 parens -= 1;
@@ -4983,7 +4979,7 @@ fn parseExpr(p: *Parser) Error!Result {
     var errStart = p.comp.diagnostics.list.items.len;
     var lhs = try p.parseAssignExpr();
 
-    if (p.getCurrToken() == .Comma)
+    if (p.currToken() == .Comma)
         try lhs.expect(p);
 
     while (p.eat(.Comma)) |_| {
@@ -5519,7 +5515,7 @@ fn removeUnusedWarningForTok(p: *Parser, lastExprToken: TokenIndex) void {
 ///  | unary-expression
 fn parseCastExpr(p: *Parser) Error!Result {
     if (p.eat(.LParen)) |lp| castExpr: {
-        if (p.getCurrToken() == .LBrace) {
+        if (p.currToken() == .LBrace) {
             try p.err(.gnu_statement_expression);
             if (p.func.type == null) {
                 try p.err(.stmt_expr_not_allowed_file_scope);
@@ -5545,7 +5541,7 @@ fn parseCastExpr(p: *Parser) Error!Result {
         };
         try p.expectClosing(lp, .RParen);
 
-        if (p.getCurrToken() == .LBrace) {
+        if (p.currToken() == .LBrace) {
             // compound literal
             if (ty.isFunc())
                 try p.err(.func_init)
@@ -5570,7 +5566,7 @@ fn parseCastExpr(p: *Parser) Error!Result {
         return operand;
     }
 
-    switch (p.getCurrToken()) {
+    switch (p.currToken()) {
         .BuiltinChooseExpr => return p.parseBuiltinChooseExpr(),
         .BuiltinVaArg => return p.builtinVaArg(),
         .BuiltinOffsetof => return p.builtinOffsetof(false),
@@ -5757,7 +5753,7 @@ fn offsetofMemberDesignator(p: *Parser, baseType: Type) Error!Result {
     var lhs = try p.fieldAccessExtra(baseNode, baseRecordTy, baseFieldName, false, &offsetNum);
     var bitOffset = Value.int(offsetNum);
 
-    while (true) switch (p.getCurrToken()) {
+    while (true) switch (p.currToken()) {
         .Period => {
             p.tokenIdx += 1;
             const fieldNameToken = try p.expectIdentifier();
@@ -5811,7 +5807,7 @@ fn offsetofMemberDesignator(p: *Parser, baseType: Type) Error!Result {
 ///  | (`keyword-alignof` | `keyword-c23-alignof`) '(' type-name ')'
 fn parseUnaryExpr(p: *Parser) Error!Result {
     const token = p.tokenIdx;
-    switch (p.getCurrToken()) {
+    switch (p.currToken()) {
         .Ampersand => {
             if (p.inMacro) {
                 try p.err(.invalid_preproc_operator);
@@ -6203,7 +6199,7 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
 ///  | '--'
 fn parseSuffixExpr(p: *Parser, lhs: Result) Error!Result {
     assert(!lhs.empty(p));
-    switch (p.getCurrToken()) {
+    switch (p.currToken()) {
         .LBracket => {
             const lb = p.tokenIdx;
             p.tokenIdx += 1;
@@ -6599,7 +6595,7 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
         return e;
     }
 
-    switch (p.getCurrToken()) {
+    switch (p.currToken()) {
         .Identifier, .ExtendedIdentifier => {
             const nameToken = p.expectIdentifier() catch unreachable;
             const name = p.getTokenText(nameToken);
@@ -6651,7 +6647,7 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
                 };
             }
 
-            if (p.getCurrToken() == .LParen and !p.comp.langOpts.standard.atLeast(.c2x)) {
+            if (p.currToken() == .LParen and !p.comp.langOpts.standard.atLeast(.c2x)) {
                 // implicitly declare simple functions as like `puts("foo")`;
                 // allow implicitly declaring functions before C99 like `puts("foo")`
                 if (std.mem.startsWith(u8, name, "__builtin_"))
@@ -6788,6 +6784,7 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
         .StringLiteralUTF_16,
         .StringLiteralUTF_32,
         .StringLiteralWide,
+        .UnterminatedStringLiteral,
         => return p.parseStringLiteral(),
 
         .CharLiteral,
@@ -6795,6 +6792,8 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
         .CharLiteralUTF_16,
         .CharLiteralUTF_32,
         .CharLiteralWide,
+        .EmptyCharLiteral,
+        .UnterminatedCharLiteral,
         => return p.parseCharLiteral(),
 
         .Zero => {
@@ -7236,76 +7235,90 @@ fn parsePPNumber(p: *Parser) Error!Result {
 fn parseCharLiteral(p: *Parser) Error!Result {
     defer p.tokenIdx += 1;
 
-    const tokenId = p.getCurrToken();
-    const charKind = CharLiteral.Kind.classify(tokenId);
+    const tokenId = p.currToken();
+    const charKind = TextLiteral.Kind.classify(tokenId, .CharLiteral) orelse {
+        if (tokenId == .EmptyCharLiteral)
+            try p.err(.empty_char_literal_error)
+        else if (tokenId == .UnterminatedCharLiteral)
+            try p.err(.unterminated_char_literal_error)
+        else
+            unreachable;
+
+        return .{
+            .ty = Type.Int,
+            .value = Value.int(0),
+            .node = try p.addNode(.{ .tag = .CharLiteral, .type = Type.Int, .data = undefined }),
+        };
+    };
+
+    var val: u32 = 0;
 
     const slice = charKind.contentSlice(p.getTokenText(p.tokenIdx));
 
-    var CharLiteralParser = CharLiteral.Parser.init(slice, charKind, p.comp);
-    const maxCharsExpected = 4;
+    if (slice.len == 1 and std.ascii.isASCII(slice[0])) {
+        val = slice[0];
+    } else {
+        const maxCodepoint = charKind.maxCodepoint(p.comp);
+        var CharLiteralParser = TextLiteral.Parser.init(slice, charKind, maxCodepoint, p.comp);
+        const maxCharsExpected = 4;
 
-    var stackFallback = std.heap.stackFallback(maxCharsExpected * @sizeOf(u32), p.comp.gpa);
-    var chars = std.ArrayList(u32).initCapacity(stackFallback.get(), maxCharsExpected) catch unreachable;
-    defer chars.deinit();
+        var stackFallback = std.heap.stackFallback(maxCharsExpected * @sizeOf(u32), p.comp.gpa);
+        var chars = std.ArrayList(u32).initCapacity(stackFallback.get(), maxCharsExpected) catch unreachable;
+        defer chars.deinit();
 
-    while (CharLiteralParser.next()) |item|
-        switch (item) {
-            .value => |c| try chars.append(c),
-            .improperlyEncoded => |s| {
-                const shouldError = (charKind != .char);
-                const tag: Diagnostics.Tag = if (shouldError) .illegal_char_encoding_error else .illegal_char_encoding_warning;
-                try p.err(tag);
-                if (!shouldError) {
-                    for (s) |c| try chars.append(c);
-                } else {
-                    CharLiteralParser.errored = true;
-                }
-            },
-            .utf8Text => |view| {
-                var it = view.iterator();
-                var maxcodepoint: u21 = 0;
-                while (it.nextCodepoint()) |c| {
-                    maxcodepoint = @max(maxcodepoint, c);
-                    try chars.append(c);
-                }
-                if (maxcodepoint > CharLiteralParser.maxCodepoint)
-                    CharLiteralParser.err(.char_too_large, .{ .none = {} });
-            },
-        };
-
-    const isMultichar = chars.items.len > 1;
-    if (isMultichar) {
-        if (charKind == .char and chars.items.len == 4) {
-            CharLiteralParser.warn(.four_char_char_literal, .{ .none = {} });
-        } else if (charKind == .char) {
-            CharLiteralParser.warn(.multichar_literal_warning, .{ .none = {} });
-        } else {
-            const kind = switch (charKind) {
-                .wide => "wide",
-                .utf8, .utf16, .utf32 => "Unicode",
-                else => unreachable,
+        while (CharLiteralParser.next()) |item|
+            switch (item) {
+                .value => |v| try chars.append(v),
+                .codepoint => |c| try chars.append(c),
+                .improperlyEncoded => |s| {
+                    try chars.ensureUnusedCapacity(s.len);
+                    for (s) |c| chars.appendAssumeCapacity(c);
+                },
+                .utf8Text => |view| {
+                    var it = view.iterator();
+                    var maxcodepointSeen: u21 = 0;
+                    while (it.nextCodepoint()) |c| {
+                        maxcodepointSeen = @max(maxcodepointSeen, c);
+                        try chars.append(c);
+                    }
+                    if (maxcodepointSeen > maxCodepoint)
+                        CharLiteralParser.err(.char_too_large, .{ .none = {} });
+                },
             };
-            CharLiteralParser.err(.invalid_multichar_literal, .{ .str = kind });
+
+        const isMultichar = chars.items.len > 1;
+        if (isMultichar) {
+            if (charKind == .char and chars.items.len == 4) {
+                CharLiteralParser.warn(.four_char_char_literal, .{ .none = {} });
+            } else if (charKind == .char) {
+                CharLiteralParser.warn(.multichar_literal_warning, .{ .none = {} });
+            } else {
+                const kind = switch (charKind) {
+                    .wide => "wide",
+                    .utf8, .utf16, .utf32 => "Unicode",
+                    else => unreachable,
+                };
+                CharLiteralParser.err(.invalid_multichar_literal, .{ .str = kind });
+            }
         }
-    }
 
-    var multicharOverflow = false;
-    var val: u32 = 0;
-    if (charKind == .char and isMultichar) {
-        for (chars.items) |item| {
-            val, const overflowed = @shlWithOverflow(val, 8);
-            multicharOverflow = multicharOverflow or overflowed != 0;
-            val += @as(u8, @truncate(item));
+        var multicharOverflow = false;
+        if (charKind == .char and isMultichar) {
+            for (chars.items) |item| {
+                val, const overflowed = @shlWithOverflow(val, 8);
+                multicharOverflow = multicharOverflow or overflowed != 0;
+                val += @as(u8, @truncate(item));
+            }
+        } else if (chars.items.len > 0) {
+            val = chars.items[chars.items.len - 1];
         }
-    } else if (chars.items.len > 0) {
-        val = chars.items[chars.items.len - 1];
+
+        if (multicharOverflow)
+            CharLiteralParser.err(.char_lit_too_wide, .{ .none = {} });
+
+        for (CharLiteralParser.errors.constSlice()) |item|
+            try p.errExtra(item.tag, p.tokenIdx, item.extra);
     }
-
-    if (multicharOverflow)
-        CharLiteralParser.err(.char_lit_too_wide, .{ .none = {} });
-
-    for (CharLiteralParser.errors.constSlice()) |item|
-        try p.errExtra(item.tag, p.tokenIdx, item.extra);
 
     const ty = charKind.charLiteralType(p.comp);
     // This is the type the literal will have if we're in a macro; macros always operate on intmax_t/uintmax_t values
@@ -7326,105 +7339,102 @@ fn parseCharLiteral(p: *Parser) Error!Result {
 }
 
 fn parseStringLiteral(p: *Parser) Error!Result {
-    var start = p.tokenIdx;
-    var width: ?u8 = null;
-    var isU8Literal = false;
+    var stringEnd = p.tokenIdx;
+    var stringKind: TextLiteral.Kind = .char;
+    while (TextLiteral.Kind.classify(p.tokenIds[stringEnd], .StringLiteral)) |next| : (stringEnd += 1) {
+        stringKind = stringKind.concat(next) catch {
+            try p.errToken(.unsupported_str_cat, stringEnd);
+            while (p.currToken().isStringLiteral()) : (p.tokenIdx += 1) {}
+            return error.ParsingFailed;
+        };
 
-    while (true) {
-        switch (p.getCurrToken()) {
-            .StringLiteral => {},
-            .StringLiteralUTF_8 => {
-                isU8Literal = true;
-                if (width) |some| {
-                    if (some != 8) try p.err(.unsupported_str_cat);
-                } else {
-                    width = 8;
+        if (stringKind == .unterminated) {
+            try p.errToken(.unterminated_string_literal_error, stringEnd);
+            p.tokenIdx = stringEnd + 1;
+            return error.ParsingFailed;
+        }
+    }
+
+    assert(stringEnd > p.tokenIdx);
+
+    const charWidth = stringKind.charUnitSize(p.comp);
+    const retainStart = std.mem.alignForward(usize, p.retainedStrings.items.len, stringKind.internalStorageAlignment(p.comp));
+    try p.retainedStrings.resize(retainStart);
+
+    while (p.tokenIdx < stringEnd) : (p.tokenIdx += 1) {
+        const thisKind = TextLiteral.Kind.classify(p.currToken(), .StringLiteral).?;
+        const slice = thisKind.contentSlice(p.getTokenText(p.tokenIdx));
+        var charLiteralParser = TextLiteral.Parser.init(slice, thisKind, 0x10ffff, p.comp);
+
+        try p.retainedStrings.ensureUnusedCapacity((slice.len + 1) * @intFromEnum(charWidth));
+        while (charLiteralParser.next()) |item| switch (item) {
+            .value => |v| {
+                switch (charWidth) {
+                    .@"1" => p.retainedStrings.appendAssumeCapacity(@intCast(v)),
+                    .@"2" => {
+                        const word: u16 = @intCast(v);
+                        p.retainedStrings.appendSliceAssumeCapacity(std.mem.asBytes(&word));
+                    },
+                    .@"4" => p.retainedStrings.appendSliceAssumeCapacity(std.mem.asBytes(&v)),
                 }
             },
-
-            .StringLiteralUTF_16 => if (width) |some| {
-                if (some != 16) try p.err(.unsupported_str_cat);
-            } else {
-                width = 16;
+            .codepoint => |c| {
+                switch (charWidth) {
+                    .@"1" => {
+                        var buf: [4]u8 = undefined;
+                        const written = std.unicode.utf8Encode(c, &buf) catch unreachable;
+                        const encoded = buf[0..written];
+                        p.retainedStrings.appendSliceAssumeCapacity(encoded);
+                    },
+                    .@"2" => {
+                        var utf16Buffer: [2]u16 = undefined;
+                        var utf8Buffer: [4]u8 = undefined;
+                        const utf8written = std.unicode.utf8Encode(c, &utf8Buffer) catch unreachable;
+                        const utf16Written = std.unicode.utf8ToUtf16Le(&utf16Buffer, utf8Buffer[0..utf8written]) catch unreachable;
+                        const bytes = std.mem.sliceAsBytes(utf16Buffer[0..utf16Written]);
+                        p.retainedStrings.appendSliceAssumeCapacity(bytes);
+                    },
+                    .@"4" => {
+                        const val: u32 = c;
+                        p.retainedStrings.appendSliceAssumeCapacity(std.mem.asBytes(&val));
+                    },
+                }
             },
-
-            .StringLiteralUTF_32 => if (width) |some| {
-                if (some != 32) try p.err(.unsupported_str_cat);
-            } else {
-                width = 32;
+            .improperlyEncoded => |bytes| p.retainedStrings.appendSliceAssumeCapacity(bytes),
+            .utf8Text => |view| {
+                switch (charWidth) {
+                    .@"1" => p.retainedStrings.appendSliceAssumeCapacity(view.bytes),
+                    .@"2" => {
+                        var capacitySlice: []align(@alignOf(u16)) u8 = @alignCast(p.retainedStrings.unusedCapacitySlice());
+                        const destLen = std.mem.alignBackward(usize, capacitySlice.len, 2);
+                        const dest = std.mem.bytesAsSlice(u16, capacitySlice[0..destLen]);
+                        const wordsWritten = std.unicode.utf8ToUtf16Le(dest, view.bytes) catch unreachable;
+                        p.retainedStrings.resize(p.retainedStrings.items.len + wordsWritten * 2) catch unreachable;
+                    },
+                    .@"4" => {
+                        var it = view.iterator();
+                        while (it.nextCodepoint()) |codepoint| {
+                            const val: u32 = codepoint;
+                            p.retainedStrings.appendSliceAssumeCapacity(std.mem.asBytes(&val));
+                        }
+                    },
+                }
             },
+        };
 
-            .StringLiteralWide => if (width) |some| {
-                if (some != 1) try p.err(.unsupported_str_cat);
-            } else {
-                width = 1;
-            },
-
-            else => break,
-        }
-
-        p.tokenIdx += 1;
+        for (charLiteralParser.errors.constSlice()) |item|
+            try p.errExtra(item.tag, p.tokenIdx, item.extra);
     }
 
-    if (width == null)
-        width = 8;
-
-    if (width.? != 8)
-        return p.todo("unicode string literals");
-
-    const stringStart = p.retainedStrings.items.len;
-    while (start < p.tokenIdx) : (start += 1) {
-        var slice = p.getTokenText(start);
-        slice = slice[0 .. slice.len - 1];
-        var i = std.mem.indexOf(u8, slice, "\"").? + 1;
-
-        try p.retainedStrings.ensureUnusedCapacity(slice.len);
-        while (i < slice.len) : (i += 1) {
-            switch (slice[i]) {
-                '\\' => {
-                    i += 1;
-                    switch (slice[i]) {
-                        '\n' => i += 1,
-                        '\r' => i += 2,
-                        '\'', '\"', '\\', '?' => |c| p.retainedStrings.appendAssumeCapacity(c),
-                        'n' => p.retainedStrings.appendAssumeCapacity('\n'),
-                        'r' => p.retainedStrings.appendAssumeCapacity('\r'),
-                        't' => p.retainedStrings.appendAssumeCapacity('\t'),
-                        'a' => p.retainedStrings.appendAssumeCapacity(0x07),
-                        'b' => p.retainedStrings.appendAssumeCapacity(0x08),
-                        'e' => {
-                            try p.errExtra(
-                                .non_standard_escape_char,
-                                start,
-                                .{ .invalidEscape = .{ .char = 'e', .offset = @intCast(i) } },
-                            );
-                            p.retainedStrings.appendAssumeCapacity(0x1B);
-                        },
-                        'f' => p.retainedStrings.appendAssumeCapacity(0x0C),
-                        'v' => p.retainedStrings.appendAssumeCapacity(0x0B),
-                        'x' => p.retainedStrings.appendAssumeCapacity(try p.parseNumberEscape(start, 16, slice, &i)),
-                        '0'...'7' => p.retainedStrings.appendAssumeCapacity(try p.parseNumberEscape(start, 8, slice, &i)),
-
-                        'u' => try p.parseUnicodeEscape(start, 4, slice, &i),
-                        'U' => try p.parseUnicodeEscape(start, 8, slice, &i),
-                        else => unreachable,
-                    }
-                },
-                else => |c| p.retainedStrings.appendAssumeCapacity(c),
-            }
-        }
-    }
-
-    try p.retainedStrings.append(0);
-    const slice = p.retainedStrings.items[stringStart..];
+    p.retainedStrings.appendNTimesAssumeCapacity(0, @intFromEnum(charWidth));
+    const slice = p.retainedStrings.items[retainStart..];
 
     const arrayType = try p.arena.create(Type.Array);
-    const specifier: Type.Specifier = if (isU8Literal and p.comp.langOpts.hasChar8_t()) .UChar else .Char;
-    arrayType.* = .{ .elem = .{ .specifier = specifier }, .len = slice.len };
+    arrayType.* = .{ .elem = stringKind.elementType(p.comp), .len = @divExact(slice.len, @intFromEnum(charWidth)) };
 
     var res: Result = .{
         .ty = .{ .specifier = .Array, .data = .{ .array = arrayType } },
-        .value = Value.bytes(@intCast(stringStart), @intCast(p.retainedStrings.items.len)),
+        .value = Value.bytes(@intCast(retainStart), @intCast(p.retainedStrings.items.len)),
     };
 
     res.node = try p.addNode(.{ .tag = .StringLiteralExpr, .type = res.ty, .data = undefined });
@@ -7433,38 +7443,6 @@ fn parseStringLiteral(p: *Parser) Error!Result {
         try p.valueMap.put(res.node, res.value);
 
     return res;
-}
-
-pub fn parseNumberEscape(p: *Parser, tok: TokenIndex, base: u8, slice: []const u8, i: *usize) !u8 {
-    if (base == 16) i.* += 1; // skip x
-    var char: u8 = 0;
-    var reported = false;
-
-    while (i.* < slice.len) : (i.* += 1) {
-        const val = std.fmt.charToDigit(slice[i.*], base) catch break; // validated by Tokenizer
-        const product, const overflowed = @mulWithOverflow(char, base);
-        if (overflowed != 0 and !reported) {
-            try p.errExtra(.escape_sequence_overflow, tok, .{ .unsigned = i.* });
-            reported = true;
-        }
-        char = product + val;
-    }
-
-    i.* -= 1;
-    return char;
-}
-
-fn parseUnicodeEscape(p: *Parser, tok: TokenIndex, count: u8, slice: []const u8, i: *usize) !void {
-    const c = std.fmt.parseInt(u21, slice[i.* + 1 ..][0..count], 16) catch 0x110000; // Validated by tokenizer
-    i.* += count + 1;
-    if (!std.unicode.utf8ValidCodepoint(c) or (c < 0xa0 and c != '$' and c != '@' and c != '`')) {
-        try p.errExtra(.invalid_universal_character, tok, .{ .unsigned = i.* - count - 2 });
-        return;
-    }
-
-    var buf: [4]u8 = undefined;
-    const toWrite = std.unicode.utf8Encode(c, &buf) catch unreachable; // validated above
-    p.retainedStrings.appendSliceAssumeCapacity(buf[0..toWrite]);
 }
 
 /// Run a parser function but do not evaluate the result

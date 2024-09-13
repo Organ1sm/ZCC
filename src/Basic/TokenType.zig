@@ -16,12 +16,25 @@ pub const TokenType = enum(u8) {
     StringLiteralUTF_16,
     StringLiteralUTF_32,
 
+    /// Any string literal with an embedded newline or EOF
+    /// Always a parser error, by default just a warning from preprocessor
+    UnterminatedStringLiteral,
+
     // char literals with prefixes
     CharLiteral,
     CharLiteralWide,
     CharLiteralUTF_8,
     CharLiteralUTF_16,
     CharLiteralUTF_32,
+
+    /// Any character literal with nothing inside the quotes
+    /// Always a parser error, by default just a warning from preprocessor
+    EmptyCharLiteral,
+    /// Any character literal with an embedded newline or EOF
+    /// Always a parser error, by default just a warning from preprocessor
+    UnterminatedCharLiteral,
+    /// `/* */` style comment without a closing `*/` before EOF
+    UnterminatedComment,
 
     /// "! !=  = =="
     Bang,
@@ -470,7 +483,7 @@ pub const TokenType = enum(u8) {
 
     pub fn lexeme(id: TokenType) ?[]const u8 {
         return switch (id) {
-            .IncludeStart, .IncludeResume => unreachable,
+            .IncludeStart, .IncludeResume, .UnterminatedComment => unreachable,
 
             .Invalid,
             .Identifier,
@@ -480,11 +493,14 @@ pub const TokenType = enum(u8) {
             .StringLiteralUTF_16,
             .StringLiteralUTF_32,
             .StringLiteralWide,
+            .UnterminatedStringLiteral,
             .CharLiteral,
             .CharLiteralUTF_8,
             .CharLiteralUTF_16,
             .CharLiteralUTF_32,
             .CharLiteralWide,
+            .UnterminatedCharLiteral,
+            .EmptyCharLiteral,
             .MacroString,
             .WhiteSpace,
             .PPNumber,
