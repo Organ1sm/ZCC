@@ -2442,7 +2442,8 @@ fn parseEnumSpec(p: *Parser) Error!Type {
         // check if this is a reference to a previous type
         const internedName = try p.getInternString(ident);
         if (try p.symStack.findTag(internedName, .KeywordEnum, ident, p.currToken())) |prev| {
-            try p.checkEnumFixedTy(fixedTy, ident, prev);
+            if (p.currToken() == .Semicolon)
+                try p.checkEnumFixedTy(fixedTy, ident, prev);
             return prev.type;
         } else {
             // this is a forward declaration, create a new enum type
