@@ -66,9 +66,9 @@ pub const Message = struct {
 
 pub const Tag = std.meta.DeclEnum(DiagnosticsMessages);
 
-pub const Kind = enum(u4) { @"fatal error", @"error", note, warning, off, default };
+pub const Kind = enum { @"fatal error", @"error", note, warning, off, default };
 
-pub const Options = packed struct {
+pub const Options = struct {
     // do not directly use these, instead add `const NAME = true;`
     all: Kind = .default,
     extra: Kind = .default,
