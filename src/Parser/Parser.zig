@@ -1036,7 +1036,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
                     const attrBufferTopDeclarator = p.attrBuffer.len;
                     defer p.attrBuffer.len = attrBufferTopDeclarator;
 
-                    var d = (try p.declarator(paramDeclSpec.type, .normal)) orelse {
+                    var d = (try p.declarator(paramDeclSpec.type, .param)) orelse {
                         try p.errToken(.missing_declaration, firstTokenIndex);
                         _ = try p.expectToken(.Semicolon);
                         continue :paramLoop;
