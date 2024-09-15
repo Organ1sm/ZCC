@@ -368,7 +368,7 @@ pub fn errExtra(p: *Parser, tag: Diagnostics.Tag, index: TokenIndex, extra: Diag
     const token = p.pp.tokens.get(index);
     var loc = token.loc;
 
-    if (index != 0 and token.id == .Eof) {
+    if (index != 0 and token.is(.Eof)) {
         const prev = p.pp.tokens.get(index - 1);
         loc = prev.loc;
         loc.byteOffset += @intCast(p.getTokenText(index - 1).len);

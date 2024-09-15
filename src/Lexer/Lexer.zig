@@ -775,7 +775,7 @@ fn expectTokensExtra(contents: []const u8, expected: []const TokenType, standard
     var i: usize = 0;
     while (i < expected.len) {
         const token = lexer.next();
-        if (token.id == .WhiteSpace) continue;
+        if (token.is(.WhiteSpace)) continue;
         const expectedTokenId = expected[i];
         i += 1;
         if (!std.meta.eql(token.id, expectedTokenId)) {
@@ -784,7 +784,7 @@ fn expectTokensExtra(contents: []const u8, expected: []const TokenType, standard
     }
 
     const lastToken = lexer.next();
-    std.testing.expect(lastToken.id == .Eof) catch std.debug.print("lastToken not EOF", .{});
+    std.testing.expect(lastToken.is(.Eof)) catch std.debug.print("lastToken not EOF", .{});
 }
 
 test "extended identifiers" {

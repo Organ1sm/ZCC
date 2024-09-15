@@ -21,6 +21,23 @@ pub const Token = struct {
     /// Line number where this token appears
     line: u32 = 0,
 
+    pub inline fn is(self: Token, kind: TokenType) bool {
+        return self.id == kind;
+    }
+
+    pub inline fn isNot(self: Token, kind: TokenType) bool {
+        return self.id != kind;
+    }
+
+    pub fn isOneOf(self: Token, kinds: anytype) bool {
+        inline for (kinds) |k| {
+            if (self.id == k) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /// Maps a token string to a TokenType based on keywords
     /// and current language standard.
     ///

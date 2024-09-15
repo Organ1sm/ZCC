@@ -40,7 +40,7 @@ fn preprocessorHandler(pragma: *Pragma, pp: *Preprocessor, startIdx: TokenIndex)
     var self: *Once = @fieldParentPtr("pragma", pragma);
     const nameToken = pp.tokens.get(startIdx);
     const next = pp.tokens.get(startIdx + 1);
-    if (next.id != .NewLine) {
+    if (next.isNot(.NewLine)) {
         try pp.comp.addDiagnostic(.{
             .tag = .extra_tokens_directive_end,
             .loc = nameToken.loc,

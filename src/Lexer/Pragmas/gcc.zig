@@ -66,7 +66,7 @@ pub fn deinit(pragma: *Pragma, comp: *Compilation) void {
 
 fn diagnosticHandler(self: *GCC, pp: *Preprocessor, startIdx: TokenIndex) Pragma.Error!void {
     const diagnosticToken = pp.tokens.get(startIdx);
-    if (diagnosticToken.id == .NewLine)
+    if (diagnosticToken.is(.NewLine))
         return;
 
     const diagnostic = std.meta.stringToEnum(Directive.Diagnostics, pp.expandedSlice(diagnosticToken)) orelse
@@ -110,7 +110,7 @@ fn diagnosticHandler(self: *GCC, pp: *Preprocessor, startIdx: TokenIndex) Pragma
 fn preprocessorHandler(pragma: *Pragma, pp: *Preprocessor, startIdx: TokenIndex) Pragma.Error!void {
     var self: *GCC = @alignCast(@fieldParentPtr("pragma", pragma));
     const directiveToken = pp.tokens.get(startIdx + 1);
-    if (directiveToken.id == .NewLine)
+    if (directiveToken.is(.NewLine))
         return;
 
     const gccPragma = std.meta.stringToEnum(Directive, pp.expandedSlice(directiveToken)) orelse {
@@ -152,7 +152,7 @@ fn preprocessorHandler(pragma: *Pragma, pp: *Preprocessor, startIdx: TokenIndex)
             var i: usize = 2;
             while (true) : (i += 1) {
                 const tok = pp.tokens.get(startIdx + i);
-                if (tok.id == .NewLine)
+                if (tok.is(.NewLine))
                     break;
 
                 if (!tok.id.isMacroIdentifier()) {
@@ -178,7 +178,7 @@ fn preprocessorHandler(pragma: *Pragma, pp: *Preprocessor, startIdx: TokenIndex)
 fn parserHandler(pragma: *Pragma, p: *Parser, startIdx: TokenIndex) Compilation.Error!void {
     var self: *GCC = @alignCast(@fieldParentPtr("pragma", pragma));
     const directiveToken = p.pp.tokens.get(startIdx + 1);
-    if (directiveToken.id == .NewLine)
+    if (directiveToken.is(.NewLine))
         return;
 
     const name = p.pp.expandedSlice(directiveToken);
@@ -193,7 +193,7 @@ fn parserHandler(pragma: *Pragma, p: *Parser, startIdx: TokenIndex) Compilation.
 
 fn preserveTokens(_: *Pragma, pp: *Preprocessor, startIdx: TokenIndex) bool {
     const next = pp.tokens.get(startIdx + 1);
-    if (next.id != .NewLine) {
+    if (next.isNot(.NewLine)) {
         const name = pp.expandedSlice(next);
         if (std.mem.eql(u8, name, "poison")) {
             return false;

@@ -33,7 +33,7 @@ fn parserHandler(pragma: *Pragma, p: *Parser, startIdx: TokenIndex) Compilation.
     var pack: *Pack = @fieldParentPtr("pragma", pragma);
     var idx = startIdx + 1;
     const lparen = p.pp.tokens.get(idx);
-    if (lparen.id != .LParen) {
+    if (lparen.isNot(.LParen)) {
         return p.comp.addDiagnostic(.{
             .tag = .pragma_pack_lparen,
             .loc = lparen.loc,

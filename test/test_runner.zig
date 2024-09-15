@@ -252,7 +252,7 @@ pub fn main() !void {
         try pp.tokens.append(gpa, eof);
 
         if (pp.defines.get("TESTS_SKIPPED")) |macro| {
-            if (macro.isFunc or macro.tokens.len != 1 or macro.tokens[0].id != .PPNumber) {
+            if (macro.isFunc or macro.tokens.len != 1 or macro.tokens[0].isNot(.PPNumber)) {
                 failCount += 1;
                 std.debug.print("invalid TESTS_SKIPPED, definition should contain exactly one integer literal {}\n", .{macro});
                 continue;
@@ -350,8 +350,8 @@ pub fn main() !void {
 
             var i: usize = 0;
             for (types.tokens) |str| {
-                if (str.id == .MacroWS) continue;
-                if (str.id != .StringLiteral) {
+                if (str.is(.MacroWS)) continue;
+                if (str.isNot(.StringLiteral)) {
                     failCount += 1;
                     std.debug.print("EXPECTED_TYPES tokens must be string literals (found {s})\n", .{@tagName(str.id)});
                     continue :next_test;
@@ -397,7 +397,7 @@ pub fn main() !void {
                 continue;
             }
 
-            if (macro.tokens.len != 1 or macro.tokens[0].id != .StringLiteral) {
+            if (macro.tokens.len != 1 or macro.tokens[0].isNot(.StringLiteral)) {
                 failCount += 1;
                 std.debug.print("EXPECTED_OUTPUT takes exactly one string", .{});
                 continue;
@@ -486,8 +486,8 @@ fn checkExpectedErrors(pp: *zcc.Preprocessor, buf: *std.ArrayList(u8)) !?bool {
 
     var count: usize = 0;
     for (macro.tokens) |str| {
-        if (str.id == .MacroWS) continue;
-        if (str.id != .StringLiteral) {
+        if (str.is(.MacroWS)) continue;
+        if (str.isNot(.StringLiteral)) {
             std.debug.print("EXPECTED_ERRORS tokens must be string literals (found {s})\n", .{@tagName(str.id)});
             return false;
         }

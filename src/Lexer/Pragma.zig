@@ -40,7 +40,7 @@ preserveTokens: ?*const fn (*Pragma, *Preprocessor, startIdx: TokenIndex) bool =
 parserHandler: ?*const fn (*Pragma, *Parser, startIdx: TokenIndex) Compilation.Error!void = null,
 
 pub fn pasteTokens(pp: *Preprocessor, startIdx: TokenIndex) ![]const u8 {
-    if (pp.tokens.get(startIdx).id == .NewLine)
+    if (pp.tokens.get(startIdx).is(.NewLine))
         return error.ExpectedStringLiteral;
 
     const charBufferTop = pp.charBuffer.items.len;
@@ -51,7 +51,7 @@ pub fn pasteTokens(pp: *Preprocessor, startIdx: TokenIndex) ![]const u8 {
     var rparenCount: u32 = 0;
     while (true) : (i += 1) {
         const tok = pp.tokens.get(startIdx + i);
-        if (tok.id == .NewLine)
+        if (tok.is(.NewLine))
             break;
         switch (tok.id) {
             .LParen => {

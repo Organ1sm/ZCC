@@ -119,6 +119,23 @@ pub const Token = struct {
         }
     }
 
+    pub inline fn is(self: Token, kind: TokenType) bool {
+        return self.id == kind;
+    }
+
+    pub inline fn isNot(self: Token, kind: TokenType) bool {
+        return self.id != kind;
+    }
+
+    pub fn isOneOf(self: Token, kinds: anytype) bool {
+        inline for (kinds) |k| {
+            if (self.id == k) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /// How many source locations do we track for each token.
     /// Must be at least 2.
     pub const List = std.MultiArrayList(Token);
