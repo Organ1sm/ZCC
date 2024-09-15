@@ -39,6 +39,7 @@
 - [x] [`__COUNTER__`](../test/cases/line-counter.c)
 - [x] `__VA_ARGS__`
 - [x] `__has_attribute`
+- [x] [`__has_c_attribute`](../test/cases/__has_c_attribute.c)
 - [x] `__has_builtin`
 - [x] `__has_extension`
 - [x] `__has_feature`
@@ -199,6 +200,7 @@ void foo(int a, ...)
 - [x] [`constexpr`](../test/cases/constexpr.c)
 - [x] [`typeof`](../test/cases/parse-using-typeof-types.c)
 - [x] `unreachable()`
+- [x] [`__has_c_attribute`](../test/cases/__has_c_attribute.c)
 - [x] [Bit-precise integers `_BitInt(N)` and suffixes](../test/cases/_BitInt.c)
 - [x] Allow duplicate attributes
 

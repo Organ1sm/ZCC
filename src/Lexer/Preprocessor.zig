@@ -107,6 +107,7 @@ pub const LineMarkers = enum {
 const BuiltinMacros = struct {
     const args = [1][]const u8{"X"};
     const hasAttribute = [1]RawToken{makeFeatCheckMacro(.MacroParamHasAttribute)};
+    const hasCAttribute = [1]RawToken{makeFeatCheckMacro(.MacroParamHasCAttribute)};
     const hasDeclspecAttribute = [1]RawToken{makeFeatCheckMacro(.MacroParamHasDeclspecAttribute)};
     const hasWarning = [1]RawToken{makeFeatCheckMacro(.MacroParamHasWarning)};
     const hasFeature = [1]RawToken{makeFeatCheckMacro(.MacroParamHasFeature)};
@@ -120,7 +121,7 @@ const BuiltinMacros = struct {
     const counter = [1]RawToken{makeFeatCheckMacro(.MacroCounter)};
     const pragmaOperator = [1]RawToken{makeFeatCheckMacro(.MacroParamPragmaOperator)};
 
-    fn makeFeatCheckMacro(id: TokenType) RawToken {
+    inline fn makeFeatCheckMacro(id: TokenType) RawToken {
         return .{ .id = id, .source = .generated };
     }
 };
@@ -138,6 +139,7 @@ pub fn addBuiltinMacro(pp: *Preprocessor, name: []const u8, isFunc: bool, tokens
 
 pub fn addBuiltinMacros(pp: *Preprocessor) !void {
     try pp.addBuiltinMacro("__has_attribute", true, &BuiltinMacros.hasAttribute);
+    try pp.addBuiltinMacro("__has_c_attribute", true, &BuiltinMacros.hasCAttribute);
     try pp.addBuiltinMacro("__has_declspec_attribute", true, &BuiltinMacros.hasDeclspecAttribute);
     try pp.addBuiltinMacro("__has_warning", true, &BuiltinMacros.hasWarning);
     try pp.addBuiltinMacro("__has_feature", true, &BuiltinMacros.hasFeature);
@@ -1481,6 +1483,55 @@ fn expandFuncMacro(
 
                 const start = pp.comp.generatedBuffer.items.len;
                 try pp.comp.generatedBuffer.writer().print("{}\n", .{@intFromBool(result)});
+                try buf.append(try pp.makeGeneratedToken(start, .PPNumber, tokenFromRaw(raw)));
+            },
+
+            .MacroParamHasCAttribute => {
+                const arg = expandedArgs.items[0];
+                const notFound = "0\n";
+                const result = if (arg.len == 0) blk: {
+                    const extra = Diagnostics.Message.Extra{ .arguments = .{ .expected = 1, .actual = 0 } };
+                    try pp.comp.addDiagnostic(.{ .tag = .expected_arguments, .loc = loc, .extra = extra }, &.{});
+                    break :blk notFound;
+                } else res: {
+                    var invalid: ?Token = null;
+                    var identifier: ?Token = null;
+                    for (arg) |tok| {
+                        if (tok.id == .MacroWS) continue;
+                        if (tok.id == .Comment) continue;
+                        if (!tok.id.isMacroIdentifier()) {
+                            invalid = tok;
+                            break;
+                        }
+                        if (identifier) |_| invalid = tok else identifier = tok;
+                    }
+
+                    if (identifier == null and invalid == null) invalid = .{ .id = .Eof, .loc = loc };
+                    if (invalid) |some| {
+                        try pp.comp.addDiagnostic(
+                            .{ .tag = .feature_check_requires_identifier, .loc = some.loc },
+                            some.expansionSlice(),
+                        );
+                        break :res notFound;
+                    }
+                    if (!pp.comp.langOpts.standard.atLeast(.c2x)) break :res notFound;
+
+                    const attrs = std.StaticStringMap([]const u8).initComptime(.{
+                        .{ "deprecated", "201904L\n" },
+                        .{ "fallthrough", "201904L\n" },
+                        .{ "maybe_unused", "201904L\n" },
+                        .{ "nodiscard", "202003L\n" },
+                        .{ "noreturn", "202202L\n" },
+                        .{ "_Noreturn", "202202L\n" },
+                        .{ "unsequenced", "202207L\n" },
+                        .{ "reproducible", "202207L\n" },
+                    });
+
+                    const identStr = pp.expandedSlice(identifier.?);
+                    break :res attrs.get(identStr) orelse notFound;
+                };
+                const start = pp.comp.generatedBuffer.items.len;
+                try pp.comp.generatedBuffer.appendSlice(result);
                 try buf.append(try pp.makeGeneratedToken(start, .PPNumber, tokenFromRaw(raw)));
             },
 
