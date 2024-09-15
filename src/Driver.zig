@@ -179,6 +179,7 @@ pub fn parseArgs(
 ) !bool {
     var colorSetting: enum { on, off, unset } = .unset;
 
+    var commentArg: []const u8 = "";
     var i: usize = 1;
     while (i < args.len) : (i += 1) {
         const arg = args[i];
@@ -369,6 +370,13 @@ pub fn parseArgs(
                 d.dumpRawTokens = true;
             } else if (std.mem.eql(u8, arg, "-dump-linker-args")) {
                 d.dumpLinkerArgs = true;
+            } else if (mem.eql(u8, arg, "-C") or mem.eql(u8, arg, "--comments")) {
+                d.comp.langOpts.preserveComments = true;
+                commentArg = arg;
+            } else if (mem.eql(u8, arg, "-CC") or mem.eql(u8, arg, "--comments-in-macros")) {
+                d.comp.langOpts.preserveComments = true;
+                d.comp.langOpts.preserveCommentsInMacros = true;
+                commentArg = arg;
             } else if (option(arg, "-fuse-ld=")) |linkerName| {
                 d.useLinker = linkerName;
             } else if (std.mem.eql(u8, arg, "-fuse-ld=")) {
@@ -431,6 +439,10 @@ pub fn parseArgs(
         .off => false,
         .unset => Util.fileSupportsColor(std.io.getStdOut()) and !std.process.hasEnvVarConstant("NO_COLOR"),
     };
+
+    if (d.comp.langOpts.preserveComments and !d.onlyPreprocess)
+        return d.fatal("invalid argument '{s}' only allowed with '-E'", .{commentArg});
+
     return false;
 }
 

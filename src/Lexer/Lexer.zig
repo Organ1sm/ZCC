@@ -577,6 +577,10 @@ pub fn next(self: *Lexer) Token {
 
             .line_comment => switch (c) {
                 '\n' => {
+                    if (self.comp.langOpts.preserveComments) {
+                        id = .Comment;
+                        break;
+                    }
                     self.index -= 1;
                     state = .start;
                 },
@@ -588,7 +592,14 @@ pub fn next(self: *Lexer) Token {
                 else => {},
             },
             .multi_line_comment_asterisk => switch (c) {
-                '/' => state = .multi_line_comment_done,
+                '/' => {
+                    if (self.comp.langOpts.preserveComments) {
+                        self.index += 1;
+                        id = .Comment;
+                        break;
+                    }
+                    state = .multi_line_comment_done;
+                },
                 '\n' => {
                     self.line += 1;
                     state = .multi_line_comment;
@@ -725,6 +736,10 @@ pub fn next(self: *Lexer) Token {
 }
 
 pub fn nextNoWhiteSpace(self: *Lexer) Token {
+    return self.nextNoSpecificTokens(std.EnumSet(TokenType).initMany(&[_]TokenType{ .Comment, .WhiteSpace }));
+}
+
+pub fn nextNoWhiteSpaceComments(self: *Lexer) Token {
     return self.nextNoSpecificTokens(std.EnumSet(TokenType).initOne(.WhiteSpace));
 }
 

@@ -305,6 +305,9 @@ pub const TokenType = enum(u8) {
     /// completion of the preceding #include
     IncludeResume,
 
+    /// A comment token if asked to preserve comments
+    Comment,
+
     /// This function checks if the provided `id` matches any of the predefined macro-related token types,
     /// and returns `true` if it does, indicating that it is a macro identifier.
     ///
@@ -505,6 +508,7 @@ pub const TokenType = enum(u8) {
             .WhiteSpace,
             .PPNumber,
             .EmbedByte,
+            .Comment,
             => null,
 
             .Eof,

@@ -104,6 +104,11 @@ charSignednessOverride: ?std.builtin.Signedness = null,
 /// If set, override the default availability of char8_t (by default, enabled in C2X and later; disabled otherwise)
 hasChar8tOverride: ?bool = null,
 
+/// Preserve comments when preprocessing
+preserveComments: bool = false,
+/// Preserve comments in macros when preprocessing
+preserveCommentsInMacros: bool = false,
+
 /// Whether to allow GNU-style inline assembly
 gnuAsm: bool = true,
 

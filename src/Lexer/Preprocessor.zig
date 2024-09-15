@@ -994,9 +994,14 @@ fn expandObjMacro(pp: *Preprocessor, simpleMacro: *const Macro) Error!ExpandBuff
             .HashHash => {
                 var rhs = tokenFromRaw(simpleMacro.tokens[i + 1]);
                 i += 1;
-                while (rhs.id == .WhiteSpace) {
-                    rhs = tokenFromRaw(simpleMacro.tokens[i + 1]);
-                    i += 1;
+                while (true) {
+                    if (rhs.id == .WhiteSpace) {
+                        rhs = tokenFromRaw(simpleMacro.tokens[i + 1]);
+                        i += 1;
+                    } else if (rhs.id == .Comment and !pp.comp.langOpts.preserveCommentsInMacros) {
+                        rhs = tokenFromRaw(simpleMacro.tokens[i + 1]);
+                        i += 1;
+                    } else break;
                 }
                 try pp.pasteTokens(&buff, &.{rhs});
             },
@@ -1249,7 +1254,7 @@ fn handleBuiltinMacro(
             var invalid: ?Token = null;
             var identifier: ?Token = null;
             for (paramTokens) |tok| {
-                if (tok.id == .MacroWS) continue;
+                if (tok.id == .MacroWS or tok.id == .Comment) continue;
                 if (!tok.id.isMacroIdentifier()) {
                     invalid = tok;
                     break;
@@ -1314,6 +1319,7 @@ fn handleBuiltinMacro(
             var identifier: ?Token = null;
             for (paramTokens) |tok| switch (tok.id) {
                 .MacroWS => continue,
+                .Comment => continue,
                 else => {
                     if (identifier) |_| invalid = tok else identifier = tok;
                 },
@@ -1404,6 +1410,10 @@ fn expandFuncMacro(
                     const next = switch (rawNext.id) {
                         .MacroWS => continue,
                         .HashHash => continue,
+                        .Comment => if (!pp.comp.langOpts.preserveCommentsInMacros)
+                            continue
+                        else
+                            &[1]Token{tokenFromRaw(rawNext)},
                         .MacroParam, .MacroParamNoExpand => if (args.items[rawNext.end].len > 0)
                             args.items[rawNext.end]
                         else
@@ -1486,6 +1496,7 @@ fn expandFuncMacro(
                         if (string) |_| invalid = tok else string = tok;
                     },
                     .MacroWS => continue,
+                    .Comment => continue,
                     else => {
                         invalid = tok;
                         break;
@@ -1971,6 +1982,10 @@ fn expandMacro(pp: *Preprocessor, lexer: *Lexer, raw: RawToken) MacroError!void 
             Token.free(tok.expansionLocs, pp.gpa);
             continue;
         }
+        if (tok.id == .Comment and !pp.comp.langOpts.preserveCommentsInMacros) {
+            Token.free(tok.expansionLocs, pp.gpa);
+            continue;
+        }
         tok.id.simplifyMacroKeywordExtra(true);
         pp.tokens.appendAssumeCapacity(tok.*);
     }
@@ -2021,17 +2036,21 @@ pub fn expandedSliceExtra(
 /// Concat two tokens and add the result to pp.generated
 fn pasteTokens(pp: *Preprocessor, lhsTokens: *ExpandBuffer, rhsTokens: []const Token) Error!void {
     const lhs = while (lhsTokens.popOrNull()) |lhs| {
-        if (lhs.id == .MacroWS)
-            Token.free(lhs.expansionLocs, pp.gpa)
-        else
+        if ((pp.comp.langOpts.preserveCommentsInMacros and lhs.id == .Comment) or
+            (lhs.id != .MacroWS and lhs.id != .Comment))
             break lhs;
+
+        Token.free(lhs.expansionLocs, pp.gpa);
     } else {
         return bufCopyTokens(lhsTokens, rhsTokens, &.{});
     };
 
     var rhsRest: u32 = 1;
     const rhs = for (rhsTokens) |rhs| {
-        if (rhs.id != .MacroWS) break rhs;
+        if ((pp.comp.langOpts.preserveCommentsInMacros and rhs.id == .Comment) or
+            (rhs.id != .MacroWS and rhs.id != .Comment))
+            break rhs;
+
         rhsRest += 1;
     } else {
         return lhsTokens.appendAssumeCapacity(lhs);
@@ -2055,21 +2074,21 @@ fn pasteTokens(pp: *Preprocessor, lhsTokens: *ExpandBuffer, rhsTokens: []const T
         .source = .generated,
     };
 
-    const pastedToken = lexer.nextNoWhiteSpace();
-    const next = lexer.nextNoWhiteSpace().id;
-
-    if (next != .NewLine and next != .Eof) {
-        try pp.comp.addDiagnostic(.{
-            .tag = .pasting_formed_invalid,
-            .loc = lhs.loc,
-            .extra = .{ .str = try pp.comp.diagnostics.arena.allocator().dupe(u8, pp.comp.generatedBuffer.items[start..end]) },
-        }, lhs.expansionSlice());
-    }
+    const pastedToken = lexer.nextNoWhiteSpaceComments();
+    const next = lexer.nextNoWhiteSpaceComments();
     const pastedId = if (lhs.id == .PlaceMarker and rhs.id == .PlaceMarker)
         .PlaceMarker
     else
         pastedToken.id;
     try lhsTokens.append(try pp.makeGeneratedToken(start, pastedId, lhs));
+    if (next.id != .NewLine and next.id != .Eof) {
+        try pp.comp.addDiagnostic(.{
+            .tag = .pasting_formed_invalid,
+            .loc = lhs.loc,
+            .extra = .{ .str = try pp.comp.diagnostics.arena.allocator().dupe(u8, pp.comp.generatedBuffer.items[start..end]) },
+        }, lhs.expansionSlice());
+        try lhsTokens.append(tokenFromRaw(next));
+    }
     try bufCopyTokens(lhsTokens, rhsTokens[rhsRest..], &.{});
 }
 
@@ -2160,7 +2179,7 @@ fn define(pp: *Preprocessor, lexer: *Lexer) Error!void {
         token.id.simplifyMacroKeyword();
         switch (token.id) {
             .HashHash => {
-                const next = lexer.nextNoWhiteSpace();
+                const next = lexer.nextNoWhiteSpaceComments();
                 switch (next.id) {
                     .NewLine, .Eof => {
                         try pp.addError(token, .hash_hash_at_end);
@@ -2176,6 +2195,13 @@ fn define(pp: *Preprocessor, lexer: *Lexer) Error!void {
                 try pp.tokenBuffer.append(next);
             },
             .NewLine, .Eof => break token.start,
+            .Comment => if (pp.comp.langOpts.preserveCommentsInMacros) {
+                if (needWS) {
+                    needWS = false;
+                    try pp.tokenBuffer.append(.{ .id = .MacroWS, .source = .generated });
+                }
+                try pp.tokenBuffer.append(token);
+            },
             .WhiteSpace => needWS = true,
             .UnterminatedStringLiteral => {
                 try pp.addError(token, .unterminated_string_literal_warning);
@@ -2326,6 +2352,13 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: RawToken, lParen: Raw
         switch (token.id) {
             .NewLine, .Eof => break token.start,
             .WhiteSpace => needWS = pp.tokenBuffer.items.len != 0,
+            .Comment => if (!pp.comp.langOpts.preserveCommentsInMacros) continue else {
+                if (needWS) {
+                    needWS = false;
+                    try pp.tokenBuffer.append(.{ .id = .MacroWS, .source = .generated });
+                }
+                try pp.tokenBuffer.append(token);
+            },
             .Hash => {
                 if (token.id != .WhiteSpace and needWS) {
                     needWS = false;
@@ -2373,7 +2406,7 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: RawToken, lParen: Raw
                 }
 
                 const savedLexer = lexer.*;
-                const next = lexer.nextNoWhiteSpace();
+                const next = lexer.nextNoWhiteSpaceComments();
                 if (next.id == .NewLine or next.id == .Eof) {
                     try pp.addError(token, .hash_hash_at_end);
                     return;
