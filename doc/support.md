@@ -199,6 +199,7 @@ void foo(int a, ...)
 - [x] `bool, true, false`
 - [x] [`constexpr`](../test/cases/constexpr.c)
 - [x] [`typeof`](../test/cases/parse-using-typeof-types.c)
+- [x] [`typeof_unqual`](../test/cases/typeof-quals.c)
 - [x] `unreachable()`
 - [x] [`__has_c_attribute`](../test/cases/__has_c_attribute.c)
 - [x] [Bit-precise integers `_BitInt(N)` and suffixes](../test/cases/_BitInt.c)

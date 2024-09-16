@@ -1085,7 +1085,7 @@ test "comments" {
 }
 
 test "C23 keywords" {
-    try expectTokensExtra("true false alignas alignof bool static_assert thread_local nullptr", &.{
+    try expectTokensExtra("true false alignas alignof bool static_assert thread_local nullptr typeof_unqual", &.{
         .KeywordTrue,
         .KeywordFalse,
         .KeywordC23Alignas,
@@ -1094,5 +1094,6 @@ test "C23 keywords" {
         .KeywordC23StaticAssert,
         .KeywordC23ThreadLocal,
         .KeywordNullptr,
+        .KeywordTypeofUnqual
     }, .c2x);
 }

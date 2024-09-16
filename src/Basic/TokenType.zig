@@ -214,6 +214,7 @@ pub const TokenType = enum(u8) {
     KeywordTrue,
     KeywordFalse,
     KeywordNullptr,
+    KeywordTypeofUnqual,
 
     // GCC keywords
     KeywordGccConst1,
@@ -442,6 +443,7 @@ pub const TokenType = enum(u8) {
             .KeywordTrue,
             .KeywordFalse,
             .KeywordNullptr,
+            .KeywordTypeofUnqual,
             => return true,
             else => false,
         };
@@ -658,6 +660,7 @@ pub const TokenType = enum(u8) {
             .KeywordTrue => "true",
             .KeywordFalse => "false",
             .KeywordNullptr => "nullptr",
+            .KeywordTypeofUnqual => "typeof_unqual",
 
             .KeywordGccConst1 => "__const",
             .KeywordGccConst2 => "__const__",

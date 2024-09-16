@@ -853,6 +853,7 @@ fn nextExternDecl(p: *Parser) void {
             .KeywordTypeof,
             .KeywordTypeof1,
             .KeywordTypeof2,
+            .KeywordTypeofUnqual,
             .KeywordBitInt,
             .Identifier,
             .ExtendedIdentifier,
@@ -1296,8 +1297,13 @@ fn parseStaticAssert(p: *Parser) Error!bool {
 ///   : `typeof` '(' type-name ')'
 ///   | `typeof` '(' expr ')'
 fn typeof(p: *Parser) Error!?Type {
+    var unqual = false;
     switch (p.currToken()) {
         .KeywordTypeof, .KeywordTypeof1, .KeywordTypeof2 => p.tokenIdx += 1,
+        .KeywordTypeofUnqual => {
+            p.tokenIdx += 1;
+            unqual = true;
+        },
         else => return null,
     }
 
@@ -1307,7 +1313,7 @@ fn typeof(p: *Parser) Error!?Type {
         const typeofType = try p.arena.create(Type);
         typeofType.* = .{
             .data = ty.data,
-            .qual = ty.qual.inheritFromTypeof(),
+            .qual = if (unqual) .{} else ty.qual.inheritFromTypeof(),
             .specifier = ty.specifier,
         };
 
@@ -1319,14 +1325,17 @@ fn typeof(p: *Parser) Error!?Type {
     try p.expectClosing(lp, .RParen);
 
     if (typeofExpr.ty.is(.NullPtrTy))
-        return Type{ .specifier = .NullPtrTy, .qual = typeofExpr.ty.qual.inheritFromTypeof() };
+        return Type{
+            .specifier = .NullPtrTy,
+            .qual = if (unqual) .{} else typeofExpr.ty.qual.inheritFromTypeof(),
+        };
 
     const inner = try p.arena.create(Type.Expr);
     inner.* = .{
         .node = typeofExpr.node,
         .ty = .{
             .data = typeofExpr.ty.data,
-            .qual = typeofExpr.ty.qual.inheritFromTypeof(),
+            .qual = if (unqual) .{} else typeofExpr.ty.qual.inheritFromTypeof(),
             .specifier = typeofExpr.ty.specifier,
             .decayed = typeofExpr.ty.decayed,
         },
@@ -4944,6 +4953,7 @@ fn nextStmt(p: *Parser, lBrace: TokenIndex) !void {
             .KeywordTypeof,
             .KeywordTypeof1,
             .KeywordTypeof2,
+            .KeywordTypeofUnqual,
             .KeywordGccExtension,
             => if (parens == 0) return,
             .KeywordPragma => p.skipToPragmaSentinel(),
