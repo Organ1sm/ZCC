@@ -4582,7 +4582,7 @@ fn parseCaseStmt(p: *Parser, caseToken: u32) Error!?NodeIndex {
         try p.errStr(.case_not_in_switch, caseToken, "case");
     }
 
-    const s = try p.parseStmt();
+    const s = try p.labelableStmt();
     if (secondItem) |some| return try p.addNode(.{
         .tag = .CaseRangeStmt,
         .data = .{
@@ -4600,7 +4600,7 @@ fn parseCaseStmt(p: *Parser, caseToken: u32) Error!?NodeIndex {
 /// default-statement : `default` ':'
 fn parseDefaultStmt(p: *Parser, defaultToken: u32) Error!?NodeIndex {
     _ = try p.expectToken(.Colon);
-    const s = try p.parseStmt();
+    const s = try p.labelableStmt();
 
     const node = try p.addNode(.{
         .tag = .DefaultStmt,
@@ -4620,6 +4620,14 @@ fn parseDefaultStmt(p: *Parser, defaultToken: u32) Error!?NodeIndex {
     }
 
     return node;
+}
+
+fn labelableStmt(p: *Parser) Error!NodeIndex {
+    if (p.currToken() == .RBrace) {
+        try p.err(.label_compound_end);
+        return p.addNode(.{ .tag = .NullStmt, .data = undefined });
+    }
+    return p.parseStmt();
 }
 
 /// labeledStmt
@@ -4659,7 +4667,7 @@ fn parseLabeledStmt(p: *Parser) Error!?NodeIndex {
 
         var labeledStmt = AST.Node{
             .tag = .LabeledStmt,
-            .data = .{ .decl = .{ .name = nameToken, .node = try p.parseStmt() } },
+            .data = .{ .decl = .{ .name = nameToken, .node = try p.labelableStmt() } },
         };
         labeledStmt.type = try Attribute.applyLabelAttributes(p, labeledStmt.type, attrBufferTop);
         return try p.addNode(labeledStmt);

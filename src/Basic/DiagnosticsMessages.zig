@@ -2334,3 +2334,9 @@ pub const unterminated_comment = struct {
     pub const msg = "unterminated comment";
     pub const kind = .@"error";
 };
+pub const label_compound_end = struct {
+    pub const msg = "label at end of compound statement is a C2x extension";
+    pub const opt = "c2x-extensions";
+    pub const kind = .warning;
+    pub const suppress_version = .c2x;
+};
