@@ -1513,7 +1513,7 @@ fn expandFuncMacro(
                         );
                         break :res notFound;
                     }
-                    if (!pp.comp.langOpts.standard.atLeast(.c2x)) break :res notFound;
+                    if (!pp.comp.langOpts.standard.atLeast(.c23)) break :res notFound;
 
                     const attrs = std.StaticStringMap([]const u8).initComptime(.{
                         .{ "deprecated", "201904L\n" },

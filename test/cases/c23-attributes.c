@@ -1,4 +1,4 @@
-//zcc-args -std=c2x
+//zcc-args -std=c23
 
 // Example adapted from N2956 - unsequenced functions
 

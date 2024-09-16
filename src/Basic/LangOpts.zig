@@ -32,10 +32,10 @@ pub const Standard = enum {
     default,
     /// ISO C 2017 with GNU extensions
     gnu17,
-    /// Working Draft for ISO C2x
-    c2x,
-    /// Working Draft for ISO C2x with GNU extensions
-    gnu2x,
+    /// Working Draft for ISO C23
+    c23,
+    /// Working Draft for ISO C23 with GNU extensions
+    gnu23,
 
     const NameMap = std.StaticStringMap(Standard).initComptime(.{
         .{ "c89", .c89 },                .{ "c90", .c89 },          .{ "iso9899:1990", .c89 },
@@ -44,7 +44,7 @@ pub const Standard = enum {
         .{ "c11", .c11 },                .{ "iso9899:2011", .c11 }, .{ "gnu11", .gnu11 },
         .{ "c17", .c17 },                .{ "iso9899:2017", .c17 }, .{ "c18", .c17 },
         .{ "iso9899:2018", .c17 },       .{ "gnu17", .gnu17 },      .{ "gnu18", .gnu17 },
-        .{ "c2x", .c2x },                .{ "gnu2x", .gnu2x },
+        .{ "c23", .c23 },                .{ "gnu23", .gnu23 },
     });
 
     pub fn atLeast(self: Standard, other: Standard) bool {
@@ -53,7 +53,7 @@ pub const Standard = enum {
 
     pub fn isGNU(standard: Standard) bool {
         return switch (standard) {
-            .gnu89, .gnu99, .gnu11, .default, .gnu17, .gnu2x => true,
+            .gnu89, .gnu99, .gnu11, .default, .gnu17, .gnu23 => true,
             else => false,
         };
     }
@@ -71,7 +71,7 @@ pub const Standard = enum {
             .c11, .gnu11 => "201112L",
             .default, .c17, .gnu17 => "201710L",
             // todo: subject to change, verify once c23 finalized
-            .c2x, .gnu2x => "202311L",
+            .c23, .gnu23 => "202311L",
         };
     }
 
@@ -101,7 +101,7 @@ declSpecAttrs: bool = false,
 msExtensions: bool = false,
 /// If set, use specified signedness for `char` instead of the target's default char signedness
 charSignednessOverride: ?std.builtin.Signedness = null,
-/// If set, override the default availability of char8_t (by default, enabled in C2X and later; disabled otherwise)
+/// If set, override the default availability of char8_t (by default, enabled in C23 and later; disabled otherwise)
 hasChar8tOverride: ?bool = null,
 
 /// Preserve comments when preprocessing
@@ -127,7 +127,7 @@ pub fn disableMSExtensions(self: *LangOpts) void {
 }
 
 pub fn hasChar8_t(self: *const LangOpts) bool {
-    return self.hasChar8tOverride orelse self.standard.atLeast(.c2x);
+    return self.hasChar8tOverride orelse self.standard.atLeast(.c23);
 }
 
 pub fn setEmulatedCompiler(self: *LangOpts, compiler: Compiler) void {

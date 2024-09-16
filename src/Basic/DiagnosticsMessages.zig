@@ -189,7 +189,7 @@ pub const missing_type_specifier = struct {
     pub const kind = .warning;
     pub const all = true;
 };
-pub const missing_type_specifier_c2x = struct {
+pub const missing_type_specifier_c23 = struct {
     pub const msg = "a type specifier is required for all declarations";
     pub const kind = .@"error";
 };
@@ -928,17 +928,17 @@ pub const static_assert_not_constant = struct {
     pub const kind = .@"error";
 };
 pub const static_assert_missing_message = struct {
-    pub const msg = "static_assert with no message is a C2X extension";
-    pub const opt = "c2x-extensions";
+    pub const msg = "static_assert with no message is a C23 extension";
+    pub const opt = "c23-extensions";
     pub const kind = .warning;
-    pub const suppress_version = .c2x;
+    pub const suppress_version = .c23;
 };
-pub const pre_c2x_compat = struct {
-    pub const msg = "{s} is incompatible with C standards before C2x";
+pub const pre_c23_compat = struct {
+    pub const msg = "{s} is incompatible with C standards before C23";
     pub const extra = .str;
     pub const kind = .off;
-    pub const suppress_unless_version = .c2x;
-    pub const opt = "pre-c2x-compat";
+    pub const suppress_unless_version = .c23;
+    pub const opt = "pre-c23-compat";
 };
 pub const unbound_vla = struct {
     pub const msg = "variable length array must be bound in function definition";
@@ -1241,10 +1241,10 @@ pub const empty_translation_unit = struct {
     pub const pedantic = true;
 };
 pub const omitting_parameter_name = struct {
-    pub const msg = "omitting the parameter name in a function definition is a C2x extension";
-    pub const opt = "c2x-extensions";
+    pub const msg = "omitting the parameter name in a function definition is a C23 extension";
+    pub const opt = "c23-extensions";
     pub const kind = .warning;
-    pub const suppress_version = .c2x;
+    pub const suppress_version = .c23;
 };
 pub const non_int_bitfield = struct {
     pub const msg = "bit-field has non-integer type '{s}'";
@@ -2019,7 +2019,7 @@ pub const bit_int = struct {
     pub const kind = .off;
     pub const pedantic = true;
     pub const opt = "bit-int-extension";
-    pub const suppress_version = .c2x;
+    pub const suppress_version = .c23;
 };
 pub const unsigned_bit_int_too_small = struct {
     pub const msg = "{s} must have a bit size of at least 1";
@@ -2088,10 +2088,10 @@ pub const invalid_object_cast = struct {
     pub const kind = .@"error";
 };
 pub const bitint_suffix = struct {
-    pub const msg = "'_BitInt' suffix for literals is a C2x extension";
-    pub const opt = "c2x-extensions";
+    pub const msg = "'_BitInt' suffix for literals is a C23 extension";
+    pub const opt = "c23-extensions";
     pub const kind = .warning;
-    pub const suppress_version = .c2x;
+    pub const suppress_version = .c23;
 };
 pub const auto_type_extension = struct {
     pub const msg = "'__auto_type' is a GNU extension";
@@ -2165,12 +2165,12 @@ pub const cast_to_incomplete_type = struct {
     pub const extra = .str;
 };
 pub const def_no_proto_deprecated = struct {
-    pub const msg = "a function definition without a prototype is deprecated in all versions of C and is not supported in C2x";
+    pub const msg = "a function definition without a prototype is deprecated in all versions of C and is not supported in C23";
     pub const kind = .warning;
     pub const opt = "deprecated-non-prototype";
 };
 pub const passing_args_to_kr = struct {
-    pub const msg = "passing arguments to without a prototype is deprecated in all versions of C and is not supported in C2x";
+    pub const msg = "passing arguments to without a prototype is deprecated in all versions of C and is not supported in C23";
     pub const kind = .warning;
     pub const opt = "deprecated-non-prototype";
 };
@@ -2256,21 +2256,21 @@ pub const ucn_basic_char_error = struct {
     pub const extra = .ascii;
 };
 pub const ucn_basic_char_warning = struct {
-    pub const msg = "specifying character '{c}' with a universal character name is incompatible with C standards before C2x";
+    pub const msg = "specifying character '{c}' with a universal character name is incompatible with C standards before C23";
     pub const kind = .off;
     pub const extra = .ascii;
-    pub const suppress_unless_version = .c2x;
-    pub const opt = "pre-c2x-compat";
+    pub const suppress_unless_version = .c23;
+    pub const opt = "pre-c23-compat";
 };
 pub const ucn_control_char_error = struct {
     pub const msg = "universal character name refers to a control character";
     pub const kind = .@"error";
 };
 pub const ucn_control_char_warning = struct {
-    pub const msg = "universal character name referring to a control character is incompatible with C standards before C2x";
+    pub const msg = "universal character name referring to a control character is incompatible with C standards before C23";
     pub const kind = .off;
-    pub const suppress_unless_version = .c2x;
-    pub const opt = "pre-c2x-compat";
+    pub const suppress_unless_version = .c23;
+    pub const opt = "pre-c23-compat";
 };
 pub const c89_ucn_in_literal = struct {
     pub const msg = "universal character names are only valid in C99 or later";
@@ -2335,8 +2335,8 @@ pub const unterminated_comment = struct {
     pub const kind = .@"error";
 };
 pub const label_compound_end = struct {
-    pub const msg = "label at end of compound statement is a C2x extension";
-    pub const opt = "c2x-extensions";
+    pub const msg = "label at end of compound statement is a C23 extension";
+    pub const opt = "c23-extensions";
     pub const kind = .warning;
-    pub const suppress_version = .c2x;
+    pub const suppress_version = .c23;
 };

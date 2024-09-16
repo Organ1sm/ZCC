@@ -1,4 +1,4 @@
-//zcc-args --target=x86_64-linux-gnu -Wno-unused-value -Wno-c2x-extensions
+//zcc-args --target=x86_64-linux-gnu -Wno-unused-value -Wno-c23-extensions
 
 #include "include/test-helpers.h"
 

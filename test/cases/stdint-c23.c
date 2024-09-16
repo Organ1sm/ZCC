@@ -1,4 +1,4 @@
-//zcc-args -std=c2x
+//zcc-args -std=c23
 
 #include <stdint.h>
 #include "test-helpers.h"

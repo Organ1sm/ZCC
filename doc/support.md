@@ -206,7 +206,7 @@ void foo(int a, ...)
 - [x] Allow duplicate attributes
 
 - [ ] Decimal floating-point types (`_Decimal32, _Decimal64, and _Decimal128`)
-- [x] [Binary integer constants / Digit separator](../test/cases/c2x-digit-separators.c)
+- [x] [Binary integer constants / Digit separator](../test/cases/c23-digit-separators.c)
 
   `_Static_assert(0b1001'0110 == 150);`
 
@@ -214,7 +214,7 @@ void foo(int a, ...)
 
    `const unsigned char c2 = u8'™';`
 
-- [x] `char8_t` [as the type of UTF-8 string literal](../test/cases/c2x-char8_t.c)
+- [x] `char8_t` [as the type of UTF-8 string literal](../test/cases/c23-char8_t.c)
 
 - [ ] Empty initializer `= {}`
 

@@ -149,7 +149,7 @@ pub const Specifier = union(enum) {
 
             .Void => "void",
             .NullPtrTy => "nullptr_t",
-            .Bool => if (langOpts.standard.atLeast(.c2x)) "bool" else "_Bool",
+            .Bool => if (langOpts.standard.atLeast(.c23)) "bool" else "_Bool",
 
             .Char => "char",
             .SChar => "signed char",
@@ -296,8 +296,8 @@ pub fn finish(b: @This(), p: *Parser) Parser.Error!Type {
                 ty = typeof;
             } else {
                 ty.specifier = .Int;
-                if (p.comp.langOpts.standard.atLeast(.c2x))
-                    try p.err(.missing_type_specifier_c2x)
+                if (p.comp.langOpts.standard.atLeast(.c23))
+                    try p.err(.missing_type_specifier_c23)
                 else
                     try p.err(.missing_type_specifier);
             }

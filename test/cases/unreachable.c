@@ -1,4 +1,4 @@
-//zcc-args -std=c2x
+//zcc-args -std=c23
 #include <stddef.h>
 void foo(void) {
 	unreachable();

@@ -1,4 +1,4 @@
-//zcc-args -std=c2x
+//zcc-args -std=c23
 int foo(a, int b, char c, d)
     int a; short d;
 {

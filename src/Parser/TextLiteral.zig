@@ -265,7 +265,7 @@ pub const Parser = struct {
             self.err(.char_too_large, .{ .none = {} });
 
         if (val < 0xA0 and (val != '$' and val != '@' and val != '`')) {
-            const isError = !self.comp.langOpts.standard.atLeast(.c2x);
+            const isError = !self.comp.langOpts.standard.atLeast(.c23);
             if (val >= 0x20 and val <= 0x7F) {
                 if (isError)
                     self.err(.ucn_basic_char_error, .{ .ascii = @intCast(val) })

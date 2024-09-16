@@ -139,7 +139,7 @@ pub fn next(self: *Lexer) Token {
                     self.index += 1;
                     break;
                 },
-                ':' => if (self.comp.langOpts.standard.atLeast(.c2x)) {
+                ':' => if (self.comp.langOpts.standard.atLeast(.c23)) {
                     state = .colon;
                 } else {
                     id = .Colon;
@@ -638,7 +638,7 @@ pub fn next(self: *Lexer) Token {
                 '.',
                 => {},
                 'e', 'E', 'p', 'P' => state = .pp_num_exponent,
-                '\'' => if (self.comp.langOpts.standard.atLeast(.c2x)) {
+                '\'' => if (self.comp.langOpts.standard.atLeast(.c23)) {
                     state = .pp_num_digit_separator;
                 } else {
                     id = .PPNumber;
@@ -1095,5 +1095,5 @@ test "C23 keywords" {
         .KeywordC23ThreadLocal,
         .KeywordNullptr,
         .KeywordTypeofUnqual
-    }, .c2x);
+    }, .c23);
 }
