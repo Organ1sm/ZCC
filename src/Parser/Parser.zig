@@ -7270,8 +7270,8 @@ fn parseCharLiteral(p: *Parser) Error!Result {
         };
     };
 
+    if (charKind == .utf8) try p.err(.u8_char_lit);
     var val: u32 = 0;
-
     const slice = charKind.contentSlice(p.getTokenText(p.tokenIdx));
 
     if (slice.len == 1 and std.ascii.isASCII(slice[0])) {

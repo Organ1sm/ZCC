@@ -2340,3 +2340,9 @@ pub const label_compound_end = struct {
     pub const kind = .warning;
     pub const suppress_version = .c23;
 };
+pub const u8_char_lit = struct {
+    pub const msg = "UTF-8 character literal is a C23 extension";
+    pub const opt = "c23-extensions";
+    pub const kind = .warning;
+    pub const suppress_version = .c23;
+};
