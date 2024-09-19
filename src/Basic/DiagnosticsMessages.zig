@@ -2346,3 +2346,23 @@ pub const u8_char_lit = struct {
     pub const kind = .warning;
     pub const suppress_version = .c23;
 };
+pub const malformed_embed_param = struct {
+    pub const msg = "unexpected token in embed parameter";
+    pub const kind = .@"error";
+};
+pub const malformed_embed_limit = struct {
+    pub const msg = "the limit parameter expects one non-negative integer as a parameter";
+    pub const kind = .@"error";
+};
+pub const duplicate_embed_param = struct {
+    pub const msg = "duplicate embed parameter '{s}'";
+    pub const kind = .warning;
+    pub const extra = .str;
+    pub const opt = "duplicate-embed-param";
+};
+pub const unsupported_embed_param = struct {
+    pub const msg = "unsupported embed parameter '{s}' embed parameter";
+    pub const kind = .warning;
+    pub const extra = .str;
+    pub const opt = "unsupported-embed-param";
+};

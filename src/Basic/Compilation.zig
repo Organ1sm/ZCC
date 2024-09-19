@@ -1184,14 +1184,23 @@ pub const IncludeType = enum {
     AngleBrackets, // `<`
 };
 
-fn getFileContents(comp: *Compilation, path: []const u8) ![]const u8 {
+fn getFileContents(comp: *Compilation, path: []const u8, limit: ?u32) ![]const u8 {
     if (std.mem.indexOfScalar(u8, path, 0) != null)
         return error.FileNotFound;
 
     const file = try std.fs.cwd().openFile(path, .{});
     defer file.close();
 
-    return file.readToEndAlloc(comp.gpa, std.math.maxInt(u32));
+    var buffer = std.ArrayList(u8).init(comp.gpa);
+    defer buffer.deinit();
+
+    const max = limit orelse std.math.maxInt(u32);
+    file.reader().readAllArrayList(&buffer, max) catch |e| switch (e) {
+        error.StreamTooLong => if (limit == null) return e,
+        else => return e,
+    };
+
+    return buffer.toOwnedSlice();
 }
 
 pub fn findEmbed(
@@ -1200,9 +1209,10 @@ pub fn findEmbed(
     includerTokenSource: Source.ID,
     /// angle bracket vs quotes
     includeType: IncludeType,
+    limit: ?u32,
 ) !?[]const u8 {
     if (std.fs.path.isAbsolute(filename)) {
-        return if (comp.getFileContents(filename)) |some|
+        return if (comp.getFileContents(filename, limit)) |some|
             some
         else |err| switch (err) {
             error.OutOfMemory => |e| return e,
@@ -1221,7 +1231,7 @@ pub fn findEmbed(
 
     while (try it.nextWithFile(filename, sfAllocator)) |found| {
         defer sfAllocator.free(found.path);
-        if (comp.getFileContents(found.path)) |some|
+        if (comp.getFileContents(found.path, limit)) |some|
             return some
         else |err| switch (err) {
             error.OutOfMemory => return error.OutOfMemory,

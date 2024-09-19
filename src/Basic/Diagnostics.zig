@@ -176,6 +176,8 @@ pub const Options = struct {
     @"four-char-constants": Kind = .default,
     @"unknown-escape-sequence": Kind = .default,
     @"invalid-pp-token": Kind = .default,
+    @"duplicate-embed-param": Kind = .default,
+    @"unsupported-embed-param": Kind = .default,
 };
 
 list: std.ArrayListUnmanaged(Message) = .{},

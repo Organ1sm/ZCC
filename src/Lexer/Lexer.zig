@@ -754,6 +754,16 @@ pub fn nextNoSpecificTokens(self: *Lexer, skipTokens: std.EnumSet(TokenType)) To
     return token;
 }
 
+/// Try to tokenize a '::' even if not supported by the current language standard.
+pub fn colonColon(self: *Lexer) Token {
+    var tok = self.nextNoWhiteSpace();
+    if (tok.id == .Colon and self.buffer[self.index] == ':') {
+        self.index += 1;
+        tok.id = .ColonColon;
+    }
+    return tok;
+}
+
 fn expectTokens(contents: []const u8, expectedTokens: []const TokenType) !void {
     return expectTokensExtra(contents, expectedTokens, null);
 }
@@ -1085,15 +1095,5 @@ test "comments" {
 }
 
 test "C23 keywords" {
-    try expectTokensExtra("true false alignas alignof bool static_assert thread_local nullptr typeof_unqual", &.{
-        .KeywordTrue,
-        .KeywordFalse,
-        .KeywordC23Alignas,
-        .KeywordC23Alignof,
-        .KeywordC23Bool,
-        .KeywordC23StaticAssert,
-        .KeywordC23ThreadLocal,
-        .KeywordNullptr,
-        .KeywordTypeofUnqual
-    }, .c23);
+    try expectTokensExtra("true false alignas alignof bool static_assert thread_local nullptr typeof_unqual", &.{ .KeywordTrue, .KeywordFalse, .KeywordC23Alignas, .KeywordC23Alignof, .KeywordC23Bool, .KeywordC23StaticAssert, .KeywordC23ThreadLocal, .KeywordNullptr, .KeywordTypeofUnqual }, .c23);
 }
