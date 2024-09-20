@@ -66,6 +66,10 @@ void static_array_parameter(x)
 	int x[static 5];
 {}
 
+int(wrapped)(void) {
+   return 0;
+}
+
 #define EXPECTED_ERRORS "functions.c:10:12: error: parameter named 'quux' is missing" \
     "functions.c:20:14: error: illegal initializer (only variables can be initialized)" \
     "functions.c:18:2: warning: non-void function 'foooo' does not return a value [-Wreturn-type]" \

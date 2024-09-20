@@ -1689,7 +1689,7 @@ fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec, attrBufferTop: usize) Er
     }
 
     if (p.eat(.Equal)) |eq| init: {
-        if (declSpec.storageClass == .typedef or ID.d.funcDeclarator != null)
+        if (declSpec.storageClass == .typedef or (ID.d.funcDeclarator != null and ID.d.type.isFunc()))
             try p.errToken(.illegal_initializer, eq)
         else if (ID.d.type.is(.VariableLenArray))
             try p.errToken(.vla_init, eq)
@@ -2875,6 +2875,7 @@ fn declarator(p: *Parser, baseType: Type, kind: DeclaratorKind) Error!?Declarato
         try res.type.combine(outer);
         try res.type.validateCombinedType(p, suffixStart);
         res.oldTypeFunc = d.oldTypeFunc;
+        res.funcDeclarator = d.funcDeclarator;
         return res;
     }
 
