@@ -285,6 +285,12 @@ pub const Tag = enum(u8) {
     UnionInitExpr,
     /// (ty){ un }
     CompoundLiteralExpr,
+    /// (static ty){ un }
+    StaticCompoundLiteralExpr,
+    /// (thread_local ty){ un }
+    ThreadLocalCompoundLiteralExpr,
+    /// (static thread_local ty){ un }
+    StaticThreadLocalCompoundLiteralExpr,
 
     /// Inserted at the end of a function body if no return stmt is found.
     /// ty is the functions return type

@@ -283,7 +283,11 @@ pub fn isLValueExtra(tree: *const AST, node: NodeIndex, isConst: *bool) bool {
     const tag = tree.nodes.items(.tag)[@intFromEnum(node)];
     const data = tree.nodes.items(.data)[@intFromEnum(node)];
     switch (tag) {
-        .CompoundLiteralExpr => {
+        .CompoundLiteralExpr,
+        .StaticCompoundLiteralExpr,
+        .ThreadLocalCompoundLiteralExpr,
+        .StaticThreadLocalCompoundLiteralExpr,
+        => {
             isConst.* = tree.nodes.items(.type)[@intFromEnum(node)].isConst();
             return true;
         },
@@ -602,7 +606,11 @@ fn dumpNode(
                 try tree.dumpNode(data.unionInit.node, level + delta, mapper, color, w);
         },
 
-        .CompoundLiteralExpr => try tree.dumpNode(data.unExpr, level + half, mapper, color, w),
+        .CompoundLiteralExpr,
+        .StaticCompoundLiteralExpr,
+        .ThreadLocalCompoundLiteralExpr,
+        .StaticThreadLocalCompoundLiteralExpr,
+        => try tree.dumpNode(data.unExpr, level + half, mapper, color, w),
 
         .LabeledStmt => {
             try w.writeByteNTimes(' ', level + half);

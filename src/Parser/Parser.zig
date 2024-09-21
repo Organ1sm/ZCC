@@ -561,6 +561,23 @@ fn nodeIs(p: *Parser, node: NodeIndex, tag: AstTag) bool {
     return p.getNode(node, tag) != null;
 }
 
+fn nodeIsCompoundLiteral(p: *Parser, node: NodeIndex) bool {
+    var cur = node;
+    const tags = p.nodes.items(.tag);
+    const data = p.nodes.items(.data);
+    while (true) {
+        switch (tags[@intFromEnum(cur)]) {
+            .ParenExpr => cur = data[@intFromEnum(cur)].unExpr,
+            .CompoundLiteralExpr,
+            .StaticCompoundLiteralExpr,
+            .ThreadLocalCompoundLiteralExpr,
+            .StaticThreadLocalCompoundLiteralExpr,
+            => return true,
+            else => return false,
+        }
+    }
+}
+
 fn getNode(p: *Parser, node: NodeIndex, tag: AstTag) ?NodeIndex {
     var cur = node;
     const tags = p.nodes.items(.tag);
@@ -1360,6 +1377,41 @@ fn typeof(p: *Parser) Error!?Type {
 ///  | func-specifier
 ///  | align-specifier
 ///
+/// funcSpec : keyword_inline | keyword_noreturn
+fn parseDeclSpec(p: *Parser) Error!?DeclSpec {
+    var d: DeclSpec = .{ .type = .{ .specifier = undefined } };
+    var spec: TypeBuilder = .{};
+
+    const start = p.tokenIdx;
+    while (true) {
+        if (try p.parseStorageClassSpec(&d)) continue;
+        if (try p.parseTypeSpec(&spec)) continue;
+
+        const id = p.currToken();
+        switch (id) {
+            .KeywordInline, .KeywordGccInline1, .KeywordGccInline2 => {
+                if (d.@"inline" != null)
+                    try p.errStr(.duplicate_declspec, p.tokenIdx, "inline");
+                d.@"inline" = p.tokenIdx;
+            },
+
+            .KeywordNoreturn => {
+                if (d.noreturn != null)
+                    try p.errStr(.duplicate_declspec, p.tokenIdx, "_Noreturn");
+                d.noreturn = p.tokenIdx;
+            },
+
+            else => break,
+        }
+        p.tokenIdx += 1;
+    }
+    if (p.tokenIdx == start) return null;
+
+    d.type = try spec.finish(p);
+    d.autoType = spec.autoTypeToken;
+    return d;
+}
+
 /// storage-class-specifier:
 ///  | `auto`
 ///  | `constexpr`
@@ -1368,15 +1420,9 @@ fn typeof(p: *Parser) Error!?Type {
 ///  | `static`
 ///  | `threadlocal`
 ///  : `typedef`
-fn parseDeclSpec(p: *Parser) Error!?DeclSpec {
-    var d: DeclSpec = .{ .type = .{ .specifier = undefined } };
-    var spec: TypeBuilder = .{};
-
+fn parseStorageClassSpec(p: *Parser, d: *DeclSpec) Error!bool {
     const start = p.tokenIdx;
     while (true) {
-        if (try p.parseTypeSpec(&spec))
-            continue;
-
         const token = p.currToken();
         switch (token) {
             .KeywordTypedef,
@@ -1448,29 +1494,13 @@ fn parseDeclSpec(p: *Parser) Error!?DeclSpec {
                 d.constexpr = p.tokenIdx;
             },
 
-            .KeywordInline, .KeywordGccInline1, .KeywordGccInline2 => {
-                if (d.@"inline" != null)
-                    try p.errStr(.duplicate_declspec, p.tokenIdx, "inline");
-                d.@"inline" = p.tokenIdx;
-            },
-
-            .KeywordNoreturn => {
-                if (d.noreturn != null)
-                    try p.errStr(.duplicate_declspec, p.tokenIdx, "_Noreturn");
-                d.noreturn = p.tokenIdx;
-            },
             else => break,
         }
 
         p.tokenIdx += 1;
     }
 
-    if (p.tokenIdx == start)
-        return null;
-
-    d.type = try spec.finish(p);
-    d.autoType = spec.autoTypeToken;
-    return d;
+    return p.tokenIdx != start;
 }
 
 /// attribute
@@ -3705,7 +3735,7 @@ fn coerceArrayInit(p: *Parser, item: *Result, token: TokenIndex, target: Type) !
         return false;
 
     const isStrLiteral = p.nodeIs(item.node, .StringLiteralExpr);
-    if (!isStrLiteral and !p.nodeIs(item.node, .CompoundLiteralExpr) or !item.ty.isArray()) {
+    if (!isStrLiteral and !p.nodeIsCompoundLiteral(item.node) or !item.ty.isArray()) {
         try p.errToken(.array_init_str, token);
         return true; // do not do further coercion
     }
@@ -5562,19 +5592,9 @@ fn parseCastExpr(p: *Parser) Error!Result {
         try p.expectClosing(lp, .RParen);
 
         if (p.currToken() == .LBrace) {
-            // compound literal
-            if (ty.isFunc())
-                try p.err(.func_init)
-            else if (ty.is(.VariableLenArray)) {
-                try p.err(.vla_init);
-            } else if (ty.hasIncompleteSize() and !ty.is(.IncompleteArray)) {
-                try p.errStr(.variable_incomplete_ty, p.tokenIdx, try p.typeStr(ty));
-                return error.ParsingFailed;
-            }
-
-            var initListExpr = try p.initializer(ty);
-            try initListExpr.un(p, .CompoundLiteralExpr);
-            return initListExpr;
+            // compound literal handled in unexpr.
+            p.tokenIdx = lp;
+            break :castExpr;
         }
 
         var operand = try p.parseCastExpr();
@@ -5819,7 +5839,7 @@ fn offsetofMemberDesignator(p: *Parser, baseType: Type) Error!Result {
 }
 
 /// unaryExpr
-///  : primary-expression suffix-expression*
+///  : (compoundLiteral | primaryExpr) suffix-expression*
 ///  | '&&' identifier
 ///  | ('&' | '*' | '+' | '-' | '~' | '!' | '++' | '--' | `__extension__` | `__imag__` | `__real__`) cast-expression
 ///  | `sizeof` unary-expression
@@ -6197,9 +6217,11 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
         },
 
         else => {
-            var lhs = try p.parsePrimaryExpr();
-            if (lhs.empty(p))
-                return lhs;
+            var lhs = try p.parseCompoundLiteral();
+            if (lhs.empty(p)) {
+                lhs = try p.parsePrimaryExpr();
+                if (lhs.empty(p)) return lhs;
+            }
             while (true) {
                 const suffix = try p.parseSuffixExpr(lhs);
                 if (suffix.empty(p)) break;
@@ -6208,6 +6230,68 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
             return lhs;
         },
     }
+}
+
+/// compoundLiteral
+///  : '(' storage-class-spec* type-name ')' '{' initializer-list '}'
+///  | '(' storage-class-spec* type-name ')' '{' initializer-list ',' '}'
+fn parseCompoundLiteral(p: *Parser) Error!Result {
+    const lparen = p.eat(.LParen) orelse return Result{};
+    var d: DeclSpec = .{ .type = .{ .specifier = undefined } };
+    const any = if (p.comp.langOpts.standard.atLeast(.c23))
+        try p.parseStorageClassSpec(&d)
+    else
+        false;
+
+    const tag: AstTag = switch (d.storageClass) {
+        .static => if (d.threadLocal != null)
+            .StaticThreadLocalCompoundLiteralExpr
+        else
+            .StaticCompoundLiteralExpr,
+
+        .register,
+        .none,
+        => if (d.threadLocal != null)
+            .ThreadLocalCompoundLiteralExpr
+        else
+            .CompoundLiteralExpr,
+
+        .auto, .@"extern", .typedef => |tok| blk: {
+            try p.errStr(.invalid_compound_literal_storage_class, tok, @tagName(d.storageClass));
+            d.storageClass = .none;
+            break :blk if (d.threadLocal != null)
+                .ThreadLocalCompoundLiteralExpr
+            else
+                .CompoundLiteralExpr;
+        },
+    };
+
+    var ty = (try p.parseTypeName()) orelse {
+        p.tokenIdx = lparen;
+        if (any) {
+            try p.err(.expected_type);
+            return error.ParsingFailed;
+        }
+        return Result{};
+    };
+    if (d.storageClass == .register) ty.qual.register = true;
+    try p.expectClosing(lparen, .RParen);
+
+    if (ty.isFunc()) {
+        try p.err(.func_init);
+    } else if (ty.is(.VariableLenArray)) {
+        try p.err(.vla_init);
+    } else if (ty.hasIncompleteSize() and !ty.is(.IncompleteArray)) {
+        try p.errStr(.variable_incomplete_ty, p.tokenIdx, try p.typeStr(ty));
+        return error.ParsingFailed;
+    }
+
+    var initlistExpr = try p.initializer(ty);
+    if (d.constexpr) |_| {
+        //TODO error if not constexpr
+    }
+    try initlistExpr.un(p, tag);
+    return initlistExpr;
 }
 
 /// suffix-expression

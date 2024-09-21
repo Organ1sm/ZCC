@@ -2366,3 +2366,8 @@ pub const unsupported_embed_param = struct {
     pub const extra = .str;
     pub const opt = "unsupported-embed-param";
 };
+pub const invalid_compound_literal_storage_class = struct {
+    pub const msg = "compound literal cannot have {s} storage class";
+    pub const kind = .@"error";
+    pub const extra = .str;
+};
