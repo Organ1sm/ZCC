@@ -354,7 +354,6 @@ pub fn get32BitArchVariant(target: std.Target) ?std.Target {
         .spirv,
         .spirv32,
         .loongarch32,
-        .dxil,
         .xtensa,
         => {}, // Already 32 bit
 
@@ -381,7 +380,6 @@ pub fn get64BitArchVariant(target: std.Target) ?std.Target {
         .arc,
         .avr,
         .csky,
-        .dxil,
         .hexagon,
         .kalimba,
         .lanai,
@@ -450,7 +448,6 @@ pub fn toLLVMTriple(target: std.Target, buf: []u8) []const u8 {
         .bpfel => "bpfel",
         .bpfeb => "bpfeb",
         .csky => "csky",
-        .dxil => "dxil",
         .hexagon => "hexagon",
         .loongarch32 => "loongarch32",
         .loongarch64 => "loongarch64",
@@ -536,6 +533,7 @@ pub fn toLLVMTriple(target: std.Target, buf: []u8) []const u8 {
         .vulkan,
         .plan9,
         .other,
+        .bridgeos,
         => "unknown",
     };
     writer.writeAll(llvm_os) catch unreachable;
@@ -574,21 +572,6 @@ pub fn toLLVMTriple(target: std.Target, buf: []u8) []const u8 {
         .cygnus => "cygnus",
         .simulator => "simulator",
         .macabi => "macabi",
-        .pixel => "pixel",
-        .vertex => "vertex",
-        .geometry => "geometry",
-        .hull => "hull",
-        .domain => "domain",
-        .compute => "compute",
-        .library => "library",
-        .raygeneration => "raygeneration",
-        .intersection => "intersection",
-        .anyhit => "anyhit",
-        .closesthit => "closesthit",
-        .miss => "miss",
-        .callable => "callable",
-        .mesh => "mesh",
-        .amplification => "amplification",
         .ohos => "openhos",
     };
     writer.writeAll(LLVMAbi) catch unreachable;

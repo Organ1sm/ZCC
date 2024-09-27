@@ -173,6 +173,7 @@ pub const Token = struct {
         .{ "pragma", .KeywordPragma },
         .{ "line", .KeywordLine },
         .{ "__VA_ARGS__", .KeywordVarArgs },
+        .{ "__VA_OPT__", .KeywordVarOpt },
         .{ "__func__", .MacroFunc },
         .{ "__FUNCTION__", .MacroFunction },
         .{ "__PRETTY_FUNCTION__", .MacroPrettyFunc },

@@ -1396,6 +1396,10 @@ fn expandFuncMacro(
                 while (tokenIdx + 1 < funcMacro.tokens.len) {
                     const rawNext = funcMacro.tokens[tokenIdx + 1];
                     tokenIdx += 1;
+
+                    var vaoptBuffer = ExpandBuffer.init(pp.gpa);
+                    defer vaoptBuffer.deinit();
+
                     const next = switch (rawNext.id) {
                         .MacroWS => continue,
                         .HashHash => continue,
@@ -1408,6 +1412,11 @@ fn expandFuncMacro(
                         else
                             &[1]Token{tokenFromRaw(.{ .id = .PlaceMarker, .source = .generated })},
                         .KeywordVarArgs => varArguments.items,
+                        .KeywordVarOpt => blk: {
+                            try pp.expandVaOpt(&vaoptBuffer, rawNext, varArguments.items.len != 0);
+                            if (varArguments.items.len == 0) break;
+                            break :blk vaoptBuffer.items;
+                        },
                         else => &[1]Token{tokenFromRaw(rawNext)},
                     };
                     try pp.pasteTokens(&buf, next);
@@ -1433,6 +1442,10 @@ fn expandFuncMacro(
             .KeywordVarArgs => {
                 const rawLoc = Source.Location{ .id = raw.source, .byteOffset = raw.start, .line = raw.line };
                 try bufCopyTokens(&buf, expandedVarArguments.items, &.{rawLoc});
+            },
+
+            .KeywordVarOpt => {
+                try pp.expandVaOpt(&buf, raw, varArguments.items.len != 0);
             },
 
             .StringifyParam, .StringifyVarArgs => {
@@ -1596,6 +1609,28 @@ fn expandFuncMacro(
     removePlaceMarkers(&buf);
 
     return buf;
+}
+
+fn expandVaOpt(
+    pp: *Preprocessor,
+    buf: *ExpandBuffer,
+    raw: RawToken,
+    shouldExpa: bool,
+) !void {
+    if (!shouldExpa) return;
+
+    const source = pp.comp.getSource(raw.source);
+    var lexer: Lexer = .{
+        .buffer = source.buffer,
+        .index = raw.start,
+        .source = raw.source,
+        .comp = pp.comp,
+        .line = raw.line,
+    };
+    while (lexer.index < raw.end) {
+        const tok = lexer.next();
+        try buf.append(tokenFromRaw(tok));
+    }
 }
 
 fn shouldExpand(tok: Token, macro: *Macro) bool {
@@ -2598,6 +2633,33 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: RawToken, lParen: Raw
 
                 if (varArgs and token.is(.KeywordVarArgs)) {
                     // do nothing
+                } else if (varArgs and token.is(.KeywordVarOpt)) {
+                    const optLparen = lexer.next();
+                    if (!optLparen.is(.LParen)) {
+                        try pp.addError(optLparen, .va_opt_lparen);
+                        return skipToNewLine(lexer);
+                    }
+                    token.start = optLparen.end;
+
+                    var parens: u32 = 0;
+                    while (true) {
+                        const optToken = lexer.next();
+                        switch (optToken.id) {
+                            .LParen => parens += 1,
+                            .RParen => if (parens == 0) {
+                                break;
+                            } else {
+                                parens -= 1;
+                            },
+                            .NewLine, .Eof => {
+                                try pp.addError(optToken, .va_opt_rparen);
+                                try pp.addError(optLparen, .to_match_paren);
+                                return skipToNewLine(lexer);
+                            },
+                            .WhiteSpace => {},
+                            else => token.end = optToken.end,
+                        }
+                    }
                 } else if (token.id.isMacroIdentifier()) {
                     token.id.simplifyMacroKeyword();
                     const s = pp.getTokenSlice(token);
@@ -3120,7 +3182,7 @@ test "Include guards" {
 
         fn skippable(tokenID: TokenType) bool {
             return switch (tokenID) {
-                .KeywordDefined, .KeywordVarArgs, .KeywordEndIf => true,
+                .KeywordDefined, .KeywordVarArgs, .KeywordVarOpt, .KeywordEndIf => true,
                 else => false,
             };
         }

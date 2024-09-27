@@ -7,7 +7,6 @@ pub fn build(b: *std.Build) !void {
     const EnableLinkerBuildId = b.option(bool, "enable-linker-build-id", "pass --build-id to linker") orelse false;
     const TestAllAllocationFailures = b.option(bool, "test-all-allocation-failures", "Test all allocation failures") orelse false;
     const LinkLibc = b.option(bool, "link-libc", "Force self-hosted compile to link libc") orelse (mode != .Debug);
-    const SkipRecordTests = b.option(bool, "skip-record-tests", "Skip record layout tests") orelse false;
     const DefaultLinker = b.option([]const u8, "default-linker", "Default linker zcc will use if none is supplied via -fuse-ld") orelse "ld";
     const DefaultSysroot = b.option([]const u8, "default-sysroot", "Default <path> to all compiler invocations for --sysroot=<path>.") orelse "";
     const DefaultRtlib = b.option([]const u8, "default-rtlib", "Default compiler runtime library if --rtlib is not specified") orelse "";
@@ -116,6 +115,5 @@ pub fn build(b: *std.Build) !void {
     const tests_step = b.step("test", "Run all tests");
     tests_step.dependOn(unit_tests_step);
     tests_step.dependOn(integration_tests_step);
-    if (!SkipRecordTests)
-        tests_step.dependOn(record_tests_step);
+    tests_step.dependOn(record_tests_step);
 }

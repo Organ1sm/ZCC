@@ -2371,3 +2371,11 @@ pub const invalid_compound_literal_storage_class = struct {
     pub const kind = .@"error";
     pub const extra = .str;
 };
+pub const va_opt_lparen = struct {
+    pub const msg = "missing '(' following __VA_OPT__";
+    pub const kind = .@"error";
+};
+pub const va_opt_rparen = struct {
+    pub const msg = "unterminated __VA_OPT__ argument list";
+    pub const kind = .@"error";
+};
