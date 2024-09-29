@@ -1,10 +1,10 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
-const Value = @import("../AST/Value.zig");
 const BigIntConst = std.math.big.int.Const;
 const BigIntMutable = std.math.big.int.Mutable;
 const Hash = std.hash.Wyhash;
+const Limb = std.math.big.Limb;
 
 const Interner = @This();
 
@@ -14,6 +14,7 @@ items: std.MultiArrayList(struct {
     data: u32,
 }) = .{},
 extra: std.ArrayListUnmanaged(u32) = .{},
+limbs: std.ArrayListUnmanaged(Limb) = .{},
 strings: std.ArrayListUnmanaged(u8) = .{},
 
 const KeyAdapter = struct {
@@ -182,7 +183,7 @@ pub const Tag = enum(u8) {
     /// `data` is `i32`
     i32,
     /// `data` is `Int`
-    intPositive,
+    intPostive,
     /// `data` is `Int`
     intNegative,
     /// `data` is `f16`
@@ -219,8 +220,8 @@ pub const Tag = enum(u8) {
     };
 
     pub const Int = struct {
-        limbs_index: u32,
-        limbs_len: u32,
+        limbsIndex: u32,
+        limbsLen: u32,
 
         /// Big enough to fit any non-BigInt value
         pub const BigIntSpace = struct {
@@ -333,6 +334,7 @@ pub fn deinit(self: *Interner, gpa: Allocator) void {
     self.map.deinit(gpa);
     self.items.deinit(gpa);
     self.extra.deinit(gpa);
+    self.limbs.deinit(gpa);
     self.strings.deinit(gpa);
 }
 
@@ -341,37 +343,281 @@ pub fn put(self: *Interner, gpa: Allocator, key: Key) !Ref {
         return some;
     const adapter = KeyAdapter{ .interner = self };
     const gop = try self.map.getOrPutAdapted(gpa, key, adapter);
+
+    try self.items.ensureUnusedCapacity(gpa, 1);
+
+    switch (key) {
+        .intTy => |bits| self.items.appendAssumeCapacity(.{ .tag = .intTy, .data = bits }),
+        .floatTy => |bits| self.items.appendAssumeCapacity(.{ .tag = .floatTy, .data = bits }),
+
+        .arrayTy => |info| {
+            const splitLen = PackedU64.init(info.len);
+            self.items.appendAssumeCapacity(.{
+                .tag = .arrayTy,
+                .data = try self.addExtra(gpa, Tag.Array{
+                    .len0 = splitLen.a,
+                    .len1 = splitLen.b,
+                    .child = info.child,
+                }),
+            });
+        },
+
+        .vectorTy => |info| {
+            self.items.appendAssumeCapacity(.{
+                .tag = .vectorTy,
+                .data = try self.addExtra(gpa, Tag.Vector{
+                    .len = info.len,
+                    .child = info.child,
+                }),
+            });
+        },
+
+        .int => |repr| int: {
+            var space: Tag.Int.BigIntSpace = undefined;
+            const big = switch (repr) {
+                .u64 => |data| if (std.math.cast(u32, data)) |small| {
+                    self.items.appendAssumeCapacity(.{ .tag = .u32, .data = small });
+                    break :int;
+                } else BigIntMutable.init(&space.limbs, data).toConst(),
+                .i64 => |data| if (std.math.cast(i32, data)) |small| {
+                    self.items.appendAssumeCapacity(.{ .tag = .i32, .data = @bitCast(small) });
+                    break :int;
+                } else BigIntMutable.init(&space.limbs, data).toConst(),
+                .bigInt => |data| big: {
+                    if (data.bitCountAbs() <= 32) {
+                        if (data.positive) {
+                            self.items.appendAssumeCapacity(.{
+                                .tag = .u32,
+                                .data = data.to(u32) catch unreachable,
+                            });
+                        } else {
+                            self.items.appendAssumeCapacity(.{
+                                .tag = .i32,
+                                .data = @bitCast(data.to(i32) catch unreachable),
+                            });
+                        }
+                        break :int;
+                    }
+                    break :big data;
+                },
+            };
+
+            const limbsIndex: u32 = @intCast(self.limbs.items.len);
+            try self.limbs.appendSlice(gpa, big.limbs);
+            self.items.appendAssumeCapacity(.{
+                .tag = if (big.positive) .intPostive else .intNegative,
+                .data = try self.addExtra(gpa, Tag.Int{
+                    .limbsIndex = limbsIndex,
+                    .limbsLen = @intCast(big.limbs.len),
+                }),
+            });
+        },
+
+        .float => |repr| switch (repr) {
+            .f16 => |data| self.items.appendAssumeCapacity(.{
+                .tag = .f16,
+                .data = @as(u16, @bitCast(data)),
+            }),
+            .f32 => |data| self.items.appendAssumeCapacity(.{
+                .tag = .f32,
+                .data = @as(u32, @bitCast(data)),
+            }),
+            .f64 => |data| self.items.appendAssumeCapacity(.{
+                .tag = .f64,
+                .data = try self.addExtra(gpa, Tag.F64.pack(data)),
+            }),
+            .f80 => |data| self.items.appendAssumeCapacity(.{
+                .tag = .f64,
+                .data = try self.addExtra(gpa, Tag.F80.pack(data)),
+            }),
+            .f128 => |data| self.items.appendAssumeCapacity(.{
+                .tag = .f64,
+                .data = try self.addExtra(gpa, Tag.F128.pack(data)),
+            }),
+        },
+
+        .bytes => |bytes| {
+            const stringsIndex: u32 = @intCast(self.strings.items.len);
+            try self.strings.appendSlice(gpa, bytes);
+            self.items.appendAssumeCapacity(.{
+                .tag = .bytes,
+                .data = try self.addExtra(gpa, Tag.Bytes{
+                    .stringsIndex = stringsIndex,
+                    .len = @intCast(bytes.len),
+                }),
+            });
+        },
+
+        .record => |record| {
+            const splitPtr = PackedU64.init(@intFromPtr(record.userPtr));
+            try self.extra.ensureUnusedCapacity(
+                gpa,
+                @typeInfo(Tag.Record).@"struct".fields.len + record.elements.len,
+            );
+            self.items.appendAssumeCapacity(.{
+                .tag = .record,
+                .data = self.addExtraAssumeCapacity(Tag.Record{
+                    .ptr0 = splitPtr.a,
+                    .ptr1 = splitPtr.b,
+                    .elements_len = @intCast(record.elements.len),
+                }),
+            });
+            self.extra.appendSliceAssumeCapacity(@ptrCast(record.elements));
+        },
+
+        .ptrTy,
+        .noreturnTy,
+        .voidTy,
+        .funcTy,
+        .null,
+        => unreachable,
+    }
+
     return @enumFromInt(gop.index);
+}
+
+fn addExtra(self: *Interner, gpa: Allocator, extra: anytype) Allocator.Error!u32 {
+    const fields = @typeInfo(@TypeOf(extra)).@"struct".fields;
+    try self.extra.ensureUnusedCapacity(gpa, fields.len);
+    return self.addExtraAssumeCapacity(extra);
+}
+
+fn addExtraAssumeCapacity(self: *Interner, extra: anytype) u32 {
+    const result = @as(u32, @intCast(self.extra.items.len));
+    inline for (@typeInfo(@TypeOf(extra)).@"struct".fields) |field| {
+        self.extra.appendAssumeCapacity(switch (field.type) {
+            Ref => @intFromEnum(@field(extra, field.name)),
+            u32 => @field(extra, field.name),
+            else => @compileError("bad field type: " ++ @typeName(field.type)),
+        });
+    }
+    return result;
 }
 
 pub fn has(self: *Interner, key: Key) ?Ref {
     if (key.toRef()) |some|
         return some;
 
-    if (self.map.getIndex(key)) |index|
+    const adapter = KeyAdapter{ .interner = self };
+    if (self.map.getIndexAdapted(key, adapter)) |index|
         return @enumFromInt(index);
 
     return null;
 }
 
-pub fn get(ip: Interner, ref: Ref) Key {
+pub fn get(self: *const Interner, ref: Ref) Key {
     switch (ref) {
-        .ptr => return .ptr,
-        .func => return .func,
-        .noreturn => return .noreturn,
-        .void => return .void,
-        .i1 => return .{ .int = 1 },
-        .i8 => return .{ .int = 8 },
-        .i16 => return .{ .int = 16 },
-        .i32 => return .{ .int = 32 },
-        .i64 => return .{ .int = 64 },
-        .i128 => return .{ .int = 128 },
-        .f16 => return .{ .float = 16 },
-        .f32 => return .{ .float = 32 },
-        .f64 => return .{ .float = 64 },
-        .f80 => return .{ .float = 80 },
-        .f128 => return .{ .float = 128 },
+        .ptr => return .ptrTy,
+        .func => return .funcTy,
+        .noreturn => return .noreturnTy,
+        .void => return .voidTy,
+        .i1 => return .{ .intTy = 1 },
+        .i8 => return .{ .intTy = 8 },
+        .i16 => return .{ .intTy = 16 },
+        .i32 => return .{ .intTy = 32 },
+        .i64 => return .{ .intTy = 64 },
+        .i128 => return .{ .intTy = 128 },
+        .f16 => return .{ .floatTy = 16 },
+        .f32 => return .{ .floatTy = 32 },
+        .f64 => return .{ .floatTy = 64 },
+        .f80 => return .{ .floatTy = 80 },
+        .f128 => return .{ .floatTy = 128 },
+        .zero => return .{ .int = .{ .u64 = 0 } },
+        .one => return .{ .int = .{ .u64 = 1 } },
+        .null => return .null,
         else => {},
     }
-    return ip.map.keys()[@intFromEnum(ref)];
+
+    const item = self.items.get(@intFromEnum(ref));
+    const data = item.data;
+    return switch (item.tag) {
+        .intTy => .{ .intTy = @intCast(data) },
+        .floatTy => .{ .floatTy = @intCast(data) },
+        .arrayTy => {
+            const arrayType = self.extraData(Tag.Array, data);
+            return .{
+                .arrayTy = .{
+                    .len = arrayType.getLen(),
+                    .child = arrayType.child,
+                },
+            };
+        },
+
+        .vectorTy => {
+            const vectorType = self.extraData(Tag.Vector, data);
+            return .{
+                .vectorTy = .{
+                    .len = vectorType.len,
+                    .child = vectorType.child,
+                },
+            };
+        },
+
+        .u32 => .{ .int = .{ .u64 = data } },
+        .i32 => .{ .int = .{ .i64 = @as(i32, @bitCast(data)) } },
+
+        .intNegative, .intPostive => {
+            const intInfo = self.extraData(Tag.Int, data);
+            const limbs = self.limbs.items[intInfo.limbsIndex..][0..intInfo.limbsLen];
+            return .{
+                .int = .{
+                    .bigInt = .{
+                        .positive = item.tag == .intPostive,
+                        .limbs = limbs,
+                    },
+                },
+            };
+        },
+
+        .f16 => .{ .float = .{ .f16 = @bitCast(@as(u16, @intCast(data))) } },
+        .f32 => .{ .float = .{ .f32 = @bitCast(data) } },
+        .f64 => {
+            const float = self.extraData(Tag.F64, data);
+            return .{ .float = .{ .f64 = float.get() } };
+        },
+        .f80 => {
+            const float = self.extraData(Tag.F80, data);
+            return .{ .float = .{ .f80 = float.get() } };
+        },
+        .f128 => {
+            const float = self.extraData(Tag.F128, data);
+            return .{ .float = .{ .f128 = float.get() } };
+        },
+
+        .bytes => {
+            const bytes = self.extraData(Tag.Bytes, data);
+            return .{ .bytes = self.strings.items[bytes.stringsIndex..][0..bytes.len] };
+        },
+
+        .record => {
+            const extra = self.extraDataTrail(Tag.Record, data);
+            return .{
+                .record = .{
+                    .userPtr = extra.data.getPtr(),
+                    .elements = @ptrCast(self.extra.items[extra.end..][0..extra.data.elements_len]),
+                },
+            };
+        },
+    };
+}
+
+fn extraData(interner: *const Interner, comptime T: type, index: usize) T {
+    return interner.extraDataTrail(T, index).data;
+}
+
+fn extraDataTrail(interner: *const Interner, comptime T: type, index: usize) struct { data: T, end: u32 } {
+    var result: T = undefined;
+    const fields = @typeInfo(T).@"struct".fields;
+    inline for (fields, 0..) |field, field_i| {
+        const int32 = interner.extra.items[field_i + index];
+        @field(result, field.name) = switch (field.type) {
+            Ref => @enumFromInt(int32),
+            u32 => int32,
+            else => @compileError("bad field type: " ++ @typeName(field.type)),
+        };
+    }
+    return .{
+        .data = result,
+        .end = @intCast(index + fields.len),
+    };
 }

@@ -168,16 +168,16 @@ fn genType(c: *CodeGen, baseTy: Type) !Interner.Ref {
 
     if (ty.isInt()) {
         const bits = ty.bitSizeof(c.comp).?;
-        key = .{ .int = @intCast(bits) };
+        key = .{ .intTy = @intCast(bits) };
     } else if (ty.isFloat()) {
         const bits = ty.bitSizeof(c.comp).?;
-        key = .{ .float = @intCast(bits) };
+        key = .{ .floatTy = @intCast(bits) };
     } else if (ty.isArray()) {
         const elem = try c.genType(ty.getElemType());
-        key = .{ .array = .{ .child = elem, .len = ty.arrayLen().? } };
+        key = .{ .arrayTy = .{ .child = elem, .len = ty.arrayLen().? } };
     } else if (ty.isVector()) {
         const elem = try c.genType(ty.getElemType());
-        key = .{ .vector = .{ .child = elem, .len = @intCast(ty.data.array.len) } };
+        key = .{ .vectorTy = .{ .child = elem, .len = @intCast(ty.data.array.len) } };
     } else if (ty.is(.NullPtrTy)) {
         return c.comp.diagnostics.fatalNoSrc("TODO lower nullptr_t", .{});
     }
