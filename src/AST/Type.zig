@@ -749,8 +749,12 @@ pub fn isVoidStar(ty: Type) bool {
 }
 
 pub fn isUnsignedInt(ty: Type, comp: *const Compilation) bool {
+    return ty.signedness(comp) == .unsigned;
+}
+
+pub fn signedness(ty: Type, comp: *const Compilation) ?std.builtin.Signedness {
     return switch (ty.specifier) {
-        .Char, .ComplexChar => return comp.getCharSignedness() == .unsigned,
+        .Char, .ComplexChar => return comp.getCharSignedness(),
 
         .UChar,
         .UShort,
@@ -764,15 +768,15 @@ pub fn isUnsignedInt(ty: Type, comp: *const Compilation) bool {
         .ComplexULong,
         .ComplexULongLong,
         .ComplexUInt128,
-        => return true,
+        => .unsigned,
 
-        .BitInt, .ComplexBitInt => return ty.data.int.signedness == .unsigned,
+        .BitInt, .ComplexBitInt => return ty.data.int.signedness,
 
-        .TypeofType => ty.data.subType.isUnsignedInt(comp),
-        .TypeofExpr => ty.data.expr.ty.isUnsignedInt(comp),
-        .Attributed => ty.data.attributed.base.isUnsignedInt(comp),
+        .TypeofType => ty.data.subType.signedness(comp),
+        .TypeofExpr => ty.data.expr.ty.signedness(comp),
+        .Attributed => ty.data.attributed.base.signedness(comp),
 
-        else => false,
+        else => .signed,
     };
 }
 

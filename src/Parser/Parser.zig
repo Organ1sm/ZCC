@@ -23,6 +23,7 @@ const TextLiteral = @import("../Parser/TextLiteral.zig");
 const Value = @import("../AST/Value.zig");
 const StringId = @import("../Basic/StringInterner.zig").StringId;
 const RecordLayout = @import("../Basic/RecordLayout.zig");
+const Interner = @import("../CodeGen//Interner.zig");
 const NumberAffixes = @import("../Lexer/NumberAffixes.zig");
 const NumberPrefix = NumberAffixes.Prefix;
 const NumberSuffix = NumberAffixes.Suffix;
@@ -61,6 +62,7 @@ comp: *Compilation,
 gpa: Allocator,
 tokenIds: []const TokenType,
 tokenIdx: u32 = 0,
+interner: Interner = .{},
 
 // value of incomplete AST
 arena: Allocator,
@@ -651,6 +653,11 @@ fn diagnoseIncompleteDefinitions(p: *Parser) !void {
     assert(errorsAdded == 2 * p.tentativeDefs.count()); // Each tentative def should add an error + note
 }
 
+pub fn intern(p: *Parser, k: Interner.Key) !Value {
+    const ref = try p.interner.put(p.gpa, k);
+    return .{ .optRef = @enumFromInt(@intFromEnum(ref)) };
+}
+
 /// root : (decl | inline assembly ';' | static-assert-declaration)*
 pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
     assert(pp.linemarkers == .None);
@@ -802,8 +809,6 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
     const data = try p.data.toOwnedSlice();
     errdefer pp.comp.gpa.free(data);
 
-    const strings = try p.retainedStrings.toOwnedSlice();
-    errdefer pp.comp.gpa.free(strings);
     return AST{
         .comp = pp.comp,
         .tokens = pp.tokens.slice(),
@@ -812,8 +817,8 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
         .nodes = p.nodes.toOwnedSlice(),
         .data = data,
         .rootDecls = rootDecls,
-        .strings = strings,
         .valueMap = p.valueMap,
+        .interner = p.interner,
     };
 }
 
@@ -2655,7 +2660,7 @@ const Enumerator = struct {
             return;
         }
 
-        if (e.res.value.add(e.res.value, Value.int(1), e.res.ty, p.comp)) {
+        if (try e.res.value.add(e.res.value, Value.int(1), e.res.ty, p)) {
             const byteSize = e.res.ty.sizeof(p.comp).?;
             const bitSize: u8 = @intCast(if (e.res.ty.isUnsignedInt(p.comp)) byteSize * 8 else byteSize * 8 - 1);
 
@@ -2672,7 +2677,7 @@ const Enumerator = struct {
                 break :blk Type.ULongLong;
             };
             e.res.ty = newTy;
-            _ = e.res.value.add(oldVal, Value.int(1), e.res.ty, p.comp);
+            _ = try e.res.value.add(oldVal, Value.int(1), e.res.ty, p);
         }
     }
 
@@ -5328,7 +5333,7 @@ fn parseOrExpr(p: *Parser) Error!Result {
         try rhs.expect(p);
 
         if (try lhs.adjustTypes(token, &rhs, p, .integer))
-            lhs.value = lhs.value.bitOr(rhs.value, lhs.ty, p.comp);
+            lhs.value = try lhs.value.bitOr(rhs.value, p);
 
         try lhs.bin(p, .BitOrExpr, rhs);
     }
@@ -5346,7 +5351,7 @@ fn parseXORExpr(p: *Parser) Error!Result {
         try rhs.expect(p);
 
         if (try lhs.adjustTypes(token, &rhs, p, .integer))
-            lhs.value = lhs.value.bitXor(rhs.value, lhs.ty, p.comp);
+            lhs.value = try lhs.value.bitXor(rhs.value, p);
 
         try lhs.bin(p, .BitXorExpr, rhs);
     }
@@ -5364,7 +5369,7 @@ fn parseAndExpr(p: *Parser) Error!Result {
         try rhs.expect(p);
 
         if (try lhs.adjustTypes(token, &rhs, p, .integer))
-            lhs.value = lhs.value.bitAnd(rhs.value, lhs.ty, p.comp);
+            lhs.value = try lhs.value.bitAnd(rhs.value, p);
 
         try lhs.bin(p, .BitAndExpr, rhs);
     }
@@ -5471,10 +5476,10 @@ fn parseAddExpr(p: *Parser) Error!Result {
         const lhsTy = lhs.ty;
         if (try lhs.adjustTypes(minus.?, &rhs, p, if (plus != null) .add else .sub)) {
             if (plus != null) {
-                if (lhs.value.add(lhs.value, rhs.value, lhs.ty, p.comp))
+                if (try lhs.value.add(lhs.value, rhs.value, lhs.ty, p))
                     try p.errOverflow(plus.?, lhs);
             } else {
-                if (lhs.value.sub(lhs.value, rhs.value, lhs.ty, p.comp))
+                if (lhs.value.sub(lhs.value, rhs.value, lhs.ty, p))
                     try p.errOverflow(minus.?, lhs);
             }
         }
@@ -5517,10 +5522,11 @@ fn parseMulExpr(p: *Parser) Error!Result {
 
         if (try lhs.adjustTypes(percent.?, &rhs, p, if (tag == .ModExpr) .integer else .arithmetic)) {
             if (mul != null) {
-                if (lhs.value.mul(lhs.value, rhs.value, lhs.ty, p.comp))
+                if (lhs.value.mul(lhs.value, rhs.value, lhs.ty, p))
                     try p.errOverflow(mul.?, lhs);
             } else if (div != null) {
-                lhs.value = Value.div(lhs.value, rhs.value, lhs.ty, p.comp);
+                if (try lhs.value.div(lhs.value, rhs.value, lhs.ty, p))
+                    try p.errOverflow(mul.?, lhs);
             } else {
                 var res = Value.rem(lhs.value, rhs.value, lhs.ty, p.comp);
                 if (res.isUnavailable()) {
@@ -5954,7 +5960,7 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
 
             try operand.usualUnaryConversion(p, token);
             if (operand.value.isNumeric())
-                _ = operand.value.sub(operand.value.zero(), operand.value, operand.ty, p.comp)
+                _ = try operand.value.sub(operand.value.zero(), operand.value, operand.ty, p)
             else
                 operand.value.tag = .unavailable;
 
@@ -5981,7 +5987,7 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
             try operand.usualUnaryConversion(p, token);
 
             if (operand.value.isNumeric()) {
-                if (operand.value.add(operand.value, operand.value.one(), operand.ty, p.comp))
+                if (try operand.value.add(operand.value, operand.value.one(), operand.ty, p))
                     try p.errOverflow(token, operand);
             } else {
                 operand.value.tag = .unavailable;
@@ -6010,7 +6016,7 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
             try operand.usualUnaryConversion(p, token);
 
             if (operand.value.isNumeric()) {
-                if (operand.value.sub(operand.value, operand.value.one(), operand.ty, p.comp))
+                if (try operand.value.sub(operand.value, operand.value.one(), operand.ty, p))
                     try p.errOverflow(token, operand);
             } else {
                 operand.value.tag = .unavailable;
@@ -6030,7 +6036,7 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
             if (operand.ty.isInt()) {
                 try operand.intCast(p, operand.ty.integerPromotion(p.comp), token);
                 if (operand.value.tag == .int) {
-                    operand.value = operand.value.bitNot(operand.ty, p.comp);
+                    operand.value = try operand.value.bitNot(operand.ty, p);
                 }
             } else {
                 try p.errStr(.invalid_argument_un, token, try p.typeStr(operand.ty));

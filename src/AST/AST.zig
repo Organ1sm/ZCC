@@ -9,6 +9,7 @@ const AstTag = @import("AstTag.zig").Tag;
 const Attribute = @import("../Lexer/Attribute.zig");
 const Value = @import("Value.zig");
 const StringInterner = @import("../Basic/StringInterner.zig");
+const Interner = @import("../CodeGen/Interner.zig");
 
 const AST = @This();
 
@@ -23,16 +24,16 @@ tokens: Token.List.Slice,
 nodes: Node.List.Slice,
 data: []const NodeIndex,
 rootDecls: []const NodeIndex,
-strings: []const u8,
 valueMap: ValueMap,
+interner: Interner,
 
 pub fn deinit(tree: *AST) void {
     tree.comp.gpa.free(tree.rootDecls);
     tree.comp.gpa.free(tree.data);
-    tree.comp.gpa.free(tree.strings);
     tree.nodes.deinit(tree.comp.gpa);
     tree.arena.deinit();
     tree.valueMap.deinit();
+    tree.interner.deinit(tree.comp.gpa);
 }
 
 pub const GNUAssemblyQualifiers = struct {
