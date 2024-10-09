@@ -111,7 +111,7 @@ pub fn maybeWarnUnused(res: Result, p: *Parser, exprStart: TokenIndex, errStart:
 
 pub fn boolRes(lhs: *Result, p: *Parser, tag: AstTag, rhs: Result) !void {
     if (lhs.value.tag == .nullptrTy)
-        lhs.value = Value.int(0);
+        lhs.value = Value.zero;
 
     if (!lhs.ty.isInvalid())
         lhs.ty = Type.Int;
@@ -420,15 +420,15 @@ pub fn boolCast(res: *Result, p: *Parser, boolType: Type, tok: TokenIndex) Error
             try p.errStr(.array_address_to_bool, tok, p.getTokenText(tok));
 
         try res.lvalConversion(p);
-        res.value = Value.int(1);
+        res.value = Value.one;
         res.ty = boolType;
         try res.implicitCast(p, .PointerToBool);
     } else if (res.ty.isPointer()) {
-        res.value.toBool();
+        res.value.boolCast();
         res.ty = boolType;
         try res.implicitCast(p, .PointerToBool);
     } else if (res.ty.isInt() and !res.ty.is(.Bool)) {
-        res.value.toBool();
+        res.value.boolCast();
         res.ty = boolType;
         try res.implicitCast(p, .IntToBool);
     } else if (res.ty.isFloat()) {
@@ -546,7 +546,7 @@ fn floatToIntWarning(res: *Result, p: *Parser, intTy: Type, oldValue: Value, cha
 
 pub fn floatCast(res: *Result, p: *Parser, floatType: Type) Error!void {
     if (res.ty.is(.Bool)) {
-        res.value.intToFloat(res.ty, floatType, p.comp);
+        try res.value.intToFloat(floatType, p);
         res.ty = floatType.makeReal();
         try res.implicitCast(p, .BoolToFloat);
         if (!floatType.isReal()) {
@@ -556,7 +556,7 @@ pub fn floatCast(res: *Result, p: *Parser, floatType: Type) Error!void {
     }
     // src type is int type
     else if (res.ty.isInt()) {
-        res.value.intToFloat(res.ty, floatType, p.comp);
+        try res.value.intToFloat(floatType, p);
         const oldReal = res.ty.isReal();
         const newReal = floatType.isReal();
         if (oldReal and newReal) {
@@ -776,7 +776,7 @@ pub fn castType(res: *Result, p: *Parser, to: Type, tok: TokenIndex) !void {
     } else if (res.ty.is(.NullPtrTy)) {
         if (to.is(.Bool)) {
             try res.nullCast(p, res.ty);
-            res.value.toBool();
+            res.value.boolCast();
             res.ty = Type.Bool;
             try res.implicitCast(p, .PointerToBool);
             try res.saveValue(p);
@@ -924,12 +924,12 @@ pub fn castType(res: *Result, p: *Parser, to: Type, tok: TokenIndex) !void {
         const oldInt = res.ty.isInt() or res.ty.isPointer();
         const newInt = to.isInt() or to.isPointer();
         if (to.is(.Bool)) {
-            res.value.toBool();
+            res.value.boolCast();
         } else if (oldIsFloat and newInt) {
             // Explicit cast, no conversion warning
             _ = res.value.floatToInt(res.ty, to, p.comp);
         } else if (newIsFloat and oldInt) {
-            res.value.intToFloat(res.ty, to, p.comp);
+            res.value.intToFloat(to, p);
         } else if (newIsFloat and oldIsFloat) {
             res.value.floatCast(res.ty, to, p.comp);
         } else if (oldInt and newInt) {

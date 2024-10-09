@@ -436,7 +436,7 @@ pub fn floatValueChangedStr(p: *Parser, res: *Result, oldValue: f64, intTy: Type
     const isZero = res.value.isZero();
     const nonZeroStr: []const u8 = if (isZero) "non-zero " else "";
     if (intTy.is(.Bool)) {
-        try w.print(" changes {s}value from {d} to {}", .{ nonZeroStr, oldValue, res.value.getBool() });
+        try w.print(" changes {s}value from {d} to {}", .{ nonZeroStr, oldValue, res.value.toBool() });
     } else if (intTy.isUnsignedInt(p.comp)) {
         try w.print(" changes {s}value from {d} to {d}", .{ nonZeroStr, oldValue, res.value.getInt(u64) });
     } else {
@@ -1299,7 +1299,7 @@ fn parseStaticAssert(p: *Parser) Error!bool {
         if (!res.ty.isInvalid())
             try p.errToken(.static_assert_not_constant, resToken);
     } else {
-        if (!res.value.getBool()) {
+        if (!res.value.toBool()) {
             if (try p.staticAssertMessage(resNode, str)) |message|
                 try p.errStr(.static_assert_failure_message, staticAssert, message)
             else
@@ -2007,7 +2007,7 @@ fn parseTypeSpec(p: *Parser, ty: *TypeBuilder) Error!bool {
                 if (res.value.isUnavailable()) {
                     try p.errToken(.expected_integer_constant_expr, bitIntToken);
                     return error.ParsingFailed;
-                } else if (res.value.compare(.lte, Value.int(0), res.ty, p.comp)) {
+                } else if (res.value.compare(.lte, Value.zero, res.ty, p.comp)) {
                     bits = -1;
                 } else if (res.value.compare(.gt, Value.int(128), res.ty, p.comp)) {
                     bits = 129;
@@ -2311,7 +2311,7 @@ fn parseRecordDeclarator(p: *Parser) Error!bool {
             if (res.value.isUnavailable()) {
                 try p.errToken(.expected_integer_constant_expr, bitsToken);
                 break :bits;
-            } else if (res.value.compare(.lt, Value.int(0), res.ty, p.comp)) {
+            } else if (res.value.compare(.lt, Value.zero, res.ty, p.comp)) {
                 try p.errExtra(.negative_bitwidth, firstToken, .{
                     .signed = res.value.signExtend(res.ty, p.comp),
                 });
@@ -2656,11 +2656,11 @@ const Enumerator = struct {
         const oldVal = e.res.value;
         if (oldVal.isUnavailable()) {
             // First enumerator, set to 0 fits in all types.
-            e.res.value = Value.int(0);
+            e.res.value = Value.zero;
             return;
         }
 
-        if (try e.res.value.add(e.res.value, Value.int(1), e.res.ty, p)) {
+        if (try e.res.value.add(e.res.value, Value.one, e.res.ty, p)) {
             const byteSize = e.res.ty.sizeof(p.comp).?;
             const bitSize: u8 = @intCast(if (e.res.ty.isUnsignedInt(p.comp)) byteSize * 8 else byteSize * 8 - 1);
 
@@ -2677,7 +2677,7 @@ const Enumerator = struct {
                 break :blk Type.ULongLong;
             };
             e.res.ty = newTy;
-            _ = try e.res.value.add(oldVal, Value.int(1), e.res.ty, p);
+            _ = try e.res.value.add(oldVal, Value.one, e.res.ty, p);
         }
     }
 
@@ -2770,14 +2770,14 @@ fn enumerator(p: *Parser, e: *Enumerator) Error!?EnumFieldAndNode {
     var res = e.res;
     res.ty = try Attribute.applyEnumeratorAttributes(p, res.ty, attrBufferTop);
 
-    if (res.ty.isUnsignedInt(p.comp) or res.value.compare(.gte, Value.int(0), res.ty, p.comp))
+    if (res.ty.isUnsignedInt(p.comp) or res.value.compare(.gte, Value.zero, res.ty, p.comp))
         e.numPositiveBits = @max(e.numPositiveBits, res.value.minUnsignedBits(res.ty, p.comp))
     else
         e.numNegativeBits = @max(e.numNegativeBits, res.value.minSignedBits(res.ty, p.comp));
 
     if (errStart == p.comp.diagnostics.list.items.len) {
         // only do these warnings if we didn't already warn about overflow or non-representable values
-        if (e.res.value.compare(.lt, Value.int(0), e.res.ty, p.comp)) {
+        if (e.res.value.compare(.lt, Value.zero, e.res.ty, p.comp)) {
             const value = e.res.value.getInt(i64);
             if (value < Type.Int.minInt(p.comp))
                 try p.errExtra(.enumerator_too_small, nameToken, .{ .signed = value });
@@ -3060,7 +3060,7 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: Declarator
 
             if (sizeValue.isZero()) {
                 try p.errToken(.zero_length_array, lb);
-            } else if (sizeValue.compare(.lt, Value.int(0), sizeTy, p.comp)) {
+            } else if (sizeValue.compare(.lt, Value.zero, sizeTy, p.comp)) {
                 try p.errToken(.negative_array_size, lb);
                 return error.ParsingFailed;
             }
@@ -3394,7 +3394,7 @@ pub fn initializerItem(p: *Parser, il: *InitList, initType: Type) Error!bool {
                 if (indexRes.value.isUnavailable()) {
                     try p.errToken(.expected_integer_constant_expr, exprToken);
                     return error.ParsingFailed;
-                } else if (indexRes.value.compare(.lt, indexRes.value.zero(), indexRes.ty, p.comp)) {
+                } else if (indexRes.value.compare(.lt, Value.zero, indexRes.ty, p.comp)) {
                     try p.errExtra(.negative_array_designator, lb + 1, .{
                         .signed = indexRes.value.signExtend(indexRes.ty, p.comp),
                     });
@@ -4923,7 +4923,6 @@ pub fn tempTree(p: *Parser) AST {
         .arena = undefined,
         .generated = undefined,
         .tokens = undefined,
-        .strings = undefined,
         .rootDecls = undefined,
     };
 }
@@ -5025,7 +5024,7 @@ pub fn macroExpr(p: *Parser) Compilation.Error!bool {
         return false;
     }
 
-    return res.value.getBool();
+    return res.value.toBool();
 }
 
 /// expression : assign-expression (',' assign-expression)*
@@ -5219,7 +5218,7 @@ fn parseCondExpr(p: *Parser) Error!Result {
     // Depending on the value of the condition, avoid  evaluating unreachable
     var thenExpr = blk: {
         defer p.noEval = savedEval;
-        if (!cond.value.isUnavailable() and !cond.value.getBool())
+        if (!cond.value.isUnavailable() and !cond.value.toBool())
             p.noEval = true;
 
         break :blk try p.parseExpr();
@@ -5244,7 +5243,7 @@ fn parseCondExpr(p: *Parser) Error!Result {
 
     var elseExpr = blk: {
         defer p.noEval = savedEval;
-        if (!cond.value.isUnavailable() and cond.value.getBool())
+        if (!cond.value.isUnavailable() and cond.value.toBool())
             p.noEval = true;
 
         break :blk try p.parseCondExpr();
@@ -5254,7 +5253,7 @@ fn parseCondExpr(p: *Parser) Error!Result {
     _ = try thenExpr.adjustTypes(colon, &elseExpr, p, .conditional);
 
     if (!cond.value.isUnavailable()) {
-        cond.value = if (cond.value.getBool()) thenExpr.value else elseExpr.value;
+        cond.value = if (cond.value.toBool()) thenExpr.value else elseExpr.value;
     } else {
         try thenExpr.saveValue(p);
         try elseExpr.saveValue(p);
@@ -5279,15 +5278,15 @@ fn logicalOrExpr(p: *Parser) Error!Result {
     defer p.noEval = savedEval;
 
     while (p.eat(.PipePipe)) |token| {
-        if (!lhs.value.isUnavailable() and lhs.value.getBool())
+        if (!lhs.value.isUnavailable() and lhs.value.toBool())
             p.noEval = true;
 
         var rhs = try p.logicalAndExpr();
         try rhs.expect(p);
 
         if (try lhs.adjustTypes(token, &rhs, p, .booleanLogic)) {
-            const res = @intFromBool(lhs.value.getBool() or rhs.value.getBool());
-            lhs.value = Value.int(res);
+            const res = lhs.value.toBool() or rhs.value.toBool();
+            lhs.val = Value.fromBool(res);
         }
 
         try lhs.boolRes(p, .BoolOrExpr, rhs);
@@ -5306,15 +5305,15 @@ fn logicalAndExpr(p: *Parser) Error!Result {
     defer p.noEval = savedEval;
 
     while (p.eat(.AmpersandAmpersand)) |token| {
-        if (!lhs.value.isUnavailable() and !lhs.value.getBool())
+        if (!lhs.value.isUnavailable() and !lhs.value.toBool())
             p.noEval = true;
 
         var rhs = try p.parseOrExpr();
         try rhs.expect(p);
 
         if (try lhs.adjustTypes(token, &rhs, p, .booleanLogic)) {
-            const res = @intFromBool(lhs.value.getBool() and rhs.value.getBool());
-            lhs.value = Value.int(res);
+            const res = lhs.value.toBool() and rhs.value.toBool();
+            lhs.val = Value.fromBool(res);
         }
 
         try lhs.boolRes(p, .BoolAndExpr, rhs);
@@ -5392,7 +5391,7 @@ fn parseEqExpr(p: *Parser) Error!Result {
         if (try lhs.adjustTypes(ne.?, &rhs, p, .equality)) {
             const op: std.math.CompareOperator = if (tag == .EqualExpr) .eq else .neq;
             const res = lhs.value.compare(op, rhs.value, lhs.ty, p.comp);
-            lhs.value = Value.int(@intFromBool(res));
+            lhs.value = Value.fromBool(res);
         }
 
         try lhs.boolRes(p, tag, rhs);
@@ -5425,7 +5424,7 @@ fn parseCompExpr(p: *Parser) Error!Result {
             };
 
             const res = lhs.value.compare(op, rhs.value, lhs.ty, p.comp);
-            lhs.value = Value.int(@intFromBool(res));
+            lhs.value = Value.fromBool(res);
         }
 
         lhs.ty = Type.Int;
@@ -5532,7 +5531,7 @@ fn parseMulExpr(p: *Parser) Error!Result {
                 if (res.isUnavailable()) {
                     if (p.inMacro) {
                         // match clang behavior by defining invalid remainder to be zero in macros
-                        res = Value.int(0);
+                        res = Value.zero;
                     } else {
                         try lhs.saveValue(p);
                         try rhs.saveValue(p);
@@ -5656,7 +5655,7 @@ fn typesCompatible(p: *Parser) Error!Result {
     const compatible = firstUnqual.eql(secondUnqual, p.comp, true);
 
     const res = Result{
-        .value = Value.int(@intFromBool(compatible)),
+        .value = Value.fromBool(compatible),
         .node = try p.addNode(.{
             .tag = .BuiltinTypesCompatibleP,
             .type = Type.Int,
@@ -5680,17 +5679,17 @@ fn parseBuiltinChooseExpr(p: *Parser) Error!Result {
 
     _ = try p.expectToken(.Comma);
 
-    var thenExpr = if (cond.value.getBool()) try p.parseAssignExpr() else try p.parseNoEval(parseAssignExpr);
+    var thenExpr = if (cond.value.toBool()) try p.parseAssignExpr() else try p.parseNoEval(parseAssignExpr);
     try thenExpr.expect(p);
 
     _ = try p.expectToken(.Comma);
 
-    var elseExpr = if (!cond.value.getBool()) try p.parseAssignExpr() else try p.parseNoEval(parseAssignExpr);
+    var elseExpr = if (!cond.value.toBool()) try p.parseAssignExpr() else try p.parseNoEval(parseAssignExpr);
     try elseExpr.expect(p);
 
     try p.expectClosing(lp, .RParen);
 
-    if (cond.value.getBool()) {
+    if (cond.value.toBool()) {
         cond.value = thenExpr.value;
         cond.ty = thenExpr.ty;
     } else {
@@ -5960,7 +5959,7 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
 
             try operand.usualUnaryConversion(p, token);
             if (operand.value.isNumeric())
-                _ = try operand.value.sub(operand.value.zero(), operand.value, operand.ty, p)
+                _ = try operand.value.sub(Value.zero, operand.value, operand.ty, p)
             else
                 operand.value.tag = .unavailable;
 
@@ -5987,7 +5986,7 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
             try operand.usualUnaryConversion(p, token);
 
             if (operand.value.isNumeric()) {
-                if (try operand.value.add(operand.value, operand.value.one(), operand.ty, p))
+                if (try operand.value.add(operand.value, Value.one, operand.ty, p))
                     try p.errOverflow(token, operand);
             } else {
                 operand.value.tag = .unavailable;
@@ -6059,13 +6058,13 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
             try operand.usualUnaryConversion(p, token);
 
             if (operand.value.tag == .int) {
-                const res = Value.int(@intFromBool(!operand.value.getBool()));
+                const res = Value.fromBool(!operand.value.toBool());
                 operand.value = res;
             } else if (operand.value.tag == .nullptrTy) {
-                operand.value = Value.int(1);
+                operand.value = Value.one;
             } else {
                 if (operand.ty.isDecayed())
-                    operand.value = Value.int(0)
+                    operand.value = Value.zero
                 else
                     operand.value.tag = .unavailable;
             }
@@ -6185,13 +6184,13 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
                     .msvc => {},
                     .gcc => {
                         if (operand.ty.isInt())
-                            operand.value = Value.int(0)
+                            operand.value = Value.zero
                         else if (operand.ty.isFloat())
                             operand.value = Value.float(0);
                     },
                     .clang => {
                         if (operand.value.tag == .int)
-                            operand.value = Value.int(0)
+                            operand.value = Value.zero
                         else if (operand.value.tag == .float)
                             operand.value = Value.float(0);
                     },
@@ -6676,7 +6675,7 @@ fn checkArrayBounds(p: *Parser, index: Result, array: Result, token: TokenIndex)
         if (index.value.compare(.gte, len, p.comp.types.size, p.comp))
             try p.errExtra(.array_after, token, .{ .unsigned = index.value.data.int });
     } else {
-        if (index.value.compare(.lt, Value.int(0), index.ty, p.comp)) {
+        if (index.value.compare(.lt, Value.zero, index.ty, p.comp)) {
             const signed: i64 = index.value.signExtend(index.ty, p.comp);
             try p.errExtra(.array_before, token, .{ .signed = signed });
         } else if (index.value.compare(.gte, len, p.comp.types.size, p.comp)) {
@@ -6908,7 +6907,7 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
 
         .Zero => {
             p.tokenIdx += 1;
-            var res: Result = .{ .value = Value.int(0), .ty = if (p.inMacro) p.comp.types.intmax else Type.Int };
+            var res: Result = .{ .value = Value.zero, .ty = if (p.inMacro) p.comp.types.intmax else Type.Int };
             res.node = try p.addNode(.{ .tag = .IntLiteral, .type = res.ty, .data = undefined });
             if (!p.inMacro) try p.valueMap.put(res.node, res.value);
             return res;
@@ -6916,7 +6915,7 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
 
         .One => {
             p.tokenIdx += 1;
-            var res: Result = .{ .value = Value.int(1), .ty = if (p.inMacro) p.comp.types.intmax else Type.Int };
+            var res: Result = .{ .value = Value.one, .ty = if (p.inMacro) p.comp.types.intmax else Type.Int };
             res.node = try p.addNode(.{ .tag = .IntLiteral, .type = res.ty, .data = undefined });
             if (!p.inMacro) try p.valueMap.put(res.node, res.value);
             return res;
@@ -7356,7 +7355,7 @@ fn parseCharLiteral(p: *Parser) Error!Result {
 
         return .{
             .ty = Type.Int,
-            .value = Value.int(0),
+            .value = Value.zero,
             .node = try p.addNode(.{ .tag = .CharLiteral, .type = Type.Int, .data = undefined }),
         };
     };
