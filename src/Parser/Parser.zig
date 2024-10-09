@@ -1586,7 +1586,7 @@ fn handleAttrParam(p: *Parser, attr: Attribute.Tag, arguments: *Attribute.Argume
 
 fn diagnose(p: *Parser, attr: Attribute.Tag, arguments: *Attribute.Arguments, argIdx: u32, res: Result) ?Diagnostics.Message {
     if (Attribute.wantsAlignment(attr, argIdx))
-        return Attribute.diagnoseAlignment(attr, arguments, argIdx, res.value, res.ty, p.comp);
+        return Attribute.diagnoseAlignment(attr, arguments, argIdx, res.value, res.ty, p);
 
     const node = p.nodes.get(@intFromEnum(res.node));
     return Attribute.diagnose(attr, arguments, argIdx, res.value, node, p.retainedStrings.items);
@@ -2007,9 +2007,9 @@ fn parseTypeSpec(p: *Parser, ty: *TypeBuilder) Error!bool {
                 if (res.value.isUnavailable()) {
                     try p.errToken(.expected_integer_constant_expr, bitIntToken);
                     return error.ParsingFailed;
-                } else if (res.value.compare(.lte, Value.zero, res.ty, p.comp)) {
+                } else if (res.value.compare(.lte, Value.zero, p)) {
                     bits = -1;
-                } else if (res.value.compare(.gt, Value.int(128), res.ty, p.comp)) {
+                } else if (res.value.compare(.gt, Value.int(128), p)) {
                     bits = 129;
                 } else {
                     bits = res.value.getInt(i16);
@@ -2311,7 +2311,7 @@ fn parseRecordDeclarator(p: *Parser) Error!bool {
             if (res.value.isUnavailable()) {
                 try p.errToken(.expected_integer_constant_expr, bitsToken);
                 break :bits;
-            } else if (res.value.compare(.lt, Value.zero, res.ty, p.comp)) {
+            } else if (res.value.compare(.lt, Value.zero, p)) {
                 try p.errExtra(.negative_bitwidth, firstToken, .{
                     .signed = res.value.signExtend(res.ty, p.comp),
                 });
@@ -2320,7 +2320,7 @@ fn parseRecordDeclarator(p: *Parser) Error!bool {
 
             // incomplete size error is reported later
             const bitSize = ty.bitSizeof(p.comp) orelse break :bits;
-            if (res.value.compare(.gt, Value.int(bitSize), res.ty, p.comp)) {
+            if (res.value.compare(.gt, Value.int(bitSize), p)) {
                 try p.errToken(.bitfield_too_big, nameToken);
                 break :bits;
             } else if (res.value.isZero() and nameToken != 0) {
@@ -2770,14 +2770,14 @@ fn enumerator(p: *Parser, e: *Enumerator) Error!?EnumFieldAndNode {
     var res = e.res;
     res.ty = try Attribute.applyEnumeratorAttributes(p, res.ty, attrBufferTop);
 
-    if (res.ty.isUnsignedInt(p.comp) or res.value.compare(.gte, Value.zero, res.ty, p.comp))
+    if (res.ty.isUnsignedInt(p.comp) or res.value.compare(.gte, Value.zero, p))
         e.numPositiveBits = @max(e.numPositiveBits, res.value.minUnsignedBits(res.ty, p.comp))
     else
         e.numNegativeBits = @max(e.numNegativeBits, res.value.minSignedBits(res.ty, p.comp));
 
     if (errStart == p.comp.diagnostics.list.items.len) {
         // only do these warnings if we didn't already warn about overflow or non-representable values
-        if (e.res.value.compare(.lt, Value.zero, e.res.ty, p.comp)) {
+        if (e.res.value.compare(.lt, Value.zero, p)) {
             const value = e.res.value.getInt(i64);
             if (value < Type.Int.minInt(p.comp))
                 try p.errExtra(.enumerator_too_small, nameToken, .{ .signed = value });
@@ -3056,18 +3056,16 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: Declarator
             }
         } else {
             var sizeValue = size.value;
-            const sizeTy = p.comp.types.size;
-
             if (sizeValue.isZero()) {
                 try p.errToken(.zero_length_array, lb);
-            } else if (sizeValue.compare(.lt, Value.zero, sizeTy, p.comp)) {
+            } else if (sizeValue.compare(.lt, Value.zero, p)) {
                 try p.errToken(.negative_array_size, lb);
                 return error.ParsingFailed;
             }
 
             const arrayType = try p.arena.create(Type.Array);
             arrayType.elem = Type.Void;
-            if (sizeValue.compare(.gt, Value.int(maxElems), sizeTy, p.comp)) {
+            if (sizeValue.compare(.gt, Value.int(maxElems), p)) {
                 try p.errToken(.array_too_large, lb);
                 arrayType.len = maxElems;
             } else {
@@ -3394,7 +3392,7 @@ pub fn initializerItem(p: *Parser, il: *InitList, initType: Type) Error!bool {
                 if (indexRes.value.isUnavailable()) {
                     try p.errToken(.expected_integer_constant_expr, exprToken);
                     return error.ParsingFailed;
-                } else if (indexRes.value.compare(.lt, Value.zero, indexRes.ty, p.comp)) {
+                } else if (indexRes.value.compare(.lt, Value.zero, p)) {
                     try p.errExtra(.negative_array_designator, lb + 1, .{
                         .signed = indexRes.value.signExtend(indexRes.ty, p.comp),
                     });
@@ -4558,6 +4556,7 @@ fn parseSwitchStmt(p: *Parser) Error!NodeIndex {
     var @"switch" = Switch{
         .ranges = std.ArrayList(Switch.Range).init(p.gpa),
         .type = cond.ty,
+        .p = p,
     };
     p.@"switch" = &@"switch";
 
@@ -4597,13 +4596,13 @@ fn parseCaseStmt(p: *Parser, caseToken: u32) Error!?NodeIndex {
         } else if (last.isUnavailable()) {
             try p.errToken(.case_val_unavailable, ellipsis + 1);
             break :check;
-        } else if (last.compare(.lt, first, some.type, p.comp)) {
+        } else if (last.compare(.lt, first, p)) {
             try p.errToken(.empty_case_range, caseToken + 1);
             break :check;
         }
 
         // TODO cast to target type
-        const prev = (try some.add(p.comp, first, last, caseToken + 1)) orelse break :check;
+        const prev = (try some.add(first, last, caseToken + 1)) orelse break :check;
         // TODO: check which value was already handled
         if (some.type.isUnsignedInt(p.comp)) {
             try p.errExtra(.duplicate_switch_case_unsigned, caseToken + 1, .{
@@ -5390,7 +5389,7 @@ fn parseEqExpr(p: *Parser) Error!Result {
 
         if (try lhs.adjustTypes(ne.?, &rhs, p, .equality)) {
             const op: std.math.CompareOperator = if (tag == .EqualExpr) .eq else .neq;
-            const res = lhs.value.compare(op, rhs.value, lhs.ty, p.comp);
+            const res = lhs.value.compare(op, rhs.value, p);
             lhs.value = Value.fromBool(res);
         }
 
@@ -5423,7 +5422,7 @@ fn parseCompExpr(p: *Parser) Error!Result {
                 else => unreachable,
             };
 
-            const res = lhs.value.compare(op, rhs.value, lhs.ty, p.comp);
+            const res = lhs.value.compare(op, rhs.value, p);
             lhs.value = Value.fromBool(res);
         }
 
@@ -6672,13 +6671,13 @@ fn checkArrayBounds(p: *Parser, index: Result, array: Result, token: TokenIndex)
 
     const len = Value.int(arrayLen);
     if (index.ty.isUnsignedInt(p.comp)) {
-        if (index.value.compare(.gte, len, p.comp.types.size, p.comp))
+        if (index.value.compare(.gte, len, p))
             try p.errExtra(.array_after, token, .{ .unsigned = index.value.data.int });
     } else {
-        if (index.value.compare(.lt, Value.zero, index.ty, p.comp)) {
+        if (index.value.compare(.lt, Value.zero, p)) {
             const signed: i64 = index.value.signExtend(index.ty, p.comp);
             try p.errExtra(.array_before, token, .{ .signed = signed });
-        } else if (index.value.compare(.gte, len, p.comp.types.size, p.comp)) {
+        } else if (index.value.compare(.gte, len, p)) {
             try p.errExtra(.array_after, token, .{ .unsigned = index.value.data.int });
         }
     }

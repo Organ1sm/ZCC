@@ -634,51 +634,20 @@ pub fn bitNot(val: Value, ty: Type, p: *Parser) !Value {
     return p.intern(.{ .int = .{ .bigInt = result.toConst() } });
 }
 
-pub fn compare(a: Value, op: std.math.CompareOperator, b: Value, ty: Type, comp: *const Compilation) bool {
-    assert(a.tag == b.tag);
-    if (a.tag == .nullptrTy) {
-        return switch (op) {
-            .eq => true,
-            .neq => false,
-            else => unreachable,
-        };
+pub fn compare(lhs: Value, op: std.math.CompareOperator, rhs: Value, p: *Parser) bool {
+    const lhsKey = p.interner.get(lhs.ref());
+    const rhsKey = p.interner.get(rhs.ref());
+    if (lhsKey == .float or rhsKey == .float) {
+        const lhsF128 = lhs.toFloat(f128, p);
+        const rhsF128 = rhs.toFloat(f128, p);
+        return std.math.compare(lhsF128, op, rhsF128);
     }
-    const S = struct {
-        inline fn doICompare(comptime T: type, aa: Value, opp: std.math.CompareOperator, bb: Value) bool {
-            const a_val = aa.getInt(T);
-            const b_val = bb.getInt(T);
-            return std.math.compare(a_val, opp, b_val);
-        }
-        inline fn doFCompare(comptime T: type, aa: Value, opp: std.math.CompareOperator, bb: Value) bool {
-            const a_val = aa.getFloat(T);
-            const b_val = bb.getFloat(T);
-            return std.math.compare(a_val, opp, b_val);
-        }
-    };
-    const size = ty.sizeof(comp).?;
-    switch (a.tag) {
-        .unavailable => return true,
-        .int => if (ty.isUnsignedInt(comp)) switch (size) {
-            1 => return S.doICompare(u8, a, op, b),
-            2 => return S.doICompare(u16, a, op, b),
-            4 => return S.doICompare(u32, a, op, b),
-            8 => return S.doICompare(u64, a, op, b),
-            else => unreachable,
-        } else switch (size) {
-            1 => return S.doICompare(i8, a, op, b),
-            2 => return S.doICompare(i16, a, op, b),
-            4 => return S.doICompare(i32, a, op, b),
-            8 => return S.doICompare(i64, a, op, b),
-            else => unreachable,
-        },
-        .float => switch (size) {
-            4 => return S.doFCompare(f32, a, op, b),
-            8 => return S.doFCompare(f64, a, op, b),
-            else => unreachable,
-        },
-        else => @panic("TODO"),
-    }
-    return false;
+
+    var lhsBigIntSpace: BigIntSpace = undefined;
+    var rhsBigIntSpace: BigIntSpace = undefined;
+    const lhsBigInt = lhs.toBigInt(&lhsBigIntSpace, p);
+    const rhsBigInt = rhs.toBigInt(&rhsBigIntSpace, p);
+    return lhsBigInt.order(rhsBigInt).compare(op);
 }
 
 pub fn hash(v: Value) u64 {

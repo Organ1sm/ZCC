@@ -984,7 +984,7 @@ pub fn intFitsInType(res: Result, p: *Parser, ty: Type) bool {
     const minInt = Value.int(ty.minInt(p.comp));
 
     return res.value.compare(.lte, maxInt, res.ty, p.comp) and
-        (res.ty.isUnsignedInt(p.comp) or res.value.compare(.gte, minInt, res.ty, p.comp));
+        (res.ty.isUnsignedInt(p.comp) or res.value.compare(.gte, minInt, p));
 }
 
 const CoerceContext = union(enum) {
