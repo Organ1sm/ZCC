@@ -546,7 +546,7 @@ fn floatToIntWarning(res: *Result, p: *Parser, intTy: Type, oldValue: Value, cha
 
 pub fn floatCast(res: *Result, p: *Parser, floatType: Type) Error!void {
     if (res.ty.is(.Bool)) {
-        try res.value.intToFloat(floatType, p);
+        try res.value.intToFloat(floatType, p.ctx());
         res.ty = floatType.makeReal();
         try res.implicitCast(p, .BoolToFloat);
         if (!floatType.isReal()) {
@@ -556,7 +556,7 @@ pub fn floatCast(res: *Result, p: *Parser, floatType: Type) Error!void {
     }
     // src type is int type
     else if (res.ty.isInt()) {
-        try res.value.intToFloat(floatType, p);
+        try res.value.intToFloat(floatType, p.ctx());
         const oldReal = res.ty.isReal();
         const newReal = floatType.isReal();
         if (oldReal and newReal) {
@@ -929,7 +929,7 @@ pub fn castType(res: *Result, p: *Parser, to: Type, tok: TokenIndex) !void {
             // Explicit cast, no conversion warning
             _ = res.value.floatToInt(res.ty, to, p.comp);
         } else if (newIsFloat and oldInt) {
-            res.value.intToFloat(to, p);
+            res.value.intToFloat(to, p.ctx());
         } else if (newIsFloat and oldIsFloat) {
             res.value.floatCast(res.ty, to, p.comp);
         } else if (oldInt and newInt) {
@@ -983,8 +983,8 @@ pub fn intFitsInType(res: Result, p: *Parser, ty: Type) bool {
     const maxInt = Value.int(ty.maxInt(p.comp));
     const minInt = Value.int(ty.minInt(p.comp));
 
-    return res.value.compare(.lte, maxInt, res.ty, p.comp) and
-        (res.ty.isUnsignedInt(p.comp) or res.value.compare(.gte, minInt, p));
+    return res.value.compare(.lte, maxInt, res.ty, p.ctx()) and
+        (res.ty.isUnsignedInt(p.comp) or res.value.compare(.gte, minInt, p.ctx()));
 }
 
 const CoerceContext = union(enum) {

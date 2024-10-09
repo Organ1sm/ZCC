@@ -249,7 +249,7 @@ pub fn diagnoseAlignment(attr: Tag, arguments: *Arguments, argIdx: u32, val: Val
                     if (val.tag != .int)
                         return Diagnostics.Message{ .tag = .alignas_unavailable };
 
-                    if (val.compare(.lt, Value.zero, p))
+                    if (val.compare(.lt, Value.zero, p.ctx()))
                         return Diagnostics.Message{
                             .tag = .negative_alignment,
                             .extra = .{ .signed = val.signExtend(ty, p.comp) },

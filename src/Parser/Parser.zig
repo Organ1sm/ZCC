@@ -653,9 +653,12 @@ fn diagnoseIncompleteDefinitions(p: *Parser) !void {
     assert(errorsAdded == 2 * p.tentativeDefs.count()); // Each tentative def should add an error + note
 }
 
-pub fn intern(p: *Parser, k: Interner.Key) !Value {
-    const ref = try p.interner.put(p.gpa, k);
-    return .{ .optRef = @enumFromInt(@intFromEnum(ref)) };
+pub fn ctx(p: *Parser) Value.Context {
+    return .{
+        .comp = p.comp,
+        .interner = &p.interner,
+        .mutable = if (std.debug.runtime_safety) true else {},
+    };
 }
 
 /// root : (decl | inline assembly ';' | static-assert-declaration)*
@@ -2007,9 +2010,9 @@ fn parseTypeSpec(p: *Parser, ty: *TypeBuilder) Error!bool {
                 if (res.value.isUnavailable()) {
                     try p.errToken(.expected_integer_constant_expr, bitIntToken);
                     return error.ParsingFailed;
-                } else if (res.value.compare(.lte, Value.zero, p)) {
+                } else if (res.value.compare(.lte, Value.zero, p.ctx())) {
                     bits = -1;
-                } else if (res.value.compare(.gt, Value.int(128), p)) {
+                } else if (res.value.compare(.gt, Value.int(128), p.ctx())) {
                     bits = 129;
                 } else {
                     bits = res.value.getInt(i16);
@@ -2311,7 +2314,7 @@ fn parseRecordDeclarator(p: *Parser) Error!bool {
             if (res.value.isUnavailable()) {
                 try p.errToken(.expected_integer_constant_expr, bitsToken);
                 break :bits;
-            } else if (res.value.compare(.lt, Value.zero, p)) {
+            } else if (res.value.compare(.lt, Value.zero, p.ctx())) {
                 try p.errExtra(.negative_bitwidth, firstToken, .{
                     .signed = res.value.signExtend(res.ty, p.comp),
                 });
@@ -2320,7 +2323,7 @@ fn parseRecordDeclarator(p: *Parser) Error!bool {
 
             // incomplete size error is reported later
             const bitSize = ty.bitSizeof(p.comp) orelse break :bits;
-            if (res.value.compare(.gt, Value.int(bitSize), p)) {
+            if (res.value.compare(.gt, Value.int(bitSize), p.ctx())) {
                 try p.errToken(.bitfield_too_big, nameToken);
                 break :bits;
             } else if (res.value.isZero() and nameToken != 0) {
@@ -2660,7 +2663,7 @@ const Enumerator = struct {
             return;
         }
 
-        if (try e.res.value.add(e.res.value, Value.one, e.res.ty, p)) {
+        if (try e.res.value.add(e.res.value, Value.one, e.res.ty, p.ctx())) {
             const byteSize = e.res.ty.sizeof(p.comp).?;
             const bitSize: u8 = @intCast(if (e.res.ty.isUnsignedInt(p.comp)) byteSize * 8 else byteSize * 8 - 1);
 
@@ -2677,7 +2680,7 @@ const Enumerator = struct {
                 break :blk Type.ULongLong;
             };
             e.res.ty = newTy;
-            _ = try e.res.value.add(oldVal, Value.one, e.res.ty, p);
+            _ = try e.res.value.add(oldVal, Value.one, e.res.ty, p.ctx());
         }
     }
 
@@ -2770,14 +2773,14 @@ fn enumerator(p: *Parser, e: *Enumerator) Error!?EnumFieldAndNode {
     var res = e.res;
     res.ty = try Attribute.applyEnumeratorAttributes(p, res.ty, attrBufferTop);
 
-    if (res.ty.isUnsignedInt(p.comp) or res.value.compare(.gte, Value.zero, p))
-        e.numPositiveBits = @max(e.numPositiveBits, res.value.minUnsignedBits(res.ty, p.comp))
+    if (res.ty.isUnsignedInt(p.comp) or res.value.compare(.gte, Value.zero, p.ctx()))
+        e.numPositiveBits = @max(e.numPositiveBits, res.value.minUnsignedBits(p.ctx()))
     else
-        e.numNegativeBits = @max(e.numNegativeBits, res.value.minSignedBits(res.ty, p.comp));
+        e.numNegativeBits = @max(e.numNegativeBits, res.value.minSignedBits(p.ctx()));
 
     if (errStart == p.comp.diagnostics.list.items.len) {
         // only do these warnings if we didn't already warn about overflow or non-representable values
-        if (e.res.value.compare(.lt, Value.zero, p)) {
+        if (e.res.value.compare(.lt, Value.zero, p.ctx())) {
             const value = e.res.value.getInt(i64);
             if (value < Type.Int.minInt(p.comp))
                 try p.errExtra(.enumerator_too_small, nameToken, .{ .signed = value });
@@ -3065,7 +3068,7 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: Declarator
 
             const arrayType = try p.arena.create(Type.Array);
             arrayType.elem = Type.Void;
-            if (sizeValue.compare(.gt, Value.int(maxElems), p)) {
+            if (sizeValue.compare(.gt, Value.int(maxElems), p.ctx())) {
                 try p.errToken(.array_too_large, lb);
                 arrayType.len = maxElems;
             } else {
@@ -4556,7 +4559,7 @@ fn parseSwitchStmt(p: *Parser) Error!NodeIndex {
     var @"switch" = Switch{
         .ranges = std.ArrayList(Switch.Range).init(p.gpa),
         .type = cond.ty,
-        .p = p,
+        .ctx = p.ctx(),
     };
     p.@"switch" = &@"switch";
 
@@ -4596,7 +4599,7 @@ fn parseCaseStmt(p: *Parser, caseToken: u32) Error!?NodeIndex {
         } else if (last.isUnavailable()) {
             try p.errToken(.case_val_unavailable, ellipsis + 1);
             break :check;
-        } else if (last.compare(.lt, first, p)) {
+        } else if (last.compare(.lt, first, p.ctx())) {
             try p.errToken(.empty_case_range, caseToken + 1);
             break :check;
         }
@@ -5331,7 +5334,7 @@ fn parseOrExpr(p: *Parser) Error!Result {
         try rhs.expect(p);
 
         if (try lhs.adjustTypes(token, &rhs, p, .integer))
-            lhs.value = try lhs.value.bitOr(rhs.value, p);
+            lhs.value = try lhs.value.bitOr(rhs.value, p.ctx());
 
         try lhs.bin(p, .BitOrExpr, rhs);
     }
@@ -5349,7 +5352,7 @@ fn parseXORExpr(p: *Parser) Error!Result {
         try rhs.expect(p);
 
         if (try lhs.adjustTypes(token, &rhs, p, .integer))
-            lhs.value = try lhs.value.bitXor(rhs.value, p);
+            lhs.value = try lhs.value.bitXor(rhs.value, p.ctx());
 
         try lhs.bin(p, .BitXorExpr, rhs);
     }
@@ -5367,7 +5370,7 @@ fn parseAndExpr(p: *Parser) Error!Result {
         try rhs.expect(p);
 
         if (try lhs.adjustTypes(token, &rhs, p, .integer))
-            lhs.value = try lhs.value.bitAnd(rhs.value, p);
+            lhs.value = try lhs.value.bitAnd(rhs.value, p.ctx());
 
         try lhs.bin(p, .BitAndExpr, rhs);
     }
@@ -5389,7 +5392,7 @@ fn parseEqExpr(p: *Parser) Error!Result {
 
         if (try lhs.adjustTypes(ne.?, &rhs, p, .equality)) {
             const op: std.math.CompareOperator = if (tag == .EqualExpr) .eq else .neq;
-            const res = lhs.value.compare(op, rhs.value, p);
+            const res = lhs.value.compare(op, rhs.value, p.ctx());
             lhs.value = Value.fromBool(res);
         }
 
@@ -5422,7 +5425,7 @@ fn parseCompExpr(p: *Parser) Error!Result {
                 else => unreachable,
             };
 
-            const res = lhs.value.compare(op, rhs.value, p);
+            const res = lhs.value.compare(op, rhs.value, p.ctx());
             lhs.value = Value.fromBool(res);
         }
 
@@ -5474,10 +5477,10 @@ fn parseAddExpr(p: *Parser) Error!Result {
         const lhsTy = lhs.ty;
         if (try lhs.adjustTypes(minus.?, &rhs, p, if (plus != null) .add else .sub)) {
             if (plus != null) {
-                if (try lhs.value.add(lhs.value, rhs.value, lhs.ty, p))
+                if (try lhs.value.add(lhs.value, rhs.value, lhs.ty, p.ctx()))
                     try p.errOverflow(plus.?, lhs);
             } else {
-                if (lhs.value.sub(lhs.value, rhs.value, lhs.ty, p))
+                if (lhs.value.sub(lhs.value, rhs.value, lhs.ty, p.ctx()))
                     try p.errOverflow(minus.?, lhs);
             }
         }
@@ -5520,10 +5523,10 @@ fn parseMulExpr(p: *Parser) Error!Result {
 
         if (try lhs.adjustTypes(percent.?, &rhs, p, if (tag == .ModExpr) .integer else .arithmetic)) {
             if (mul != null) {
-                if (lhs.value.mul(lhs.value, rhs.value, lhs.ty, p))
+                if (lhs.value.mul(lhs.value, rhs.value, lhs.ty, p.ctx()))
                     try p.errOverflow(mul.?, lhs);
             } else if (div != null) {
-                if (try lhs.value.div(lhs.value, rhs.value, lhs.ty, p))
+                if (try lhs.value.div(lhs.value, rhs.value, lhs.ty, p.ctx()))
                     try p.errOverflow(mul.?, lhs);
             } else {
                 var res = Value.rem(lhs.value, rhs.value, lhs.ty, p.comp);
@@ -5958,7 +5961,7 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
 
             try operand.usualUnaryConversion(p, token);
             if (operand.value.isNumeric())
-                _ = try operand.value.sub(Value.zero, operand.value, operand.ty, p)
+                _ = try operand.value.sub(Value.zero, operand.value, operand.ty, p.ctx())
             else
                 operand.value.tag = .unavailable;
 
@@ -5985,7 +5988,7 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
             try operand.usualUnaryConversion(p, token);
 
             if (operand.value.isNumeric()) {
-                if (try operand.value.add(operand.value, Value.one, operand.ty, p))
+                if (try operand.value.add(operand.value, Value.one, operand.ty, p.ctx()))
                     try p.errOverflow(token, operand);
             } else {
                 operand.value.tag = .unavailable;
@@ -6014,7 +6017,7 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
             try operand.usualUnaryConversion(p, token);
 
             if (operand.value.isNumeric()) {
-                if (try operand.value.sub(operand.value, operand.value.one(), operand.ty, p))
+                if (try operand.value.sub(operand.value, operand.value.one(), operand.ty, p.ctx()))
                     try p.errOverflow(token, operand);
             } else {
                 operand.value.tag = .unavailable;
@@ -6034,7 +6037,7 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
             if (operand.ty.isInt()) {
                 try operand.intCast(p, operand.ty.integerPromotion(p.comp), token);
                 if (operand.value.tag == .int) {
-                    operand.value = try operand.value.bitNot(operand.ty, p);
+                    operand.value = try operand.value.bitNot(operand.ty, p.ctx());
                 }
             } else {
                 try p.errStr(.invalid_argument_un, token, try p.typeStr(operand.ty));
@@ -6671,13 +6674,13 @@ fn checkArrayBounds(p: *Parser, index: Result, array: Result, token: TokenIndex)
 
     const len = Value.int(arrayLen);
     if (index.ty.isUnsignedInt(p.comp)) {
-        if (index.value.compare(.gte, len, p))
+        if (index.value.compare(.gte, len, p.ctx()))
             try p.errExtra(.array_after, token, .{ .unsigned = index.value.data.int });
     } else {
-        if (index.value.compare(.lt, Value.zero, p)) {
+        if (index.value.compare(.lt, Value.zero, p.ctx())) {
             const signed: i64 = index.value.signExtend(index.ty, p.comp);
             try p.errExtra(.array_before, token, .{ .signed = signed });
-        } else if (index.value.compare(.gte, len, p)) {
+        } else if (index.value.compare(.gte, len, p.ctx())) {
             try p.errExtra(.array_after, token, .{ .unsigned = index.value.data.int });
         }
     }
