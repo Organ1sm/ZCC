@@ -91,12 +91,12 @@ pub const Specifier = union(enum) {
     ComplexSInt128,
     ComplexUInt128,
 
-    BitInt: i16,
-    SBitInt: i16,
-    UBitInt: i16,
-    ComplexBitInt: i16,
-    ComplexSBitInt: i16,
-    ComplexUBitInt: i16,
+    BitInt: u16,
+    SBitInt: u16,
+    UBitInt: u16,
+    ComplexBitInt: u16,
+    ComplexSBitInt: u16,
+    ComplexUBitInt: u16,
 
     FP16,
     Float,

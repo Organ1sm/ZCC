@@ -979,9 +979,9 @@ pub fn castType(res: *Result, p: *Parser, to: Type, tok: TokenIndex) !void {
 /// @param p     A pointer to the Parser object.
 /// @param ty    The type within which the value should fit.
 /// @return      Returns true if the value fits within the type bounds, false otherwise.
-pub fn intFitsInType(res: Result, p: *Parser, ty: Type) bool {
-    const maxInt = Value.int(ty.maxInt(p.comp));
-    const minInt = Value.int(ty.minInt(p.comp));
+pub fn intFitsInType(res: Result, p: *Parser, ty: Type) !bool {
+    const maxInt = try Value.int(ty.maxInt(p.comp), p.ctx());
+    const minInt = try Value.int(ty.minInt(p.comp), p.ctx());
 
     return res.value.compare(.lte, maxInt, res.ty, p.ctx()) and
         (res.ty.isUnsignedInt(p.comp) or res.value.compare(.gte, minInt, p.ctx()));

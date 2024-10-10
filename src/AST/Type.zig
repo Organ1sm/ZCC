@@ -25,7 +25,7 @@ data: union {
     attributed: *Attributed,
     none: void,
     int: struct {
-        bits: u8,
+        bits: u16,
         signedness: std.builtin.Signedness,
     },
 } = .{ .none = {} },

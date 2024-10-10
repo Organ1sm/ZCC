@@ -117,6 +117,15 @@ pub fn isZero(v: Value) bool {
     return v.ref() == .zero;
 }
 
+pub fn int(i: anytype, ctx: Context) !Value {
+    const info = @typeInfo(@TypeOf(i));
+    if (info == .ComptimeInt or info.Int.signedness == .unsigned) {
+        return ctx.intern(.{ .int = .{ .u64 = i } });
+    } else {
+        return ctx.intern(.{ .int = .{ .i64 = i } });
+    }
+}
+
 pub fn ref(v: Value) Interner.Ref {
     std.debug.assert(v.optRef != .none);
     return @enumFromInt(@intFromEnum(v.optRef));
