@@ -46,6 +46,11 @@ pub const Key = union(enum) {
         len: u32,
         child: Ref,
     },
+    recordTy: struct {
+        /// Pointer to user data, value used for hash and equality check.
+        userPtr: *anyopaque,
+        elements: []const Ref,
+    },
     /// may not be zero
     null,
     int: union(enum) {
@@ -55,11 +60,6 @@ pub const Key = union(enum) {
     },
     float: Float,
     bytes: []const u8,
-    record: struct {
-        /// Pointer to user data, value used for hash and equality check.
-        userPtr: *anyopaque,
-        elements: []const Ref,
-    },
 
     pub const Float = union(enum) {
         f16: f16,
@@ -77,7 +77,7 @@ pub const Key = union(enum) {
             .bytes => |bytes| {
                 hasher.update(bytes);
             },
-            .record => |info| {
+            .recordTy => |info| {
                 std.hash.autoHash(&hasher, @intFromPtr(info.userPtr));
             },
             .float => @panic("TODO"),
@@ -95,7 +95,7 @@ pub const Key = union(enum) {
         const rhsTag: KeyTag = rhs;
         if (lhsTag != rhsTag) return false;
         switch (lhs) {
-            .record => |lhsInfo| {
+            .recordTy => |lhsInfo| {
                 return lhsInfo.userPtr == rhs.record.userPtr;
             },
             .bytes => |lhsBytes| {
@@ -199,7 +199,7 @@ pub const Tag = enum(u8) {
     /// `data` is `Bytes`
     bytes,
     /// `data` is `Record`
-    record,
+    recordTy,
 
     pub const Array = struct {
         len0: u32,
@@ -448,7 +448,7 @@ pub fn put(self: *Interner, gpa: Allocator, key: Key) !Ref {
             });
         },
 
-        .record => |record| {
+        .recordTy => |record| {
             const splitPtr = PackedU64.init(@intFromPtr(record.userPtr));
             try self.extra.ensureUnusedCapacity(
                 gpa,
@@ -589,7 +589,7 @@ pub fn get(self: *const Interner, ref: Ref) Key {
             return .{ .bytes = self.strings.items[bytes.stringsIndex..][0..bytes.len] };
         },
 
-        .record => {
+        .recordTy => {
             const extra = self.extraDataTrail(Tag.Record, data);
             return .{
                 .record = .{

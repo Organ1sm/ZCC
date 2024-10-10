@@ -321,7 +321,7 @@ pub fn intToFloat(v: *Value, destTy: Type, ctx: Context) !void {
                 128 => .{ .f128 = @floatFromInt(data) },
                 else => unreachable,
             };
-            v.* = try p.intern(.{ .float = f });
+            v.* = try ctx.intern(.{ .float = f });
         },
 
         .bigInt => |data| {
@@ -450,7 +450,7 @@ pub fn add(res: *Value, lhs: Value, rhs: Value, ty: Type, ctx: Context) !bool {
 
         var result = BigIntMutable{ .limbs = limbs, .positive = undefined, .len = undefined };
         const overflowed = result.addWrap(lhsBigInt, rhsBigInt, ty.signedness(ctx.comp), bits);
-        res.* = .{ .ref = try ctx.interner.put(p.gpa, .{ .int = .{ .bigInt = result.toConst() } }) };
+        res.* = .{ .ref = try ctx.interner.put(ctx.comp.gpa, .{ .int = .{ .bigInt = result.toConst() } }) };
         return overflowed;
     }
 }
@@ -479,7 +479,7 @@ pub fn sub(res: *Value, lhs: Value, rhs: Value, ty: Type, ctx: Context) !bool {
 
         var result = BigIntMutable{ .limbs = limbs, .positive = undefined, .len = undefined };
         const overflowed = result.subWrap(lhsBigInt, rhsBigInt, ty.signedness(ctx.comp), bits);
-        res.* = .{ .ref = try ctx.interner.put(p.gpa, .{ .int = .{ .bigInt = result.toConst() } }) };
+        res.* = .{ .ref = try ctx.interner.put(ctx.comp.gpa, .{ .int = .{ .bigInt = result.toConst() } }) };
         return overflowed;
     }
 }
@@ -656,19 +656,17 @@ pub fn hash(v: Value) u64 {
     }
 }
 
-pub fn dump(v: Value, ty: Type, comp: *Compilation, strings: []const u8, w: anytype) !void {
-    switch (v.tag) {
-        .unavailable => try w.writeAll("unavailable"),
-        .int => if (ty.is(.Bool) and comp.langOpts.standard.atLeast(.c23)) {
-            try w.print("{s}", .{if (v.isZero()) "false" else "true"});
-        } else if (ty.isUnsignedInt(comp)) {
-            try w.print("{d}", .{v.data.int});
-        } else {
-            try w.print("{d}", .{v.signExtend(ty, comp)});
+pub fn print(v: Value, ctx: Context, w: anytype) @TypeOf(w).Error!void {
+    const key = ctx.interner.get(v.ref());
+    switch (key) {
+        .null => return w.writeAll("nullptr_t"),
+        .int => |repr| switch (repr) {
+            inline else => |x| return w.print("{d}", .{x}),
         },
-        .bytes => try v.data.bytes.dumpString(ty, comp, strings, w),
-        // std.fmt does @as instead of @floatCast
-        .float => try w.print("{d}", .{@as(f64, @floatCast(v.data.float))}),
-        else => try w.print("({s})", .{@tagName(v.tag)}),
+        .float => |repr| switch (repr) {
+            inline else => |x| return w.print("{d}", .{@as(f64, @floatCast(x))}),
+        },
+        .bytes => |b| return std.zig.fmt.stringEscape(b, "", .{}, w),
+        else => unreachable, // not a value
     }
 }

@@ -36,6 +36,10 @@ pub fn deinit(tree: *AST) void {
     tree.interner.deinit(tree.comp.gpa);
 }
 
+pub fn ctx(tree: *const AST) Value.Context {
+    return .{ .comp = tree.comp, .interner = &tree.interner };
+}
+
 pub const GNUAssemblyQualifiers = struct {
     @"volatile": bool = false,
     @"inline": bool = false,
@@ -163,7 +167,7 @@ pub const Node = struct {
         int: u64,
         returnZero: bool,
 
-        pub fn forDecl(data: Data, tree: AST) struct {
+        pub fn forDecl(data: Data, tree: *const AST) struct {
             decls: []const NodeIndex,
             cond: NodeIndex,
             incr: NodeIndex,
@@ -178,7 +182,7 @@ pub const Node = struct {
             };
         }
 
-        pub fn forStmt(data: Data, tree: AST) struct {
+        pub fn forStmt(data: Data, tree: *const AST) struct {
             init: NodeIndex,
             cond: NodeIndex,
             incr: NodeIndex,
@@ -409,7 +413,7 @@ fn dumpAttribute(attr: Attribute, strings: []const u8, writer: anytype) !void {
 }
 
 fn dumpNode(
-    tree: AST,
+    tree: *const AST,
     node: NodeIndex,
     level: u32,
     mapper: StringInterner.TypeMapper,
@@ -460,7 +464,7 @@ fn dumpNode(
     if (tree.valueMap.get(node)) |val| {
         if (color) util.setColor(LITERAL, w);
         try w.writeAll(" (value: ");
-        try val.dump(ty, tree.comp, tree.strings, w);
+        try val.print(tree.ctx(), w);
         try w.writeByte(')');
     }
 

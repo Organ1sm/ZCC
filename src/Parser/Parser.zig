@@ -324,10 +324,7 @@ fn expectClosing(p: *Parser, opening: TokenIndex, id: TokenType) Error!void {
 }
 
 fn errOverflow(p: *Parser, op_tok: TokenIndex, res: Result) !void {
-    if (res.ty.isUnsignedInt(p.comp))
-        try p.errExtra(.overflow_unsigned, op_tok, .{ .unsigned = res.value.data.int })
-    else
-        try p.errExtra(.overflow_signed, op_tok, .{ .signed = res.value.signExtend(res.ty, p.comp) });
+    try p.errStr(.overflow, op_tok, try p.valStr(res.val));
 }
 
 pub fn getTokenText(p: *Parser, index: TokenIndex) []const u8 {
@@ -395,6 +392,21 @@ pub fn err(p: *Parser, tag: Diagnostics.Tag) Compilation.Error!void {
 pub fn todo(p: *Parser, msg: []const u8) Error {
     try p.errStr(.todo, p.tokenIdx, msg);
     return error.ParsingFailed;
+}
+
+pub fn valStr(p: *Parser, val: Value) ![]const u8 {
+    switch (val.ref()) {
+        .zero => return "0",
+        .one => return "1",
+        .null => return "nullptr_t",
+        else => {},
+    }
+
+    const stringsTop = p.strings.items.len;
+    defer p.strings.items.len = stringsTop;
+
+    try val.print(p.ctx(), p.strings.writer());
+    return try p.comp.diagnostics.arena.allocator().dupe(u8, p.strings.items[stringsTop..]);
 }
 
 pub fn typeStr(p: *Parser, ty: Type) ![]const u8 {
@@ -1580,16 +1592,16 @@ fn handleAttrParam(p: *Parser, attr: Attribute.Tag, arguments: *Attribute.Argume
     const argStart = p.tokenIdx;
     var argExpr = try p.parseAssignExpr();
     try argExpr.expect(p);
-    if (p.diagnose(attr, arguments, argIdx, argExpr)) |msg| {
+    if (try p.diagnose(attr, arguments, argIdx, argExpr)) |msg| {
         try p.errExtra(msg.tag, argStart, msg.extra);
         p.skipTo(.RParen);
         return error.ParsingFailed;
     }
 }
 
-fn diagnose(p: *Parser, attr: Attribute.Tag, arguments: *Attribute.Arguments, argIdx: u32, res: Result) ?Diagnostics.Message {
+fn diagnose(p: *Parser, attr: Attribute.Tag, arguments: *Attribute.Arguments, argIdx: u32, res: Result) !?Diagnostics.Message {
     if (Attribute.wantsAlignment(attr, argIdx))
-        return Attribute.diagnoseAlignment(attr, arguments, argIdx, res.value, res.ty, p);
+        return Attribute.diagnoseAlignment(attr, arguments, argIdx, res.value, p);
 
     const node = p.nodes.get(@intFromEnum(res.node));
     return Attribute.diagnose(attr, arguments, argIdx, res.value, node, p.retainedStrings.items);
@@ -1918,7 +1930,7 @@ fn parseTypeSpec(p: *Parser, ty: *TypeBuilder) Error!bool {
                     const res = try p.parseIntegerConstExpr(.NoConstDeclFolding);
                     if (!res.value.isZero()) {
                         var args = Attribute.initArguments(.aligned, alignToken);
-                        if (p.diagnose(.aligned, &args, 0, res)) |msg| {
+                        if (try p.diagnose(.aligned, &args, 0, res)) |msg| {
                             try p.errExtra(msg.tag, argStart, msg.extra);
                             p.skipTo(.RParen);
                             return error.ParsingFailed;
@@ -2315,9 +2327,7 @@ fn parseRecordDeclarator(p: *Parser) Error!bool {
                 try p.errToken(.expected_integer_constant_expr, bitsToken);
                 break :bits;
             } else if (res.value.compare(.lt, Value.zero, p.ctx())) {
-                try p.errExtra(.negative_bitwidth, firstToken, .{
-                    .signed = res.value.signExtend(res.ty, p.comp),
-                });
+                try p.errExra(.negative_bitwidth, firstToken, try p.valStr(res.value));
                 break :bits;
             }
 
@@ -3396,15 +3406,13 @@ pub fn initializerItem(p: *Parser, il: *InitList, initType: Type) Error!bool {
                     try p.errToken(.expected_integer_constant_expr, exprToken);
                     return error.ParsingFailed;
                 } else if (indexRes.value.compare(.lt, Value.zero, p)) {
-                    try p.errExtra(.negative_array_designator, lb + 1, .{
-                        .signed = indexRes.value.signExtend(indexRes.ty, p.comp),
-                    });
+                    try p.errExtra(.negative_array_designator, lb + 1, try p.valStr(indexRes.value));
                     return error.ParsingFailed;
                 }
 
                 const maxLen = curType.arrayLen() orelse std.math.maxInt(usize);
                 if (indexRes.value.data.int >= maxLen) {
-                    try p.errExtra(.oob_array_designator, lbr + 1, .{ .unsigned = indexRes.value.data.int });
+                    try p.errExtra(.oob_array_designator, lbr + 1, indexRes.value);
                     return error.ParsingFailed;
                 }
 
@@ -4606,15 +4614,8 @@ fn parseCaseStmt(p: *Parser, caseToken: u32) Error!?NodeIndex {
 
         // TODO cast to target type
         const prev = (try some.add(first, last, caseToken + 1)) orelse break :check;
-        // TODO: check which value was already handled
-        if (some.type.isUnsignedInt(p.comp)) {
-            try p.errExtra(.duplicate_switch_case_unsigned, caseToken + 1, .{
-                .unsigned = first.data.int,
-            });
-        } else {
-            const signed: i64 = first.signExtend(some.type, p.comp);
-            try p.errExtra(.duplicate_switch_case_signed, caseToken + 1, .{ .signed = signed });
-        }
+
+        try p.errExtra(.duplicate_switch_case, caseToken + 1, try p.valStr(first));
         try p.errToken(.previous_case, prev.token);
     } else {
         try p.errStr(.case_not_in_switch, caseToken, "case");
@@ -6675,13 +6676,12 @@ fn checkArrayBounds(p: *Parser, index: Result, array: Result, token: TokenIndex)
     const len = Value.int(arrayLen);
     if (index.ty.isUnsignedInt(p.comp)) {
         if (index.value.compare(.gte, len, p.ctx()))
-            try p.errExtra(.array_after, token, .{ .unsigned = index.value.data.int });
+            try p.errStr(.array_after, token, try p.valStr(index.val));
     } else {
         if (index.value.compare(.lt, Value.zero, p.ctx())) {
-            const signed: i64 = index.value.signExtend(index.ty, p.comp);
-            try p.errExtra(.array_before, token, .{ .signed = signed });
+            try p.errStr(.array_before, token, try p.valStr(index.val));
         } else if (index.value.compare(.gte, len, p.ctx())) {
-            try p.errExtra(.array_after, token, .{ .unsigned = index.value.data.int });
+            try p.errStr(.array_after, token, try p.valStr(index.val));
         }
     }
 }

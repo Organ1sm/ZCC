@@ -236,7 +236,7 @@ pub fn wantsAlignment(attr: Tag, idx: usize) bool {
 /// argument to diagnose, the value of the argument, the type of the argument, and the compilation
 /// object. It returns a diagnostics message if the alignment argument is invalid, and null if it is
 /// valid.
-pub fn diagnoseAlignment(attr: Tag, arguments: *Arguments, argIdx: u32, val: Value, ty: Type, p: *Parser) ?Diagnostics.Message {
+pub fn diagnoseAlignment(attr: Tag, arguments: *Arguments, argIdx: u32, val: Value, p: *Parser) !?Diagnostics.Message {
     switch (attr) {
         inline else => |tag| {
             const argFields = getArguments(@field(attributes, @tagName(tag)));
@@ -250,13 +250,10 @@ pub fn diagnoseAlignment(attr: Tag, arguments: *Arguments, argIdx: u32, val: Val
                         return Diagnostics.Message{ .tag = .alignas_unavailable };
 
                     if (val.compare(.lt, Value.zero, p.ctx()))
-                        return Diagnostics.Message{
-                            .tag = .negative_alignment,
-                            .extra = .{ .signed = val.signExtend(ty, p.comp) },
-                        };
+                        return Diagnostics.Message{ .tag = .negative_alignment, .extra = .{ .str = try p.valStr(val) } };
 
                     const requested = std.math.cast(u29, val.data.int) orelse {
-                        return Diagnostics.Message{ .tag = .maximum_alignment, .extra = .{ .unsigned = val.data.int } };
+                        return Diagnostics.Message{ .tag = .maximum_alignment, .extra = .{ .str = try p.valStr(val) } };
                     };
                     if (!std.mem.isValidAlign(requested))
                         return Diagnostics.Message{ .tag = .non_pow2_align };
