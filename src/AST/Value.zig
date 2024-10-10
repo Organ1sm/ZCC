@@ -423,6 +423,15 @@ pub fn toBool(v: Value) bool {
     return v.ref() != .zero;
 }
 
+pub fn toInt(v: Value, comptime T: type, ctx: Context) ?T {
+    if (v.optRef == .none) return null;
+    if (ctx.interner.get(v.ref()) != .int) return null;
+
+    var space: BigIntSpace = undefined;
+    const bigInt = v.toBigInt(&space, ctx);
+    return bigInt.to(T) catch null;
+}
+
 pub fn add(res: *Value, lhs: Value, rhs: Value, ty: Type, ctx: Context) !bool {
     const bits = ty.bitSizeof(ctx.comp).?;
     if (ty.isFloat()) {

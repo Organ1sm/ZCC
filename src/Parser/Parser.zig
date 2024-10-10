@@ -445,15 +445,13 @@ pub fn floatValueChangedStr(p: *Parser, res: *Result, oldValue: f64, intTy: Type
     var w = p.strings.writer();
     const str = try p.typePairStrExtra(res.ty, " to ", intTy);
     try w.writeAll(str);
-    const isZero = res.value.isZero();
-    const nonZeroStr: []const u8 = if (isZero) "non-zero " else "";
-    if (intTy.is(.Bool)) {
-        try w.print(" changes {s}value from {d} to {}", .{ nonZeroStr, oldValue, res.value.toBool() });
-    } else if (intTy.isUnsignedInt(p.comp)) {
-        try w.print(" changes {s}value from {d} to {d}", .{ nonZeroStr, oldValue, res.value.getInt(u64) });
-    } else {
-        try w.print(" changes {s}value from {d} to {d}", .{ nonZeroStr, oldValue, res.value.getInt(i64) });
-    }
+
+    try w.writeAll(" changes ");
+    if (res.val.isZero()) try w.writeAll("non-zero ");
+    try w.writeAll("value from ");
+    try oldValue.print(p.ctx(), w);
+    try w.writeAll(" to ");
+    try res.val.print(p.ctx(), w);
 
     return try p.comp.diagnostics.arena.allocator().dupe(u8, p.strings.items[stringsTop..]);
 }
@@ -708,6 +706,7 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
         p.nodes.deinit(pp.comp.gpa);
         p.retainedStrings.deinit();
         p.valueMap.deinit();
+        p.interner.deinit(pp.comp.gpa);
     }
 
     defer {
@@ -2027,7 +2026,7 @@ fn parseTypeSpec(p: *Parser, ty: *TypeBuilder) Error!bool {
                 } else if (res.value.compare(.gt, Value.int(128), p.ctx())) {
                     bits = 129;
                 } else {
-                    bits = res.value.getInt(i16);
+                    bits = res.value.toInt(i16, p.ctx()).?;
                 }
 
                 try ty.combine(p, .{ .BitInt = bits }, bitIntToken);
@@ -2341,7 +2340,7 @@ fn parseRecordDeclarator(p: *Parser) Error!bool {
                 break :bits;
             }
 
-            bits = res.value.getInt(u32);
+            bits = res.value.toInt(u32, p.ctx()).?;
             bitsNode = res.node;
         }
 
@@ -2791,13 +2790,13 @@ fn enumerator(p: *Parser, e: *Enumerator) Error!?EnumFieldAndNode {
     if (errStart == p.comp.diagnostics.list.items.len) {
         // only do these warnings if we didn't already warn about overflow or non-representable values
         if (e.res.value.compare(.lt, Value.zero, p.ctx())) {
-            const value = e.res.value.getInt(i64);
-            if (value < Type.Int.minInt(p.comp))
-                try p.errExtra(.enumerator_too_small, nameToken, .{ .signed = value });
+            const minInt = Value.int(Type.Int.minInt(p.comp));
+            if (e.res.val.compare(.lt, minInt, p.ctx()))
+                try p.errStr(.enumerator_too_small, nameToken, try p.valStr(e.res.val));
         } else {
-            const value = e.res.value.getInt(u64);
-            if (value > Type.Int.maxInt(p.comp))
-                try p.errExtra(.enumerator_too_large, nameToken, .{ .unsigned = value });
+            const maxInt = Value.int(Type.Int.maxInt(p.comp));
+            if (e.res.val.compare(.gt, maxInt, p.ctx()))
+                try p.errStr(.enumerator_too_large, nameToken, try p.valStr(e.res.val));
         }
     }
 
@@ -3082,7 +3081,7 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: Declarator
                 try p.errToken(.array_too_large, lb);
                 arrayType.len = maxElems;
             } else {
-                arrayType.len = sizeValue.getInt(u64);
+                arrayType.len = sizeValue.toInt(u64, p.ctx()).?;
             }
             resType.data = .{ .array = arrayType };
             resType.specifier = .Array;
@@ -3405,18 +3404,18 @@ pub fn initializerItem(p: *Parser, il: *InitList, initType: Type) Error!bool {
                 if (indexRes.value.isUnavailable()) {
                     try p.errToken(.expected_integer_constant_expr, exprToken);
                     return error.ParsingFailed;
-                } else if (indexRes.value.compare(.lt, Value.zero, p)) {
+                } else if (indexRes.value.compare(.lt, Value.zero, p.ctx())) {
                     try p.errExtra(.negative_array_designator, lb + 1, try p.valStr(indexRes.value));
                     return error.ParsingFailed;
                 }
 
                 const maxLen = curType.arrayLen() orelse std.math.maxInt(usize);
-                if (indexRes.value.data.int >= maxLen) {
+                if (indexRes.val.compare(.gte, Value.int(maxLen), p.ctx())) {
                     try p.errExtra(.oob_array_designator, lbr + 1, indexRes.value);
                     return error.ParsingFailed;
                 }
 
-                const checked = indexRes.value.getInt(u64);
+                const checked = indexRes.value.toInt(u64, p.ctx()).?;
                 curIndexHint = curIndexHint orelse checked;
 
                 curIL = try curIL.find(p.gpa, checked);
@@ -5796,11 +5795,11 @@ fn offsetofMemberDesignator(p: *Parser, baseType: Type) Error!Result {
 
     const baseNode = try p.addNode(.{ .tag = .DefaultInitExpr, .type = baseType, .data = undefined });
 
-    var offsetNum: u64 = 0;
+    var curOffset: u64 = 0;
     const baseRecordTy = baseType.canonicalize(.standard);
-    var lhs = try p.fieldAccessExtra(baseNode, baseRecordTy, baseFieldName, false, &offsetNum);
-    var bitOffset = Value.int(offsetNum);
+    var lhs = try p.fieldAccessExtra(baseNode, baseType, baseFieldName, false, &curOffset);
 
+    var totalOffset = curOffset;
     while (true) switch (p.currToken()) {
         .Period => {
             p.tokenIdx += 1;
@@ -5812,9 +5811,8 @@ fn offsetofMemberDesignator(p: *Parser, baseType: Type) Error!Result {
                 return error.ParsingFailed;
             }
             try p.validateFieldAccess(lhs.ty, lhs.ty, fieldNameToken, fieldName);
-            lhs = try p.fieldAccessExtra(lhs.node, lhs.ty, fieldName, false, &offsetNum);
-            if (bitOffset.tag != .unavailable)
-                bitOffset = Value.int(offsetNum + bitOffset.getInt(u64));
+            lhs = try p.fieldAccessExtra(lhs.node, lhs.ty, fieldName, false, &curOffset);
+            totalOffset += curOffset;
         },
         .LBracket => {
             const lbracketToken = p.tokenIdx;
@@ -5843,7 +5841,7 @@ fn offsetofMemberDesignator(p: *Parser, baseType: Type) Error!Result {
         else => break,
     };
 
-    return Result{ .ty = baseType, .value = bitOffset, .node = lhs.node };
+    return Result{ .ty = baseType, .value = Value.int(totalOffset), .node = lhs.node };
 }
 
 /// unaryExpr
@@ -6492,7 +6490,7 @@ fn fieldAccessExtra(
                 .data = .{ .member = .{ .lhs = lhs, .index = @intCast(i) } },
             });
             const res = p.fieldAccessExtra(inner, f.ty, fieldName, false, offsetBits);
-            offsetBits.* += f.layout.offsetBits;
+            offsetBits.* = f.layout.offsetBits;
             return res;
         }
 
@@ -6663,9 +6661,7 @@ fn checkArrayBounds(p: *Parser, index: Result, array: Result, token: TokenIndex)
                 const record = lhs.getRecord().?;
                 if (data.member.index + 1 == record.fields.len) {
                     if (!index.value.isZero()) {
-                        try p.errExtra(.old_style_flexible_struct, token, .{
-                            .unsigned = index.value.data.int,
-                        });
+                        try p.errExtra(.old_style_flexible_struct, token, try p.valStr(index.value));
                     }
                     return;
                 }
