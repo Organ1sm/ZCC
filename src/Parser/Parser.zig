@@ -7057,39 +7057,6 @@ fn getIntegerPart(p: *Parser, buffer: []const u8, prefix: NumberPrefix, tokenIdx
     return buffer;
 }
 
-fn castInt(p: *Parser, val: u64, specs: []const Type.Specifier) Error!Result {
-    var res: Result = .{ .value = Value.int(val) };
-    for (specs) |spec| {
-        const ty = Type{ .specifier = spec };
-        const isUnsigned = ty.isUnsignedInt(p.comp);
-        const tySize = ty.sizeof(p.comp).?;
-        res.ty = ty;
-
-        if (isUnsigned) {
-            switch (tySize) {
-                2 => if (val <= std.math.maxInt(u16)) break,
-                4 => if (val <= std.math.maxInt(u32)) break,
-                8 => if (val <= std.math.maxInt(u64)) break,
-                else => unreachable,
-            }
-        } else {
-            switch (tySize) {
-                2 => if (val <= std.math.maxInt(i16)) break,
-                4 => if (val <= std.math.maxInt(i32)) break,
-                8 => if (val <= std.math.maxInt(i64)) break,
-                else => unreachable,
-            }
-        }
-    } else {
-        res.ty = Type.ULongLong;
-    }
-
-    res.node = try p.addNode(.{ .tag = .IntLiteral, .type = res.ty, .data = .{ .int = val } });
-    if (!p.inMacro)
-        try p.valueMap.put(res.node, res.value);
-    return res;
-}
-
 fn fixedSizeInt(p: *Parser, base: u8, buf: []const u8, suffix: NumberSuffix, tokenIdx: TokenIndex) !Result {
     var value: u64 = 0;
     var overflow = false;
@@ -7115,9 +7082,10 @@ fn fixedSizeInt(p: *Parser, base: u8, buf: []const u8, suffix: NumberSuffix, tok
         value = sum;
     }
 
+    var res: Result = .{ .value = try Value.int(value, p.ctx()) };
     if (overflow) {
         try p.errToken(.int_literal_too_big, tokenIdx);
-        var res: Result = .{ .ty = Type.ULongLong, .value = Value.int(value) };
+        res.ty = Type.ULongLong;
         res.node = try p.addNode(.{ .tag = .IntLiteral, .type = res.ty, .data = undefined });
         if (!p.inMacro)
             try p.valueMap.put(res.node, res.value);
@@ -7127,25 +7095,27 @@ fn fixedSizeInt(p: *Parser, base: u8, buf: []const u8, suffix: NumberSuffix, tok
     if (suffix.isSignedInteger() and value > p.comp.types.intmax.maxInt(p.comp))
         try p.errToken(.implicitly_unsigned_literal, tokenIdx);
 
-    return if (base == 10)
-        switch (suffix) {
-            .None, .I => p.castInt(value, &.{ .Int, .Long, .LongLong }),
-            .U, .IU => p.castInt(value, &.{ .UInt, .ULong, .ULongLong }),
-            .L, .IL => p.castInt(value, &.{ .Long, .LongLong }),
-            .UL, .IUL => p.castInt(value, &.{ .ULong, .ULongLong }),
-            .LL, .ILL => p.castInt(value, &.{.LongLong}),
-            .ULL, .IULL => p.castInt(value, &.{.ULongLong}),
-            else => unreachable,
-        }
-    else switch (suffix) {
-        .None, .I => p.castInt(value, &.{ .Int, .UInt, .Long, .ULong, .LongLong, .ULongLong }),
-        .U, .IU => p.castInt(value, &.{ .UInt, .ULong, .ULongLong }),
-        .L, .IL => p.castInt(value, &.{ .Long, .ULong, .LongLong, .ULongLong }),
-        .UL, .IUL => p.castInt(value, &.{ .ULong, .ULongLong }),
-        .LL, .ILL => p.castInt(value, &.{ .LongLong, .ULongLong }),
-        .ULL, .IULL => p.castInt(value, &.{.ULongLong}),
-        else => unreachable,
-    };
+    const signedSpecs = .{ .Int, .Long, .LongLong };
+    const unsignedSpecs = .{ .UInt, .ULong, .ULongLong };
+    const signedOctHexSpecs = .{ .Int, .UInt, .Long, .ULong, .LongLong, .ULongLong };
+    const specs: []const Type.Specifier = if (suffix.signedness() == .unsigned)
+        &unsignedSpecs
+    else if (base == 10)
+        &signedSpecs
+    else
+        &signedOctHexSpecs;
+
+    for (specs) |spec| {
+        res.ty = Type{ .specifier = spec };
+        const maxInt = res.ty.maxInt(p.comp);
+        if (value <= maxInt) break;
+    } else {
+        res.ty = Type.ULongLong;
+    }
+
+    res.node = try p.addNode(.{ .tag = .IntLiteral, .ty = res.ty, .data = undefined });
+    if (!p.inMacro) try p.valueMap.put(res.node, res.value);
+    return res;
 }
 
 fn parseInt(
@@ -7205,19 +7175,12 @@ fn bitInt(p: *Parser, base: u8, buf: []const u8, suffix: NumberSuffix, tokenIdx:
             return error.ParsingFailed;
         }
 
-        if (bitsNeeded > 64)
-            return p.todo("_BitInt constants > 64 bits");
-
         break :blk @intCast(bitsNeeded);
     };
 
-    const val = c.to(u64) catch |e| switch (e) {
-        error.NegativeIntoUnsigned => unreachable, // unary minus parsed elsewhere; we only see positive integers
-        error.TargetTooSmall => unreachable, // Validated above but Todo: handle larger _BitInt
-    };
-
+    const val = try p.ctx().intern(.{ .int = .{ .bigInt = c } });
     var res: Result = .{
-        .value = Value.int(val),
+        .value = val,
         .ty = .{
             .specifier = .BitInt,
             .data = .{ .int = .{ .bits = bitsNeeded, .signedness = suffix.signedness() } },

@@ -24,7 +24,7 @@ pub const Error = error{
     FatalError,
 } || Allocator.Error;
 
-pub const BitIntMaxBits = 128;
+pub const BitIntMaxBits = std.math.maxInt(u16);
 const PathBufferStackLimit = 1024;
 
 /// Environment variables used during compilation / linking.
