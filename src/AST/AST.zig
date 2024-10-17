@@ -1013,7 +1013,6 @@ fn dumpNode(
         .CharLiteral,
         .IntLiteral,
         .FloatLiteral,
-        .DoubleLiteral,
         .StringLiteralExpr,
         => {},
 
