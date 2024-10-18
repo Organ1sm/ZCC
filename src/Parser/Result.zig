@@ -433,7 +433,7 @@ pub fn boolCast(res: *Result, p: *Parser, boolType: Type, tok: TokenIndex) Error
         try res.implicitCast(p, .IntToBool);
     } else if (res.ty.isFloat()) {
         const oldValue = res.value;
-        const valueChangeKind = res.value.floatToInt(res.ty, boolType, p.comp);
+        const valueChangeKind = try res.value.floatToInt(boolType, p.ctx());
         try res.floatToIntWarning(p, boolType, oldValue, valueChangeKind, tok);
         if (!res.ty.isReal()) {
             res.ty = res.ty.makeReal();
@@ -480,9 +480,7 @@ pub fn intCast(res: *Result, p: *Parser, intType: Type, tok: TokenIndex) Error!v
     // Cast from floating point to integer.
     else if (res.ty.isFloat()) {
         const oldValue = res.value;
-        // Check for the kind of value change that will occur during the cast.
-        const valueChangeKind = res.value.floatToInt(res.ty, intType, p.comp);
-        // Warn if there are issues with the float to int conversion.
+        const valueChangeKind = try res.value.floatToInt(intType, p.ctx());
         try res.floatToIntWarning(p, intType, oldValue, valueChangeKind, tok);
 
         const oldReal = res.ty.isReal();
@@ -579,7 +577,7 @@ pub fn floatCast(res: *Result, p: *Parser, floatType: Type) Error!void {
     }
     // src type is not equal float type
     else if (!res.ty.eql(floatType, p.comp, true)) {
-        res.value.floatCast(res.ty, floatType, p.comp);
+        try res.value.floatCast(floatType, p.ctx());
         const oldReal = res.ty.isReal();
         const newReal = floatType.isReal();
         if (oldReal and newReal) {
@@ -608,7 +606,7 @@ pub fn ptrCast(res: *Result, p: *Parser, ptrType: Type) Error!void {
         res.ty = ptrType;
         try res.implicitCast(p, .BoolToPointer);
     } else if (res.ty.isInt()) {
-        res.value.intCast(res.ty, ptrType, p.comp);
+        try res.value.intCast(ptrType, p.ctx());
         res.ty = ptrType;
         try res.implicitCast(p, .IntToPointer);
     }
@@ -927,17 +925,17 @@ pub fn castType(res: *Result, p: *Parser, to: Type, tok: TokenIndex) !void {
             res.value.boolCast();
         } else if (oldIsFloat and newInt) {
             // Explicit cast, no conversion warning
-            _ = res.value.floatToInt(res.ty, to, p.comp);
+            _ = try res.value.floatToInt(to, p.ctx());
         } else if (newIsFloat and oldInt) {
             res.value.intToFloat(to, p.ctx());
         } else if (newIsFloat and oldIsFloat) {
-            res.value.floatCast(res.ty, to, p.comp);
+            try res.value.floatCast(to, p.ctx());
         } else if (oldInt and newInt) {
             if (to.hasIncompleteSize()) {
                 try p.errStr(.cast_to_incomplete_type, tok, try p.typeStr(to));
                 return error.ParsingFailed;
             }
-            res.value.intCast(res.ty, to, p.comp);
+            try res.value.intCast(to, p.ctx());
         }
     } else if (to.get(.Union)) |unionTy| {
         if (unionTy.data.record.hasFieldOfType(res.ty, p.comp)) {

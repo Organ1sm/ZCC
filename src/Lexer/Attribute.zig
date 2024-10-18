@@ -280,7 +280,7 @@ fn diagnoseField(
     switch (val.tag) {
         .int => {
             if (@typeInfo(wanted) == .int) {
-                @field(@field(arguments, decl.name), field.name) = val.getInt(wanted);
+                @field(@field(arguments, decl.name), field.name) = val.toInt(wanted);
                 return null;
             }
         },

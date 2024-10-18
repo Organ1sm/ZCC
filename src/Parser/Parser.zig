@@ -3071,7 +3071,7 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: Declarator
             var sizeValue = size.value;
             if (sizeValue.isZero()) {
                 try p.errToken(.zero_length_array, lb);
-            } else if (sizeValue.compare(.lt, Value.zero, p)) {
+            } else if (sizeValue.compare(.lt, Value.zero, p.ctx())) {
                 try p.errToken(.negative_array_size, lb);
                 return error.ParsingFailed;
             }
@@ -5287,7 +5287,7 @@ fn logicalOrExpr(p: *Parser) Error!Result {
 
         if (try lhs.adjustTypes(token, &rhs, p, .booleanLogic)) {
             const res = lhs.value.toBool() or rhs.value.toBool();
-            lhs.val = Value.fromBool(res);
+            lhs.value = Value.fromBool(res);
         }
 
         try lhs.boolRes(p, .BoolOrExpr, rhs);
@@ -5314,7 +5314,7 @@ fn logicalAndExpr(p: *Parser) Error!Result {
 
         if (try lhs.adjustTypes(token, &rhs, p, .booleanLogic)) {
             const res = lhs.value.toBool() and rhs.value.toBool();
-            lhs.val = Value.fromBool(res);
+            lhs.value = Value.fromBool(res);
         }
 
         try lhs.boolRes(p, .BoolAndExpr, rhs);
@@ -5522,7 +5522,7 @@ fn parseMulExpr(p: *Parser) Error!Result {
 
         if (try lhs.adjustTypes(percent.?, &rhs, p, if (tag == .ModExpr) .integer else .arithmetic)) {
             if (mul != null) {
-                if (lhs.value.mul(lhs.value, rhs.value, lhs.ty, p.ctx()))
+                if (try lhs.value.mul(lhs.value, rhs.value, lhs.ty, p.ctx()))
                     try p.errOverflow(mul.?, lhs);
             } else if (div != null) {
                 if (try lhs.value.div(lhs.value, rhs.value, lhs.ty, p.ctx()))
