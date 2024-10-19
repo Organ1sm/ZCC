@@ -116,7 +116,7 @@ pub const Builder = struct {
 
     pub fn addConstant(b: *Builder, val: Value, ty: Interner.Ref) Allocator.Error!Ref {
         const ref: Ref = @enumFromInt(b.instructions.len);
-        const key: Interner.Key = .{ .value = val };
+        const key: Interner.Key = .{ .v = val };
         const valRef = try b.pool.put(b.gpa, key);
 
         try b.instructions.append(b.gpa, .{

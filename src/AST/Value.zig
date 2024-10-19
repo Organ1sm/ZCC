@@ -520,6 +520,56 @@ pub fn div(res: *Value, lhs: Value, rhs: Value, ty: Type, ctx: Context) !bool {
     }
 }
 
+/// caller guarantees rhs != 0
+/// caller guarantees lhs != std.math.minInt(T) OR rhs != -1
+pub fn rem(lhs: Value, rhs: Value, ty: Type, ctx: Context) !Value {
+    var lhsSpace: BigIntSpace = undefined;
+    var rhsSpace: BigIntSpace = undefined;
+    const lhsBigInt = lhs.toBigInt(&lhsSpace, ctx);
+    const rhsBigInt = rhs.toBigInt(&rhsSpace, ctx);
+
+    const signedness = ty.signedness(ctx.comp);
+    if (signedness == .signed) {
+        var spaces: [3]BigIntSpace = undefined;
+        const minVal = BigIntMutable.init(&spaces[0].limbs, ty.minInt(ctx.comp)).toConst();
+        const negative = BigIntMutable.init(&spaces[1].limbs, -1).toConst();
+        const bigOne = BigIntMutable.init(&spaces[2].limbs, 1).toConst();
+        if (lhsBigInt.eql(minVal) and rhsBigInt.eql(negative)) {
+            return .{};
+        } else if (rhsBigInt.order(bigOne).compare(.lt)) {
+            // lhs - @divTrunc(lhs, rhs) * rhs
+            var tmp: Value = undefined;
+            _ = try tmp.div(lhs, rhs, ty, ctx);
+            _ = try tmp.mul(tmp, rhs, ty, ctx);
+            _ = try tmp.sub(lhs, tmp, ty, ctx);
+            return tmp;
+        }
+    }
+
+    const limbsQ = try ctx.comp.gpa.alloc(
+        std.math.big.Limb,
+        lhsBigInt.limbs.len,
+    );
+    defer ctx.comp.gpa.free(limbsQ);
+    var resultQ = BigIntMutable{ .limbs = limbsQ, .positive = undefined, .len = undefined };
+
+    const limbsR = try ctx.comp.gpa.alloc(
+        std.math.big.Limb,
+        rhsBigInt.limbs.len,
+    );
+    defer ctx.comp.gpa.free(limbsR);
+    var resultR = BigIntMutable{ .limbs = limbsR, .positive = undefined, .len = undefined };
+
+    const limbsBuffer = try ctx.comp.gpa.alloc(
+        std.math.big.Limb,
+        std.math.big.int.calcDivLimbsBufferLen(lhsBigInt.limbs.len, rhsBigInt.limbs.len),
+    );
+    defer ctx.comp.gpa.free(limbsBuffer);
+
+    resultQ.divTrunc(&resultR, lhsBigInt, rhsBigInt, limbsBuffer);
+    return ctx.intern(.{ .int = .{ .bigInt = resultR.toConst() } });
+}
+
 pub fn bitOr(lhs: Value, rhs: Value, ctx: Context) !Value {
     var lhsSpace: BigIntSpace = undefined;
     var rhsSpace: BigIntSpace = undefined;
@@ -577,6 +627,66 @@ pub fn bitNot(val: Value, ty: Type, ctx: Context) !Value {
     result.bitNotWrap(valBigInt, ty.signedness(ctx.comp), bits);
 
     return ctx.intern(.{ .int = .{ .bigInt = result.toConst() } });
+}
+
+pub fn shl(res: *Value, lhs: Value, rhs: Value, ty: Type, ctx: Context) !bool {
+    var lhsSpace: Value.BigIntSpace = undefined;
+    const lhsBigInt = lhs.toBigInt(&lhsSpace, ctx);
+    const shift = rhs.toInt(usize, ctx) orelse std.math.maxInt(usize);
+
+    const bits = ty.bitSizeof(ctx.comp).?;
+    if (shift > bits) {
+        if (lhsBigInt.positive) {
+            res.* = try ctx.intern(.{ .int = .{ .u64 = ty.maxInt(ctx.comp) } });
+        } else {
+            res.* = try ctx.intern(.{ .int = .{ .i64 = ty.minInt(ctx.comp) } });
+        }
+        return true;
+    }
+
+    const limbs = try ctx.comp.gpa.alloc(
+        std.math.big.Limb,
+        lhsBigInt.limbs.len + (shift / (@sizeOf(std.math.big.Limb) * 8)) + 1,
+    );
+    defer ctx.comp.gpa.free(limbs);
+    var result = BigIntMutable{ .limbs = limbs, .positive = undefined, .len = undefined };
+
+    result.shiftLeft(lhsBigInt, shift);
+    const signedness = ty.signedness(ctx.comp);
+    const overflowed = !result.toConst().fitsInTwosComp(signedness, bits);
+    if (overflowed)
+        result.truncate(result.toConst(), signedness, bits);
+
+    res.* = try ctx.intern(.{ .int = .{ .bigInt = result.toConst() } });
+    return overflowed;
+}
+
+pub fn shr(lhs: Value, rhs: Value, ty: Type, ctx: Context) !Value {
+    var lhsSpace: Value.BigIntSpace = undefined;
+    const lhsBigInt = lhs.toBigInt(&lhsSpace, ctx);
+    const shift = rhs.toInt(usize, ctx) orelse return zero;
+
+    const resultLimbs = lhsBigInt.limbs.len -| (shift / (@sizeOf(std.math.big.Limb) * 8));
+    if (resultLimbs == 0) {
+        // The shift is enough to remove all the bits from the number, which means the
+        // result is 0 or -1 depending on the sign.
+        if (lhsBigInt.positive) {
+            return zero;
+        } else {
+            return ctx.intern(.{ .int = .{ .i64 = -1 } });
+        }
+    }
+
+    const bits = ty.bitSizeof(ctx.comp).?;
+    const limbs = try ctx.comp.gpa.alloc(
+        std.math.big.Limb,
+        std.math.big.int.calcTwosCompLimbCount(bits),
+    );
+    defer ctx.comp.gpa.free(limbs);
+    var resultBigInt = BigIntMutable{ .limbs = limbs, .positive = undefined, .len = undefined };
+
+    resultBigInt.shiftRight(lhsBigInt, shift);
+    return ctx.intern(.{ .int = .{ .bigInt = resultBigInt.toConst() } });
 }
 
 pub fn compare(lhs: Value, op: std.math.CompareOperator, rhs: Value, ctx: Context) bool {

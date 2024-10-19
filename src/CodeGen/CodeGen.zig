@@ -146,7 +146,7 @@ fn genType(c: *CodeGen, baseTy: Type) !Interner.Ref {
                 try c.recordElemBuffer.append(c.builder.gpa, fieldRef);
             }
 
-            key.record.elements = try c.builder.arena.allocator().dupe(Interner.Ref, c.recordElemBuffer.items[elemBufferTop..]);
+            key.recordTy.elements = try c.builder.arena.allocator().dupe(Interner.Ref, c.recordElemBuffer.items[elemBufferTop..]);
             return c.builder.pool.put(c.builder.gpa, key);
         },
 

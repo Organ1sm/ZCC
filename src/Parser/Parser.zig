@@ -5447,10 +5447,12 @@ fn parseShiftExpr(p: *Parser) Error!Result {
         try rhs.expect(p);
 
         if (try lhs.adjustTypes(shr.?, &rhs, p, .integer)) {
-            if (shl != null)
-                lhs.value = lhs.value.shl(rhs.value, lhs.ty, p.comp)
-            else
-                lhs.value = lhs.value.shr(rhs.value, lhs.ty, p.comp);
+            if (shl != null) {
+                if (try lhs.value.shl(lhs.value, rhs.value, lhs.ty, p.ctx()))
+                    try p.errOverflow(shl.?, lhs);
+            } else {
+                lhs.value = try lhs.value.shr(rhs.value, lhs.ty, p.ctx());
+            }
         }
 
         try lhs.bin(p, tag, rhs);
@@ -5526,8 +5528,8 @@ fn parseMulExpr(p: *Parser) Error!Result {
                 if (try lhs.value.div(lhs.value, rhs.value, lhs.ty, p.ctx()))
                     try p.errOverflow(mul.?, lhs);
             } else {
-                var res = Value.rem(lhs.value, rhs.value, lhs.ty, p.comp);
-                if (res.isUnavailable()) {
+                var res = try Value.rem(lhs.value, rhs.value, lhs.ty, p.ctx());
+                if (res.isNone()) {
                     if (p.inMacro) {
                         // match clang behavior by defining invalid remainder to be zero in macros
                         res = Value.zero;
