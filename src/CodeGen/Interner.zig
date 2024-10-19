@@ -46,11 +46,7 @@ pub const Key = union(enum) {
         len: u32,
         child: Ref,
     },
-    recordTy: struct {
-        /// Pointer to user data, value used for hash and equality check.
-        userPtr: *anyopaque,
-        elements: []const Ref,
-    },
+    recordTy: []const Ref,
     /// may not be zero
     null,
     int: union(enum) {
@@ -84,8 +80,8 @@ pub const Key = union(enum) {
             .bytes => |bytes| {
                 hasher.update(bytes);
             },
-            .recordTy => |info| {
-                std.hash.autoHash(&hasher, @intFromPtr(info.userPtr));
+            .recordTy => |elems| for (elems) |elem| {
+                std.hash.autoHash(&hasher, elem);
             },
             .float => |repr| switch (repr) {
                 inline else => |data| std.hash.autoHash(
@@ -112,8 +108,13 @@ pub const Key = union(enum) {
         const rhsTag: KeyTag = rhs;
         if (lhsTag != rhsTag) return false;
         switch (lhs) {
-            .recordTy => |lhsInfo| {
-                return lhsInfo.userPtr == rhs.recordTy.userPtr;
+            .recordTy => |lhsElems| {
+                const rhsElems = rhs.recordTy;
+                if (lhsElems.len != rhsElems.len) return false;
+                for (lhsElems, rhsElems) |lhsElem, rhsElem| {
+                    if (lhsElem != rhsElem) return false;
+                }
+                return true;
             },
             .bytes => |lhsBytes| {
                 const rhsBytes = rhs.bytes;
@@ -331,18 +332,9 @@ pub const Tag = enum(u8) {
     };
 
     pub const Record = struct {
-        ptr0: u32,
-        ptr1: u32,
-        elements_len: u32,
+        elementsLen: u32,
         // trailing
         // [elements_len]Ref
-
-        pub fn getPtr(r: Record) *anyopaque {
-            return @ptrFromInt((PackedU64{
-                .a = r.ptr0,
-                .b = r.ptr1,
-            }).get());
-        }
     };
 };
 
@@ -478,21 +470,15 @@ pub fn put(self: *Interner, gpa: Allocator, key: Key) !Ref {
             });
         },
 
-        .recordTy => |record| {
-            const splitPtr = PackedU64.init(@intFromPtr(record.userPtr));
-            try self.extra.ensureUnusedCapacity(
-                gpa,
-                @typeInfo(Tag.Record).@"struct".fields.len + record.elements.len,
-            );
+        .recordTy => |elems| {
+            try self.extra.ensureUnusedCapacity(gpa, @typeInfo(Tag.Record).@"struct".fields.len + elems.len);
             self.items.appendAssumeCapacity(.{
                 .tag = .recordTy,
                 .data = self.addExtraAssumeCapacity(Tag.Record{
-                    .ptr0 = splitPtr.a,
-                    .ptr1 = splitPtr.b,
-                    .elements_len = @intCast(record.elements.len),
+                    .elementsLen = @intCast(elems.len),
                 }),
             });
-            self.extra.appendSliceAssumeCapacity(@ptrCast(record.elements));
+            self.extra.appendSliceAssumeCapacity(@ptrCast(elems));
         },
 
         .ptrTy,
@@ -622,10 +608,7 @@ pub fn get(self: *const Interner, ref: Ref) Key {
         .recordTy => {
             const extra = self.extraDataTrail(Tag.Record, data);
             return .{
-                .recordTy = .{
-                    .userPtr = extra.data.getPtr(),
-                    .elements = @ptrCast(self.extra.items[extra.end..][0..extra.data.elements_len]),
-                },
+                .recordTy = @ptrCast(self.extra.items[extra.end..][0..extra.data.elementsLen]),
             };
         },
     };
