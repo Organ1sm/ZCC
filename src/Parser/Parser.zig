@@ -394,7 +394,8 @@ pub fn todo(p: *Parser, msg: []const u8) Error {
 }
 
 pub fn valStr(p: *Parser, val: Value) ![]const u8 {
-    switch (val.ref()) {
+    switch (val.optRef) {
+        .none => return "(none)",
         .zero => return "0",
         .one => return "1",
         .null => return "nullptr_t",
@@ -6058,7 +6059,7 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
             if (operand.value.is(.int, p.ctx())) {
                 const res = Value.fromBool(!operand.value.toBool(p.ctx()));
                 operand.value = res;
-            } else if (operand.value.is(.null, p.ctx())) {
+            } else if (operand.value.optRef == .null) {
                 operand.value = Value.one;
             } else {
                 if (operand.ty.isDecayed())

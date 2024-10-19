@@ -22,12 +22,11 @@ pub const Context = struct {
     }
 };
 
-pub const OptRef = enum(u32) {
-    none = std.math.maxInt(u32),
-    _,
-};
+optRef: Interner.OptRef = .none,
 
-optRef: OptRef = .none,
+pub const zero = Value{ .optRef = .zero };
+pub const one = Value{ .optRef = .one };
+pub const @"null" = Value{ .optRef = .null };
 
 pub fn isNone(v: Value) bool {
     return v.optRef == .none;
@@ -82,10 +81,6 @@ pub fn is(v: Value, tag: std.meta.Tag(Interner.Key), ctx: Context) bool {
     if (v.optRef == .none) return false;
     return ctx.interner.get(v.ref()) == tag;
 }
-
-pub const zero = Value{ .optRef = @enumFromInt(@intFromEnum(Interner.Ref.zero)) };
-pub const one = Value{ .optRef = @enumFromInt(@intFromEnum(Interner.Ref.one)) };
-pub const @"null" = Value{ .optRef = @enumFromInt(@intFromEnum(Interner.Ref.null)) };
 
 /// Number of bits needed to hold `v`.
 /// Asserts that `v` is not negative

@@ -110,7 +110,7 @@ pub fn maybeWarnUnused(res: Result, p: *Parser, exprStart: TokenIndex, errStart:
 }
 
 pub fn boolRes(lhs: *Result, p: *Parser, tag: AstTag, rhs: Result) !void {
-    if (lhs.value.is(.null, p.ctx()))
+    if (lhs.value.optRef == .null)
         lhs.value = Value.zero;
 
     if (!lhs.ty.isInvalid())
