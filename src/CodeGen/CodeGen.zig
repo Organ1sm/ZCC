@@ -125,7 +125,7 @@ fn genType(c: *CodeGen, baseTy: Type) !Interner.Ref {
         .Bool => return .i1,
         .Struct => {
             key = .{
-                .record = .{
+                .recordTy = .{
                     .userPtr = ty.data.record,
                     .elements = undefined, // Not needed for hash lookup.
                 },

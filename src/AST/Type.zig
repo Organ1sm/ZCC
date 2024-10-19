@@ -752,7 +752,7 @@ pub fn isUnsignedInt(ty: Type, comp: *const Compilation) bool {
     return ty.signedness(comp) == .unsigned;
 }
 
-pub fn signedness(ty: Type, comp: *const Compilation) ?std.builtin.Signedness {
+pub fn signedness(ty: Type, comp: *const Compilation) std.builtin.Signedness {
     return switch (ty.specifier) {
         .Char, .ComplexChar => return comp.getCharSignedness(),
 

@@ -337,7 +337,7 @@ pub fn isLValueExtra(tree: *const AST, node: NodeIndex, isConst: *bool) bool {
 
         .BuiltinChooseExpr => {
             if (tree.valueMap.get(data.if3.cond)) |val| {
-                const offset = @intFromBool(val.isZero());
+                const offset = @intFromBool(val.isZero(tree.ctx()));
                 return tree.isLValueExtra(tree.data[data.if3.body + offset], isConst);
             }
             return false;
@@ -373,15 +373,15 @@ pub fn dump(tree: AST, color: bool, writer: anytype) @TypeOf(writer).Error!void 
     }
 }
 
-fn dumpFieldAttributes(attributes: []const Attribute, level: u32, strings: []const u8, writer: anytype) !void {
+fn dumpFieldAttributes(tree: *const AST, attributes: []const Attribute, level: u32, writer: anytype) !void {
     for (attributes) |attr| {
         try writer.writeByteNTimes(' ', level);
         try writer.print("field attr: {s}", .{@tagName(attr.tag)});
-        try dumpAttribute(attr, strings, writer);
+        try tree.dumpAttribute(attr, writer);
     }
 }
 
-fn dumpAttribute(attr: Attribute, strings: []const u8, writer: anytype) !void {
+fn dumpAttribute(tree: *const AST, attr: Attribute, writer: anytype) !void {
     switch (attr.tag) {
         inline else => |tag| {
             const args = @field(attr.args, @tagName(tag));
@@ -398,8 +398,8 @@ fn dumpAttribute(attr: Attribute, strings: []const u8, writer: anytype) !void {
                 try writer.writeAll(f.name);
                 try writer.writeAll(": ");
                 switch (f.type) {
-                    Value.ByteRange => try writer.print("\"{s}\"", .{@field(args, f.name).slice(strings, .@"1")}),
-                    ?Value.ByteRange => try writer.print("\"{?s}\"", .{if (@field(args, f.name)) |range| range.slice(strings, .@"1") else null}),
+                    Interner.Ref => try writer.print("\"{s}\"", .{tree.interner.get(@field(args, f.name)).bytes}),
+                    ?Interner.Ref => try writer.print("\"{?s}\"", .{if (@field(args, f.name)) |str| tree.interner.get(str).bytes else null}),
                     else => switch (@typeInfo(f.type)) {
                         .@"enum" => try writer.writeAll(@tagName(@field(args, f.name))),
                         else => try writer.print("{any}", .{@field(args, f.name)}),
@@ -482,7 +482,7 @@ fn dumpNode(
         for (ty.data.attributed.attributes) |attr| {
             try w.writeByteNTimes(' ', level + half);
             try w.print("attr: {s}", .{@tagName(attr.tag)});
-            try dumpAttribute(attr, tree.strings, w);
+            try tree.dumpAttribute(attr, w);
         }
 
         if (color) util.setColor(.reset, w);
@@ -558,7 +558,7 @@ fn dumpNode(
                     if (fieldAttrs[i].len == 0) continue;
 
                     if (color) util.setColor(ATTRIBUTE, w);
-                    try dumpFieldAttributes(fieldAttrs[i], level + delta + half, tree.strings, w);
+                    try tree.dumpFieldAttributes(fieldAttrs[i], level + delta + half, w);
                     if (color) util.setColor(.reset, w);
                 }
             }
@@ -584,7 +584,7 @@ fn dumpNode(
                 try tree.dumpNode(data.binExpr.lhs, level + delta, mapper, color, w);
                 if (fieldAttrs[0].len > 0) {
                     if (color) util.setColor(ATTRIBUTE, w);
-                    try dumpFieldAttributes(fieldAttrs[0], level + delta + half, tree.strings, w);
+                    try tree.dumpFieldAttributes(fieldAttrs[0], level + delta + half, w);
                     if (color) util.setColor(.reset, w);
                 }
             }
@@ -593,7 +593,7 @@ fn dumpNode(
                 try tree.dumpNode(data.binExpr.rhs, level + delta, mapper, color, w);
                 if (fieldAttrs[1].len > 0) {
                     if (color) util.setColor(ATTRIBUTE, w);
-                    try dumpFieldAttributes(fieldAttrs[1], level + delta + half, tree.strings, w);
+                    try tree.dumpFieldAttributes(fieldAttrs[1], level + delta + half, w);
                     if (color) util.setColor(.reset, w);
                 }
             }

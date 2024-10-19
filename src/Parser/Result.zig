@@ -20,7 +20,7 @@ value: Value = .{},
 // validate result is valid
 pub fn expect(res: Result, p: *Parser) Error!void {
     if (p.inMacro) {
-        if (res.value.isUnavailable()) {
+        if (res.value.isNone()) {
             try p.errToken(.expected_expr, p.tokenIdx);
             return error.ParsingFailed;
         }
@@ -35,7 +35,7 @@ pub fn expect(res: Result, p: *Parser) Error!void {
 
 pub fn empty(res: Result, p: *Parser) bool {
     if (p.inMacro)
-        return res.value.isUnavailable();
+        return res.value.isNone();
     return res.node == .none;
 }
 
@@ -110,7 +110,7 @@ pub fn maybeWarnUnused(res: Result, p: *Parser, exprStart: TokenIndex, errStart:
 }
 
 pub fn boolRes(lhs: *Result, p: *Parser, tag: AstTag, rhs: Result) !void {
-    if (lhs.value.tag == .nullptrTy)
+    if (lhs.value.is(.null, p.ctx()))
         lhs.value = Value.zero;
 
     if (!lhs.ty.isInvalid())
@@ -280,8 +280,8 @@ pub fn adjustTypes(lhs: *Result, token: TokenIndex, rhs: *Result, p: *Parser, ki
                 if (otherRes.ty.isPointer()) {
                     try nullPtrRes.nullCast(p, otherRes.ty);
                     return otherRes.shouldEval(nullPtrRes, p);
-                } else if (otherRes.value.isZero()) {
-                    otherRes.value = .{ .tag = .nullptrTy };
+                } else if (otherRes.value.isZero(p.ctx())) {
+                    otherRes.value = Value.null;
                     try otherRes.nullCast(p, nullPtrRes.ty);
                     return otherRes.shouldEval(nullPtrRes, p);
                 }
@@ -292,7 +292,7 @@ pub fn adjustTypes(lhs: *Result, token: TokenIndex, rhs: *Result, p: *Parser, ki
             if (!lhsIsScalar or !rhsIsScalar or (lhsIsFloat and rhsIsPtr) or (rhsIsFloat and lhsIsPtr))
                 return lhs.invalidBinTy(token, rhs, p);
 
-            if ((lhsIsInt or rhsIsInt) and !(lhs.value.isZero() or rhs.value.isZero())) {
+            if ((lhsIsInt or rhsIsInt) and !(lhs.value.isZero(p.ctx()) or rhs.value.isZero(p.ctx()))) {
                 try p.errStr(.comparison_ptr_int, token, try p.typePairStr(lhs.ty, rhs.ty));
             } else if (lhsIsPtr and rhsIsPtr) {
                 if (!lhs.ty.isVoidStar() and !rhs.ty.isVoidStar() and !lhs.ty.eql(rhs.ty, p.comp, false))
@@ -319,7 +319,7 @@ pub fn adjustTypes(lhs: *Result, token: TokenIndex, rhs: *Result, p: *Parser, ki
                 return true;
 
             if ((lhsIsPtr and rhsIsInt) or (lhsIsInt and rhsIsPtr)) {
-                if (lhs.value.isZero() or rhs.value.isZero()) {
+                if (lhs.value.isZero(p.ctx()) or rhs.value.isZero(p.ctx())) {
                     try lhs.nullCast(p, rhs.ty);
                     try rhs.nullCast(p, lhs.ty);
                     return true;
@@ -401,7 +401,7 @@ pub fn lvalConversion(res: *Result, p: *Parser) Error!void {
     }
     // Decay an array type to a pointer to its first element.
     else if (res.ty.isArray()) {
-        res.value.tag = .unavailable;
+        res.value = .{};
         res.ty.decayArray();
         try res.implicitCast(p, .ArrayToPointer);
     }
@@ -414,7 +414,7 @@ pub fn lvalConversion(res: *Result, p: *Parser) Error!void {
 
 pub fn boolCast(res: *Result, p: *Parser, boolType: Type, tok: TokenIndex) Error!void {
     if (res.ty.isArray()) {
-        if (res.value.tag == .bytes)
+        if (res.value.is(.bytes, p.ctx()))
             try p.errStr(.string_literal_to_bool, tok, try p.typePairStrExtra(res.ty, " to ", boolType))
         else
             try p.errStr(.array_address_to_bool, tok, p.getTokenText(tok));
@@ -424,11 +424,11 @@ pub fn boolCast(res: *Result, p: *Parser, boolType: Type, tok: TokenIndex) Error
         res.ty = boolType;
         try res.implicitCast(p, .PointerToBool);
     } else if (res.ty.isPointer()) {
-        res.value.boolCast();
+        res.value.boolCast(p.ctx());
         res.ty = boolType;
         try res.implicitCast(p, .PointerToBool);
     } else if (res.ty.isInt() and !res.ty.is(.Bool)) {
-        res.value.boolCast();
+        res.value.boolCast(p.ctx());
         res.ty = boolType;
         try res.implicitCast(p, .IntToBool);
     } else if (res.ty.isFloat()) {
@@ -506,7 +506,7 @@ pub fn intCast(res: *Result, p: *Parser, intType: Type, tok: TokenIndex) Error!v
 
     // Cast between integer types.
     else if (!res.ty.eql(intType, p.comp, true)) {
-        res.value.intCast(res.ty, intType, p.comp);
+        try res.value.intCast(intType, p.ctx());
         const oldReal = res.ty.isReal();
         const newReal = intType.isReal();
         if (oldReal and newReal) {
@@ -626,7 +626,7 @@ pub fn toVoid(res: *Result, p: *Parser) Error!void {
 }
 
 pub fn nullCast(res: *Result, p: *Parser, ptrType: Type) Error!void {
-    if (!res.value.isZero() and !res.ty.is(.NullPtrTy)) return;
+    if (!res.value.isZero(p.ctx()) and !res.ty.is(.NullPtrTy)) return;
     res.ty = ptrType;
     try res.implicitCast(p, .NullToPointer);
 }
@@ -729,8 +729,8 @@ fn floatConversion(
 
 fn invalidBinTy(lhs: *Result, tok: TokenIndex, rhs: *Result, p: *Parser) Error!bool {
     try p.errStr(.invalid_bin_types, tok, try p.typePairStr(lhs.ty, rhs.ty));
-    lhs.value.tag = .unavailable;
-    lhs.value.tag = .unavailable;
+    lhs.value = .{};
+    rhs.value = .{};
     lhs.ty = Type.Invalid;
     return false;
 }
@@ -738,7 +738,7 @@ fn invalidBinTy(lhs: *Result, tok: TokenIndex, rhs: *Result, p: *Parser) Error!b
 /// Return true if the result of the expression should be evaluated.
 fn shouldEval(lhs: *Result, rhs: *Result, p: *Parser) Error!bool {
     if (p.noEval) return false;
-    if (!lhs.value.isUnavailable() and !rhs.value.isUnavailable())
+    if (!lhs.value.isNone() and !rhs.value.isNone())
         return true;
 
     try lhs.saveValue(p);
@@ -749,13 +749,13 @@ fn shouldEval(lhs: *Result, rhs: *Result, p: *Parser) Error!bool {
 /// Saves value and replaces it with `.unavailable`.
 pub fn saveValue(res: *Result, p: *Parser) !void {
     assert(!p.inMacro);
-    if (res.value.isUnavailable() or res.value.tag == .nullptrTy)
+    if (res.value.isNone() or res.value.ref() == .null)
         return;
 
     if (!p.inMacro)
         try p.valueMap.put(res.node, res.value);
 
-    res.value.tag = .unavailable;
+    res.value = .{};
 }
 
 pub fn castType(res: *Result, p: *Parser, to: Type, tok: TokenIndex) !void {
@@ -763,7 +763,7 @@ pub fn castType(res: *Result, p: *Parser, to: Type, tok: TokenIndex) !void {
     if (to.is(.Void)) {
         // everything can cast to void
         explicitCastKind = .ToVoid;
-        res.value.tag = .unavailable;
+        res.value = .{};
     } else if (to.is(.NullPtrTy)) {
         if (res.ty.is(.NullPtrTy)) {
             explicitCastKind = .NoOP;
@@ -774,7 +774,7 @@ pub fn castType(res: *Result, p: *Parser, to: Type, tok: TokenIndex) !void {
     } else if (res.ty.is(.NullPtrTy)) {
         if (to.is(.Bool)) {
             try res.nullCast(p, res.ty);
-            res.value.boolCast();
+            res.value.boolCast(p.ctx());
             res.ty = Type.Bool;
             try res.implicitCast(p, .PointerToBool);
             try res.saveValue(p);
@@ -785,7 +785,7 @@ pub fn castType(res: *Result, p: *Parser, to: Type, tok: TokenIndex) !void {
             return error.ParsingFailed;
         }
         explicitCastKind = .NoOP;
-    } else if (res.value.isZero() and to.isPointer()) {
+    } else if (res.value.isZero(p.ctx()) and to.isPointer()) {
         explicitCastKind = .NullToPointer;
     } else if (to.isScalar()) cast: {
         const oldIsFloat = res.ty.isFloat();
@@ -917,17 +917,17 @@ pub fn castType(res: *Result, p: *Parser, to: Type, tok: TokenIndex) !void {
             }
         }
 
-        if (res.value.isUnavailable()) break :cast;
+        if (res.value.isNone()) break :cast;
 
         const oldInt = res.ty.isInt() or res.ty.isPointer();
         const newInt = to.isInt() or to.isPointer();
         if (to.is(.Bool)) {
-            res.value.boolCast();
+            res.value.boolCast(p.ctx());
         } else if (oldIsFloat and newInt) {
             // Explicit cast, no conversion warning
             _ = try res.value.floatToInt(to, p.ctx());
         } else if (newIsFloat and oldInt) {
-            res.value.intToFloat(to, p.ctx());
+            try res.value.intToFloat(to, p.ctx());
         } else if (newIsFloat and oldIsFloat) {
             try res.value.floatCast(to, p.ctx());
         } else if (oldInt and newInt) {
@@ -981,7 +981,7 @@ pub fn intFitsInType(res: Result, p: *Parser, ty: Type) !bool {
     const maxInt = try Value.int(ty.maxInt(p.comp), p.ctx());
     const minInt = try Value.int(ty.minInt(p.comp), p.ctx());
 
-    return res.value.compare(.lte, maxInt, res.ty, p.ctx()) and
+    return res.value.compare(.lte, maxInt, p.ctx()) and
         (res.ty.isUnsignedInt(p.comp) or res.value.compare(.gte, minInt, p.ctx()));
 }
 
@@ -1066,7 +1066,7 @@ fn coerceExtra(
     }
     // dest type is pointer
     else if (unqualTy.isPointer()) {
-        if (res.value.isZero() or res.ty.is(.NullPtrTy)) {
+        if (res.value.isZero(p.ctx()) or res.ty.is(.NullPtrTy)) {
             try res.nullCast(p, destTy);
             return;
         } else if (res.ty.isInt() and res.ty.isReal()) {

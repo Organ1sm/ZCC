@@ -6,6 +6,7 @@ const Interner = @import("../CodeGen/Interner.zig");
 const BigIntSpace = Interner.Tag.Int.BigIntSpace;
 const BigIntConst = std.math.big.int.Const;
 const BigIntMutable = std.math.big.int.Mutable;
+const TargetUtil = @import("../Basic/Target.zig");
 
 const Value = @This();
 
@@ -21,60 +22,6 @@ pub const Context = struct {
     }
 };
 
-pub const ByteRange = struct {
-    start: u32,
-    end: u32,
-
-    pub fn len(self: ByteRange) u32 {
-        return self.end - self.start;
-    }
-
-    pub fn trim(self: ByteRange, amount: u32) ByteRange {
-        std.debug.assert(self.start <= self.end - amount);
-        return .{ .start = self.start, .end = self.end - amount };
-    }
-
-    pub fn slice(
-        self: ByteRange,
-        all_bytes: []const u8,
-        comptime size: Compilation.CharUnitSize,
-    ) []const size.Type() {
-        switch (size) {
-            inline else => |sz| {
-                const aligned: []align(@alignOf(sz.Type())) const u8 = @alignCast(all_bytes[self.start..self.end]);
-                return std.mem.bytesAsSlice(sz.Type(), aligned);
-            },
-        }
-    }
-
-    pub fn dumpString(range: ByteRange, ty: Type, comp: *const Compilation, strings: []const u8, w: anytype) !void {
-        const size: Compilation.CharUnitSize = @enumFromInt(ty.getElemType().sizeof(comp).?);
-        const withoutNull = range.trim(@intFromEnum(size));
-        switch (size) {
-            inline .@"1", .@"2" => |sz| {
-                const data_slice = withoutNull.slice(strings, sz);
-                const formatter = if (sz == .@"1") std.zig.fmtEscapes(data_slice) else std.unicode.fmtUtf16Le(data_slice);
-                try w.print("\"{}\"", .{formatter});
-            },
-            .@"4" => {
-                try w.writeByte('"');
-                const data_slice = withoutNull.slice(strings, .@"4");
-                var buf: [4]u8 = undefined;
-                for (data_slice) |item| {
-                    if (item <= std.math.maxInt(u21) and std.unicode.utf8ValidCodepoint(@intCast(item))) {
-                        const codepoint: u21 = @intCast(item);
-                        const written = std.unicode.utf8Encode(codepoint, &buf) catch unreachable;
-                        try w.print("{s}", .{buf[0..written]});
-                    } else {
-                        try w.print("\\x{x}", .{item});
-                    }
-                }
-                try w.writeByte('"');
-            },
-        }
-    }
-};
-
 pub const OptRef = enum(u32) {
     none = std.math.maxInt(u32),
     _,
@@ -82,44 +29,44 @@ pub const OptRef = enum(u32) {
 
 optRef: OptRef = .none,
 
-/// The current kind of value that `Value` is representing.
-tag: Tag = .unavailable,
-
-/// The content of the value, which varies based on what `tag` is set to.
-data: union {
-    none: void,
-    int: u64, // Used to store integer, boolean, and pointer values as u64.
-    float: f64,
-    bytes: ByteRange,
-} = .{ .none = {} },
-
-/// Defines the possible types of values that the `Value` can be tagged as.
-const Tag = enum {
-    unavailable, // Value is not available or uninitialized.
-    nullptrTy,
-    int, // `int` is used to store integer, boolean and pointer values.
-    float,
-    bytes,
-};
-
-pub fn isUnavailable(v: Value) bool {
-    return v.tag == .unavailable;
+pub fn isNone(v: Value) bool {
+    return v.optRef == .none;
 }
 
-pub fn isNumeric(v: Value) bool {
-    return switch (v.tag) {
+pub fn isNumeric(v: Value, ctx: Context) bool {
+    const key = ctx.interner.get(v.ref());
+    return switch (key) {
         .int, .float => true,
         else => false,
     };
 }
 
-pub fn isZero(v: Value) bool {
-    return v.ref() == .zero;
+pub fn isZero(v: Value, ctx: Context) bool {
+    if (v.isNone()) return false;
+    switch (v.ref()) {
+        .zero => return true,
+        .one => return false,
+        .null => return TargetUtil.nullRepr(ctx.comp.target) == 0,
+        else => {},
+    }
+
+    const key = ctx.interner.get(v.ref());
+    switch (key) {
+        .float => |repr| switch (repr) {
+            inline else => |data| return data == 0,
+        },
+        .int => |repr| switch (repr) {
+            inline .i64, .u64 => |data| return data == 0,
+            .bigInt => |data| return data.eqlZero(),
+        },
+        .bytes => return false,
+        else => unreachable,
+    }
 }
 
 pub fn int(i: anytype, ctx: Context) !Value {
     const info = @typeInfo(@TypeOf(i));
-    if (info == .ComptimeInt or info.Int.signedness == .unsigned) {
+    if (info == .comptime_int or info.int.signedness == .unsigned) {
         return ctx.intern(.{ .int = .{ .u64 = i } });
     } else {
         return ctx.intern(.{ .int = .{ .i64 = i } });
@@ -131,8 +78,14 @@ pub fn ref(v: Value) Interner.Ref {
     return @enumFromInt(@intFromEnum(v.optRef));
 }
 
+pub fn is(v: Value, tag: std.meta.Tag(Interner.Key), ctx: Context) bool {
+    if (v.optRef == .none) return false;
+    return ctx.interner.get(v.ref()) == tag;
+}
+
 pub const zero = Value{ .optRef = @enumFromInt(@intFromEnum(Interner.Ref.zero)) };
 pub const one = Value{ .optRef = @enumFromInt(@intFromEnum(Interner.Ref.one)) };
+pub const @"null" = Value{ .optRef = @enumFromInt(@intFromEnum(Interner.Ref.null)) };
 
 /// Number of bits needed to hold `v`.
 /// Asserts that `v` is not negative
@@ -242,7 +195,7 @@ pub fn floatToInt(v: *Value, destTy: Type, ctx: Context) !FloatToIntChangeKind {
     const floatVal = v.toFloat(f128, ctx);
     const wasZero = floatVal == 0;
 
-    if (destTy.is(.bool)) {
+    if (destTy.is(.Bool)) {
         const wasOne = floatVal == 1.0;
         v.* = fromBool(!wasZero);
         if (wasZero or wasOne) return .none;
@@ -282,9 +235,9 @@ pub fn floatToInt(v: *Value, destTy: Type, ctx: Context) !FloatToIntChangeKind {
     try rational.p.truncate(&rational.p, signedness, bits);
     v.* = try ctx.intern(.{ .int = .{ .bigInt = rational.p.toConst() } });
 
-    if (!wasZero and v.isZero()) return .nonzero_to_zero;
-    if (!fits) return .out_of_range;
-    if (hadFraction) return .value_changed;
+    if (!wasZero and v.isZero(ctx)) return .nonZeroToZero;
+    if (!fits) return .outOfRange;
+    if (hadFraction) return .valueChanged;
     return .none;
 }
 
@@ -394,16 +347,18 @@ fn bigIntToFloat(limbs: []const std.math.big.Limb, positive: bool) f128 {
 }
 
 /// Converts value to zero or one;
-pub fn boolCast(v: *Value) void {
-    v.* = fromBool(v.toBool());
+/// `.none` value remains unchanged.
+pub fn boolCast(v: *Value, ctx: Context) void {
+    if (v.isNone()) return;
+    v.* = fromBool(v.toBool(ctx));
 }
 
 pub fn fromBool(b: bool) Value {
     return if (b) one else zero;
 }
 
-pub fn toBool(v: Value) bool {
-    return v.ref() != .zero;
+pub fn toBool(v: Value, ctx: Context) bool {
+    return !v.isZero(ctx);
 }
 
 pub fn toInt(v: Value, comptime T: type, ctx: Context) ?T {
@@ -442,7 +397,7 @@ pub fn add(res: *Value, lhs: Value, rhs: Value, ty: Type, ctx: Context) !bool {
 
         var result = BigIntMutable{ .limbs = limbs, .positive = undefined, .len = undefined };
         const overflowed = result.addWrap(lhsBigInt, rhsBigInt, ty.signedness(ctx.comp), bits);
-        res.* = .{ .ref = try ctx.interner.put(ctx.comp.gpa, .{ .int = .{ .bigInt = result.toConst() } }) };
+        res.* = try ctx.intern(.{ .int = .{ .bigInt = result.toConst() } });
         return overflowed;
     }
 }
@@ -471,7 +426,7 @@ pub fn sub(res: *Value, lhs: Value, rhs: Value, ty: Type, ctx: Context) !bool {
 
         var result = BigIntMutable{ .limbs = limbs, .positive = undefined, .len = undefined };
         const overflowed = result.subWrap(lhsBigInt, rhsBigInt, ty.signedness(ctx.comp), bits);
-        res.* = .{ .ref = try ctx.interner.put(ctx.comp.gpa, .{ .int = .{ .bigInt = result.toConst() } }) };
+        res.* = try ctx.intern(.{ .int = .{ .bigInt = result.toConst() } });
         return overflowed;
     }
 }
@@ -658,7 +613,34 @@ pub fn print(v: Value, ctx: Context, w: anytype) @TypeOf(w).Error!void {
         .float => |repr| switch (repr) {
             inline else => |x| return w.print("{d}", .{@as(f64, @floatCast(x))}),
         },
-        .bytes => |b| return std.zig.fmt.stringEscape(b, "", .{}, w),
+        .bytes => |b| return printString(b, Type.Char, ctx, w),
         else => unreachable, // not a value
+    }
+}
+
+pub fn printString(bytes: []const u8, elemTy: Type, ctx: Context, w: anytype) @TypeOf(w).Error!void {
+    const size: Compilation.CharUnitSize = @enumFromInt(elemTy.sizeof(ctx.comp).?);
+    const withoutNull = bytes[0 .. bytes.len - @intFromEnum(size)];
+    switch (size) {
+        inline .@"1", .@"2" => |sz| {
+            const dataSlice: []const sz.Type() = @alignCast(std.mem.bytesAsSlice(sz.Type(), withoutNull));
+            const formatter = if (sz == .@"1") std.zig.fmtEscapes(dataSlice) else std.unicode.fmtUtf16Le(dataSlice);
+            try w.print("\"{}\"", .{formatter});
+        },
+        .@"4" => {
+            try w.writeByte('"');
+            const dataSlice = std.mem.bytesAsSlice(u32, withoutNull);
+            var buf: [4]u8 = undefined;
+            for (dataSlice) |item| {
+                if (item <= std.math.maxInt(u21) and std.unicode.utf8ValidCodepoint(@intCast(item))) {
+                    const codepoint: u21 = @intCast(item);
+                    const written = std.unicode.utf8Encode(codepoint, &buf) catch unreachable;
+                    try w.print("{s}", .{buf[0..written]});
+                } else {
+                    try w.print("\\x{x}", .{item});
+                }
+            }
+            try w.writeByte('"');
+        },
     }
 }

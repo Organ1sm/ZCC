@@ -890,8 +890,8 @@ pub const maximum_alignment = struct {
     pub const kind = .@"error";
 };
 pub const negative_alignment = struct {
-    const msg = "requested negative alignment of {s} is invalid";
-    const extra = .str;
+    pub const msg = "requested negative alignment of {s} is invalid";
+    pub const extra = .str;
     pub const kind = .@"error";
 };
 pub const align_ignored = struct {
@@ -2366,5 +2366,15 @@ pub const va_opt_lparen = struct {
 };
 pub const va_opt_rparen = struct {
     pub const msg = "unterminated __VA_OPT__ argument list";
+    pub const kind = .@"error";
+};
+pub const attribute_int_out_of_range = struct {
+    pub const msg = "attribute value '{s}' out of range";
+    pub const kind = .@"error";
+    pub const extra = .str;
+};
+pub const case_not_in_switch = struct {
+    pub const msg = "'{s}' statement not in a switch statement";
+    pub const extra = .str;
     pub const kind = .@"error";
 };

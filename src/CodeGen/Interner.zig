@@ -57,6 +57,13 @@ pub const Key = union(enum) {
         u64: u64,
         i64: i64,
         bigInt: BigIntConst,
+
+        pub fn toBigInt(repr: @This(), space: *Tag.Int.BigIntSpace) BigIntConst {
+            return switch (repr) {
+                .bigInt => |x| x,
+                inline .u64, .i64 => |x| BigIntMutable.init(&space.limbs, x).toConst(),
+            };
+        }
     },
     float: Float,
     bytes: []const u8,
@@ -80,8 +87,18 @@ pub const Key = union(enum) {
             .recordTy => |info| {
                 std.hash.autoHash(&hasher, @intFromPtr(info.userPtr));
             },
-            .float => @panic("TODO"),
-            .int => @panic("TODO"),
+            .float => |repr| switch (repr) {
+                inline else => |data| std.hash.autoHash(
+                    &hasher,
+                    @as(std.meta.Int(.unsigned, @bitSizeOf(@TypeOf(data))), @bitCast(data)),
+                ),
+            },
+            .int => |repr| {
+                var space: Tag.Int.BigIntSpace = undefined;
+                const big = repr.toBigInt(&space);
+                std.hash.autoHash(&hasher, big.positive);
+                for (big.limbs) |limb| std.hash.autoHash(&hasher, limb);
+            },
             inline else => |a_info| {
                 std.hash.autoHash(&hasher, a_info);
             },
@@ -96,11 +113,20 @@ pub const Key = union(enum) {
         if (lhsTag != rhsTag) return false;
         switch (lhs) {
             .recordTy => |lhsInfo| {
-                return lhsInfo.userPtr == rhs.record.userPtr;
+                return lhsInfo.userPtr == rhs.recordTy.userPtr;
             },
             .bytes => |lhsBytes| {
                 const rhsBytes = rhs.bytes;
                 return std.mem.eql(u8, lhsBytes, rhsBytes);
+            },
+            .int => |lhsRepr| {
+                var lhsSpace: Tag.Int.BigIntSpace = undefined;
+                var rhsSpace: Tag.Int.BigIntSpace = undefined;
+
+                const lhsBig = lhsRepr.toBigInt(&lhsSpace);
+                const rhsBig = rhs.int.toBigInt(&rhsSpace);
+
+                return lhsBig.eql(rhsBig);
             },
             inline else => |lhsInfo, tag| {
                 const rhsInfo = @field(rhs, @tagName(tag));
@@ -148,24 +174,27 @@ pub const Key = union(enum) {
 };
 
 pub const Ref = enum(u32) {
-    ptr,
-    noreturn,
-    void,
-    i1,
-    i8,
-    i16,
-    i32,
-    i64,
-    i128,
-    f16,
-    f32,
-    f64,
-    f80,
-    f128,
-    func,
-    zero,
-    one,
-    null,
+    const max = std.math.maxInt(u32);
+
+    ptr = max - 1,
+    noreturn = max - 2,
+    void = max - 3,
+    i1 = max - 4,
+    i8 = max - 5,
+    i16 = max - 6,
+    i32 = max - 7,
+    i64 = max - 8,
+    i128 = max - 9,
+    f16 = max - 10,
+    f32 = max - 11,
+    f64 = max - 12,
+    f80 = max - 13,
+    f128 = max - 14,
+    func = max - 15,
+    zero = max - 16,
+    one = max - 17,
+    null = max - 18,
+
     _,
 };
 
@@ -343,6 +372,7 @@ pub fn put(self: *Interner, gpa: Allocator, key: Key) !Ref {
         return some;
     const adapter = KeyAdapter{ .interner = self };
     const gop = try self.map.getOrPutAdapted(gpa, key, adapter);
+    if (gop.found_existing) return @enumFromInt(gop.index);
 
     try self.items.ensureUnusedCapacity(gpa, 1);
 
@@ -455,7 +485,7 @@ pub fn put(self: *Interner, gpa: Allocator, key: Key) !Ref {
                 @typeInfo(Tag.Record).@"struct".fields.len + record.elements.len,
             );
             self.items.appendAssumeCapacity(.{
-                .tag = .record,
+                .tag = .recordTy,
                 .data = self.addExtraAssumeCapacity(Tag.Record{
                     .ptr0 = splitPtr.a,
                     .ptr1 = splitPtr.b,
@@ -592,7 +622,7 @@ pub fn get(self: *const Interner, ref: Ref) Key {
         .recordTy => {
             const extra = self.extraDataTrail(Tag.Record, data);
             return .{
-                .record = .{
+                .recordTy = .{
                     .userPtr = extra.data.getPtr(),
                     .elements = @ptrCast(self.extra.items[extra.end..][0..extra.data.elements_len]),
                 },
