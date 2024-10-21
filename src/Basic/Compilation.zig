@@ -13,6 +13,7 @@ const Pragma = @import("../Lexer/Pragma.zig");
 const StringInterner = @import("../Basic/StringInterner.zig");
 const RecordLayout = @import("RecordLayout.zig");
 const Target = @import("Target.zig");
+const Interner = @import("../CodeGen/Interner.zig");
 
 const Allocator = std.mem.Allocator;
 const EpochSeconds = std.time.epoch.EpochSeconds;
@@ -115,6 +116,7 @@ types: struct {
 } = undefined,
 
 stringInterner: StringInterner = .{},
+interner: Interner = .{},
 msCwdSourceId: ?Source.ID = null,
 
 pub fn init(gpa: Allocator) Compilation {
@@ -147,6 +149,7 @@ pub fn deinit(comp: *Compilation) void {
     comp.generatedBuffer.deinit();
     comp.builtins.deinit(comp.gpa);
     comp.stringInterner.deinit(comp.gpa);
+    comp.interner.deinit(comp.gpa);
 }
 
 pub fn intern(comp: *Compilation, str: []const u8) !StringInterner.StringId {

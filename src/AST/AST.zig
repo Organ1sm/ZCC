@@ -25,7 +25,6 @@ nodes: Node.List.Slice,
 data: []const NodeIndex,
 rootDecls: []const NodeIndex,
 valueMap: ValueMap,
-interner: Interner,
 
 pub fn deinit(tree: *AST) void {
     tree.comp.gpa.free(tree.rootDecls);
@@ -33,11 +32,6 @@ pub fn deinit(tree: *AST) void {
     tree.nodes.deinit(tree.comp.gpa);
     tree.arena.deinit();
     tree.valueMap.deinit();
-    tree.interner.deinit(tree.comp.gpa);
-}
-
-pub fn ctx(tree: *const AST) Value.Context {
-    return .{ .comp = tree.comp, .interner = &tree.interner };
 }
 
 pub const GNUAssemblyQualifiers = struct {
@@ -337,7 +331,7 @@ pub fn isLValueExtra(tree: *const AST, node: NodeIndex, isConst: *bool) bool {
 
         .BuiltinChooseExpr => {
             if (tree.valueMap.get(data.if3.cond)) |val| {
-                const offset = @intFromBool(val.isZero(tree.ctx()));
+                const offset = @intFromBool(val.isZero(tree.comp));
                 return tree.isLValueExtra(tree.data[data.if3.body + offset], isConst);
             }
             return false;
@@ -464,7 +458,7 @@ fn dumpNode(
     if (tree.valueMap.get(node)) |val| {
         if (color) util.setColor(LITERAL, w);
         try w.writeAll(" (value: ");
-        try val.print(tree.ctx(), w);
+        try val.print(tree.comp, w);
         try w.writeByte(')');
     }
 

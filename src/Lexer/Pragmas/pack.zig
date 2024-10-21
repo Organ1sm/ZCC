@@ -130,7 +130,7 @@ fn packInt(p: *Parser, tokenIdx: TokenIndex) Compilation.Error!?u8 {
         else => |e| return e,
     };
 
-    const int = res.value.toInt(u64, p.ctx()) orelse 99;
+    const int = res.value.toInt(u64, p.comp) orelse 99;
     switch (int) {
         1, 2, 4, 8, 16 => return @intCast(int),
         else => {
