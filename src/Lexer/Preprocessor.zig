@@ -804,9 +804,10 @@ fn expr(pp: *Preprocessor, lexer: *Lexer) MacroError!bool {
         .tokenIdx = @intCast(start),
         .arena = pp.arena.allocator(),
         .inMacro = true,
+        .strings = std.ArrayList(u8).init(pp.comp.gpa),
+
         .data = undefined,
         .labels = undefined,
-        .strings = undefined,
         .valueMap = undefined,
         .declBuffer = undefined,
         .listBuffer = undefined,
