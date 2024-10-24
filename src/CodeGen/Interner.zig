@@ -159,13 +159,18 @@ pub const Key = union(enum) {
             .funcTy => return .func,
             .noreturnTy => return .noreturn,
             .voidTy => return .void,
-            .int => |repr| switch (repr) {
-                inline .u64, .i64 => |u| switch (u) {
-                    0 => return .zero,
-                    1 => return .one,
-                    else => {},
+            .int => |repr| {
+                var space: Tag.Int.BigIntSpace = undefined;
+                const big = repr.toBigInt(&space);
+                if (big.eqlZero()) return .zero;
+                const bigOne = BigIntConst{ .limbs = &.{1}, .positive = true };
+                if (big.eql(bigOne)) return .one;
+            },
+            .float => |repr| switch (repr) {
+                inline else => |data| {
+                    if (std.math.isPositiveZero(data)) return .zero;
+                    if (data == 1) return .one;
                 },
-                .bigInt => |data| if (data.eqlZero()) return .zero,
             },
             .null => return .null,
             else => {},

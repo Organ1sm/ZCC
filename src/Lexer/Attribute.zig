@@ -272,7 +272,6 @@ fn diagnoseField(
             }
         },
         .bytes => |bytes| {
-            const str = bytes[0 .. bytes.len - 1];
             if (Wanted == Value) {
                 std.debug.assert(node.tag == .StringLiteralExpr);
 
@@ -283,10 +282,10 @@ fn diagnoseField(
                         .extra = .{ .str = decl.name },
                     };
                 }
-                const withoutNull = try Value.intern(p.comp, .{ .bytes = str });
-                @field(@field(arguments, decl.name), field.name) = withoutNull;
+                @field(@field(arguments, decl.name), field.name) = try p.removeNull(val);
                 return null;
             } else if (@typeInfo(Wanted) == .@"enum" and @hasDecl(Wanted, "opts") and Wanted.opts.enum_kind == .string) {
+                const str = bytes[0 .. bytes.len - 1];
                 if (std.meta.stringToEnum(Wanted, str)) |enum_val| {
                     @field(@field(arguments, decl.name), field.name) = enum_val;
                     return null;

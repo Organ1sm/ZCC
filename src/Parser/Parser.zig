@@ -392,6 +392,16 @@ pub fn todo(p: *Parser, msg: []const u8) Error {
     return error.ParsingFailed;
 }
 
+pub fn removeNull(p: *Parser, str: Value) !Value {
+    const stringsTop = p.strings.items.len;
+    defer p.strings.items.len = stringsTop;
+    {
+        const bytes = p.comp.interner.get(str.ref()).bytes;
+        try p.strings.appendSlice(bytes[0 .. bytes.len - 1]);
+    }
+    return Value.intern(p.comp, .{ .bytes = p.strings.items[stringsTop..] });
+}
+
 pub fn valStr(p: *Parser, val: Value) ![]const u8 {
     switch (val.optRef) {
         .none => return "(none)",
