@@ -404,7 +404,7 @@ pub fn valStr(p: *Parser, val: Value) ![]const u8 {
     const stringsTop = p.strings.items.len;
     defer p.strings.items.len = stringsTop;
 
-    try val.print(p.comp, p.strings.writer());
+    try val.print(&p.comp.interner, p.strings.writer());
     return try p.comp.diagnostics.arena.allocator().dupe(u8, p.strings.items[stringsTop..]);
 }
 
@@ -448,9 +448,9 @@ pub fn floatValueChangedStr(p: *Parser, res: *Result, oldValue: Value, intTy: Ty
     try w.writeAll(" changes ");
     if (!res.value.isZero(p.comp)) try w.writeAll("non-zero ");
     try w.writeAll("value from ");
-    try oldValue.print(p.comp, w);
+    try oldValue.print(&p.comp.interner, w);
     try w.writeAll(" to ");
-    try res.value.print(p.comp, w);
+    try res.value.print(&p.comp.interner, w);
 
     return try p.comp.diagnostics.arena.allocator().dupe(u8, p.strings.items[stringsTop..]);
 }
@@ -473,7 +473,7 @@ fn checkDeprecatedUnavailable(p: *Parser, ty: Type, usageToken: TokenIndex, decl
 
         const w = p.strings.writer();
         try w.print("call to '{s}' declared with attribute error: ", .{p.getTokenText(@"error".__name_token)});
-        try @"error".msg.print(p.comp, w);
+        try @"error".msg.print(&p.comp.interner, w);
         try w.print("call to '{s}' declared with attribute error: ", .{p.getTokenText(@"error".__name_token)});
         const str = try p.comp.diagnostics.arena.allocator().dupe(u8, p.strings.items[stringsTop..]);
         try p.errStr(.error_attribute, usageToken, str);
@@ -485,7 +485,7 @@ fn checkDeprecatedUnavailable(p: *Parser, ty: Type, usageToken: TokenIndex, decl
 
         const w = p.strings.writer();
         try w.print("call to '{s}' declared with attribute warning: ", .{p.getTokenText(warning.__name_token)});
-        try warning.msg.print(p.comp, w);
+        try warning.msg.print(&p.comp.interner, w);
         const str = try p.comp.diagnostics.arena.allocator().dupe(u8, p.strings.items[stringsTop..]);
         try p.errStr(.warning_attribute, usageToken, str);
     }
@@ -527,7 +527,7 @@ fn errDeprecated(p: *Parser, tag: Diagnostics.Tag, tokenIdx: TokenIndex, msg: ?V
     try w.writeAll(reason);
     if (msg) |m| {
         try w.writeAll(": ");
-        try m.print(p.comp, w);
+        try m.print(&p.comp.interner, w);
     }
 
     const str = try p.comp.diagnostics.arena.allocator().dupe(u8, p.strings.items[stringsTop..]);
@@ -1242,7 +1242,8 @@ fn staticAssertMessage(p: *Parser, condNode: NodeIndex, message: Result) !?[]con
 
         const bytes = p.comp.interner.get(message.value.ref()).bytes;
         try buf.ensureUnusedCapacity(bytes.len);
-        try Value.printString(bytes, message.ty.getElemType(), p.comp, buf.writer());
+        const size: Compilation.CharUnitSize = @enumFromInt(message.ty.getElemType().sizeof(p.comp).?);
+        try Value.printString(bytes, size, buf.writer());
     }
     return try p.comp.diagnostics.arena.allocator().dupe(u8, buf.items);
 }

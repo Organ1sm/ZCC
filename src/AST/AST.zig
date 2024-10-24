@@ -458,7 +458,7 @@ fn dumpNode(
     if (tree.valueMap.get(node)) |val| {
         if (color) util.setColor(LITERAL, w);
         try w.writeAll(" (value: ");
-        try val.print(tree.comp, w);
+        try val.print(&tree.comp.interner, w);
         try w.writeByte(')');
     }
 

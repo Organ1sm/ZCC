@@ -535,17 +535,6 @@ fn addExtraAssumeCapacity(self: *Interner, extra: anytype) u32 {
     return result;
 }
 
-pub fn has(self: *Interner, key: Key) ?Ref {
-    if (key.toRef()) |some|
-        return some;
-
-    const adapter = KeyAdapter{ .interner = self };
-    if (self.map.getIndexAdapted(key, adapter)) |index|
-        return @enumFromInt(index);
-
-    return null;
-}
-
 pub fn get(self: *const Interner, ref: Ref) Key {
     switch (ref) {
         .ptr => return .ptrTy,
