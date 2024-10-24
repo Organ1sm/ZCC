@@ -21,7 +21,8 @@ const Attribute = @import("../Lexer/Attribute.zig");
 const CharInfo = @import("../Basic/CharInfo.zig");
 const TextLiteral = @import("../Parser/TextLiteral.zig");
 const Value = @import("../AST/Value.zig");
-const StringId = @import("../Basic/StringInterner.zig").StringId;
+const StringInterner = @import("../Basic/StringInterner.zig");
+const StringId = StringInterner.StringId;
 const RecordLayout = @import("../Basic/RecordLayout.zig");
 const NumberAffixes = @import("../Lexer/NumberAffixes.zig");
 const NumberPrefix = NumberAffixes.Prefix;
@@ -602,7 +603,7 @@ fn getNode(p: *Parser, node: NodeIndex, tag: AstTag) ?NodeIndex {
 
 fn getInternString(p: *Parser, tokenIdx: TokenIndex) !StringId {
     const name = p.getTokenText(tokenIdx);
-    return p.comp.intern(name);
+    return StringInterner.intern(p.comp, name);
 }
 
 fn pragma(p: *Parser) Compilation.Error!bool {
@@ -682,8 +683,8 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
         .recordBuffer = std.ArrayList(Type.Record.Field).init(pp.comp.gpa),
         .fieldAttrBuffer = std.ArrayList([]const Attribute).init(pp.comp.gpa),
         .stringsIds = .{
-            .declSpecId = try pp.comp.intern("__declspec"),
-            .mainId = try pp.comp.intern("main"),
+            .declSpecId = try StringInterner.intern(pp.comp, "__declspec"),
+            .mainId = try StringInterner.intern(pp.comp, "main"),
         },
     };
 
@@ -719,22 +720,22 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
     _ = try p.addNode(.{ .tag = .Invalid, .type = undefined, .data = undefined });
     {
         if (p.comp.langOpts.hasChar8_t())
-            try p.symStack.defineTypedef(try p.comp.intern("char8_t"), Type.UChar, 0, .none);
+            try p.symStack.defineTypedef(try StringInterner.intern(p.comp, "char8_t"), Type.UChar, 0, .none);
 
-        try p.symStack.defineTypedef(try p.comp.intern("__int128_t"), Type.Int128, 0, .none);
-        try p.symStack.defineTypedef(try p.comp.intern("__uint128_t"), Type.UInt128, 0, .none);
+        try p.symStack.defineTypedef(try StringInterner.intern(p.comp, "__int128_t"), Type.Int128, 0, .none);
+        try p.symStack.defineTypedef(try StringInterner.intern(p.comp, "__uint128_t"), Type.UInt128, 0, .none);
 
         const elemTy = try p.arena.create(Type);
         elemTy.* = Type.Char;
         try p.symStack.defineTypedef(
-            try p.comp.intern("__builtin_ms_va_list"),
+            try StringInterner.intern(p.comp, "__builtin_ms_va_list"),
             .{ .specifier = .Pointer, .data = .{ .subType = elemTy } },
             0,
             .none,
         );
 
         const ty = &pp.comp.types.vaList;
-        try p.symStack.defineTypedef(try p.comp.intern("__builtin_va_list"), ty.*, 0, .none);
+        try p.symStack.defineTypedef(try StringInterner.intern(p.comp, "__builtin_va_list"), ty.*, 0, .none);
         if (ty.isArray())
             ty.decayArray();
     }
@@ -1083,7 +1084,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
                     // find and correct parameter types
                     // TODO check for missing declaration and redefinition
                     const name = p.getTokenText(d.name);
-                    const internedName = try p.comp.intern(name);
+                    const internedName = try StringInterner.intern(p.comp, name);
                     for (initDeclarator.d.type.getParams()) |*param| {
                         if (param.name == internedName) {
                             param.ty = d.type;
@@ -2036,7 +2037,7 @@ fn getAnonymousName(p: *Parser, kindToken: TokenIndex) !StringId {
         "(anonymous {s} at {s}:{d}:{d})",
         .{ kindStr, source.path, lineAndCol.lineNO, lineAndCol.col },
     );
-    return p.comp.intern(str);
+    return StringInterner.intern(p.comp, str);
 }
 
 /// record-specifier
@@ -2103,7 +2104,7 @@ fn parseRecordSpec(p: *Parser) Error!Type {
     var defined = false;
     const recordType: *Type.Record = if (maybeIdent) |ident| recordTy: {
         const identStr = p.getTokenText(ident);
-        const internedName = try p.comp.intern(identStr);
+        const internedName = try StringInterner.intern(p.comp, identStr);
         if (try p.symStack.defineTag(internedName, p.tokenIds[kindToken], ident)) |prev| {
             if (!prev.type.hasIncompleteSize()) {
                 // if the record isn't incomplete, this is a redefinition
@@ -2197,7 +2198,7 @@ fn parseRecordSpec(p: *Parser) Error!Type {
 
     if (ty.specifier == .Attributed and maybeIdent != null) {
         const identStr = p.getTokenText(maybeIdent.?);
-        const internedName = try p.comp.intern(identStr);
+        const internedName = try StringInterner.intern(p.comp, identStr);
         const ptr = p.symStack.getPtr(internedName, .tags);
         ptr.type = ty;
     }
@@ -2509,7 +2510,7 @@ fn parseEnumSpec(p: *Parser) Error!Type {
     var defined = false;
     const enumType: *Type.Enum = if (maybeID) |ident| enumTy: {
         const identStr = p.getTokenText(ident);
-        const internedName = try p.comp.intern(identStr);
+        const internedName = try StringInterner.intern(p.comp, identStr);
         if (try p.symStack.defineTag(internedName, .KeywordEnum, ident)) |prev| {
             const enumTy = prev.type.get(.Enum).?.data.@"enum";
             if (!enumTy.fixed and !enumTy.isIncomplete()) {
@@ -3190,7 +3191,7 @@ fn parseParamDecls(p: *Parser, d: *Declarator) Error!?[]Type.Function.Param {
                 d.oldTypeFunc = identifier;
 
             try p.paramBuffer.append(.{
-                .name = try p.comp.intern(p.getTokenText(identifier)),
+                .name = try StringInterner.intern(p.comp, p.getTokenText(identifier)),
                 .nameToken = identifier,
                 .ty = Type.Int,
             });
@@ -3405,7 +3406,7 @@ pub fn initializerItem(p: *Parser, il: *InitList, initType: Type) Error!bool {
             } else if (p.eat(.Period)) |period| {
                 const fieldToken = try p.expectIdentifier();
                 const fieldStr = p.getTokenText(fieldToken);
-                const fieldName = try p.comp.intern(fieldStr);
+                const fieldName = try StringInterner.intern(p.comp, fieldStr);
                 curType = curType.canonicalize(.standard);
                 if (!curType.isRecord()) {
                     try p.errStr(.invalid_field_designator, period, try p.typeStr(curType));
@@ -4795,7 +4796,7 @@ fn parseCompoundStmt(p: *Parser, isFnBody: bool, stmtExprState: ?*StmtExprState)
             var returnZero = false;
             if (lastNoreturn == .no and !retTy.is(.Void) and !retTy.isArray() and !retTy.isFunc()) {
                 const funcName = p.getTokenText(p.func.name);
-                const internerName = try p.comp.intern(funcName);
+                const internerName = try StringInterner.intern(p.comp, funcName);
                 if (internerName == p.stringsIds.mainId and retTy.is(.Int))
                     returnZero = true
                 else
@@ -6687,7 +6688,7 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
         .Identifier, .ExtendedIdentifier => {
             const nameToken = p.expectIdentifier() catch unreachable;
             const name = p.getTokenText(nameToken);
-            const internedName = try p.comp.intern(name);
+            const internedName = try StringInterner.intern(p.comp, name);
             if (p.comp.builtins.get(name)) |some| {
                 for (p.tokenIds[p.tokenIdx..]) |id| switch (id) {
                     .RParen => {}, // closing grouped expr

@@ -11,7 +11,8 @@ const Inst = IR.Inst;
 const Type = @import("../AST/Type.zig");
 const Interner = @import("Interner.zig");
 const Value = @import("../AST/Value.zig");
-const StringId = @import("../Basic/StringInterner.zig").StringId;
+const StringInterner = @import("../Basic/StringInterner.zig");
+const StringId = StringInterner.StringId;
 
 const CodeGen = @This();
 
@@ -327,7 +328,7 @@ fn genExpr(c: *CodeGen, node: NodeIndex) Error!IR.Ref {
             const size: u32 = @intCast(ty.sizeof(c.comp).?);
             const @"align" = ty.alignof(c.comp);
             const alloc = try c.builder.addAlloc(size, @"align");
-            const name = try c.comp.intern(c.tree.getTokenSlice(data.decl.name));
+            const name = try StringInterner.intern(c.comp, c.tree.getTokenSlice(data.decl.name));
 
             try c.symbols.append(c.comp.gpa, .{ .name = name, .value = alloc });
 
@@ -1061,7 +1062,7 @@ fn genLval(c: *CodeGen, node: NodeIndex) Error!IR.Ref {
 
         .DeclRefExpr => {
             const slice = c.tree.getTokenSlice(data.declRef);
-            const name = try c.comp.intern(slice);
+            const name = try StringInterner.intern(c.comp, slice);
             var i = c.symbols.items.len;
             while (i > 0) {
                 i -= 1;
@@ -1297,7 +1298,7 @@ fn genCall(c: *CodeGen, fnNode: NodeIndex, argNodes: []const NodeIndex, ty: Type
 
             .DeclRefExpr => {
                 const slice = c.tree.getTokenSlice(c.nodeData[cur].declRef);
-                const name = try c.comp.intern(slice);
+                const name = try StringInterner.intern(c.comp, slice);
                 var i = c.symbols.items.len;
                 while (i > 0) {
                     i -= 1;

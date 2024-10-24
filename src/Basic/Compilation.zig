@@ -152,10 +152,6 @@ pub fn deinit(comp: *Compilation) void {
     comp.interner.deinit(comp.gpa);
 }
 
-pub fn intern(comp: *Compilation, str: []const u8) !StringInterner.StringId {
-    return comp.stringInterner.intern(comp.gpa, str);
-}
-
 /// Dec 31 9999 23:59:59
 const MaxTimestamp = 253402300799;
 
@@ -657,7 +653,7 @@ fn generateVaListType(comp: *Compilation) !Type {
         .aarch64_va_list => {
             const recordType = try arena.create(Type.Record);
             recordType.* = .{
-                .name = try comp.intern("__va_list_tag"),
+                .name = try StringInterner.intern(comp, "__va_list_tag"),
                 .fields = try arena.alloc(Type.Record.Field, 5),
                 .fieldAttributes = null,
                 .typeLayout = undefined,
@@ -665,18 +661,18 @@ fn generateVaListType(comp: *Compilation) !Type {
             const voidType = try arena.create(Type);
             voidType.* = Type.Void;
             const voidPtr = Type{ .specifier = .Pointer, .data = .{ .subType = voidType } };
-            recordType.fields[0] = .{ .name = try comp.intern("__stack"), .ty = voidPtr };
-            recordType.fields[1] = .{ .name = try comp.intern("__gr_top"), .ty = voidPtr };
-            recordType.fields[2] = .{ .name = try comp.intern("__vr_top"), .ty = voidPtr };
-            recordType.fields[3] = .{ .name = try comp.intern("__gr_offs"), .ty = Type.Int };
-            recordType.fields[4] = .{ .name = try comp.intern("__vr_offs"), .ty = Type.Int };
+            recordType.fields[0] = .{ .name = try StringInterner.intern(comp, "__stack"), .ty = voidPtr };
+            recordType.fields[1] = .{ .name = try StringInterner.intern(comp, "__gr_top"), .ty = voidPtr };
+            recordType.fields[2] = .{ .name = try StringInterner.intern(comp, "__vr_top"), .ty = voidPtr };
+            recordType.fields[3] = .{ .name = try StringInterner.intern(comp, "__gr_offs"), .ty = Type.Int };
+            recordType.fields[4] = .{ .name = try StringInterner.intern(comp, "__vr_offs"), .ty = Type.Int };
             ty = .{ .specifier = .Struct, .data = .{ .record = recordType } };
             RecordLayout.compute(recordType, ty, comp, null);
         },
         .x86_64_va_list => {
             const recordType = try arena.create(Type.Record);
             recordType.* = .{
-                .name = try comp.intern("__va_list_tag"),
+                .name = try StringInterner.intern(comp, "__va_list_tag"),
                 .fields = try arena.alloc(Type.Record.Field, 4),
                 .fieldAttributes = null,
                 .typeLayout = undefined, // compute below
@@ -684,10 +680,10 @@ fn generateVaListType(comp: *Compilation) !Type {
             const voidType = try arena.create(Type);
             voidType.* = Type.Void;
             const voidPtr = Type{ .specifier = .Pointer, .data = .{ .subType = voidType } };
-            recordType.fields[0] = .{ .name = try comp.intern("gp_offset"), .ty = Type.UInt };
-            recordType.fields[1] = .{ .name = try comp.intern("fp_offset"), .ty = Type.UInt };
-            recordType.fields[2] = .{ .name = try comp.intern("overflow_arg_area"), .ty = voidPtr };
-            recordType.fields[3] = .{ .name = try comp.intern("reg_save_area"), .ty = voidPtr };
+            recordType.fields[0] = .{ .name = try StringInterner.intern(comp, "gp_offset"), .ty = Type.UInt };
+            recordType.fields[1] = .{ .name = try StringInterner.intern(comp, "fp_offset"), .ty = Type.UInt };
+            recordType.fields[2] = .{ .name = try StringInterner.intern(comp, "overflow_arg_area"), .ty = voidPtr };
+            recordType.fields[3] = .{ .name = try StringInterner.intern(comp, "reg_save_area"), .ty = voidPtr };
             ty = .{ .specifier = .Struct, .data = .{ .record = recordType } };
             RecordLayout.compute(recordType, ty, comp, null);
         },
