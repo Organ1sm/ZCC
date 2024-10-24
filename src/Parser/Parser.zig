@@ -2001,14 +2001,14 @@ fn parseTypeSpec(p: *Parser, ty: *TypeBuilder) Error!bool {
                 const res = try p.parseIntegerConstExpr(.GNUFoldingExtension);
                 try p.expectClosing(lparen, .RParen);
 
-                var bits: u16 = undefined;
+                var bits: u64 = undefined;
                 if (res.value.optRef == .none) {
                     try p.errToken(.expected_integer_constant_expr, bitIntToken);
                     return error.ParsingFailed;
                 } else if (res.value.compare(.lte, Value.zero, p.comp)) {
                     bits = 0;
                 } else {
-                    bits = res.value.toInt(u16, p.comp) orelse std.math.maxInt(u16);
+                    bits = res.value.toInt(u64, p.comp) orelse std.math.maxInt(u64);
                 }
 
                 try ty.combine(p, .{ .BitInt = bits }, bitIntToken);
