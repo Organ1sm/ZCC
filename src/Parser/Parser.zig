@@ -482,8 +482,10 @@ fn checkDeprecatedUnavailable(p: *Parser, ty: Type, usageToken: TokenIndex, decl
         defer p.strings.items.len = stringsTop;
 
         const w = p.strings.writer();
-        try w.print("call to '{s}' declared with attribute error: ", .{p.getTokenText(@"error".__name_token)});
-        try @"error".msg.print(&p.comp.interner, w);
+        const msgStr = p.comp.interner.get(@"error".msg.ref()).bytes;
+        try w.print("call to '{s}' declared with attribute error: {}", .{
+            p.getTokenText(@"error".__name_token), std.zig.fmtEscapes(msgStr),
+        });
         try w.print("call to '{s}' declared with attribute error: ", .{p.getTokenText(@"error".__name_token)});
         const str = try p.comp.diagnostics.arena.allocator().dupe(u8, p.strings.items[stringsTop..]);
         try p.errStr(.error_attribute, usageToken, str);
