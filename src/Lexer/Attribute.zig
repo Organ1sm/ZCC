@@ -5,6 +5,7 @@ const CallingConvention = @import("../zcc.zig").CallingConvention;
 const Compilation = @import("../Basic/Compilation.zig");
 const Diagnostics = @import("../Basic/Diagnostics.zig");
 const Parser = @import("../Parser/Parser.zig");
+const Result = @import("../Parser/Result.zig");
 const Type = @import("../AST/Type.zig");
 const Tree = @import("../AST/AST.zig");
 const Value = @import("../AST/Value.zig");
@@ -212,7 +213,7 @@ pub fn wantsAlignment(attr: Tag, idx: usize) bool {
 /// argument to diagnose, the value of the argument, the type of the argument, and the compilation
 /// object. It returns a diagnostics message if the alignment argument is invalid, and null if it is
 /// valid.
-pub fn diagnoseAlignment(attr: Tag, arguments: *Arguments, argIdx: u32, val: Value, p: *Parser) !?Diagnostics.Message {
+pub fn diagnoseAlignment(attr: Tag, arguments: *Arguments, argIdx: u32, res: Result, p: *Parser) !?Diagnostics.Message {
     switch (attr) {
         inline else => |tag| {
             const argFields = getArguments(@field(attributes, @tagName(tag)));
@@ -222,14 +223,14 @@ pub fn diagnoseAlignment(attr: Tag, arguments: *Arguments, argIdx: u32, val: Val
                 inline 0...argFields.len - 1 => |argI| {
                     if (UnwrapOptional(argFields[argI].type) != Alignment) unreachable;
 
-                    if (!val.is(.int, p.comp))
+                    if (!res.value.is(.int, p.comp))
                         return Diagnostics.Message{ .tag = .alignas_unavailable };
 
-                    if (val.compare(.lt, Value.zero, p.comp))
-                        return Diagnostics.Message{ .tag = .negative_alignment, .extra = .{ .str = try p.valStr(val) } };
+                    if (res.value.compare(.lt, Value.zero, p.comp))
+                        return Diagnostics.Message{ .tag = .negative_alignment, .extra = .{ .str = try res.str(p) } };
 
-                    const requested = val.toInt(u29, p.comp) orelse {
-                        return Diagnostics.Message{ .tag = .maximum_alignment, .extra = .{ .str = try p.valStr(val) } };
+                    const requested = res.value.toInt(u29, p.comp) orelse {
+                        return Diagnostics.Message{ .tag = .maximum_alignment, .extra = .{ .str = try res.str(p) } };
                     };
                     if (!std.mem.isValidAlign(requested))
                         return Diagnostics.Message{ .tag = .non_pow2_align };
@@ -249,24 +250,24 @@ fn diagnoseField(
     comptime field: ZigType.StructField,
     comptime Wanted: type,
     arguments: *Arguments,
-    val: Value,
+    res: Result,
     node: Tree.Node,
     p: *Parser,
 ) !?Diagnostics.Message {
-    if (val.isNone()) {
+    if (res.value.isNone()) {
         if (Wanted == Identifier and node.tag == .DeclRefExpr) {
             @field(@field(arguments, decl.name), field.name) = Identifier{ .tok = node.data.declRef };
             return null;
         }
         return invalidArgMsg(Wanted, .expression);
     }
-    const key = p.comp.interner.get(val.ref());
+    const key = p.comp.interner.get(res.value.ref());
     switch (key) {
         .int => {
             if (@typeInfo(Wanted) == .int) {
-                @field(@field(arguments, decl.name), field.name) = val.toInt(Wanted, p.comp) orelse return .{
+                @field(@field(arguments, decl.name), field.name) = res.value.toInt(Wanted, p.comp) orelse return .{
                     .tag = .attribute_int_out_of_range,
-                    .extra = .{ .str = try p.valStr(val) },
+                    .extra = .{ .str = try res.str(p) },
                 };
                 return null;
             }
@@ -282,7 +283,7 @@ fn diagnoseField(
                         .extra = .{ .str = decl.name },
                     };
                 }
-                @field(@field(arguments, decl.name), field.name) = try p.removeNull(val);
+                @field(@field(arguments, decl.name), field.name) = try p.removeNull(res.value);
                 return null;
             } else if (@typeInfo(Wanted) == .@"enum" and @hasDecl(Wanted, "opts") and Wanted.opts.enum_kind == .string) {
                 const str = bytes[0 .. bytes.len - 1];
@@ -336,7 +337,7 @@ pub fn diagnose(
     attr: Tag,
     arguments: *Arguments,
     argIdx: u32,
-    val: Value,
+    res: Result,
     node: Tree.Node,
     p: *Parser,
 ) !?Diagnostics.Message {
@@ -358,7 +359,7 @@ pub fn diagnose(
             const argFields = getArguments(@field(attributes, decl.name));
             switch (argIdx) {
                 inline 0...argFields.len - 1 => |argI| {
-                    return diagnoseField(decl, argFields[argI], UnwrapOptional(argFields[argI].type), arguments, val, node, p);
+                    return diagnoseField(decl, argFields[argI], UnwrapOptional(argFields[argI].type), arguments, res, node, p);
                 },
                 else => unreachable,
             }

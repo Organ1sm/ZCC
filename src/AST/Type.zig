@@ -59,6 +59,7 @@ pub const Double = create(.Double);
 pub const LongDouble = create(.LongDouble);
 pub const ComplexFloat = create(.ComplexFloat);
 pub const ComplexDouble = create(.ComplexDouble);
+pub const ComplexLongDouble = create(.ComplexLongDouble);
 
 pub inline fn create(specifier: Specifier) Type {
     return .{ .specifier = specifier };
@@ -1729,7 +1730,7 @@ pub fn hasAttribute(ty: Type, tag: Attribute.Tag) bool {
     return false;
 }
 
-fn compareIntegerRanks(lhs: Type, rhs: Type, comp: *const Compilation) std.math.Order {
+pub fn compareIntegerRanks(lhs: Type, rhs: Type, comp: *const Compilation) std.math.Order {
     assert(lhs.isInt() and rhs.isInt());
     if (lhs.eql(rhs, comp, false)) return .eq;
 

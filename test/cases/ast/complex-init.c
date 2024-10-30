@@ -6,8 +6,8 @@ FnDef: 'fn () void'
      name: cd
      init:
       ArrayInitExprTwo: '_Complex double'
-        DoubleLiteral: 'double' (value: 1)
-        DoubleLiteral: 'double' (value: 2)
+        FloatLiteral: 'double' (value: 1)
+        FloatLiteral: 'double' (value: 2)
 
     Var: '_Complex float'
      name: cf
@@ -45,9 +45,9 @@ FnDef: 'fn () void'
         CompoundLiteralExpr: '_Complex float' lvalue
          ArrayInitExprTwo: '_Complex float'
            ImplicitCast: (FloatCast) 'float'
-             DoubleLiteral: 'double' (value: 1)
+             FloatLiteral: 'double' (value: 1)
            ImplicitCast: (FloatCast) 'float'
-             DoubleLiteral: 'double' (value: 2)
+             FloatLiteral: 'double' (value: 2)
 
     ImplicitReturn: 'void'
 

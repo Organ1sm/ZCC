@@ -178,7 +178,8 @@ pub fn floatToInt(v: *Value, destTy: Type, comp: *Compilation) !FloatToIntChange
     const floored = @floor(@abs(floatVal));
 
     var rational = try std.math.big.Rational.init(comp.gpa);
-    defer rational.q.deinit();
+    defer rational.deinit();
+
     rational.setFloat(f128, floored) catch |err| switch (err) {
         error.NonFiniteFloat => {
             v.* = .{};
@@ -263,9 +264,9 @@ pub fn intCast(v: *Value, destTy: Type, comp: *Compilation) !void {
 }
 
 /// `.none` value remains unchanged.
-pub fn floatCast(v: *Value, dest_ty: Type, comp: *Compilation) !void {
+pub fn floatCast(v: *Value, destTy: Type, comp: *Compilation) !void {
     if (v.optRef == .none) return;
-    const bits = dest_ty.bitSizeof(comp).?;
+    const bits = destTy.makeReal().bitSizeof(comp).?;
     const f: Interner.Key.Float = switch (bits) {
         16 => .{ .f16 = v.toFloat(f16, comp) },
         32 => .{ .f32 = v.toFloat(f32, comp) },
@@ -465,16 +466,12 @@ pub fn div(res: *Value, lhs: Value, rhs: Value, ty: Type, comp: *Compilation) !b
         const lhsBigInt = lhs.toBigInt(&lhsSpace, comp);
         const rhsBigInt = rhs.toBigInt(&rhsSpace, comp);
 
-        const limbs = try comp.gpa.alloc(std.math.big.Limb, lhsBigInt.limbs.len + rhsBigInt.limbs.len);
-        defer comp.gpa.free(limbs);
-
         const limbsQ = try comp.gpa.alloc(std.math.big.Limb, lhsBigInt.limbs.len);
         defer comp.gpa.free(limbsQ);
 
         const limbsR = try comp.gpa.alloc(std.math.big.Limb, rhsBigInt.limbs.len);
         defer comp.gpa.free(limbsR);
 
-        var result = BigIntMutable{ .limbs = limbs, .positive = undefined, .len = undefined };
         var resultQ = BigIntMutable{ .limbs = limbsQ, .positive = undefined, .len = undefined };
         var resultR = BigIntMutable{ .limbs = limbsR, .positive = undefined, .len = undefined };
 
@@ -486,7 +483,7 @@ pub fn div(res: *Value, lhs: Value, rhs: Value, ty: Type, comp: *Compilation) !b
 
         resultQ.divTrunc(&resultR, lhsBigInt, rhsBigInt, limbsBuffer);
 
-        res.* = try intern(comp, .{ .int = .{ .bigInt = result.toConst() } });
+        res.* = try intern(comp, .{ .int = .{ .bigInt = resultQ.toConst() } });
         return !resultQ.toConst().fitsInTwosComp(ty.signedness(comp), bits);
     }
 }
@@ -687,8 +684,11 @@ pub fn hash(v: Value) u64 {
     }
 }
 
-pub fn print(v: Value, interner: *const Interner, w: anytype) @TypeOf(w).Error!void {
-    const key = interner.get(v.ref());
+pub fn print(v: Value, ty: Type, comp: *const Compilation, w: anytype) @TypeOf(w).Error!void {
+    if (ty.is(.Bool))
+        return w.writeAll(if (v.isZero(comp)) "false" else "true");
+
+    const key = comp.interner.get(v.ref());
     switch (key) {
         .null => return w.writeAll("nullptr_t"),
         .int => |repr| switch (repr) {
@@ -697,12 +697,18 @@ pub fn print(v: Value, interner: *const Interner, w: anytype) @TypeOf(w).Error!v
         .float => |repr| switch (repr) {
             inline else => |x| return w.print("{d}", .{@as(f64, @floatCast(x))}),
         },
-        .bytes => |b| return printString(b, .@"1", w),
+        .bytes => |b| return printString(b, ty, comp, w),
         else => unreachable, // not a value
     }
 }
 
-pub fn printString(bytes: []const u8, size: Compilation.CharUnitSize, w: anytype) @TypeOf(w).Error!void {
+pub fn printString(
+    bytes: []const u8,
+    ty: Type,
+    comp: *const Compilation,
+    w: anytype,
+) @TypeOf(w).Error!void {
+    const size: Compilation.CharUnitSize = @enumFromInt(ty.getElemType().sizeof(comp).?);
     const withoutNull = bytes[0 .. bytes.len - @intFromEnum(size)];
     switch (size) {
         inline .@"1", .@"2" => |sz| {

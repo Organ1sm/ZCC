@@ -582,7 +582,18 @@ fn writeType(ir: IR, tyRef: Interner.Ref, color: bool, w: anytype) !void {
 fn writeValue(ir: IR, valRef: Interner.Ref, color: bool, w: anytype) !void {
     const v: Value = .{ .optRef = @enumFromInt(@intFromEnum(valRef)) };
     if (color) util.setColor(LITERAL, w);
-    try v.print(ir.interner, w);
+    const key = ir.interner.get(v.ref());
+    switch (key) {
+        .null => return w.writeAll("nullptr_t"),
+        .int => |repr| switch (repr) {
+            inline else => |x| return w.print("{d}", .{x}),
+        },
+        .float => |repr| switch (repr) {
+            inline else => |x| return w.print("{d}", .{@as(f64, @floatCast(x))}),
+        },
+        .bytes => |b| return std.zig.stringEscape(b, "", .{}, w),
+        else => unreachable, // not a value
+    }
 }
 
 fn writeRef(ir: IR, refMap: *RefMap, ref: Ref, color: bool, w: anytype) !void {

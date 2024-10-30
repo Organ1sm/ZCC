@@ -322,7 +322,7 @@ fn expectClosing(p: *Parser, opening: TokenIndex, id: TokenType) Error!void {
 }
 
 fn errOverflow(p: *Parser, opToken: TokenIndex, res: Result) !void {
-    try p.errStr(.overflow, opToken, try p.valStr(res.value));
+    try p.errStr(.overflow, opToken, try res.str(p));
 }
 
 pub fn getTokenText(p: *Parser, index: TokenIndex) []const u8 {
@@ -402,22 +402,6 @@ pub fn removeNull(p: *Parser, str: Value) !Value {
     return Value.intern(p.comp, .{ .bytes = p.strings.items[stringsTop..] });
 }
 
-pub fn valStr(p: *Parser, val: Value) ![]const u8 {
-    switch (val.optRef) {
-        .none => return "(none)",
-        .zero => return "0",
-        .one => return "1",
-        .null => return "nullptr_t",
-        else => {},
-    }
-
-    const stringsTop = p.strings.items.len;
-    defer p.strings.items.len = stringsTop;
-
-    try val.print(&p.comp.interner, p.strings.writer());
-    return try p.comp.diagnostics.arena.allocator().dupe(u8, p.strings.items[stringsTop..]);
-}
-
 pub fn typeStr(p: *Parser, ty: Type) ![]const u8 {
     if (TypeBuilder.fromType(ty).toString(p.comp.langOpts)) |str| return str;
     const stringsTop = p.strings.items.len;
@@ -456,11 +440,11 @@ pub fn floatValueChangedStr(p: *Parser, res: *Result, oldValue: Value, intTy: Ty
     try w.writeAll(str);
 
     try w.writeAll(" changes ");
-    if (!res.value.isZero(p.comp)) try w.writeAll("non-zero ");
+    if (res.value.isZero(p.comp)) try w.writeAll("non-zero ");
     try w.writeAll("value from ");
-    try oldValue.print(&p.comp.interner, w);
+    try oldValue.print(res.ty, p.comp, w);
     try w.writeAll(" to ");
-    try res.value.print(&p.comp.interner, w);
+    try res.value.print(intTy, p.comp, w);
 
     return try p.comp.diagnostics.arena.allocator().dupe(u8, p.strings.items[stringsTop..]);
 }
@@ -496,8 +480,10 @@ fn checkDeprecatedUnavailable(p: *Parser, ty: Type, usageToken: TokenIndex, decl
         defer p.strings.items.len = stringsTop;
 
         const w = p.strings.writer();
-        try w.print("call to '{s}' declared with attribute warning: ", .{p.getTokenText(warning.__name_token)});
-        try warning.msg.print(&p.comp.interner, w);
+        const msgStr = p.comp.interner.get(warning.msg.ref()).bytes;
+        try w.print("call to '{s}' declared with attribute error: {}", .{
+            p.getTokenText(warning.__name_token), std.zig.fmtEscapes(msgStr),
+        });
         const str = try p.comp.diagnostics.arena.allocator().dupe(u8, p.strings.items[stringsTop..]);
         try p.errStr(.warning_attribute, usageToken, str);
     }
@@ -538,8 +524,8 @@ fn errDeprecated(p: *Parser, tag: Diagnostics.Tag, tokenIdx: TokenIndex, msg: ?V
 
     try w.writeAll(reason);
     if (msg) |m| {
-        try w.writeAll(": ");
-        try m.print(&p.comp.interner, w);
+        const str = p.comp.interner.get(m.ref()).bytes;
+        try w.print(": {}", .{std.zig.fmtEscapes(str)});
     }
 
     const str = try p.comp.diagnostics.arena.allocator().dupe(u8, p.strings.items[stringsTop..]);
@@ -1254,8 +1240,7 @@ fn staticAssertMessage(p: *Parser, condNode: NodeIndex, message: Result) !?[]con
 
         const bytes = p.comp.interner.get(message.value.ref()).bytes;
         try buf.ensureUnusedCapacity(bytes.len);
-        const size: Compilation.CharUnitSize = @enumFromInt(message.ty.getElemType().sizeof(p.comp).?);
-        try Value.printString(bytes, size, buf.writer());
+        try Value.printString(bytes, message.ty, p.comp, buf.writer());
     }
     return try p.comp.diagnostics.arena.allocator().dupe(u8, buf.items);
 }
@@ -1596,10 +1581,10 @@ fn handleAttrParam(p: *Parser, attr: Attribute.Tag, arguments: *Attribute.Argume
 
 fn diagnose(p: *Parser, attr: Attribute.Tag, arguments: *Attribute.Arguments, argIdx: u32, res: Result) !?Diagnostics.Message {
     if (Attribute.wantsAlignment(attr, argIdx))
-        return Attribute.diagnoseAlignment(attr, arguments, argIdx, res.value, p);
+        return Attribute.diagnoseAlignment(attr, arguments, argIdx, res, p);
 
     const node = p.nodes.get(@intFromEnum(res.node));
-    return Attribute.diagnose(attr, arguments, argIdx, res.value, node, p);
+    return Attribute.diagnose(attr, arguments, argIdx, res, node, p);
 }
 
 fn handleAttr(p: *Parser, format: Attribute.Kind, namespace: ?[]const u8) Error!void {
@@ -2320,7 +2305,7 @@ fn parseRecordDeclarator(p: *Parser) Error!bool {
                 try p.errToken(.expected_integer_constant_expr, bitsToken);
                 break :bits;
             } else if (res.value.compare(.lt, Value.zero, p.comp)) {
-                try p.errStr(.negative_bitwidth, firstToken, try p.valStr(res.value));
+                try p.errStr(.negative_bitwidth, firstToken, try res.str(p));
                 break :bits;
             }
 
@@ -2788,12 +2773,12 @@ fn enumerator(p: *Parser, e: *Enumerator) Error!?EnumFieldAndNode {
             const minInt = Type.Int.minInt(p.comp);
             const minValue = try Value.int(minInt, p.comp);
             if (e.res.value.compare(.lt, minValue, p.comp))
-                try p.errStr(.enumerator_too_small, nameToken, try p.valStr(e.res.value));
+                try p.errStr(.enumerator_too_small, nameToken, try e.res.str(p));
         } else {
             const maxInt = Type.Int.maxInt(p.comp);
             const maxValue = try Value.int(maxInt, p.comp);
             if (e.res.value.compare(.gt, maxValue, p.comp))
-                try p.errStr(.enumerator_too_large, nameToken, try p.valStr(e.res.value));
+                try p.errStr(.enumerator_too_large, nameToken, try e.res.str(p));
         }
     }
 
@@ -3401,14 +3386,14 @@ pub fn initializerItem(p: *Parser, il: *InitList, initType: Type) Error!bool {
                     try p.errToken(.expected_integer_constant_expr, exprToken);
                     return error.ParsingFailed;
                 } else if (indexRes.value.compare(.lt, Value.zero, p.comp)) {
-                    try p.errStr(.negative_array_designator, lb + 1, try p.valStr(indexRes.value));
+                    try p.errStr(.negative_array_designator, lb + 1, try indexRes.str(p));
                     return error.ParsingFailed;
                 }
 
                 const maxLen = curType.arrayLen() orelse std.math.maxInt(usize);
                 const indexInt = indexRes.value.toInt(u64, p.comp) orelse std.math.maxInt(u64);
                 if (indexInt >= maxLen) {
-                    try p.errStr(.oob_array_designator, lbr + 1, try p.valStr(indexRes.value));
+                    try p.errStr(.oob_array_designator, lbr + 1, try indexRes.str(p));
                     return error.ParsingFailed;
                 }
 
@@ -4613,7 +4598,7 @@ fn parseCaseStmt(p: *Parser, caseToken: u32) Error!?NodeIndex {
         // TODO cast to target type
         const prev = (try some.add(first, last, caseToken + 1)) orelse break :check;
 
-        try p.errStr(.duplicate_switch_case, caseToken + 1, try p.valStr(first));
+        try p.errStr(.duplicate_switch_case, caseToken + 1, try firstItem.str(p));
         try p.errToken(.previous_case, prev.token);
     } else {
         try p.errStr(.case_not_in_switch, caseToken, "case");
@@ -6655,7 +6640,7 @@ fn checkArrayBounds(p: *Parser, index: Result, array: Result, token: TokenIndex)
                 const record = lhs.getRecord().?;
                 if (data.member.index + 1 == record.fields.len) {
                     if (!index.value.isZero(p.comp)) {
-                        try p.errStr(.old_style_flexible_struct, token, try p.valStr(index.value));
+                        try p.errStr(.old_style_flexible_struct, token, try index.str(p));
                     }
                     return;
                 }
@@ -6666,13 +6651,13 @@ fn checkArrayBounds(p: *Parser, index: Result, array: Result, token: TokenIndex)
     const indexInt = index.value.toInt(u64, p.comp) orelse std.math.maxInt(u64);
     if (index.ty.isUnsignedInt(p.comp)) {
         if (indexInt >= arrayLen) {
-            try p.errStr(.array_after, token, try p.valStr(index.value));
+            try p.errStr(.array_after, token, try index.str(p));
         }
     } else {
         if (index.value.compare(.lt, Value.zero, p.comp)) {
-            try p.errStr(.array_before, token, try p.valStr(index.value));
+            try p.errStr(.array_before, token, try index.str(p));
         } else if (indexInt >= arrayLen) {
-            try p.errStr(.array_after, token, try p.valStr(index.value));
+            try p.errStr(.array_after, token, try index.str(p));
         }
     }
 }
@@ -7011,6 +6996,7 @@ fn parseFloat(p: *Parser, buf: []const u8, suffix: NumberSuffix) !Result {
         res.ty = switch (suffix) {
             .I => Type.ComplexDouble,
             .IF => Type.ComplexFloat,
+            .IL => Type.ComplexLongDouble,
             else => unreachable,
         };
         res.value = .{}; // TOOD: add complex values
@@ -7118,8 +7104,19 @@ fn fixedSizeInt(p: *Parser, base: u8, buf: []const u8, suffix: NumberSuffix, tok
     else
         &signedOctHexSpecs;
 
+    const suffixTy: Type = .{ .specifier = switch (suffix) {
+        .None, .I => .Int,
+        .U, .IU => .UInt,
+        .UL, .IUL => .ULong,
+        .ULL, .IULL => .ULongLong,
+        .L, .IL => .Long,
+        .LL, .ILL => .LongLong,
+        else => unreachable,
+    } };
+
     for (specs) |spec| {
         res.ty = Type{ .specifier = spec };
+        if (res.ty.compareIntegerRanks(suffixTy, p.comp).compare(.lt)) continue;
         const maxInt = res.ty.maxInt(p.comp);
         if (value <= maxInt) break;
     } else {
@@ -7191,9 +7188,8 @@ fn bitInt(p: *Parser, base: u8, buf: []const u8, suffix: NumberSuffix, tokenIdx:
         break :blk @intCast(bitsNeeded);
     };
 
-    const val = try Value.intern(p.comp, .{ .int = .{ .bigInt = c } });
     var res: Result = .{
-        .value = val,
+        .value = try Value.intern(p.comp, .{ .int = .{ .bigInt = c } }),
         .ty = .{
             .specifier = .BitInt,
             .data = .{ .int = .{ .bits = bitsNeeded, .signedness = suffix.signedness() } },
@@ -7298,7 +7294,8 @@ fn parsePPNumber(p: *Parser) Error!Result {
             return error.ParsingFailed;
         }
         res.ty = if (res.ty.isUnsignedInt(p.comp)) p.comp.types.intmax.makeIntegerUnsigned() else p.comp.types.intmax;
-    } else {
+    } else if (!res.value.isNone()) {
+        // TODO add complex values
         try p.valueMap.put(res.node, res.value);
     }
     return res;

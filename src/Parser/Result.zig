@@ -17,6 +17,20 @@ node: NodeIndex = .none,
 ty: Type = Type.Int,
 value: Value = .{},
 
+pub fn str(res: Result, p: *Parser) ![]const u8 {
+    switch (res.value.optRef) {
+        .none => return "(none)",
+        .null => return "nullptr_t",
+        else => {},
+    }
+
+    const stringsTop = p.strings.items.len;
+    defer p.strings.items.len = stringsTop;
+
+    try res.value.print(res.ty, p.comp, p.strings.writer());
+    return try p.comp.diagnostics.arena.allocator().dupe(u8, p.strings.items[stringsTop..]);
+}
+
 // validate result is valid
 pub fn expect(res: Result, p: *Parser) Error!void {
     if (p.inMacro) {
@@ -749,7 +763,7 @@ fn shouldEval(lhs: *Result, rhs: *Result, p: *Parser) Error!bool {
 /// Saves value and replaces it with `.unavailable`.
 pub fn saveValue(res: *Result, p: *Parser) !void {
     assert(!p.inMacro);
-    if (res.value.isNone() or res.value.ref() == .null)
+    if (res.value.isNone() or res.value.optRef == .null)
         return;
 
     if (!p.inMacro)
