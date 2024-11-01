@@ -45,7 +45,7 @@ symbols: std.ArrayListUnmanaged(Symbol) = .{},
 retNodes: std.ArrayListUnmanaged(IR.Inst.Phi.Input) = .{},
 phiNodes: std.ArrayListUnmanaged(IR.Inst.Phi.Input) = .{},
 recordElemBuffer: std.ArrayListUnmanaged(Interner.Ref) = .{},
-record_cache: std.AutoHashMapUnmanaged(*Type.Record, Interner.Ref) = .{},
+recordCache: std.AutoHashMapUnmanaged(*Type.Record, Interner.Ref) = .{},
 
 condDummyTy: ?Interner.Ref = null,
 boolInvert: bool = false,
@@ -72,7 +72,7 @@ pub fn generateTree(comp: *Compilation, tree: Tree) Compilation.Error!void {
     defer c.retNodes.deinit(c.comp.gpa);
     defer c.phiNodes.deinit(c.comp.gpa);
     defer c.recordElemBuffer.deinit(c.comp.gpa);
-    defer c.record_cache.deinit(c.comp.gpa);
+    defer c.recordCache.deinit(c.comp.gpa);
     defer c.builder.deinit();
 
     const nodeTags = tree.nodes.items(.tag);
@@ -128,7 +128,7 @@ fn genType(c: *CodeGen, baseTy: Type) !Interner.Ref {
         .Void => return .void,
         .Bool => return .i1,
         .Struct => {
-            if (c.record_cache.get(ty.data.record)) |some| return some;
+            if (c.recordCache.get(ty.data.record)) |some| return some;
 
             const elemBufferTop = c.recordElemBuffer.items.len;
             defer c.recordElemBuffer.items.len = elemBufferTop;

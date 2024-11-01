@@ -1999,7 +1999,7 @@ fn parseTypeSpec(p: *Parser, ty: *TypeBuilder) Error!bool {
                 try p.expectClosing(lparen, .RParen);
 
                 var bits: u64 = undefined;
-                if (res.value.optRef == .none) {
+                if (res.value.isNone()) {
                     try p.errToken(.expected_integer_constant_expr, bitIntToken);
                     return error.ParsingFailed;
                 } else if (res.value.compare(.lte, Value.zero, p.comp)) {
@@ -4173,10 +4173,7 @@ fn parseAssembly(p: *Parser, kind: enum { global, declLabel, stmt }) Error!?Node
     switch (kind) {
         .declLabel => {
             const asmString = try p.parseAsmString();
-
-            // remove null-terminator
-            const bytes = p.comp.interner.get(asmString.value.ref()).bytes;
-            const str = try Value.intern(p.comp, .{ .bytes = bytes[0 .. bytes.len - 1] });
+            const str = try p.removeNull(asmString.value);
 
             const args = Attribute.Arguments{ .asm_label = .{ .name = str } };
             const attr = Attribute{ .tag = .asm_label, .args = args, .syntax = .keyword };
@@ -6169,9 +6166,7 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
                     .msvc => {},
                     .gcc => operand.value = Value.zero,
                     .clang => {
-                        if (operand.value.is(.int, p.comp))
-                            operand.value = Value.zero
-                        else if (operand.value.is(.float, p.comp))
+                        if (operand.value.is(.int, p.comp) or operand.value.is(.float, p.comp))
                             operand.value = Value.zero;
                     },
                 }
@@ -6626,6 +6621,7 @@ fn parseCallExpr(p: *Parser, lhs: Result) Error!Result {
 
 fn checkArrayBounds(p: *Parser, index: Result, array: Result, token: TokenIndex) !void {
     if (index.value.isNone()) return;
+
     const arrayLen = array.ty.arrayLen() orelse return;
     if (arrayLen == 0) return;
 
@@ -6805,7 +6801,6 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
                 try p.strings.append(0);
 
                 const predef = try p.makePredefinedIdentifier(stringsTop);
-
                 ty = predef.ty;
                 p.func.ident = predef;
             } else {
@@ -6845,6 +6840,7 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
                 const mapper = p.comp.stringInterner.getSlowTypeMapper();
                 try Type.printNamed(funcType, p.getTokenText(p.func.name), mapper, p.comp.langOpts, p.strings.writer());
                 try p.strings.append(0);
+
                 const predef = try p.makePredefinedIdentifier(stringsTop);
                 ty = predef.ty;
                 p.func.prettyIdent = predef;
@@ -7499,7 +7495,11 @@ fn parseStringLiteral(p: *Parser) Error!Result {
     p.strings.appendNTimesAssumeCapacity(0, @intFromEnum(charWidth));
     const slice = p.strings.items[stringsTop..];
 
-    const internedAlign = std.mem.alignForward(usize, p.comp.interner.strings.items.len, stringKind.internalStorageAlignment(p.comp));
+    const internedAlign = std.mem.alignForward(
+        usize,
+        p.comp.interner.strings.items.len,
+        stringKind.internalStorageAlignment(p.comp),
+    );
     try p.comp.interner.strings.resize(p.gpa, internedAlign);
 
     const val = try Value.intern(p.comp, .{ .bytes = slice });

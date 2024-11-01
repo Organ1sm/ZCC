@@ -26,8 +26,8 @@ pub fn isNone(v: Value) bool {
 }
 
 pub fn isNumeric(v: Value, comp: *Compilation) bool {
-    const key = comp.interner.get(v.ref());
-    return switch (key) {
+    if (v.isNone()) return false;
+    return switch (comp.interner.get(v.ref())) {
         .int, .float => true,
         else => false,
     };
@@ -201,8 +201,8 @@ pub fn floatToInt(v: *Value, destTy: Type, comp: *Compilation) !FloatToIntChange
 
     // rational.p.truncate(rational.p.toConst(), signedness: Signedness, bit_count: usize)
     const fits = rational.p.fitsInTwosComp(signedness, bits);
-    try rational.p.truncate(&rational.p, signedness, bits);
     v.* = try intern(comp, .{ .int = .{ .bigInt = rational.p.toConst() } });
+    try rational.p.truncate(&rational.p, signedness, bits);
 
     if (!wasZero and v.isZero(comp)) return .nonZeroToZero;
     if (!fits) return .outOfRange;
@@ -695,6 +695,8 @@ pub fn print(v: Value, ty: Type, comp: *const Compilation, w: anytype) @TypeOf(w
             inline else => |x| return w.print("{d}", .{x}),
         },
         .float => |repr| switch (repr) {
+            .f16 => |x| return w.print("{d}", .{@round(@as(f64, @floatCast(x)) * 1000) / 1000}),
+            .f32 => |x| return w.print("{d}", .{@round(@as(f64, @floatCast(x)) * 1000000) / 1000000}),
             inline else => |x| return w.print("{d}", .{@as(f64, @floatCast(x))}),
         },
         .bytes => |b| return printString(b, ty, comp, w),

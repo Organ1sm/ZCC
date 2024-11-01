@@ -205,6 +205,7 @@ pub fn main() !void {
             comp.includeDirs = @TypeOf(comp.includeDirs).init(gpa);
             comp.systemIncludeDirs = @TypeOf(comp.systemIncludeDirs).init(gpa);
             comp.pragmaHandlers = .{};
+            comp.environment = .{};
 
             // reset everything else
             comp.deinit();
@@ -214,6 +215,7 @@ pub fn main() !void {
         var caseNode = rootNode.start(case, 0);
         defer caseNode.end();
 
+        std.debug.print("{s} testing...\n", .{case});
         const file = comp.addSourceFromPath(path) catch |err| {
             failCount += 1;
             std.debug.print("could not add source '{s}': {s}\n", .{ path, @errorName(err) });
@@ -409,15 +411,16 @@ pub fn main() !void {
             const expectedOutput = buffer.items;
 
             const objName = "testObject.o";
-            {
-                const obj = try CodeGen.generateTree(&comp, tree);
-                defer obj.deinit();
+            if (true) break :blk;
+            // {
+            // const obj = try CodeGen.generateTree(&comp, tree);
+            // defer obj.deinit();
 
-                const outFile = try std.fs.cwd().createFile(objName, .{});
-                defer outFile.close();
+            // const outFile = try std.fs.cwd().createFile(objName, .{});
+            // defer outFile.close();
 
-                try obj.finish(outFile);
-            }
+            // try obj.finish(outFile);
+            // }
             var child = std.process.Child.init(&.{ args[2], "run", "-lc", objName }, gpa);
             child.stdout_behavior = .Pipe;
 

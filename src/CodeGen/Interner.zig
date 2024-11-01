@@ -107,6 +107,7 @@ pub const Key = union(enum) {
         const lhsTag: KeyTag = lhs;
         const rhsTag: KeyTag = rhs;
         if (lhsTag != rhsTag) return false;
+
         switch (lhs) {
             .recordTy => |lhsElems| {
                 const rhsElems = rhs.recordTy;
@@ -200,7 +201,6 @@ pub const Ref = enum(u32) {
     zero = max - 16,
     one = max - 17,
     null = max - 18,
-
     _,
 };
 
@@ -392,6 +392,7 @@ pub fn deinit(self: *Interner, gpa: Allocator) void {
 pub fn put(self: *Interner, gpa: Allocator, key: Key) !Ref {
     if (key.toRef()) |some|
         return some;
+
     const adapter = KeyAdapter{ .interner = self };
     const gop = try self.map.getOrPutAdapted(gpa, key, adapter);
     if (gop.found_existing) return @enumFromInt(gop.index);
@@ -426,33 +427,32 @@ pub fn put(self: *Interner, gpa: Allocator, key: Key) !Ref {
 
         .int => |repr| int: {
             var space: Tag.Int.BigIntSpace = undefined;
-            const big = switch (repr) {
+            const big = repr.toBigInt(&space);
+            switch (repr) {
                 .u64 => |data| if (std.math.cast(u32, data)) |small| {
                     self.items.appendAssumeCapacity(.{ .tag = .u32, .data = small });
                     break :int;
-                } else BigIntMutable.init(&space.limbs, data).toConst(),
+                },
                 .i64 => |data| if (std.math.cast(i32, data)) |small| {
                     self.items.appendAssumeCapacity(.{ .tag = .i32, .data = @bitCast(small) });
                     break :int;
-                } else BigIntMutable.init(&space.limbs, data).toConst(),
-                .bigInt => |data| big: {
-                    if (data.bitCountAbs() <= 32) {
-                        if (data.positive) {
-                            self.items.appendAssumeCapacity(.{
-                                .tag = .u32,
-                                .data = data.to(u32) catch unreachable,
-                            });
-                        } else {
-                            self.items.appendAssumeCapacity(.{
-                                .tag = .i32,
-                                .data = @bitCast(data.to(i32) catch unreachable),
-                            });
-                        }
+                },
+                .bigInt => |data| {
+                    if (data.fitsInTwosComp(.unsigned, 32)) {
+                        self.items.appendAssumeCapacity(.{
+                            .tag = .u32,
+                            .data = data.to(u32) catch unreachable,
+                        });
+                        break :int;
+                    } else if (data.fitsInTwosComp(.signed, 32)) {
+                        self.items.appendAssumeCapacity(.{
+                            .tag = .i32,
+                            .data = @bitCast(data.to(i32) catch unreachable),
+                        });
                         break :int;
                     }
-                    break :big data;
                 },
-            };
+            }
 
             const limbsIndex: u32 = @intCast(self.limbs.items.len);
             try self.limbs.appendSlice(gpa, big.limbs);

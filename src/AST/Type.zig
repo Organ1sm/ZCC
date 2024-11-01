@@ -1027,20 +1027,13 @@ pub fn hasIncompleteSize(ty: Type) bool {
         return false;
 
     return switch (ty.specifier) {
-        .Void,
-        .IncompleteArray,
-        .Invalid,
-        => true,
-
+        .Void, .IncompleteArray => true,
         .Enum => ty.data.@"enum".isIncomplete() and !ty.data.@"enum".fixed,
         .Struct, .Union => ty.data.record.isIncomplete(),
-
         .Array, .StaticArray => ty.data.array.elem.hasIncompleteSize(),
-
         .TypeofType => ty.data.subType.hasIncompleteSize(),
         .TypeofExpr => ty.data.expr.ty.hasIncompleteSize(),
         .Attributed => ty.data.attributed.base.hasIncompleteSize(),
-
         else => false,
     };
 }

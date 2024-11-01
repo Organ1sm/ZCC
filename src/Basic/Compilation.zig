@@ -133,6 +133,7 @@ pub fn init(gpa: Allocator) Compilation {
 pub fn deinit(comp: *Compilation) void {
     for (comp.pragmaHandlers.values()) |pragma|
         pragma.deinit(pragma, comp);
+
     for (comp.sources.values()) |source| {
         comp.gpa.free(source.path);
         comp.gpa.free(source.buffer);
