@@ -2,6 +2,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 const Type = @import("Type.zig");
 const Compilation = @import("../Basic/Compilation.zig");
+const CodeGen = @import("../CodeGen/CodeGen.zig");
 const Source = @import("../Basic/Source.zig");
 const Lexer = @import("../Lexer/Lexer.zig");
 const TokenType = @import("../Basic/TokenType.zig").TokenType;
@@ -25,6 +26,8 @@ nodes: Node.List.Slice,
 data: []const NodeIndex,
 rootDecls: []const NodeIndex,
 valueMap: ValueMap,
+
+pub const genIR =  CodeGen.generateIR;
 
 pub fn deinit(tree: *AST) void {
     tree.comp.gpa.free(tree.rootDecls);

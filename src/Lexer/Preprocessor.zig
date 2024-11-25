@@ -95,6 +95,8 @@ preserveWhitespace: bool = false,
 /// linemarker tokens. Must be .none unless in -E mode (parser does not handle linemarkers)
 linemarkers: LineMarkers = .None,
 
+pub const parse = Parser.parse;
+
 pub const LineMarkers = enum {
     /// No linemarker tokens. Required setting if parser will run
     None,
@@ -170,6 +172,15 @@ pub fn init(comp: *Compilation) Preprocessor {
     return pp;
 }
 
+/// Initialize Preprocessor with builtin macros.
+pub fn initDefault(comp: *Compilation) !Preprocessor {
+    var pp = init(comp);
+    errdefer pp.deinit();
+
+    try pp.addBuiltinMacros();
+    return pp;
+}
+
 pub fn deinit(pp: *Preprocessor) void {
     pp.defines.deinit();
     for (pp.tokens.items(.expansionLocs)) |loc| {
@@ -228,6 +239,21 @@ pub fn addIncludeResume(pp: *Preprocessor, source: Source.ID, offset: u32, line:
             .line = line,
         },
     });
+}
+
+/// Preprocess a compilation unit of sources into a parsable list of tokens.
+pub fn preprocessSources(pp: *Preprocessor, sources: []const Source) Error!void {
+    assert(sources.len > 1);
+
+    const first = sources[0];
+    try pp.addIncludeStart(first);
+    for (sources[1..]) |header| {
+        try pp.addIncludeStart(header);
+        _ = try pp.preprocess(header);
+    }
+    try pp.addIncludeResume(first.id, 0, 0);
+    const eof = try pp.preprocess(first);
+    try pp.tokens.append(pp.comp.gpa, eof);
 }
 
 /// Preprocess a source file, returns eof token.
@@ -818,6 +844,7 @@ fn expr(pp: *Preprocessor, lexer: *Lexer) MacroError!bool {
         .fieldAttrBuffer = undefined,
         .stringsIds = undefined,
     };
+    defer parser.strings.deinit();
 
     return parser.macroExpr();
 }
@@ -1006,21 +1033,27 @@ fn expandObjMacro(pp: *Preprocessor, simpleMacro: *const Macro) Error!ExpandBuff
             .MacroFile => {
                 const start = pp.comp.generatedBuffer.items.len;
                 const source = pp.comp.getSource(pp.expansionSourceLoc.id);
-                try pp.comp.generatedBuffer.writer().print("\"{s}\"\n", .{source.path});
+
+                const w = pp.comp.generatedBuffer.writer(pp.gpa);
+                try w.print("\"{s}\"\n", .{source.path});
 
                 buff.appendAssumeCapacity(try pp.makeGeneratedToken(start, .StringLiteral, token));
             },
             .MacroLine => {
                 const start = pp.comp.generatedBuffer.items.len;
                 const source = pp.comp.getSource(pp.expansionSourceLoc.id);
-                try pp.comp.generatedBuffer.writer().print("{d}\n", .{source.physicalLine(pp.expansionSourceLoc)});
+
+                const w = pp.comp.generatedBuffer.writer(pp.gpa);
+                try w.print("{d}\n", .{source.physicalLine(pp.expansionSourceLoc)});
 
                 buff.appendAssumeCapacity(try pp.makeGeneratedToken(start, .PPNumber, token));
             },
             .MacroCounter => {
                 defer pp.counter += 1;
                 const start = pp.comp.generatedBuffer.items.len;
-                try pp.comp.generatedBuffer.writer().print("{d}\n", .{pp.counter});
+
+                const w = pp.comp.generatedBuffer.writer(pp.gpa);
+                try w.print("{d}\n", .{pp.counter});
 
                 buff.appendAssumeCapacity(try pp.makeGeneratedToken(start, .PPNumber, token));
             },
@@ -1069,7 +1102,7 @@ fn pragmaOperator(pp: *Preprocessor, argToken: Token, operatorLoc: Source.Locati
     pp.charBuffer.appendAssumeCapacity('\n');
 
     const start = pp.comp.generatedBuffer.items.len;
-    try pp.comp.generatedBuffer.appendSlice(pp.charBuffer.items);
+    try pp.comp.generatedBuffer.appendSlice(pp.gpa, pp.charBuffer.items);
     var tempLexer = Lexer{
         .buffer = pp.comp.generatedBuffer.items,
         .comp = pp.comp,
@@ -1458,7 +1491,7 @@ fn expandFuncMacro(
                 try pp.stringify(arg);
 
                 const start = pp.comp.generatedBuffer.items.len;
-                try pp.comp.generatedBuffer.appendSlice(pp.charBuffer.items);
+                try pp.comp.generatedBuffer.appendSlice(pp.gpa, pp.charBuffer.items);
 
                 try buf.append(try pp.makeGeneratedToken(start, .StringLiteral, tokenFromRaw(raw)));
             },
@@ -1482,7 +1515,9 @@ fn expandFuncMacro(
                 } else try pp.handleBuiltinMacro(raw.id, arg, loc);
 
                 const start = pp.comp.generatedBuffer.items.len;
-                try pp.comp.generatedBuffer.writer().print("{}\n", .{@intFromBool(result)});
+                const w = pp.comp.generatedBuffer.writer(pp.gpa);
+
+                try w.print("{}\n", .{@intFromBool(result)});
                 try buf.append(try pp.makeGeneratedToken(start, .PPNumber, tokenFromRaw(raw)));
             },
 
@@ -1530,7 +1565,7 @@ fn expandFuncMacro(
                     break :res attrs.get(identStr) orelse notFound;
                 };
                 const start = pp.comp.generatedBuffer.items.len;
-                try pp.comp.generatedBuffer.appendSlice(result);
+                try pp.comp.generatedBuffer.appendSlice(pp.gpa, result);
                 try buf.append(try pp.makeGeneratedToken(start, .PPNumber, tokenFromRaw(raw)));
             },
 
@@ -2122,7 +2157,7 @@ fn pasteTokens(pp: *Preprocessor, lhsTokens: *ExpandBuffer, rhsTokens: []const T
 
     const start = pp.comp.generatedBuffer.items.len;
     const end = start + pp.expandedSlice(lhs).len + pp.expandedSlice(rhs).len;
-    try pp.comp.generatedBuffer.ensureTotalCapacity(end + 1); // +1 for a newline
+    try pp.comp.generatedBuffer.ensureTotalCapacity(pp.gpa, end + 1); // +1 for a newline
 
     // We cannot use the same slices here since they might be invalidated by `ensureCapacity`
     pp.comp.generatedBuffer.appendSliceAssumeCapacity(pp.expandedSlice(lhs));
@@ -2456,7 +2491,7 @@ fn embed(pp: *Preprocessor, lexer: *Lexer) MacroError!void {
     // TODO: We currently only support systems with CHAR_BIT == 8
     // If the target's CHAR_BIT is not 8, we need to write out correctly-sized embed_bytes
     // and correctly account for the target's endianness
-    const writer = pp.comp.generatedBuffer.writer();
+    const writer = pp.comp.generatedBuffer.writer(pp.gpa);
 
     {
         const byte = embedBytes[0];
@@ -2471,7 +2506,7 @@ fn embed(pp: *Preprocessor, lexer: *Lexer) MacroError!void {
         pp.tokens.appendAssumeCapacity(.{ .id = .Comma, .loc = .{ .id = .generated, .byteOffset = @intCast(start) } });
         pp.tokens.appendAssumeCapacity(try pp.makeGeneratedToken(start + 1, .EmbedByte, fileNameToken));
     }
-    try pp.comp.generatedBuffer.append('\n');
+    try pp.comp.generatedBuffer.append(pp.gpa, '\n');
 
     try Range.expand(suffix, pp, lexer);
 }

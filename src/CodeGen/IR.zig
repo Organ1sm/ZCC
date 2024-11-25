@@ -18,11 +18,12 @@ arena: std.heap.ArenaAllocator.State,
 pub const Builder = struct {
     gpa: Allocator,
     arena: std.heap.ArenaAllocator,
+    interner: *Interner,
+
     instructions: std.MultiArrayList(IR.Inst) = .{},
     body: std.ArrayListUnmanaged(Ref) = .{},
     argCount: u32 = 0,
     allocCount: u32 = 0,
-    interner: *Interner,
     currentLabel: Ref = undefined,
 
     pub fn deinit(b: *Builder) void {

@@ -55,30 +55,31 @@ continueLabel: IR.Ref = undefined,
 breakLabel: IR.Ref = undefined,
 returnLabel: IR.Ref = undefined,
 
-pub fn generateTree(comp: *Compilation, tree: Tree) Compilation.Error!void {
+pub fn generateIR(tree: Tree) Compilation.Error!void {
+    const gpa = tree.comp.gpa;
     var c = CodeGen{
         .builder = .{
-            .gpa = comp.gpa,
-            .arena = std.heap.ArenaAllocator.init(comp.gpa),
-            .interner = &comp.interner,
+            .gpa = tree.comp.gpa,
+            .arena = std.heap.ArenaAllocator.init(gpa),
+            .interner = &tree.comp.interner,
         },
         .tree = tree,
-        .comp = comp,
+        .comp = tree.comp,
         .nodeTag = tree.nodes.items(.tag),
         .nodeData = tree.nodes.items(.data),
         .nodeTy = tree.nodes.items(.type),
     };
-    defer c.symbols.deinit(c.comp.gpa);
-    defer c.retNodes.deinit(c.comp.gpa);
-    defer c.phiNodes.deinit(c.comp.gpa);
-    defer c.recordElemBuffer.deinit(c.comp.gpa);
-    defer c.recordCache.deinit(c.comp.gpa);
+    defer c.symbols.deinit(gpa);
+    defer c.retNodes.deinit(gpa);
+    defer c.phiNodes.deinit(gpa);
+    defer c.recordElemBuffer.deinit(gpa);
+    defer c.recordCache.deinit(gpa);
     defer c.builder.deinit();
 
     const nodeTags = tree.nodes.items(.tag);
     for (tree.rootDecls) |decl| {
         c.builder.arena.deinit();
-        c.builder.arena = std.heap.ArenaAllocator.init(comp.gpa);
+        c.builder.arena = std.heap.ArenaAllocator.init(gpa);
 
         switch (nodeTags[@intFromEnum(decl)]) {
             .StaticAssert,

@@ -181,8 +181,8 @@ pub fn main() !void {
         gpa.free(caseNextIncludeDir);
     }
 
-    try initialComp.includeDirs.append(casesIncludeDir);
-    try initialComp.includeDirs.append(caseNextIncludeDir);
+    try initialComp.includeDirs.append(gpa, casesIncludeDir);
+    try initialComp.includeDirs.append(gpa, caseNextIncludeDir);
 
     try initialComp.addDefaultPragmaHandlers();
     try initialComp.defineSystemIncludes(testDir);
@@ -202,8 +202,8 @@ pub fn main() !void {
     next_test: for (cases.items) |path| {
         var comp = initialComp;
         defer {
-            comp.includeDirs = @TypeOf(comp.includeDirs).init(gpa);
-            comp.systemIncludeDirs = @TypeOf(comp.systemIncludeDirs).init(gpa);
+            comp.includeDirs = .{};
+            comp.systemIncludeDirs = .{};
             comp.pragmaHandlers = .{};
             comp.environment = .{};
 
@@ -215,7 +215,6 @@ pub fn main() !void {
         var caseNode = rootNode.start(case, 0);
         defer caseNode.end();
 
-        std.debug.print("{s} testing...\n", .{case});
         const file = comp.addSourceFromPath(path) catch |err| {
             failCount += 1;
             std.debug.print("could not add source '{s}': {s}\n", .{ path, @errorName(err) });

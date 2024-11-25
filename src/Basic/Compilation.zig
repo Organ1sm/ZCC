@@ -61,12 +61,12 @@ pub const Environment = struct {
     /// Load all of the environment variables using the std.process API.
     /// Do not use if using zcc as a shared library on Linux without libc
     /// See https://github.com/ziglang/zig/issues/4524
-    /// Assumes that `self` has been default-initialized
-    pub fn loadAll(self: *Environment, allocator: std.mem.Allocator) !void {
-        errdefer self.deinit(allocator);
+    pub fn loadAll(allocator: std.mem.Allocator) !Environment {
+        var env: Environment = .{};
+        errdefer env.deinit(allocator);
 
-        inline for (@typeInfo(@TypeOf(self.*)).@"struct".fields) |field| {
-            std.debug.assert(@field(self, field.name) == null);
+        inline for (@typeInfo(@TypeOf(env)).@"struct".fields) |field| {
+            std.debug.assert(@field(env, field.name) == null);
 
             var envVarBuffer: [field.name.len]u8 = undefined;
             const envVarName = std.ascii.upperString(&envVarBuffer, field.name);
@@ -75,8 +75,10 @@ pub const Environment = struct {
                 error.EnvironmentVariableNotFound => null,
                 error.InvalidWtf8 => null,
             };
-            @field(self, field.name) = val;
+            @field(env, field.name) = val;
         }
+
+        return env;
     }
 
     /// Use this only if environment slices were allocated with `allocator` (such as via `loadAll`)
@@ -91,16 +93,16 @@ pub const Environment = struct {
 };
 
 gpa: Allocator,
-environment: Environment = .{},
 diagnostics: Diagnostics,
 
-sources: std.StringArrayHashMap(Source),
-includeDirs: std.ArrayList([]const u8),
-systemIncludeDirs: std.ArrayList([]const u8),
+environment: Environment = .{},
+sources: std.StringArrayHashMapUnmanaged(Source) = .{},
+includeDirs: std.ArrayListUnmanaged([]const u8) = .{},
+systemIncludeDirs: std.ArrayListUnmanaged([]const u8) = .{},
 target: std.Target = builtin.target,
 pragmaHandlers: std.StringArrayHashMapUnmanaged(*Pragma) = .{},
 langOpts: LangOpts = .{},
-generatedBuffer: std.ArrayList(u8),
+generatedBuffer: std.ArrayListUnmanaged(u8) = .{},
 builtins: Builtins = .{},
 types: struct {
     wchar: Type = undefined,
@@ -123,11 +125,23 @@ pub fn init(gpa: Allocator) Compilation {
     return .{
         .gpa = gpa,
         .diagnostics = Diagnostics.init(gpa),
-        .sources = std.StringArrayHashMap(Source).init(gpa),
-        .includeDirs = std.ArrayList([]const u8).init(gpa),
-        .systemIncludeDirs = std.ArrayList([]const u8).init(gpa),
-        .generatedBuffer = std.ArrayList(u8).init(gpa),
     };
+}
+
+/// Initialize Compilation with default environment,
+/// pragma handlers and emulation mode set to target.
+pub fn initDefault(gpa: Allocator) !Compilation {
+    var comp: Compilation = .{
+        .gpa = gpa,
+        .environment = try Environment.loadAll(gpa),
+        .diagnostics = Diagnostics.init(gpa),
+    };
+    errdefer comp.deinit();
+
+    try comp.addDefaultPragmaHandlers();
+    comp.langOpts.setEmulatedCompiler(Target.systemCompiler(comp.target));
+
+    return comp;
 }
 
 pub fn deinit(comp: *Compilation) void {
@@ -140,17 +154,18 @@ pub fn deinit(comp: *Compilation) void {
         comp.gpa.free(source.spliceLocs);
     }
 
-    comp.sources.deinit();
+    comp.sources.deinit(comp.gpa);
     comp.diagnostics.deinit();
-    comp.includeDirs.deinit();
+    comp.includeDirs.deinit(comp.gpa);
     for (comp.systemIncludeDirs.items) |path|
         comp.gpa.free(path);
-    comp.systemIncludeDirs.deinit();
+    comp.systemIncludeDirs.deinit(comp.gpa);
     comp.pragmaHandlers.deinit(comp.gpa);
-    comp.generatedBuffer.deinit();
+    comp.generatedBuffer.deinit(comp.gpa);
     comp.builtins.deinit(comp.gpa);
     comp.stringInterner.deinit(comp.gpa);
     comp.interner.deinit(comp.gpa);
+    comp.environment.deinit(comp.gpa);
 }
 
 /// Dec 31 9999 23:59:59
@@ -821,7 +836,7 @@ pub fn defineSystemIncludes(comp: *Compilation, zccDir: []const u8) !void {
 
         const path = try std.fs.path.join(comp.gpa, &.{ dirname, "include" });
         errdefer comp.gpa.free(path);
-        try comp.systemIncludeDirs.append(path);
+        try comp.systemIncludeDirs.append(comp.gpa, path);
 
         break;
     } else return error.ZccIncludeNotFound;
@@ -836,13 +851,13 @@ pub fn defineSystemIncludes(comp: *Compilation, zccDir: []const u8) !void {
         if (!std.meta.isError(std.fs.accessAbsolute(multiarchPath, .{}))) {
             const duped = try comp.gpa.dupe(u8, multiarchPath);
             errdefer comp.gpa.free(duped);
-            try comp.systemIncludeDirs.append(duped);
+            try comp.systemIncludeDirs.append(comp.gpa, duped);
         }
     }
 
     const usrInclude = try comp.gpa.dupe(u8, "/usr/include");
     errdefer comp.gpa.free(usrInclude);
-    try comp.systemIncludeDirs.append(usrInclude);
+    try comp.systemIncludeDirs.append(comp.gpa, usrInclude);
 }
 
 pub fn getSource(comp: *const Compilation, id: Source.ID) Source {
@@ -876,7 +891,7 @@ pub fn addSourceFromOwnedBuffer(
     path: []const u8,
     kind: Source.Kind,
 ) !Source {
-    try comp.sources.ensureUnusedCapacity(1);
+    try comp.sources.ensureUnusedCapacity(comp.gpa, 1);
 
     var contents = buffer;
 

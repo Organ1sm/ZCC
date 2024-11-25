@@ -7,7 +7,6 @@ const Compilation = @import("Basic/Compilation.zig");
 const LangOpts = @import("Basic/LangOpts.zig");
 const Lexer = @import("Lexer/Lexer.zig");
 const Preprocessor = @import("Lexer/Preprocessor.zig");
-const Parser = @import("Parser/Parser.zig");
 const Source = @import("Basic/Source.zig");
 const Toolchain = @import("Toolchain.zig");
 const Util = @import("Basic/Util.zig");
@@ -285,7 +284,7 @@ pub fn parseArgs(
                     }
                     path = args[i];
                 }
-                try d.comp.includeDirs.append(path);
+                try d.comp.includeDirs.append(d.comp.gpa, path);
             } else if (std.mem.eql(u8, arg, "-fsyntax-only")) {
                 d.onlySyntax = true;
             } else if (std.mem.eql(u8, arg, "-fno-syntax-only")) {
@@ -300,7 +299,7 @@ pub fn parseArgs(
                     }
                     path = args[i];
                 }
-                try d.comp.systemIncludeDirs.append(path);
+                try d.comp.systemIncludeDirs.append(d.comp.gpa, path);
             } else if (option(arg, "--emulate=")) |compilerStr| {
                 const compiler = std.meta.stringToEnum(LangOpts.Compiler, compilerStr) orelse {
                     try d.comp.addDiagnostic(.{ .tag = .cli_invalid_emulate, .extra = .{ .str = arg } }, &.{});
@@ -465,7 +464,9 @@ pub fn fatal(d: *Driver, comptime fmt: []const u8, args: anytype) error{FatalErr
     return d.comp.diagnostics.fatalNoSrc(fmt, args);
 }
 
-pub fn main(d: *Driver, tc: *Toolchain, args: [][]const u8) !void {
+/// The entry point of the Zcc compiler.
+/// **MAY call `exit` if `fast_exit` is set.**
+pub fn main(d: *Driver, tc: *Toolchain, args: [][]const u8, comptime fastExit: bool) !void {
     var macroBuffer = std.ArrayList(u8).init(d.comp.gpa);
     defer macroBuffer.deinit();
 
@@ -493,7 +494,6 @@ pub fn main(d: *Driver, tc: *Toolchain, args: [][]const u8) !void {
     const builtinMacros = try d.comp.generateBuiltinMacros();
     const userDefinedMacros = try d.comp.addSourceFromBuffer("<command line>", macroBuffer.items);
 
-    const fastExit = @import("builtin").mode != .Debug;
     if (fastExit and d.inputs.items.len == 1) {
         processSource(tc, d.inputs.items[0], builtinMacros, userDefinedMacros, fastExit) catch |e| switch (e) {
             error.FatalError => {
@@ -533,7 +533,7 @@ fn processSource(
     comptime fastExit: bool,
 ) !void {
     d.comp.generatedBuffer.items.len = 0;
-    var pp = Preprocessor.init(d.comp);
+    var pp = try Preprocessor.initDefault(d.comp);
     defer pp.deinit();
 
     if (d.comp.langOpts.msExtensions)
@@ -546,24 +546,10 @@ fn processSource(
             pp.linemarkers = if (d.useLineDirectives) .LineDirectives else .NumericDirectives;
     }
 
-    try pp.addBuiltinMacros();
-
-    try pp.addIncludeStart(source);
-
-    try pp.addIncludeStart(builtinMacro);
-    _ = try pp.preprocess(builtinMacro);
-
-    try pp.addIncludeStart(userDefinedMacros);
-    _ = try pp.preprocess(userDefinedMacros);
-
-    try pp.addIncludeResume(source.id, 0, 0);
-
-    if (d.dumpRawTokens) {
-        _ = try pp.tokenize(source);
-    } else {
-        const eof = try pp.preprocess(source);
-        try pp.tokens.append(pp.comp.gpa, eof);
-    }
+    if (d.dumpRawTokens)
+        _ = try pp.tokenize(source)
+    else
+        try pp.preprocessSources(&.{ source, builtinMacro, userDefinedMacros });
 
     if (d.onlyPreprocess) {
         d.comp.renderErrors();
@@ -613,7 +599,7 @@ fn processSource(
         return;
     }
 
-    var tree = try Parser.parse(&pp);
+    var tree = try pp.parse();
     defer tree.deinit();
 
     if (d.dumpAst) {
@@ -651,7 +637,7 @@ fn processSource(
     }
 
     if (d.dumpIR)
-        try @import("CodeGen/CodeGen.zig").generateTree(d.comp, tree);
+        try tree.genIR();
 
     const obj = try Codegen.generateTree(d.comp, tree);
     defer obj.deinit();
