@@ -2,9 +2,9 @@ const std = @import("std");
 const assert = std.debug.assert;
 const buildOptions = @import("build_options");
 const print = std.debug.print;
-const zcc = @import("zcc");
-const CodeGen = zcc.CodeGenLegacy;
-const Tree = zcc.Tree;
+const zinc = @import("zinc");
+const CodeGen = zinc.CodeGenLegacy;
+const Tree = zinc.Tree;
 const Token = Tree.Token;
 const NodeIndex = Tree.NodeIndex;
 const AllocatorError = std.mem.Allocator.Error;
@@ -13,12 +13,12 @@ var general_purpose_allocator = std.heap.GeneralPurposeAllocator(.{}){};
 
 /// Returns onlyPreprocess and lineMarkers settings if saw -E
 fn addCommandLineArgs(
-    comp: *zcc.Compilation,
-    file: zcc.Source,
+    comp: *zinc.Compilation,
+    file: zinc.Source,
     macroBuffer: anytype,
-) !struct { bool, zcc.Preprocessor.LineMarkers } {
+) !struct { bool, zinc.Preprocessor.LineMarkers } {
     var onlyPreprocess = false;
-    var lineMarkers: zcc.Preprocessor.LineMarkers = .None;
+    var lineMarkers: zinc.Preprocessor.LineMarkers = .None;
     if (std.mem.startsWith(u8, file.buffer, "//zcc-args")) {
         var testArgs = std.ArrayList([]const u8).init(comp.gpa);
         defer testArgs.deinit();
@@ -27,7 +27,7 @@ fn addCommandLineArgs(
         var it = std.mem.tokenizeScalar(u8, file.buffer[0..nl], ' ');
         while (it.next()) |some| try testArgs.append(some);
 
-        var driver = zcc.Driver{ .comp = comp };
+        var driver = zinc.Driver{ .comp = comp };
         defer driver.deinit();
 
         _ = try driver.parseArgs(std.io.null_writer, macroBuffer, testArgs.items);
@@ -46,7 +46,7 @@ fn addCommandLineArgs(
             var parts = std.mem.splitScalar(u8, some, '=');
             const name = parts.next().?;
             const val = parts.next() orelse "";
-            inline for (@typeInfo(zcc.Compilation.Environment).@"struct".fields) |field| {
+            inline for (@typeInfo(zinc.Compilation.Environment).@"struct".fields) |field| {
                 var envVarBuffer: [field.name.len]u8 = undefined;
                 const varName = std.ascii.lowerString(&envVarBuffer, field.name);
                 if (std.ascii.eqlIgnoreCase(name, varName))
@@ -59,7 +59,7 @@ fn addCommandLineArgs(
 }
 
 fn testOne(allocator: std.mem.Allocator, path: []const u8, testDir: []const u8) !void {
-    var comp = zcc.Compilation.init(allocator);
+    var comp = zinc.Compilation.init(allocator);
     defer comp.deinit();
 
     try comp.addDefaultPragmaHandlers();
@@ -74,7 +74,7 @@ fn testOne(allocator: std.mem.Allocator, path: []const u8, testDir: []const u8) 
 
     const bulitinMacros = try comp.generateBuiltinMacros();
 
-    var pp = zcc.Preprocessor.init(&comp);
+    var pp = zinc.Preprocessor.init(&comp);
     defer pp.deinit();
 
     try pp.addBuiltinMacros();
@@ -88,7 +88,7 @@ fn testOne(allocator: std.mem.Allocator, path: []const u8, testDir: []const u8) 
     const eof = pp.preprocess(file);
     try pp.tokens.append(allocator, eof);
 
-    var tree = try zcc.Parser.parse(&pp);
+    var tree = try zinc.Parser.parse(&pp);
     defer tree.deinit();
     tree.dump(false, std.io.null_writer) catch {};
 }
@@ -171,7 +171,7 @@ pub fn main() !void {
     });
 
     // prepare compiler
-    var initialComp = zcc.Compilation.init(gpa);
+    var initialComp = zinc.Compilation.init(gpa);
     defer initialComp.deinit();
 
     const casesIncludeDir = try std.fs.path.join(gpa, &.{ args[1], "include" });
@@ -230,7 +230,7 @@ pub fn main() !void {
         const builtinMacros = try comp.generateBuiltinMacros();
 
         comp.diagnostics.errors = 0;
-        var pp = zcc.Preprocessor.init(&comp);
+        var pp = zinc.Preprocessor.init(&comp);
         defer pp.deinit();
 
         if (onlyPreprocess) {
@@ -305,7 +305,7 @@ pub fn main() !void {
 
         const expectedTypes = pp.defines.get("EXPECTED_TYPES");
 
-        var tree = zcc.Parser.parse(&pp) catch |err| switch (err) {
+        var tree = zinc.Parser.parse(&pp) catch |err| switch (err) {
             error.FatalError => {
                 if (try checkExpectedErrors(&pp, &buffer)) |some| {
                     if (some) passCount += 1 else failCount += 1;
@@ -473,13 +473,13 @@ pub fn main() !void {
 }
 
 // returns true if passed
-fn checkExpectedErrors(pp: *zcc.Preprocessor, buf: *std.ArrayList(u8)) !?bool {
+fn checkExpectedErrors(pp: *zinc.Preprocessor, buf: *std.ArrayList(u8)) !?bool {
     const macro = pp.defines.get("EXPECTED_ERRORS") orelse return null;
 
     const expectedCount = pp.comp.diagnostics.list.items.len;
     var m = MsgWriter.init(pp.comp.gpa);
     defer m.deinit();
-    zcc.Diagnostics.renderMessages(pp.comp, &m);
+    zinc.Diagnostics.renderMessages(pp.comp, &m);
 
     if (macro.isFunc) {
         std.debug.print("invalid EXPECTED_ERRORS {}\n", .{macro});
@@ -556,7 +556,7 @@ const MsgWriter = struct {
         m.print("{s}:{d}:{d}: ", .{ path, line, col });
     }
 
-    pub fn start(m: *MsgWriter, kind: zcc.Diagnostics.Kind) void {
+    pub fn start(m: *MsgWriter, kind: zinc.Diagnostics.Kind) void {
         m.print("{s}: ", .{@tagName(kind)});
     }
 
@@ -587,7 +587,7 @@ const StmtTypeDumper = struct {
         };
     }
 
-    fn dumpNode(self: *StmtTypeDumper, tree: *const Tree, mapper: zcc.TypeMapper, node: NodeIndex, m: *MsgWriter) AllocatorError!void {
+    fn dumpNode(self: *StmtTypeDumper, tree: *const Tree, mapper: zinc.TypeMapper, node: NodeIndex, m: *MsgWriter) AllocatorError!void {
         if (node == .none)
             return;
         const tag = tree.nodes.items(.tag)[@intFromEnum(node)];
@@ -603,7 +603,7 @@ const StmtTypeDumper = struct {
         try self.types.append(owned);
     }
 
-    fn dump(self: *StmtTypeDumper, tree: *const Tree, mapper: zcc.TypeMapper, declIdx: NodeIndex, allocator: std.mem.Allocator) AllocatorError!void {
+    fn dump(self: *StmtTypeDumper, tree: *const Tree, mapper: zinc.TypeMapper, declIdx: NodeIndex, allocator: std.mem.Allocator) AllocatorError!void {
         var m = MsgWriter.init(allocator);
         defer m.deinit();
 

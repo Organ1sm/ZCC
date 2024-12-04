@@ -189,7 +189,7 @@ pub fn parseArgs(
                 };
                 return true;
             } else if (std.mem.eql(u8, arg, "-v") or std.mem.eql(u8, arg, "--version")) {
-                stdOut.writeAll(@import("zcc.zig").VersionStr ++ "\n") catch |er| {
+                stdOut.writeAll(@import("zinc.zig").VersionStr ++ "\n") catch |er| {
                     return d.fatal("unable to print version: {s}", .{Util.errorDescription(er)});
                 };
                 return true;

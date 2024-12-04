@@ -25,3 +25,17 @@ pub const CallingConvention = enum {
     thiscall,
     vectorcall,
 };
+
+test "simple test" {
+    _ = @import("Basic/CharInfo.zig");
+    _ = @import("Basic/Compilation.zig");
+    _ = @import("Basic/Target.zig");
+    _ = @import("Driver/Distro.zig");
+    _ = @import("Driver/GCCVersion.zig");
+    _ = @import("Driver/Filesystem.zig");
+    _ = @import("Lexer/Lexer.zig");
+    _ = @import("Lexer/Preprocessor.zig");
+    _ = @import("Parser/InitList.zig");
+    _ = @import("AST/AST.zig");
+    _ = @import("AST/Value.zig");
+}

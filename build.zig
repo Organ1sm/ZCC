@@ -23,8 +23,8 @@ pub fn build(b: *std.Build) !void {
     systemDefaults.addOption([]const u8, "unwindlib", DefaultUnwindlib);
 
     const depsModule = b.createModule(.{ .root_source_file = b.path("deps/lib.zig") });
-    const zccModule = b.addModule("zcc", .{
-        .root_source_file = b.path("src/zcc.zig"),
+    const zincModule = b.addModule("zinc", .{
+        .root_source_file = b.path("src/zinc.zig"),
         .imports = &.{
             .{
                 .name = "system-defaults",
@@ -45,7 +45,7 @@ pub fn build(b: *std.Build) !void {
         .single_threaded = true,
     });
     exe.root_module.addOptions("system-defaults", systemDefaults);
-    exe.root_module.addImport("zcc", zccModule);
+    exe.root_module.addImport("zinc", zincModule);
     exe.root_module.addImport("deps", depsModule);
 
     if (LinkLibc)
@@ -60,12 +60,13 @@ pub fn build(b: *std.Build) !void {
     }
 
     const unit_tests_step = step: {
-        var unit_tests = b.addTest(.{ .root_source_file = b.path("src/main.zig") });
-        unit_tests.root_module.addImport("deps", depsModule);
-
+        var unit_tests = b.addTest(.{ .root_source_file = b.path("src/zinc.zig") });
+        for (zincModule.import_table.keys(), zincModule.import_table.values()) |name, module| {
+            unit_tests.root_module.addImport(name, module);
+        }
         const run_test = b.addRunArtifact(unit_tests);
-        const unit_test_step = b.step("test-unit", "run unit tests");
 
+        const unit_test_step = b.step("test-unit", "run unit tests");
         unit_test_step.dependOn(&run_test.step);
         break :step unit_test_step;
     };
@@ -77,7 +78,7 @@ pub fn build(b: *std.Build) !void {
             .target = target,
             .optimize = mode,
         });
-        integration_tests.root_module.addImport("zcc", zccModule);
+        integration_tests.root_module.addImport("zinc", zincModule);
         const test_runner_options = b.addOptions();
         integration_tests.root_module.addOptions("build_options", test_runner_options);
         test_runner_options.addOption(bool, "TestAllAllocationFailures", TestAllAllocationFailures);
@@ -100,7 +101,7 @@ pub fn build(b: *std.Build) !void {
             .optimize = mode,
             .target = target,
         });
-        record_tests.root_module.addImport("zcc", zccModule);
+        record_tests.root_module.addImport("zinc", zincModule);
 
         const record_tests_runner = b.addRunArtifact(record_tests);
         record_tests_runner.addArg(b.pathFromRoot("test/records"));
