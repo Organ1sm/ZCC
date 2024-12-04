@@ -91,12 +91,12 @@ pub const Specifier = union(enum) {
     ComplexSInt128,
     ComplexUInt128,
 
-    BitInt: i16,
-    SBitInt: i16,
-    UBitInt: i16,
-    ComplexBitInt: i16,
-    ComplexSBitInt: i16,
-    ComplexUBitInt: i16,
+    BitInt: u64,
+    SBitInt: u64,
+    UBitInt: u64,
+    ComplexBitInt: u64,
+    ComplexSBitInt: u64,
+    ComplexUBitInt: u64,
 
     FP16,
     Float,
@@ -378,18 +378,18 @@ pub fn finish(b: @This(), p: *Parser) Parser.Error!Type {
             if (unsigned) {
                 if (bits < 1) {
                     try p.errStr(.unsigned_bit_int_too_small, b.bitIntToken.?, b.specifier.toString(p.comp.langOpts).?);
-                    return error.ParsingFailed;
+                    return Type.Invalid;
                 }
             } else {
                 if (bits < 2) {
                     try p.errStr(.signed_bit_int_too_small, b.bitIntToken.?, b.specifier.toString(p.comp.langOpts).?);
-                    return error.ParsingFailed;
+                    return Type.Invalid;
                 }
             }
 
             if (bits > Compilation.BitIntMaxBits) {
                 try p.errStr(.bit_int_too_big, b.bitIntToken.?, b.specifier.toString(p.comp.langOpts).?);
-                return error.ParsingFailed;
+                return Type.Invalid;
             }
 
             ty.specifier = if (b.complexToken != null) .ComplexBitInt else .BitInt;

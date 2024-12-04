@@ -25,7 +25,7 @@ data: union {
     attributed: *Attributed,
     none: void,
     int: struct {
-        bits: u8,
+        bits: u16,
         signedness: std.builtin.Signedness,
     },
 } = .{ .none = {} },
@@ -59,6 +59,7 @@ pub const Double = create(.Double);
 pub const LongDouble = create(.LongDouble);
 pub const ComplexFloat = create(.ComplexFloat);
 pub const ComplexDouble = create(.ComplexDouble);
+pub const ComplexLongDouble = create(.ComplexLongDouble);
 
 pub inline fn create(specifier: Specifier) Type {
     return .{ .specifier = specifier };
@@ -749,8 +750,12 @@ pub fn isVoidStar(ty: Type) bool {
 }
 
 pub fn isUnsignedInt(ty: Type, comp: *const Compilation) bool {
+    return ty.signedness(comp) == .unsigned;
+}
+
+pub fn signedness(ty: Type, comp: *const Compilation) std.builtin.Signedness {
     return switch (ty.specifier) {
-        .Char, .ComplexChar => return comp.getCharSignedness() == .unsigned,
+        .Char, .ComplexChar => return comp.getCharSignedness(),
 
         .UChar,
         .UShort,
@@ -764,15 +769,15 @@ pub fn isUnsignedInt(ty: Type, comp: *const Compilation) bool {
         .ComplexULong,
         .ComplexULongLong,
         .ComplexUInt128,
-        => return true,
+        => .unsigned,
 
-        .BitInt, .ComplexBitInt => return ty.data.int.signedness == .unsigned,
+        .BitInt, .ComplexBitInt => return ty.data.int.signedness,
 
-        .TypeofType => ty.data.subType.isUnsignedInt(comp),
-        .TypeofExpr => ty.data.expr.ty.isUnsignedInt(comp),
-        .Attributed => ty.data.attributed.base.isUnsignedInt(comp),
+        .TypeofType => ty.data.subType.signedness(comp),
+        .TypeofExpr => ty.data.expr.ty.signedness(comp),
+        .Attributed => ty.data.attributed.base.signedness(comp),
 
-        else => false,
+        else => .signed,
     };
 }
 
@@ -1022,20 +1027,13 @@ pub fn hasIncompleteSize(ty: Type) bool {
         return false;
 
     return switch (ty.specifier) {
-        .Void,
-        .IncompleteArray,
-        .Invalid,
-        => true,
-
+        .Void, .IncompleteArray => true,
         .Enum => ty.data.@"enum".isIncomplete() and !ty.data.@"enum".fixed,
         .Struct, .Union => ty.data.record.isIncomplete(),
-
         .Array, .StaticArray => ty.data.array.elem.hasIncompleteSize(),
-
         .TypeofType => ty.data.subType.hasIncompleteSize(),
         .TypeofExpr => ty.data.expr.ty.hasIncompleteSize(),
         .Attributed => ty.data.attributed.base.hasIncompleteSize(),
-
         else => false,
     };
 }
@@ -1725,7 +1723,7 @@ pub fn hasAttribute(ty: Type, tag: Attribute.Tag) bool {
     return false;
 }
 
-fn compareIntegerRanks(lhs: Type, rhs: Type, comp: *const Compilation) std.math.Order {
+pub fn compareIntegerRanks(lhs: Type, rhs: Type, comp: *const Compilation) std.math.Order {
     assert(lhs.isInt() and rhs.isInt());
     if (lhs.eql(rhs, comp, false)) return .eq;
 

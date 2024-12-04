@@ -433,7 +433,6 @@ pub fn renderMessage(comp: *Compilation, m: anytype, msg: Message) void {
                         else => unreachable,
                     }}),
                     .unsigned => m.print(info.msg, .{msg.extra.unsigned}),
-                    .signed => m.print(info.msg, .{msg.extra.signed}),
                     .attr_enum => m.print(info.msg, .{
                         @tagName(msg.extra.attrEnum.tag),
                         Attribute.Formatting.choices(msg.extra.attrEnum.tag),

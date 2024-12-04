@@ -5,6 +5,7 @@ const CallingConvention = @import("../zcc.zig").CallingConvention;
 const Compilation = @import("../Basic/Compilation.zig");
 const Diagnostics = @import("../Basic/Diagnostics.zig");
 const Parser = @import("../Parser/Parser.zig");
+const Result = @import("../Parser/Result.zig");
 const Type = @import("../AST/Type.zig");
 const Tree = @import("../AST/AST.zig");
 const Value = @import("../AST/Value.zig");
@@ -55,30 +56,6 @@ pub const ArgumentType = enum {
             .nullptrTy => "nullptr",
             .float => "a floating point number",
             .expression => "an expression",
-        };
-    }
-
-    fn fromType(comptime T: type) ArgumentType {
-        return switch (T) {
-            Value.ByteRange => .string,
-            Identifier => .identifier,
-            u32 => .int,
-            Alignment => .alignment,
-            CallingConvention => .identifier,
-            else => switch (@typeInfo(T)) {
-                .@"enum" => if (T.opts.enum_kind == .string) .string else .identifier,
-                else => unreachable,
-            },
-        };
-    }
-
-    fn fromVal(value: Value) ArgumentType {
-        return switch (value.tag) {
-            .int => .int,
-            .bytes => .string,
-            .unavailable => .expression,
-            .float => .float,
-            .nullptrTy => .nullptrTy,
         };
     }
 };
@@ -236,7 +213,7 @@ pub fn wantsAlignment(attr: Tag, idx: usize) bool {
 /// argument to diagnose, the value of the argument, the type of the argument, and the compilation
 /// object. It returns a diagnostics message if the alignment argument is invalid, and null if it is
 /// valid.
-pub fn diagnoseAlignment(attr: Tag, arguments: *Arguments, argIdx: u32, val: Value, ty: Type, comp: *Compilation) ?Diagnostics.Message {
+pub fn diagnoseAlignment(attr: Tag, arguments: *Arguments, argIdx: u32, res: Result, p: *Parser) !?Diagnostics.Message {
     switch (attr) {
         inline else => |tag| {
             const argFields = getArguments(@field(attributes, @tagName(tag)));
@@ -246,17 +223,14 @@ pub fn diagnoseAlignment(attr: Tag, arguments: *Arguments, argIdx: u32, val: Val
                 inline 0...argFields.len - 1 => |argI| {
                     if (UnwrapOptional(argFields[argI].type) != Alignment) unreachable;
 
-                    if (val.tag != .int)
+                    if (!res.value.is(.int, p.comp))
                         return Diagnostics.Message{ .tag = .alignas_unavailable };
 
-                    if (val.compare(.lt, Value.int(0), ty, comp))
-                        return Diagnostics.Message{
-                            .tag = .negative_alignment,
-                            .extra = .{ .signed = val.signExtend(ty, comp) },
-                        };
+                    if (res.value.compare(.lt, Value.zero, p.comp))
+                        return Diagnostics.Message{ .tag = .negative_alignment, .extra = .{ .str = try res.str(p) } };
 
-                    const requested = std.math.cast(u29, val.data.int) orelse {
-                        return Diagnostics.Message{ .tag = .maximum_alignment, .extra = .{ .unsigned = val.data.int } };
+                    const requested = res.value.toInt(u29, p.comp) orelse {
+                        return Diagnostics.Message{ .tag = .maximum_alignment, .extra = .{ .str = try res.str(p) } };
                     };
                     if (!std.mem.isValidAlign(requested))
                         return Diagnostics.Message{ .tag = .non_pow2_align };
@@ -274,61 +248,86 @@ pub fn diagnoseAlignment(attr: Tag, arguments: *Arguments, argIdx: u32, val: Val
 fn diagnoseField(
     comptime decl: ZigType.Declaration,
     comptime field: ZigType.StructField,
-    comptime wanted: type,
+    comptime Wanted: type,
     arguments: *Arguments,
-    val: Value,
+    res: Result,
     node: Tree.Node,
-    strings: []const u8,
-) ?Diagnostics.Message {
-    switch (val.tag) {
+    p: *Parser,
+) !?Diagnostics.Message {
+    if (res.value.isNone()) {
+        if (Wanted == Identifier and node.tag == .DeclRefExpr) {
+            @field(@field(arguments, decl.name), field.name) = Identifier{ .tok = node.data.declRef };
+            return null;
+        }
+        return invalidArgMsg(Wanted, .expression);
+    }
+    const key = p.comp.interner.get(res.value.ref());
+    switch (key) {
         .int => {
-            if (@typeInfo(wanted) == .int) {
-                @field(@field(arguments, decl.name), field.name) = val.getInt(wanted);
+            if (@typeInfo(Wanted) == .int) {
+                @field(@field(arguments, decl.name), field.name) = res.value.toInt(Wanted, p.comp) orelse return .{
+                    .tag = .attribute_int_out_of_range,
+                    .extra = .{ .str = try res.str(p) },
+                };
                 return null;
             }
         },
-        .bytes => {
-            const bytes = val.data.bytes.trim(1); // remove null terminator
-            if (wanted == Value.ByteRange) {
+        .bytes => |bytes| {
+            if (Wanted == Value) {
                 std.debug.assert(node.tag == .StringLiteralExpr);
-                const nodeElemTy = node.type.getElemType();
 
+                const nodeElemTy = node.type.getElemType();
                 if (!nodeElemTy.is(.Char) and !nodeElemTy.is(.UChar)) {
-                    return Diagnostics.Message{
+                    return .{
                         .tag = .attribute_requires_string,
                         .extra = .{ .str = decl.name },
                     };
                 }
-                @field(@field(arguments, decl.name), field.name) = bytes;
+                @field(@field(arguments, decl.name), field.name) = try p.removeNull(res.value);
                 return null;
-            } else if (@typeInfo(wanted) == .@"enum" and @hasDecl(wanted, "opts") and wanted.opts.enum_kind == .string) {
-                const str = bytes.slice(strings, .@"1");
-                if (std.meta.stringToEnum(wanted, str)) |enum_val| {
+            } else if (@typeInfo(Wanted) == .@"enum" and @hasDecl(Wanted, "opts") and Wanted.opts.enum_kind == .string) {
+                const str = bytes[0 .. bytes.len - 1];
+                if (std.meta.stringToEnum(Wanted, str)) |enum_val| {
                     @field(@field(arguments, decl.name), field.name) = enum_val;
                     return null;
                 } else {
                     @setEvalBranchQuota(3000);
-                    return Diagnostics.Message{
+                    return .{
                         .tag = .unknown_attr_enum,
                         .extra = .{ .attrEnum = .{ .tag = std.meta.stringToEnum(Tag, decl.name).? } },
                     };
                 }
             }
         },
-        else => {
-            if (wanted == Identifier and node.tag == .DeclRefExpr) {
-                @field(@field(arguments, decl.name), field.name) = Identifier{ .tok = node.data.declRef };
-                return null;
-            }
-        },
+        else => {},
     }
 
-    return Diagnostics.Message{
+    return invalidArgMsg(Wanted, switch (key) {
+        .int => .int,
+        .bytes => .string,
+        .float => .float,
+        .null => .nullptrTy,
+        else => unreachable,
+    });
+}
+
+fn invalidArgMsg(comptime Expected: type, actual: ArgumentType) Diagnostics.Message {
+    return .{
         .tag = .attribute_arg_invalid,
         .extra = .{
             .attrArgType = .{
-                .expected = ArgumentType.fromType(wanted),
-                .actual = ArgumentType.fromVal(val),
+                .expected = switch (Expected) {
+                    Value => .string,
+                    Identifier => .identifier,
+                    u32 => .int,
+                    Alignment => .alignment,
+                    CallingConvention => .identifier,
+                    else => switch (@typeInfo(Expected)) {
+                        .@"enum" => if (Expected.opts.enum_kind == .string) .string else .identifier,
+                        else => unreachable,
+                    },
+                },
+                .actual = actual,
             },
         },
     };
@@ -338,10 +337,10 @@ pub fn diagnose(
     attr: Tag,
     arguments: *Arguments,
     argIdx: u32,
-    val: Value,
+    res: Result,
     node: Tree.Node,
-    strings: []const u8,
-) ?Diagnostics.Message {
+    p: *Parser,
+) !?Diagnostics.Message {
     switch (attr) {
         inline else => |tag| {
             const decl = @typeInfo(attributes).@"struct".decls[@intFromEnum(tag)];
@@ -360,7 +359,7 @@ pub fn diagnose(
             const argFields = getArguments(@field(attributes, decl.name));
             switch (argIdx) {
                 inline 0...argFields.len - 1 => |argI| {
-                    return diagnoseField(decl, argFields[argI], UnwrapOptional(argFields[argI].type), arguments, val, node, strings);
+                    return diagnoseField(decl, argFields[argI], UnwrapOptional(argFields[argI].type), arguments, res, node, p);
                 },
                 else => unreachable,
             }
@@ -401,7 +400,7 @@ const attributes = struct {
     pub const alias = struct {
         const gnu = "alias";
         const Args = struct {
-            alias: Value.ByteRange,
+            alias: Value,
         };
     };
     pub const aligned = struct {
@@ -429,7 +428,7 @@ const attributes = struct {
     pub const allocate = struct {
         const declspec = "allocate";
         const Args = struct {
-            segname: Value.ByteRange,
+            segname: Value,
         };
     };
     pub const allocator = struct {
@@ -460,7 +459,7 @@ const attributes = struct {
     pub const code_seg = struct {
         const declspec = "code_seg";
         const Args = struct {
-            segname: Value.ByteRange,
+            segname: Value,
         };
     };
     pub const cold = struct {
@@ -489,7 +488,7 @@ const attributes = struct {
         const declspec = "deprecated";
         const c23 = "deprecated";
         const Args = struct {
-            msg: ?Value.ByteRange = null,
+            msg: ?Value = null,
             __name_token: TokenIndex,
         };
     };
@@ -511,7 +510,7 @@ const attributes = struct {
     pub const @"error" = struct {
         const gnu = "error";
         const Args = struct {
-            msg: Value.ByteRange,
+            msg: Value,
             __name_token: TokenIndex,
         };
     };
@@ -557,7 +556,7 @@ const attributes = struct {
     pub const ifunc = struct {
         const gnu = "ifunc";
         const Args = struct {
-            resolver: Value.ByteRange,
+            resolver: Value,
         };
     };
     pub const interrupt = struct {
@@ -633,8 +632,8 @@ const attributes = struct {
         const gnu = "no_sanitize";
         /// Todo: represent args as union?
         const Args = struct {
-            alignment: Value.ByteRange,
-            object_size: ?Value.ByteRange = null,
+            alignment: Value,
+            object_size: ?Value = null,
         };
     };
     pub const no_sanitize_address = struct {
@@ -753,7 +752,7 @@ const attributes = struct {
     pub const section = struct {
         const gnu = "section";
         const Args = struct {
-            name: Value.ByteRange,
+            name: Value,
         };
     };
     pub const sentinel = struct {
@@ -793,19 +792,19 @@ const attributes = struct {
     pub const symver = struct {
         const gnu = "symver";
         const Args = struct {
-            version: Value.ByteRange, // TODO: validate format "name2@nodename"
+            version: Value, // TODO: validate format "name2@nodename"
         };
     };
     pub const target = struct {
         const gnu = "target";
         const Args = struct {
-            options: Value.ByteRange, // TODO: multiple arguments
+            options: Value, // TODO: multiple arguments
         };
     };
     pub const target_clones = struct {
         const gnu = "target_clones";
         const Args = struct {
-            options: Value.ByteRange, // TODO: multiple arguments
+            options: Value, // TODO: multiple arguments
         };
     };
     pub const thread = struct {
@@ -832,7 +831,7 @@ const attributes = struct {
     pub const unavailable = struct {
         const gnu = "unavailable";
         const Args = struct {
-            msg: ?Value.ByteRange = null,
+            msg: ?Value = null,
             __name_token: TokenIndex,
         };
     };
@@ -852,7 +851,7 @@ const attributes = struct {
     pub const uuid = struct {
         const declspec = "uuid";
         const Args = struct {
-            uuid: Value.ByteRange,
+            uuid: Value,
         };
     };
     pub const vector_size = struct {
@@ -888,7 +887,7 @@ const attributes = struct {
     pub const warning = struct {
         const gnu = "warning";
         const Args = struct {
-            msg: Value.ByteRange,
+            msg: Value,
             __name_token: TokenIndex,
         };
     };
@@ -898,7 +897,7 @@ const attributes = struct {
     pub const weakref = struct {
         const gnu = "weakref";
         const Args = struct {
-            target: ?Value.ByteRange = null,
+            target: ?Value = null,
         };
     };
     pub const zero_call_used_regs = struct {
@@ -923,7 +922,7 @@ const attributes = struct {
     };
     pub const asm_label = struct {
         const Args = struct {
-            name: Value.ByteRange,
+            name: Value,
         };
     };
     pub const calling_convention = struct {

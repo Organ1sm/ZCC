@@ -58,6 +58,8 @@ const SysVContext = struct {
 
     fn layoutFields(self: *SysVContext, rec: *const Record) void {
         for (rec.fields, 0..) |*field, fieldIdx| {
+            if (field.ty.is(.Invalid)) continue;
+
             const typeLayout = computeLayout(field.ty, self.comp);
 
             var fieldAttrs: ?[]const Attribute = null;

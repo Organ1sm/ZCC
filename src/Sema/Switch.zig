@@ -9,6 +9,7 @@ const NodeIndex = AST.NodeIndex;
 
 pub const Switch = @This();
 
+comp: *Compilation,
 default: ?TokenIndex = null,
 ranges: std.ArrayList(Range),
 type: Type,
@@ -19,15 +20,9 @@ pub const Range = struct {
     token: TokenIndex,
 };
 
-pub fn add(
-    self: *Switch,
-    comp: *Compilation,
-    first: Value,
-    last: Value,
-    token: TokenIndex,
-) !?Range {
+pub fn add(self: *Switch, first: Value, last: Value, token: TokenIndex) !?Range {
     for (self.ranges.items) |range| {
-        if (last.compare(.gte, range.first, self.type, comp) and first.compare(.lte, range.last, self.type, comp)) {
+        if (last.compare(.gte, range.first, self.comp) and first.compare(.lte, range.last, self.comp)) {
             return range; // They overlap.
         }
     }

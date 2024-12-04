@@ -1,4 +1,5 @@
 const std = @import("std");
+const process = std.process;
 const builtin = @import("builtin");
 const Compilation = @import("Basic/Compilation.zig");
 const Driver = @import("Driver.zig");
@@ -17,7 +18,7 @@ pub fn main() u8 {
     defer arenaInstance.deinit();
 
     const arena = arenaInstance.allocator();
-    const args = std.process.argsAlloc(arena) catch {
+    const args = process.argsAlloc(arena) catch {
         std.debug.print("Out of Memory\n", .{});
         return 1;
     };
@@ -26,32 +27,19 @@ pub fn main() u8 {
 
     const zccName = std.fs.selfExePathAlloc(gpa) catch {
         std.debug.print("unable to find Zcc executable path\n", .{});
-        if (fastExit) std.process.exit(1);
+        if (fastExit) process.exit(1);
         return 1;
     };
     defer gpa.free(zccName);
 
-    var comp = Compilation.init(gpa);
+    var comp = Compilation.initDefault(gpa) catch |er| switch (er) {
+        error.OutOfMemory => {
+            std.debug.print("Out of Memory\n", .{});
+            if (fastExit) process.exit(1);
+            return 1;
+        },
+    };
     defer comp.deinit();
-
-    comp.environment.loadAll(gpa) catch |er| switch (er) {
-        error.OutOfMemory => {
-            std.debug.print("Out of Memory\n", .{});
-            if (fastExit) std.process.exit(1);
-            return 1;
-        },
-    };
-    defer comp.environment.deinit(gpa);
-
-    comp.addDefaultPragmaHandlers() catch |er| switch (er) {
-        error.OutOfMemory => {
-            std.debug.print("Out of Memory\n", .{});
-            if (fastExit) std.process.exit(1);
-            return 1;
-        },
-    };
-
-    comp.langOpts.setEmulatedCompiler(Target.systemCompiler(comp.target));
 
     var driver = Driver{ .comp = &comp, .zccName = zccName };
     defer driver.deinit();
@@ -59,31 +47,31 @@ pub fn main() u8 {
     var toolChain: Toolchain = .{ .driver = &driver, .arena = arena };
     defer toolChain.deinit();
 
-    driver.main(&toolChain, args) catch |er| switch (er) {
+    driver.main(&toolChain, args, fastExit) catch |er| switch (er) {
         error.OutOfMemory => {
             std.debug.print("Out of Memory\n", .{});
-            if (fastExit) std.process.exit(1);
+            if (fastExit) process.exit(1);
             return 1;
         },
         error.StreamTooLong => {
             std.debug.print("maximum file size exceeded\n", .{});
-            if (fastExit) std.process.exit(1);
+            if (fastExit) process.exit(1);
             return 1;
         },
         error.FatalError => {
             comp.renderErrors();
-            if (fastExit) std.process.exit(1);
+            if (fastExit) process.exit(1);
             return 1;
         },
         error.TooManyMultilibs => {
             std.debug.print("found more than one multilib with the same priority\n", .{});
-            if (fastExit) std.process.exit(1);
+            if (fastExit) process.exit(1);
             return 1;
         },
         else => |err| return err,
     };
 
-    if (fastExit) std.process.exit(@intFromBool(comp.diagnostics.errors != 0));
+    if (fastExit) process.exit(@intFromBool(comp.diagnostics.errors != 0));
     return @intFromBool(comp.diagnostics.errors != 0);
 }
 

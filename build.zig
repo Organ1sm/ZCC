@@ -42,6 +42,7 @@ pub fn build(b: *std.Build) !void {
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = .Debug,
+        .single_threaded = true,
     });
     exe.root_module.addOptions("system-defaults", systemDefaults);
     exe.root_module.addImport("zcc", zccModule);
@@ -89,7 +90,6 @@ pub fn build(b: *std.Build) !void {
         integration_tests_step.dependOn(&integration_test_runner.step);
 
         b.installArtifact(integration_tests);
-
         break :step integration_tests_step;
     };
 
@@ -108,7 +108,6 @@ pub fn build(b: *std.Build) !void {
         const record_tests_step = b.step("test-record", "Run record layout tests");
         record_tests_step.dependOn(&record_tests_runner.step);
 
-        b.installArtifact(record_tests);
         break :step record_tests_step;
     };
 

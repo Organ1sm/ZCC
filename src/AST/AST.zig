@@ -2,6 +2,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 const Type = @import("Type.zig");
 const Compilation = @import("../Basic/Compilation.zig");
+const CodeGen = @import("../CodeGen/CodeGen.zig");
 const Source = @import("../Basic/Source.zig");
 const Lexer = @import("../Lexer/Lexer.zig");
 const TokenType = @import("../Basic/TokenType.zig").TokenType;
@@ -9,6 +10,7 @@ const AstTag = @import("AstTag.zig").Tag;
 const Attribute = @import("../Lexer/Attribute.zig");
 const Value = @import("Value.zig");
 const StringInterner = @import("../Basic/StringInterner.zig");
+const Interner = @import("../CodeGen/Interner.zig");
 
 const AST = @This();
 
@@ -23,13 +25,13 @@ tokens: Token.List.Slice,
 nodes: Node.List.Slice,
 data: []const NodeIndex,
 rootDecls: []const NodeIndex,
-strings: []const u8,
 valueMap: ValueMap,
+
+pub const genIR =  CodeGen.generateIR;
 
 pub fn deinit(tree: *AST) void {
     tree.comp.gpa.free(tree.rootDecls);
     tree.comp.gpa.free(tree.data);
-    tree.comp.gpa.free(tree.strings);
     tree.nodes.deinit(tree.comp.gpa);
     tree.arena.deinit();
     tree.valueMap.deinit();
@@ -162,7 +164,7 @@ pub const Node = struct {
         int: u64,
         returnZero: bool,
 
-        pub fn forDecl(data: Data, tree: AST) struct {
+        pub fn forDecl(data: Data, tree: *const AST) struct {
             decls: []const NodeIndex,
             cond: NodeIndex,
             incr: NodeIndex,
@@ -177,7 +179,7 @@ pub const Node = struct {
             };
         }
 
-        pub fn forStmt(data: Data, tree: AST) struct {
+        pub fn forStmt(data: Data, tree: *const AST) struct {
             init: NodeIndex,
             cond: NodeIndex,
             incr: NodeIndex,
@@ -332,7 +334,7 @@ pub fn isLValueExtra(tree: *const AST, node: NodeIndex, isConst: *bool) bool {
 
         .BuiltinChooseExpr => {
             if (tree.valueMap.get(data.if3.cond)) |val| {
-                const offset = @intFromBool(val.isZero());
+                const offset = @intFromBool(val.isZero(tree.comp));
                 return tree.isLValueExtra(tree.data[data.if3.body + offset], isConst);
             }
             return false;
@@ -368,15 +370,15 @@ pub fn dump(tree: AST, color: bool, writer: anytype) @TypeOf(writer).Error!void 
     }
 }
 
-fn dumpFieldAttributes(attributes: []const Attribute, level: u32, strings: []const u8, writer: anytype) !void {
+fn dumpFieldAttributes(tree: *const AST, attributes: []const Attribute, level: u32, writer: anytype) !void {
     for (attributes) |attr| {
         try writer.writeByteNTimes(' ', level);
         try writer.print("field attr: {s}", .{@tagName(attr.tag)});
-        try dumpAttribute(attr, strings, writer);
+        try tree.dumpAttribute(attr, writer);
     }
 }
 
-fn dumpAttribute(attr: Attribute, strings: []const u8, writer: anytype) !void {
+fn dumpAttribute(tree: *const AST, attr: Attribute, writer: anytype) !void {
     switch (attr.tag) {
         inline else => |tag| {
             const args = @field(attr.args, @tagName(tag));
@@ -393,8 +395,8 @@ fn dumpAttribute(attr: Attribute, strings: []const u8, writer: anytype) !void {
                 try writer.writeAll(f.name);
                 try writer.writeAll(": ");
                 switch (f.type) {
-                    Value.ByteRange => try writer.print("\"{s}\"", .{@field(args, f.name).slice(strings, .@"1")}),
-                    ?Value.ByteRange => try writer.print("\"{?s}\"", .{if (@field(args, f.name)) |range| range.slice(strings, .@"1") else null}),
+                    Interner.Ref => try writer.print("\"{s}\"", .{tree.interner.get(@field(args, f.name)).bytes}),
+                    ?Interner.Ref => try writer.print("\"{?s}\"", .{if (@field(args, f.name)) |str| tree.interner.get(str).bytes else null}),
                     else => switch (@typeInfo(f.type)) {
                         .@"enum" => try writer.writeAll(@tagName(@field(args, f.name))),
                         else => try writer.print("{any}", .{@field(args, f.name)}),
@@ -408,7 +410,7 @@ fn dumpAttribute(attr: Attribute, strings: []const u8, writer: anytype) !void {
 }
 
 fn dumpNode(
-    tree: AST,
+    tree: *const AST,
     node: NodeIndex,
     level: u32,
     mapper: StringInterner.TypeMapper,
@@ -459,7 +461,7 @@ fn dumpNode(
     if (tree.valueMap.get(node)) |val| {
         if (color) util.setColor(LITERAL, w);
         try w.writeAll(" (value: ");
-        try val.dump(ty, tree.comp, tree.strings, w);
+        try val.print(ty, tree.comp, w);
         try w.writeByte(')');
     }
 
@@ -477,7 +479,7 @@ fn dumpNode(
         for (ty.data.attributed.attributes) |attr| {
             try w.writeByteNTimes(' ', level + half);
             try w.print("attr: {s}", .{@tagName(attr.tag)});
-            try dumpAttribute(attr, tree.strings, w);
+            try tree.dumpAttribute(attr, w);
         }
 
         if (color) util.setColor(.reset, w);
@@ -553,7 +555,7 @@ fn dumpNode(
                     if (fieldAttrs[i].len == 0) continue;
 
                     if (color) util.setColor(ATTRIBUTE, w);
-                    try dumpFieldAttributes(fieldAttrs[i], level + delta + half, tree.strings, w);
+                    try tree.dumpFieldAttributes(fieldAttrs[i], level + delta + half, w);
                     if (color) util.setColor(.reset, w);
                 }
             }
@@ -579,7 +581,7 @@ fn dumpNode(
                 try tree.dumpNode(data.binExpr.lhs, level + delta, mapper, color, w);
                 if (fieldAttrs[0].len > 0) {
                     if (color) util.setColor(ATTRIBUTE, w);
-                    try dumpFieldAttributes(fieldAttrs[0], level + delta + half, tree.strings, w);
+                    try tree.dumpFieldAttributes(fieldAttrs[0], level + delta + half, w);
                     if (color) util.setColor(.reset, w);
                 }
             }
@@ -588,7 +590,7 @@ fn dumpNode(
                 try tree.dumpNode(data.binExpr.rhs, level + delta, mapper, color, w);
                 if (fieldAttrs[1].len > 0) {
                     if (color) util.setColor(ATTRIBUTE, w);
-                    try dumpFieldAttributes(fieldAttrs[1], level + delta + half, tree.strings, w);
+                    try tree.dumpFieldAttributes(fieldAttrs[1], level + delta + half, w);
                     if (color) util.setColor(.reset, w);
                 }
             }
@@ -1008,7 +1010,6 @@ fn dumpNode(
         .CharLiteral,
         .IntLiteral,
         .FloatLiteral,
-        .DoubleLiteral,
         .StringLiteralExpr,
         => {},
 
