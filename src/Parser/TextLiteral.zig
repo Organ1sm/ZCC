@@ -247,7 +247,7 @@ pub const Parser = struct {
         self.i += expectedLen;
 
         if (overflowed) {
-            self.err(.escape_sequence_overflow, .{ .unsigned = start + self.prefixLen() });
+            self.err(.escape_sequence_overflow, .{ .offset = start + self.prefixLen() });
             return null;
         }
 
@@ -257,7 +257,7 @@ pub const Parser = struct {
         }
 
         if (val > std.math.maxInt(u21) or !std.unicode.utf8ValidCodepoint(@intCast(val))) {
-            self.err(.invalid_universal_character, .{ .unsigned = start + self.prefixLen() });
+            self.err(.invalid_universal_character, .{ .offset = start + self.prefixLen() });
             return null;
         }
 
@@ -343,7 +343,7 @@ pub const Parser = struct {
         }
 
         if (overflowed or val > self.kind.maxInt(self.comp)) {
-            self.err(.escape_sequence_overflow, .{ .unsigned = start + self.prefixLen() });
+            self.err(.escape_sequence_overflow, .{ .offset = start + self.prefixLen() });
             return 0;
         }
 

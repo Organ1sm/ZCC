@@ -59,6 +59,7 @@ pub const Message = struct {
         ascii: u7,
         pow2AsString: u8,
         unsigned: u64,
+        offset: u64,
         signed: i64,
         none: void,
     };
@@ -376,8 +377,7 @@ pub fn renderMessage(comp: *Compilation, m: anytype, msg: Message) void {
         switch (msg.tag) {
             .escape_sequence_overflow,
             .invalid_universal_character,
-            // use msg.extra.unsigned for index into string literal
-            => loc.byteOffset += @as(u32, @truncate(msg.extra.unsigned)),
+            => loc.byteOffset += @as(u32, @truncate(msg.extra.offset)),
             .non_standard_escape_char,
             .unknown_escape_sequence,
             => loc.byteOffset += msg.extra.invalidEscape.offset,
@@ -432,6 +432,7 @@ pub fn renderMessage(comp: *Compilation, m: anytype, msg: Message) void {
                         128 => "340282366920938463463374607431768211456",
                         else => unreachable,
                     }}),
+                    .offset => m.write(info.msg),
                     .unsigned => m.print(info.msg, .{msg.extra.unsigned}),
                     .attr_enum => m.print(info.msg, .{
                         @tagName(msg.extra.attrEnum.tag),
