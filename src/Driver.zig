@@ -2,7 +2,7 @@ const std = @import("std");
 const mem = std.mem;
 const Allocator = mem.Allocator;
 const process = std.process;
-const Codegen = @import("CodeGen/Codegen.zig");
+const CodeGen = @import("CodeGen/CodeGen.zig");
 const Compilation = @import("Basic/Compilation.zig");
 const LangOpts = @import("Basic/LangOpts.zig");
 const Lexer = @import("Lexer/Lexer.zig");
@@ -11,6 +11,7 @@ const Source = @import("Basic/Source.zig");
 const Toolchain = @import("Toolchain.zig");
 const Util = @import("Basic/Util.zig");
 const Target = @import("Basic/Target.zig");
+const Object = @import("Object/Object.zig");
 
 const Driver = @This();
 
@@ -636,10 +637,19 @@ fn processSource(
         );
     }
 
-    if (d.dumpIR)
-        try tree.genIR();
+    var ir = try tree.genIR();
+    defer ir.deinit(d.comp.gpa);
 
-    const obj = try Codegen.generateTree(d.comp, tree);
+    if (d.dumpIR) {
+        const stdout = std.io.getStdOut();
+        var bufferWriter = std.io.bufferedWriter(stdout.writer());
+        const color = d.comp.diagnostics.color and Util.fileSupportsColor(stdout);
+
+        ir.dump(d.comp.gpa, color, bufferWriter.writer()) catch {};
+        bufferWriter.flush() catch {};
+    }
+
+    const obj = try Object.create(d.comp);
     defer obj.deinit();
 
     // If it's used, name_buf will either hold a filename or `/tmp/<12 random bytes with base-64 encoding>.<extension>`

@@ -1,5 +1,4 @@
 const std = @import("std");
-pub const CodeGenLegacy = @import("CodeGen/Codegen.zig");
 pub const CodeGen = @import("CodeGen/CodeGen.zig");
 pub const Compilation = @import("Basic/Compilation.zig");
 pub const Diagnostics = @import("Basic/Diagnostics.zig");
