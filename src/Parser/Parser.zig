@@ -6931,7 +6931,7 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
 
 fn makePredefinedIdentifier(p: *Parser, stringsTop: usize) !Result {
     const end: u32 = @intCast(p.strings.items.len);
-    const elemType = .{ .specifier = .Char, .qual = .{ .@"const" = true } };
+    const elemType: Type = .{ .specifier = .Char, .qual = .{ .@"const" = true } };
 
     const arrType = try p.arena.create(Type.Array);
     arrType.* = .{ .elem = elemType, .len = end - stringsTop };

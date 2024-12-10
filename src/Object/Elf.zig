@@ -182,7 +182,7 @@ pub fn finish(elf: *Elf, file: std.fs.File) !void {
     var buffWriter = std.io.bufferedWriter(file.writer());
     const w = buffWriter.writer();
 
-    var numSections: std.elf.Elf64_Half = AdditionalSections;
+    var numSections: std.elf.Half = AdditionalSections;
     var relocationsLen: std.elf.Elf64_Off = 0;
     var sectionsLen: std.elf.Elf64_Off = 0;
     {

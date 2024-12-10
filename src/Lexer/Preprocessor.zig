@@ -24,6 +24,40 @@ const MaxIncludeDepth = 200;
 /// it is handled there and doesn't escape that function
 const MacroError = Error || error{StopPreprocessing};
 
+const IfContext = struct {
+    const Backing = u2;
+    const Nesting = enum(Backing) {
+        untilElse,
+        untilEndIf,
+        untilEndIfSeenElse,
+    };
+
+    const bufferSizeBits = @bitSizeOf(Backing) * 256;
+    kind: [bufferSizeBits / std.mem.byte_size_in_bits]u8,
+    level: u8,
+
+    fn get(self: *const IfContext) Nesting {
+        return @enumFromInt(std.mem.readPackedIntNative(Backing, &self.kind, @as(usize, self.level) * 2));
+    }
+
+    fn set(self: *IfContext, context: Nesting) void {
+        std.mem.writePackedIntNative(Backing, &self.kind, @as(usize, self.level) * 2, @intFromEnum(context));
+    }
+
+    fn increment(self: *IfContext) bool {
+        self.level, const overflowed = @addWithOverflow(self.level, 1);
+        return overflowed != 0;
+    }
+
+    fn decrement(self: *IfContext) void {
+        self.level -= 1;
+    }
+
+    /// Initialize `kind` to an invalid value since it is an error to read the kind before setting it.
+    /// Doing so will trigger safety-checked undefined behavior in `IfContext.get`
+    const default: IfContext = .{ .kind = @splat(0xFF), .level = 0 };
+};
+
 const Macro = struct {
     /// Parameters of the function type macro
     params: []const []const u8,
@@ -281,11 +315,7 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!Token {
     const estimatedTokenCount = source.buffer.len / 8;
     try pp.tokens.ensureTotalCapacity(pp.gpa, pp.tokens.len + estimatedTokenCount);
 
-    var ifLevel: u8 = 0;
-    var ifKind = std.PackedIntArray(u2, 256).init([1]u2{0} ** 256);
-    const untilElse = 0;
-    const untilEndIf = 1;
-    const untilEndIfSeenElse = 2;
+    var ifContext: IfContext = .default;
 
     var startOfLine = true;
     while (true) {
@@ -319,18 +349,16 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!Token {
                     },
 
                     .KeywordIf => {
-                        const sum, const overflowed = @addWithOverflow(ifLevel, 1);
-                        if (overflowed != 0)
+                        const overflowed = ifContext.increment();
+                        if (overflowed)
                             return pp.fatal(directive, "too many #if nestings", .{});
 
-                        ifLevel = sum;
-
                         if (try pp.expr(&lexer)) {
-                            ifKind.set(ifLevel, untilEndIf);
+                            ifContext.set(.untilEndIf);
                             if (pp.verbose)
                                 pp.verboseLog(directive, "entering then branch of #if", .{});
                         } else {
-                            ifKind.set(ifLevel, untilElse);
+                            ifContext.set(.untilElse);
                             try pp.skip(&lexer, .untilElse);
                             if (pp.verbose)
                                 pp.verboseLog(directive, "entering else branch of #if", .{});
@@ -338,21 +366,19 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!Token {
                     },
 
                     .KeywordIfdef => {
-                        const sum, const overflowed = @addWithOverflow(ifLevel, 1);
-                        if (overflowed != 0)
+                        const overflowed = ifContext.increment();
+                        if (overflowed)
                             return pp.fatal(directive, "too many #if nestings", .{});
-
-                        ifLevel = sum;
 
                         const macroName = try pp.expectMacroName(&lexer) orelse continue;
                         try pp.expectNewLine(&lexer);
 
                         if (pp.defines.get(macroName) != null) {
-                            ifKind.set(ifLevel, untilEndIf);
+                            ifContext.set(.untilEndIf);
                             if (pp.verbose)
                                 pp.verboseLog(directive, "entering then branch of #ifdef", .{});
                         } else {
-                            ifKind.set(ifLevel, untilElse);
+                            ifContext.set(.untilElse);
                             try pp.skip(&lexer, .untilElse);
                             if (pp.verbose)
                                 pp.verboseLog(directive, "entering else branch of #ifdef", .{});
@@ -360,19 +386,17 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!Token {
                     },
 
                     .KeywordIfndef => {
-                        const sum, const overflowed = @addWithOverflow(ifLevel, 1);
-                        if (overflowed != 0)
+                        const overflowed = ifContext.increment();
+                        if (overflowed)
                             return pp.fatal(directive, "too many #if nestings", .{});
-
-                        ifLevel = sum;
 
                         const macroName = try pp.expectMacroName(&lexer) orelse continue;
                         try pp.expectNewLine(&lexer);
 
                         if (pp.defines.get(macroName) == null) {
-                            ifKind.set(ifLevel, untilEndIf);
+                            ifContext.set(.untilEndIf);
                         } else {
-                            ifKind.set(ifLevel, untilElse);
+                            ifContext.set(.untilElse);
                             try pp.skip(&lexer, .untilElse);
                         }
                     },
@@ -384,17 +408,17 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!Token {
                     },
 
                     .KeywordElIf => {
-                        if (ifLevel == 0) {
+                        if (ifContext.level == 0) {
                             try pp.addError(directive, .elif_without_if);
-                            ifLevel += 1;
-                            ifKind.set(ifLevel, untilElse);
-                        } else if (ifLevel == 1) {
+                            _ = ifContext.increment();
+                            ifContext.set(.untilElse);
+                        } else if (ifContext.level == 1) {
                             guardName = null;
                         }
 
-                        switch (ifKind.get(ifLevel)) {
-                            untilElse => if (try pp.expr(&lexer)) {
-                                ifKind.set(ifLevel, untilEndIf);
+                        switch (ifContext.get()) {
+                            .untilElse => if (try pp.expr(&lexer)) {
+                                ifContext.set(.untilEndIf);
                                 if (pp.verbose)
                                     pp.verboseLog(directive, "entering then branch of #elif", .{});
                             } else {
@@ -403,47 +427,45 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!Token {
                                     pp.verboseLog(directive, "entering else branch of #elif", .{});
                             },
 
-                            untilEndIf => try pp.skip(&lexer, .untilEndIf),
-                            untilEndIfSeenElse => {
+                            .untilEndIf => try pp.skip(&lexer, .untilEndIf),
+                            .untilEndIfSeenElse => {
                                 try pp.addError(directive, .elif_after_else);
                                 skipToNewLine(&lexer);
                             },
-                            else => unreachable,
                         }
                     },
 
                     .KeywordElse => {
                         try pp.expectNewLine(&lexer);
 
-                        if (ifLevel == 0) {
+                        if (ifContext.level == 0) {
                             try pp.addError(directive, .else_without_if);
                             continue;
-                        } else if (ifLevel == 1) {
+                        } else if (ifContext.level == 1) {
                             guardName = null;
                         }
 
-                        switch (ifKind.get(ifLevel)) {
-                            untilElse => {
-                                ifKind.set(ifLevel, untilEndIfSeenElse);
+                        switch (ifContext.get()) {
+                            .untilElse => {
+                                ifContext.set(.untilEndIfSeenElse);
                                 if (pp.verbose)
                                     pp.verboseLog(directive, "#else branch here", .{});
                             },
-                            untilEndIf => try pp.skip(&lexer, .untilEndIfSeenElse),
-                            untilEndIfSeenElse => {
+                            .untilEndIf => try pp.skip(&lexer, .untilEndIfSeenElse),
+                            .untilEndIfSeenElse => {
                                 try pp.addError(directive, .else_after_else);
                                 skipToNewLine(&lexer);
                             },
-                            else => unreachable,
                         }
                     },
 
                     .KeywordEndIf => {
                         try pp.expectNewLine(&lexer);
-                        if (ifLevel == 0) {
+                        if (ifContext.level == 0) {
                             guardName = null;
                             try pp.addError(directive, .else_without_if);
                             continue;
-                        } else if (ifLevel == 1) {
+                        } else if (ifContext.level == 1) {
                             const savedLexer = lexer;
                             defer lexer = savedLexer;
 
@@ -451,7 +473,7 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!Token {
                             while (next.is(.NewLine)) : (next = lexer.nextNoWhiteSpace()) {}
                             if (next.isNot(.Eof)) guardName = null;
                         }
-                        ifLevel -= 1;
+                        ifContext.decrement();
                     },
 
                     .KeywordDefine => try pp.define(&lexer),
@@ -519,7 +541,7 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!Token {
                     },
                     .NewLine => {},
                     .Eof => {
-                        if (ifLevel != 0)
+                        if (ifContext.level != 0)
                             try pp.addError(directive, .unterminated_conditional_directive);
                         return tokenFromRaw(directive);
                     },
@@ -542,7 +564,7 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!Token {
             },
 
             .Eof => {
-                if (ifLevel != 0)
+                if (ifContext.level != 0)
                     try pp.addError(token, .unterminated_conditional_directive);
                 if (source.buffer.len > 0 and source.buffer[source.buffer.len - 1] != '\n')
                     try pp.addError(token, .newline_eof);

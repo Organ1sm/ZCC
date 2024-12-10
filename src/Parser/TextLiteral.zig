@@ -141,7 +141,7 @@ pub const Kind = enum {
     }
 };
 
-const CharDiagnostics = struct {
+const charDiagnostic = struct {
     tag: Diagnostics.Tag,
     extra: Diagnostics.Message.Extra,
 };
@@ -153,7 +153,7 @@ pub const Parser = struct {
     maxCodepoint: u21,
     /// We only want to issue a max of 1 error per char literal
     errored: bool = false,
-    errors: std.BoundedArray(CharDiagnostics, 4) = .{},
+    errors: std.BoundedArray(charDiagnostic, 4) = .{},
     comp: *const Compilation,
 
     pub fn init(literal: []const u8, kind: Kind, maxCodepoint: u21, comp: *const Compilation) Parser {
@@ -177,7 +177,7 @@ pub const Parser = struct {
     pub fn err(self: *Parser, tag: Diagnostics.Tag, extra: Diagnostics.Message.Extra) void {
         if (self.errored) return;
         self.errored = true;
-        const diagnostic = .{ .tag = tag, .extra = extra };
+        const diagnostic: charDiagnostic = .{ .tag = tag, .extra = extra };
         self.errors.append(diagnostic) catch {
             _ = self.errors.pop();
             self.errors.append(diagnostic) catch unreachable;
