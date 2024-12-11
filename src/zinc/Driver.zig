@@ -2,6 +2,10 @@ const std = @import("std");
 const mem = std.mem;
 const Allocator = mem.Allocator;
 const process = std.process;
+const backend = @import("backend");
+const IR = backend.Ir;
+const Object = backend.Object;
+const Util = backend.Util;
 const CodeGen = @import("CodeGen/CodeGen.zig");
 const Compilation = @import("Basic/Compilation.zig");
 const LangOpts = @import("Basic/LangOpts.zig");
@@ -9,9 +13,7 @@ const Lexer = @import("Lexer/Lexer.zig");
 const Preprocessor = @import("Lexer/Preprocessor.zig");
 const Source = @import("Basic/Source.zig");
 const Toolchain = @import("Toolchain.zig");
-const Util = @import("Basic/Util.zig");
 const Target = @import("Basic/Target.zig");
-const Object = @import("Object/Object.zig");
 
 const Driver = @This();
 
@@ -190,7 +192,7 @@ pub fn parseArgs(
                 };
                 return true;
             } else if (std.mem.eql(u8, arg, "-v") or std.mem.eql(u8, arg, "--version")) {
-                stdOut.writeAll(@import("zinc.zig").VersionStr ++ "\n") catch |er| {
+                stdOut.writeAll(@import("backend").VersionStr ++ "\n") catch |er| {
                     return d.fatal("unable to print version: {s}", .{Util.errorDescription(er)});
                 };
                 return true;
@@ -649,12 +651,22 @@ fn processSource(
         bufferWriter.flush() catch {};
     }
 
-    const obj = try Object.create(d.comp);
-    defer obj.deinit();
+    var renderer = try IR.Renderer.init(d.comp.gpa, d.comp.target, &ir);
+    defer renderer.deinit();
+
+    renderer.render() catch |e| switch (e) {
+        error.OutOfMemory => return error.OutOfMemory,
+        error.LowerFail => {
+            return d.fatal(
+                "unable to render Ir to machine code: {s}",
+                .{renderer.errors.values()[0]},
+            );
+        },
+    };
 
     // If it's used, name_buf will either hold a filename or `/tmp/<12 random bytes with base-64 encoding>.<extension>`
     // both of which should fit into MAX_NAME_BYTES for all systems
-    var name_buf: [std.fs.max_name_bytes]u8 = undefined;
+    var nameBuffer: [std.fs.max_name_bytes]u8 = undefined;
 
     const outFileName = if (d.onlyCompile) blk: {
         const fmtTemplate = "{s}{s}";
@@ -662,7 +674,7 @@ fn processSource(
             std.fs.path.stem(source.path),
             d.comp.target.ofmt.fileExt(d.comp.target.cpu.arch),
         };
-        break :blk d.outputName orelse std.fmt.bufPrint(&name_buf, fmtTemplate, fmtArgs) catch return d.fatal("Filename too long for filesystem: " ++ fmtTemplate, fmtArgs);
+        break :blk d.outputName orelse std.fmt.bufPrint(&nameBuffer, fmtTemplate, fmtArgs) catch return d.fatal("Filename too long for filesystem: " ++ fmtTemplate, fmtArgs);
     } else blk: {
         const randomBytesCount = 12;
         const subPathLen = comptime std.fs.base64_encoder.calcSize(randomBytesCount);
@@ -677,14 +689,14 @@ fn processSource(
             randomName,
             d.comp.target.ofmt.fileExt(d.comp.target.cpu.arch),
         };
-        break :blk std.fmt.bufPrint(&name_buf, fmtTemplate, fmtArgs) catch return d.fatal("Filename too long for filesystem: " ++ fmtTemplate, fmtArgs);
+        break :blk std.fmt.bufPrint(&nameBuffer, fmtTemplate, fmtArgs) catch return d.fatal("Filename too long for filesystem: " ++ fmtTemplate, fmtArgs);
     };
 
     const outFile = std.fs.cwd().createFile(outFileName, .{}) catch |er|
         return d.fatal("unable to create output file '{s}': {s}", .{ outFileName, Util.errorDescription(er) });
     defer outFile.close();
 
-    obj.finish(outFile) catch |er|
+    renderer.obj.finish(outFile) catch |er|
         return d.fatal("could not output to object file '{s}': {s}", .{ outFileName, Util.errorDescription(er) });
 
     if (d.onlyCompile) {

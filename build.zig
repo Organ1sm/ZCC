@@ -22,7 +22,16 @@ pub fn build(b: *std.Build) !void {
     systemDefaults.addOption([]const u8, "rtlib", DefaultRtlib);
     systemDefaults.addOption([]const u8, "unwindlib", DefaultUnwindlib);
 
-    const depsModule = b.createModule(.{ .root_source_file = b.path("deps/lib.zig") });
+    const zigModule = b.createModule(.{ .root_source_file = b.path("deps/lib.zig") });
+    const zincBackend = b.addModule("zinc-backend", .{
+        .root_source_file = b.path("src/backend.zig"),
+        .imports = &.{
+            .{
+                .name = "zig",
+                .module = zigModule,
+            },
+        },
+    });
     const zincModule = b.addModule("zinc", .{
         .root_source_file = b.path("src/zinc.zig"),
         .imports = &.{
@@ -31,8 +40,8 @@ pub fn build(b: *std.Build) !void {
                 .module = systemDefaults.createModule(),
             },
             .{
-                .name = "deps",
-                .module = depsModule,
+                .name = "backend",
+                .module = zincBackend,
             },
         },
     });
@@ -41,12 +50,11 @@ pub fn build(b: *std.Build) !void {
         .name = "Zcc",
         .root_source_file = b.path("src/main.zig"),
         .target = target,
-        .optimize = .Debug,
+        .optimize = mode,
         .single_threaded = true,
     });
     exe.root_module.addOptions("system-defaults", systemDefaults);
     exe.root_module.addImport("zinc", zincModule);
-    exe.root_module.addImport("deps", depsModule);
 
     if (LinkLibc)
         exe.linkLibC();

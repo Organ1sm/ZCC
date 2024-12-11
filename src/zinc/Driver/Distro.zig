@@ -2,7 +2,7 @@
 
 const std = @import("std");
 const mem = std.mem;
-const util = @import("../Basic/Util.zig");
+const util = @import("backend").Util;
 const Filesystem = @import("Filesystem.zig").Filesystem;
 
 const MAX_BYTES = 1024; // TODO: Can we assume 1024 bytes enough for the info we need?

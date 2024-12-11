@@ -1,15 +1,14 @@
 const std = @import("std");
-const Compilation = @import("../Basic/Compilation.zig");
-const Elf = @import("Elf.zig");
+const Elf = @import("Object/Elf.zig");
 
 const Object = @This();
 
 format: std.Target.ObjectFormat,
-comp: *Compilation,
+target: std.Target,
 
-pub fn create(comp: *Compilation) !*Object {
-    switch (comp.target.ofmt) {
-        .elf => return Elf.create(comp),
+pub fn create(gpa: std.mem.Allocator, target: std.Target) !*Object {
+    switch (target.ofmt) {
+        .elf => return Elf.create(gpa, target),
         else => unreachable,
     }
 }

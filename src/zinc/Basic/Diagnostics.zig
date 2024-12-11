@@ -1,4 +1,5 @@
 const std = @import("std");
+const util = @import("backend").Util;
 const builtin = @import("builtin");
 const Source = @import("Source.zig");
 const TokenType = @import("TokenType.zig").TokenType;
@@ -6,7 +7,6 @@ const Tree = @import("../AST/AST.zig");
 const Compilation = @import("Compilation.zig");
 const Attribute = @import("../Lexer/Attribute.zig");
 const DiagnosticsMessages = @import("../Basic/DiagnosticsMessages.zig");
-const util = @import("../Basic/Util.zig");
 const LangOpts = @import("../Basic/LangOpts.zig");
 const IsWindows = @import("builtin").os.tag == .windows;
 

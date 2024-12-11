@@ -13,7 +13,7 @@ const Pragma = @import("../Lexer/Pragma.zig");
 const StringInterner = @import("../Basic/StringInterner.zig");
 const RecordLayout = @import("RecordLayout.zig");
 const Target = @import("Target.zig");
-const Interner = @import("../CodeGen/Interner.zig");
+const Interner = @import("backend").Interner;
 
 const Allocator = std.mem.Allocator;
 const EpochSeconds = std.time.epoch.EpochSeconds;
@@ -242,7 +242,7 @@ pub fn generateBuiltinMacros(comp: *Compilation) !Source {
     // Standard macros
     try w.writeAll(
         \\#define __VERSION__ "Zcc 
-    ++ @import("../Basic/Info.zig").VersionStr ++ "\"\n" ++
+    ++ @import("backend").VersionStr ++ "\"\n" ++
         \\#define __Zcc__
         \\#define __STDC__ 1
         \\#define __STDC_HOSTED__ 1

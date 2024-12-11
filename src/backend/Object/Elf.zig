@@ -1,6 +1,5 @@
 const std = @import("std");
-const Compilation = @import("../Basic/Compilation.zig");
-const Object = @import("Object.zig");
+const Object = @import("../Object.zig");
 
 const Elf = @This();
 
@@ -43,11 +42,11 @@ unnamedSymbolMangle: u32 = 0,
 stringTabLen: u64 = DefaultStringTable.len,
 arena: std.heap.ArenaAllocator,
 
-pub fn create(comp: *Compilation) !*Object {
-    const elf = try comp.gpa.create(Elf);
+pub fn create(gpa: std.mem.Allocator, target: std.Target) !*Object {
+    const elf = try gpa.create(Elf);
     elf.* = .{
-        .obj = .{ .format = .elf, .comp = comp },
-        .arena = std.heap.ArenaAllocator.init(comp.gpa),
+        .obj = .{ .format = .elf, .target = target },
+        .arena = std.heap.ArenaAllocator.init(gpa),
     };
     return &elf.obj;
 }
@@ -207,7 +206,7 @@ pub fn finish(elf: *Elf, file: std.fs.File) !void {
     const elfHeader = std.elf.Elf64_Ehdr{
         .e_ident = .{ 0x7F, 'E', 'L', 'F', 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
         .e_type = std.elf.ET.REL, // we only produce relocatables
-        .e_machine = elf.obj.comp.target.toElfMachine(),
+        .e_machine = elf.obj.target.toElfMachine(),
         .e_version = 1,
         .e_entry = 0, // linker will handle this
         .e_phoff = 0, // no program header

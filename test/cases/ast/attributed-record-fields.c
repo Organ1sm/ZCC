@@ -57,8 +57,8 @@ StructDecl: 'struct S9'
   RecordFieldDecl: 'long'
    name: l
    field attr: packed
-   field attr: aligned alignment: Lexer.Attribute.Alignment{ .node = AST.AST.NodeIndex.none, .requested = 16 }
-   field attr: warn_if_not_aligned alignment: Lexer.Attribute.Alignment{ .node = AST.AST.NodeIndex.none, .requested = 16 }
+   field attr: aligned alignment: zinc.Lexer.Attribute.Alignment{ .node = zinc.AST.AST.NodeIndex.none, .requested = 16 }
+   field attr: warn_if_not_aligned alignment: zinc.Lexer.Attribute.Alignment{ .node = zinc.AST.AST.NodeIndex.none, .requested = 16 }
 
 UnionDecl: 'union U1'
   RecordFieldDecl: 'long'
@@ -66,7 +66,7 @@ UnionDecl: 'union U1'
 
   RecordFieldDecl: 'int'
    name: y
-   field attr: aligned alignment: Lexer.Attribute.Alignment{ .node = AST.AST.NodeIndex.none, .requested = 32 }
+   field attr: aligned alignment: zinc.Lexer.Attribute.Alignment{ .node = zinc.AST.AST.NodeIndex.none, .requested = 32 }
 
   RecordFieldDecl: 'unsigned int'
    name: z

@@ -1,5 +1,6 @@
 const std = @import("std");
 const assert = std.debug.assert;
+const Interner = @import("backend").Interner;
 const Type = @import("Type.zig");
 const Compilation = @import("../Basic/Compilation.zig");
 const CodeGen = @import("../CodeGen/CodeGen.zig");
@@ -10,7 +11,6 @@ const AstTag = @import("AstTag.zig").Tag;
 const Attribute = @import("../Lexer/Attribute.zig");
 const Value = @import("Value.zig");
 const StringInterner = @import("../Basic/StringInterner.zig");
-const Interner = @import("../CodeGen/Interner.zig");
 
 const AST = @This();
 
@@ -27,7 +27,7 @@ data: []const NodeIndex,
 rootDecls: []const NodeIndex,
 valueMap: ValueMap,
 
-pub const genIR =  CodeGen.generateIR;
+pub const genIR = CodeGen.generateIR;
 
 pub fn deinit(tree: *AST) void {
     tree.comp.gpa.free(tree.rootDecls);
@@ -419,7 +419,7 @@ fn dumpNode(
 ) @TypeOf(w).Error!void {
     const delta = 2;
     const half = delta / 2;
-    const util = @import("../Basic/Util.zig");
+    const util = @import("backend").Util;
     const TYPE = util.Color.purple;
     const TAG = util.Color.cyan;
     const IMPLICIT = util.Color.blue;

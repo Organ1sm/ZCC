@@ -19,7 +19,7 @@ FnDef: 'fn () void'
  body:
   CompoundStmt: 'void'
     Var: 'attributed([64]char)'
-     attr: aligned alignment: Lexer.Attribute.Alignment{ .node = AST.AST.NodeIndex(9), .requested = 8 }
+     attr: aligned alignment: zinc.Lexer.Attribute.Alignment{ .node = zinc.AST.AST.NodeIndex(9), .requested = 8 }
      name: x
 
     Var: '*char'
@@ -30,12 +30,12 @@ FnDef: 'fn () void'
         ArrayAccessExpr: 'char' lvalue
          lhs:
           ImplicitCast: (ArrayToPointer) '*d:attributed([64]char)'
-           attr: aligned alignment: Lexer.Attribute.Alignment{ .node = AST.AST.NodeIndex(9), .requested = 8 }
+           attr: aligned alignment: zinc.Lexer.Attribute.Alignment{ .node = zinc.AST.AST.NodeIndex(9), .requested = 8 }
             ParenExpr: 'attributed([64]char)' lvalue
-             attr: aligned alignment: Lexer.Attribute.Alignment{ .node = AST.AST.NodeIndex(9), .requested = 8 }
+             attr: aligned alignment: zinc.Lexer.Attribute.Alignment{ .node = zinc.AST.AST.NodeIndex(9), .requested = 8 }
              operand:
               DeclRefExpr: 'attributed([64]char)' lvalue
-               attr: aligned alignment: Lexer.Attribute.Alignment{ .node = AST.AST.NodeIndex(9), .requested = 8 }
+               attr: aligned alignment: zinc.Lexer.Attribute.Alignment{ .node = zinc.AST.AST.NodeIndex(9), .requested = 8 }
                name: x
          index:
           IntLiteral: 'int' (value: 0)

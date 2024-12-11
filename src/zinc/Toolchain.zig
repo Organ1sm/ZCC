@@ -2,7 +2,6 @@ const std = @import("std");
 const mem = std.mem;
 const Driver = @import("Driver.zig");
 const Compilation = @import("Basic/Compilation.zig");
-const util = @import("Basic/Util.zig");
 const SystemDefaults = @import("system-defaults");
 const TargetUtil = @import("Basic/Target.zig");
 const Linux = @import("Toolchains/Linux.zig");

@@ -1,7 +1,7 @@
 Var: 'attributed(int)'
- attr: aligned alignment: Lexer.Attribute.Alignment{ .node = AST.AST.NodeIndex.none, .requested = 4 }
- attr: aligned alignment: Lexer.Attribute.Alignment{ .node = AST.AST.NodeIndex.none, .requested = 4 }
- attr: aligned alignment: Lexer.Attribute.Alignment{ .node = AST.AST.NodeIndex(1), .requested = 16 }
+ attr: aligned alignment: zinc.Lexer.Attribute.Alignment{ .node = zinc.AST.AST.NodeIndex.none, .requested = 4 }
+ attr: aligned alignment: zinc.Lexer.Attribute.Alignment{ .node = zinc.AST.AST.NodeIndex.none, .requested = 4 }
+ attr: aligned alignment: zinc.Lexer.Attribute.Alignment{ .node = zinc.AST.AST.NodeIndex(1), .requested = 16 }
  name: a
 
 Var: 'const volatile int'

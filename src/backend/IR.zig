@@ -1,10 +1,8 @@
 const std = @import("std");
 const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
-const Compilation = @import("../Basic/Compilation.zig");
 const Interner = @import("Interner.zig");
-const StringId = @import("../Basic/StringInterner.zig").StringId;
-const Value = @import("../AST/Value.zig");
+const Object = @import("Object.zig");
 
 const IR = @This();
 
@@ -148,11 +146,11 @@ pub const Builder = struct {
         _ = try b.addInst(.Store, .{ .bin = .{ .lhs = ptr, .rhs = val } }, .void);
     }
 
-    pub fn addConstant(b: *Builder, val: Value, ty: Interner.Ref) Allocator.Error!Ref {
+    pub fn addConstant(b: *Builder, val: Interner.Ref, ty: Interner.Ref) Allocator.Error!Ref {
         const ref: Ref = @enumFromInt(b.instructions.len);
         try b.instructions.append(b.gpa, .{
             .tag = .Constant,
-            .data = .{ .constant = val.ref() },
+            .data = .{ .constant = val },
             .type = ty,
         });
         return ref;
@@ -175,6 +173,49 @@ pub const Builder = struct {
             .@"else" = @"else",
         };
         return b.addInst(.Select, .{ .branch = branch }, ty);
+    }
+};
+
+pub const Renderer = struct {
+    gpa: Allocator,
+    obj: *Object,
+    ir: *const IR,
+    errors: std.StringArrayHashMapUnmanaged([]const u8) = .{},
+
+    pub const Error = Allocator.Error || error{LowerFail};
+
+    pub fn init(gpa: Allocator, target: std.Target, ir: *const IR) !Renderer {
+        const obj = try Object.create(gpa, target);
+        errdefer obj.deinit();
+        return .{
+            .gpa = gpa,
+            .obj = obj,
+            .ir = ir,
+        };
+    }
+
+    pub fn deinit(r: *Renderer) void {
+        for (r.errors.values()) |msg| r.gpa.free(msg);
+        r.errors.deinit(r.gpa);
+        r.obj.deinit();
+    }
+
+    pub fn render(r: *Renderer) !void {
+        switch (r.obj.target.cpu.arch) {
+            .x86, .x86_64 => return @import("IR/x86/Renderer.zig").render(r),
+            else => unreachable,
+        }
+    }
+
+    pub fn fail(
+        r: *Renderer,
+        name: []const u8,
+        comptime format: []const u8,
+        args: anytype,
+    ) Error {
+        try r.errors.ensureUnusedCapacity(r.gpa, 1);
+        r.errors.putAssumeCapacity(name, try std.fmt.allocPrint(r.gpa, format, args));
+        return error.LowerFail;
     }
 };
 
@@ -318,7 +359,7 @@ pub fn deinit(ir: *IR, gpa: std.mem.Allocator) void {
     ir.* = undefined;
 }
 
-const util = @import("../Basic/Util.zig");
+const util = @import("Util.zig");
 const TYPE = util.Color.purple;
 const INST = util.Color.cyan;
 const REF = util.Color.blue;
@@ -623,10 +664,9 @@ fn writeType(ir: IR, tyRef: Interner.Ref, color: bool, w: anytype) !void {
     }
 }
 
-fn writeValue(ir: IR, valRef: Interner.Ref, color: bool, w: anytype) !void {
-    const v: Value = .{ .optRef = @enumFromInt(@intFromEnum(valRef)) };
+fn writeValue(ir: IR, val: Interner.Ref, color: bool, w: anytype) !void {
     if (color) util.setColor(LITERAL, w);
-    const key = ir.interner.get(v.ref());
+    const key = ir.interner.get(val);
     switch (key) {
         .null => return w.writeAll("nullptr_t"),
         .int => |repr| switch (repr) {

@@ -1,40 +1,39 @@
-const std = @import("std");
-pub const CodeGen = @import("CodeGen/CodeGen.zig");
-pub const Compilation = @import("Basic/Compilation.zig");
-pub const Diagnostics = @import("Basic/Diagnostics.zig");
-pub const Driver = @import("Driver.zig");
-pub const Interner = @import("CodeGen/Interner.zig");
-pub const IR = @import("CodeGen/IR.zig");
-pub const Object = @import("Object/Object.zig");
-pub const Parser = @import("Parser/Parser.zig");
-pub const Preprocessor = @import("Lexer/Preprocessor.zig");
-pub const Source = @import("Basic/Source.zig");
-pub const Token = @import("Lexer/Token.zig").Token;
-pub const Lexer = @import("Lexer/Lexer.zig");
-pub const Tree = @import("AST/AST.zig");
-pub const Type = @import("AST/Type.zig");
-pub const VersionStr = @import("Basic/Info.zig").VersionStr;
-pub const TypeMapper = @import("Basic/StringInterner.zig").TypeMapper;
-pub const TargetUtil = @import("Basic/Target.zig");
+pub const CodeGen = @import("zinc/CodeGen/CodeGen.zig");
+pub const Compilation = @import("zinc/Basic/Compilation.zig");
+pub const Diagnostics = @import("zinc/Basic/Diagnostics.zig");
+pub const Driver = @import("zinc/Driver.zig");
+pub const Parser = @import("zinc/Parser/Parser.zig");
+pub const Preprocessor = @import("zinc/Lexer/Preprocessor.zig");
+pub const Source = @import("zinc/Basic/Source.zig");
+pub const Token = @import("zinc/Lexer/Token.zig").Token;
+pub const Lexer = @import("zinc/Lexer/Lexer.zig");
+pub const Tree = @import("zinc/AST/AST.zig");
+pub const Type = @import("zinc/AST/Type.zig");
+pub const TypeMapper = @import("zinc/Basic/StringInterner.zig").TypeMapper;
+pub const TargetUtil = @import("zinc/Basic/Target.zig");
+pub const ToolChain = @import("zinc/Toolchain.zig");
+pub const Value = @import("zinc/AST/Value.zig");
 
-pub const version = std.SemanticVersion.parse(VersionStr) catch unreachable;
-pub const CallingConvention = enum {
-    C,
-    stdcall,
-    thiscall,
-    vectorcall,
-};
+const backend = @import("backend");
+pub const Interner = backend.Interner;
+pub const IR = backend.Ir;
+pub const Object = backend.Object;
+
+pub const CallingConvention = backend.CallingConvention;
+
+pub const VersionStr = backend.version_str;
+pub const version = backend.version;
 
 test "simple test" {
-    _ = @import("Basic/CharInfo.zig");
-    _ = @import("Basic/Compilation.zig");
-    _ = @import("Basic/Target.zig");
-    _ = @import("Driver/Distro.zig");
-    _ = @import("Driver/GCCVersion.zig");
-    _ = @import("Driver/Filesystem.zig");
-    _ = @import("Lexer/Lexer.zig");
-    _ = @import("Lexer/Preprocessor.zig");
-    _ = @import("Parser/InitList.zig");
-    _ = @import("AST/AST.zig");
-    _ = @import("AST/Value.zig");
+    _ = @import("zinc/Basic/CharInfo.zig");
+    _ = @import("zinc/Basic/Compilation.zig");
+    _ = @import("zinc/Basic/Target.zig");
+    _ = @import("zinc/Driver/Distro.zig");
+    _ = @import("zinc/Driver/GCCVersion.zig");
+    _ = @import("zinc/Driver/Filesystem.zig");
+    _ = @import("zinc/Lexer/Lexer.zig");
+    _ = @import("zinc/Lexer/Preprocessor.zig");
+    _ = @import("zinc/Parser/InitList.zig");
+    _ = @import("zinc/AST/AST.zig");
+    _ = @import("zinc/AST/Value.zig");
 }

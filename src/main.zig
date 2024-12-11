@@ -1,10 +1,11 @@
 const std = @import("std");
 const process = std.process;
 const builtin = @import("builtin");
-const Compilation = @import("Basic/Compilation.zig");
-const Driver = @import("Driver.zig");
-const Toolchain = @import("Toolchain.zig");
-const Target = @import("Basic/Target.zig");
+const zinc = @import("zinc");
+const Compilation = zinc.Compilation;
+const Driver = zinc.Driver;
+const Toolchain = zinc.ToolChain;
+const Target = zinc.TargetUtil;
 
 var GeneralPurposeAllocator = std.heap.GeneralPurposeAllocator(.{}){};
 
@@ -74,4 +75,3 @@ pub fn main() u8 {
     if (fastExit) process.exit(@intFromBool(comp.diagnostics.errors != 0));
     return @intFromBool(comp.diagnostics.errors != 0);
 }
-

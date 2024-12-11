@@ -1,15 +1,16 @@
 const std = @import("std");
 const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
+const backend = @import("backend");
+const IR = backend.Ir;
+const IRBuilder = IR.Builder;
+const Inst = IR.Inst;
+const Interner = backend.Interner;
 const Compilation = @import("../Basic/Compilation.zig");
 const Tree = @import("../AST/AST.zig");
 const TreeTag = @import("../AST/AstTag.zig").Tag;
 const NodeIndex = Tree.NodeIndex;
-const IR = @import("IR.zig");
-const IRBuilder = IR.Builder;
-const Inst = IR.Inst;
 const Type = @import("../AST/Type.zig");
-const Interner = @import("Interner.zig");
 const Value = @import("../AST/Value.zig");
 const StringInterner = @import("../Basic/StringInterner.zig");
 const StringId = StringInterner.StringId;
@@ -248,7 +249,7 @@ fn addBranch(c: *CodeGen, cond: IR.Ref, trueLabel: IR.Ref, falseLabel: IR.Ref) !
 }
 
 fn addBoolPhi(c: *CodeGen, value: bool) !void {
-    const val = try c.builder.addConstant(try Value.int(@intFromBool(value), c.comp), .i1);
+    const val = try c.builder.addConstant((try Value.int(@intFromBool(value), c.comp)).ref(), .i1);
     try c.phiNodes.append(c.comp.gpa, .{ .label = c.builder.currentLabel, .value = val });
 }
 
@@ -261,7 +262,7 @@ fn genExpr(c: *CodeGen, node: NodeIndex) Error!IR.Ref {
 
     const ty = c.nodeTy[@intFromEnum(node)];
     if (c.tree.valueMap.get(node)) |val|
-        return c.builder.addConstant(val, try c.genType(ty));
+        return c.builder.addConstant(val.ref(), try c.genType(ty));
 
     const data = c.nodeData[@intFromEnum(node)];
     const tag = c.nodeTag[@intFromEnum(node)];
@@ -585,7 +586,7 @@ fn genExpr(c: *CodeGen, node: NodeIndex) Error!IR.Ref {
 
         .ImplicitReturn => {
             if (data.returnZero) {
-                const operand = try c.builder.addConstant(Value.zero, try c.genType(ty));
+                const operand = try c.builder.addConstant(.zero, try c.genType(ty));
                 try c.retNodes.append(c.comp.gpa, .{ .value = operand, .label = c.builder.currentLabel });
             }
             // No need to emit a jump since implicit_return is always the last instruction.
@@ -702,7 +703,7 @@ fn genExpr(c: *CodeGen, node: NodeIndex) Error!IR.Ref {
 
         .PlusExpr => return c.genExpr(data.unExpr),
         .NegateExpr => {
-            const zero = try c.builder.addConstant(Value.zero, try c.genType(ty));
+            const zero = try c.builder.addConstant(.zero, try c.genType(ty));
             const operand = try c.genExpr(data.unExpr);
             return c.addBin(.Sub, zero, operand, ty);
         },
@@ -712,7 +713,7 @@ fn genExpr(c: *CodeGen, node: NodeIndex) Error!IR.Ref {
             return c.addUn(.BitNot, operand, ty);
         },
         .BoolNotExpr => {
-            const zero = try c.builder.addConstant(Value.zero, try c.genType(ty));
+            const zero = try c.builder.addConstant(.zero, try c.genType(ty));
             const operand = try c.genExpr(data.unExpr);
             return c.addBin(.CmpNE, zero, operand, ty);
         },
@@ -720,7 +721,7 @@ fn genExpr(c: *CodeGen, node: NodeIndex) Error!IR.Ref {
         .PreIncExpr => {
             const operand = try c.genLval(data.unExpr);
             const val = try c.addUn(.Load, operand, ty);
-            const one = try c.builder.addConstant(Value.one, try c.genType(ty));
+            const one = try c.builder.addConstant(.one, try c.genType(ty));
             const plusOne = try c.addBin(.Add, val, one, ty);
             try c.builder.addStore(operand, plusOne);
             return plusOne;
@@ -728,7 +729,7 @@ fn genExpr(c: *CodeGen, node: NodeIndex) Error!IR.Ref {
         .PreDecExpr => {
             const operand = try c.genLval(data.unExpr);
             const val = try c.addUn(.Load, operand, ty);
-            const one = try c.builder.addConstant(Value.one, try c.genType(ty));
+            const one = try c.builder.addConstant(.one, try c.genType(ty));
             const decOne = try c.addBin(.Sub, val, one, ty);
             try c.builder.addStore(operand, decOne);
             return decOne;
@@ -737,7 +738,7 @@ fn genExpr(c: *CodeGen, node: NodeIndex) Error!IR.Ref {
         .PostIncExpr => {
             const operand = try c.genLval(data.unExpr);
             const val = try c.addUn(.Load, operand, ty);
-            const one = try c.builder.addConstant(Value.one, try c.genType(ty));
+            const one = try c.builder.addConstant(.one, try c.genType(ty));
             const plusOne = try c.addBin(.Add, val, one, ty);
             try c.builder.addStore(operand, plusOne);
             return val;
@@ -745,7 +746,7 @@ fn genExpr(c: *CodeGen, node: NodeIndex) Error!IR.Ref {
         .PostDecExpr => {
             const operand = try c.genLval(data.unExpr);
             const val = try c.addUn(.Load, operand, ty);
-            const one = try c.builder.addConstant(Value.one, try c.genType(ty));
+            const one = try c.builder.addConstant(.one, try c.genType(ty));
             const decOne = try c.addBin(.Sub, val, one, ty);
             try c.builder.addStore(operand, decOne);
             return val;
@@ -793,7 +794,7 @@ fn genExpr(c: *CodeGen, node: NodeIndex) Error!IR.Ref {
 
             .PointerToBool, .IntToBool, .FloatToBool => {
                 const lhs = try c.genExpr(data.cast.operand);
-                const rhs = try c.builder.addConstant(Value.zero, try c.genType(c.nodeTy[@intFromEnum(node)]));
+                const rhs = try c.builder.addConstant(.zero, try c.genType(c.nodeTy[@intFromEnum(node)]));
                 return c.builder.addInst(.CmpNE, .{ .bin = .{ .lhs = lhs, .rhs = rhs } }, .i1);
             },
 
@@ -910,7 +911,7 @@ fn genExpr(c: *CodeGen, node: NodeIndex) Error!IR.Ref {
         .BoolOrExpr => {
             if (c.tree.valueMap.get(data.binExpr.lhs)) |lhs| {
                 if (!lhs.toBool(c.comp))
-                    return c.builder.addConstant(Value.zero, try c.genType(ty));
+                    return c.builder.addConstant(.zero, try c.genType(ty));
 
                 return c.genExpr(data.binExpr.rhs);
             }
@@ -939,7 +940,7 @@ fn genExpr(c: *CodeGen, node: NodeIndex) Error!IR.Ref {
         .BoolAndExpr => {
             if (c.tree.valueMap.get(data.binExpr.lhs)) |lhs| {
                 if (!lhs.toBool(c.comp))
-                    return c.builder.addConstant(Value.zero, try c.genType(ty));
+                    return c.builder.addConstant(.zero, try c.genType(ty));
 
                 return c.genExpr(data.binExpr.rhs);
             }
@@ -1041,7 +1042,7 @@ fn genLval(c: *CodeGen, node: NodeIndex) Error!IR.Ref {
     switch (c.nodeTag[@intFromEnum(node)]) {
         .StringLiteralExpr => {
             const val = c.tree.valueMap.get(node).?;
-            return c.builder.addConstant(val, .ptr);
+            return c.builder.addConstant(val.ref(), .ptr);
         },
 
         .ParenExpr => return c.genLval(data.unExpr),
@@ -1121,7 +1122,7 @@ fn genBoolExpr(c: *CodeGen, base: NodeIndex, trueLabel: IR.Ref, falseLabel: IR.R
             try c.genBoolExpr(data.binExpr.lhs, trueLabel, newFalseLabel);
             try c.builder.startBlock(newFalseLabel);
 
-            if (c.condDummyTy) |ty| c.condDummyRef = try c.builder.addConstant(Value.one, ty);
+            if (c.condDummyTy) |ty| c.condDummyRef = try c.builder.addConstant(.one, ty);
             return c.genBoolExpr(data.binExpr.rhs, trueLabel, falseLabel);
         },
 
@@ -1140,7 +1141,7 @@ fn genBoolExpr(c: *CodeGen, base: NodeIndex, trueLabel: IR.Ref, falseLabel: IR.R
             try c.genBoolExpr(data.binExpr.lhs, newTrueLabel, falseLabel);
             try c.builder.startBlock(newTrueLabel);
 
-            if (c.condDummyTy) |ty| c.condDummyRef = try c.builder.addConstant(Value.one, ty);
+            if (c.condDummyTy) |ty| c.condDummyRef = try c.builder.addConstant(.one, ty);
             return c.genBoolExpr(data.binExpr.rhs, trueLabel, falseLabel);
         },
 
@@ -1148,7 +1149,7 @@ fn genBoolExpr(c: *CodeGen, base: NodeIndex, trueLabel: IR.Ref, falseLabel: IR.R
             c.boolInvert = !c.boolInvert;
             defer c.boolInvert = !c.boolInvert;
 
-            if (c.condDummyTy) |ty| c.condDummyRef = try c.builder.addConstant(Value.zero, ty);
+            if (c.condDummyTy) |ty| c.condDummyRef = try c.builder.addConstant(.zero, ty);
             return c.genBoolExpr(data.unExpr, trueLabel, falseLabel);
         },
 
@@ -1210,7 +1211,7 @@ fn genBoolExpr(c: *CodeGen, base: NodeIndex, trueLabel: IR.Ref, falseLabel: IR.R
             try c.genBoolExpr(data.if3.cond, trueLabel, newFalseLabel);
 
             try c.builder.startBlock(newFalseLabel);
-            if (c.condDummyTy) |ty| c.condDummyRef = try c.builder.addConstant(Value.one, ty);
+            if (c.condDummyTy) |ty| c.condDummyRef = try c.builder.addConstant(.one, ty);
             return c.genBoolExpr(c.tree.data[data.if3.body + 1], trueLabel, falseLabel); // else
         },
 
@@ -1230,7 +1231,7 @@ fn genBoolExpr(c: *CodeGen, base: NodeIndex, trueLabel: IR.Ref, falseLabel: IR.R
             try c.builder.startBlock(newTrueLabel);
             try c.genBoolExpr(c.tree.data[data.if3.body], trueLabel, falseLabel); // then
             try c.builder.startBlock(newFalseLabel);
-            if (c.condDummyTy) |ty| c.condDummyRef = try c.builder.addConstant(Value.one, ty);
+            if (c.condDummyTy) |ty| c.condDummyRef = try c.builder.addConstant(.one, ty);
             return c.genBoolExpr(c.tree.data[data.if3.body + 1], trueLabel, falseLabel); // else
         },
 
@@ -1253,7 +1254,7 @@ fn genBoolExpr(c: *CodeGen, base: NodeIndex, trueLabel: IR.Ref, falseLabel: IR.R
 
     // Assume int operand.
     const lhs = try c.genExpr(node);
-    const rhs = try c.builder.addConstant(Value.zero, try c.genType(c.nodeTy[@intFromEnum(node)]));
+    const rhs = try c.builder.addConstant(.zero, try c.genType(c.nodeTy[@intFromEnum(node)]));
     const cmp = try c.builder.addInst(.CmpNE, .{ .bin = .{ .lhs = lhs, .rhs = rhs } }, .i1);
     if (c.condDummyTy != null) c.condDummyRef = cmp;
     try c.addBranch(cmp, trueLabel, falseLabel);
@@ -1351,7 +1352,7 @@ fn genPtrArithmetic(c: *CodeGen, ptr: IR.Ref, offset: IR.Ref, offsetTy: Type, ty
     if (size == 1)
         return c.builder.addInst(.Add, .{ .bin = .{ .lhs = ptr, .rhs = offset } }, try c.genType(ty));
 
-    const sizeInst = try c.builder.addConstant(try Value.int(size, c.comp), try c.genType(offsetTy));
+    const sizeInst = try c.builder.addConstant((try Value.int(size, c.comp)).ref(), try c.genType(offsetTy));
     const offsetInst = try c.addBin(.Mul, offset, sizeInst, offsetTy);
     return c.addBin(.Add, ptr, offsetInst, offsetTy);
 }
@@ -1370,7 +1371,7 @@ fn genInitializer(c: *CodeGen, ptr: IR.Ref, destTy: Type, initializer: NodeIndex
 
         .StringLiteralExpr => {
             const val = c.tree.valueMap.get(initializer).?;
-            const strPtr = try c.builder.addConstant(val, .ptr);
+            const strPtr = try c.builder.addConstant(val.ref(), .ptr);
             if (destTy.isArray()) {
                 return c.comp.diagnostics.fatalNoSrc("TODO memcpy\n", .{});
             } else {
