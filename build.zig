@@ -1,5 +1,11 @@
 const std = @import("std");
 
+const ZincVersion = std.SemanticVersion{
+    .major = 0,
+    .minor = 0,
+    .patch = 0,
+};
+
 pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
     const mode = b.standardOptimizeOption(.{});
@@ -22,6 +28,56 @@ pub fn build(b: *std.Build) !void {
     systemDefaults.addOption([]const u8, "rtlib", DefaultRtlib);
     systemDefaults.addOption([]const u8, "unwindlib", DefaultUnwindlib);
 
+    const zincOptions = b.addOptions();
+    const versionStr = v: {
+        const versionString = b.fmt("{d}.{d}.{d}", .{ ZincVersion.major, ZincVersion.minor, ZincVersion.patch });
+        var code: u8 = undefined;
+
+        const gitDescribeUntrimmed = b.runAllowFail(&[_][]const u8{
+            "git", "-C", b.build_root.path orelse ".", "describe", "--match", "*.*.*", "--tags",
+        }, &code, .Ignore) catch versionString;
+        const gitDescribe = std.mem.trim(u8, gitDescribeUntrimmed, " \n\r");
+
+        switch (std.mem.count(u8, gitDescribe, "-")) {
+            0 => {
+                // Tagged release version (e.g. 0.10.0).
+                if (!std.mem.eql(u8, gitDescribe, versionString)) {
+                    std.debug.print("Zinc version '{s}' does not match Git tag '{s}'\n", .{ versionString, gitDescribe });
+                    std.process.exit(1);
+                }
+                break :v versionString;
+            },
+            2 => {
+                // Untagged development build (e.g. 0.10.0-dev.2025+ecf0050a9).
+                var it = std.mem.splitScalar(u8, gitDescribe, '-');
+                const taggedAncestor = it.first();
+                const commitHeight = it.next().?;
+                const commitID = it.next().?;
+
+                const ancestor_ver = try std.SemanticVersion.parse(taggedAncestor);
+                if (!ZincVersion.order(ancestor_ver).compare(.gte)) {
+                    std.debug.print("Zinc version '{}' must be greater than tagged ancestor '{}'\n", .{ ZincVersion, ancestor_ver });
+                    std.process.exit(1);
+                }
+
+                // Check that the commit hash is prefixed with a 'g' (a Git convention).
+                if (commitID.len < 1 or commitID[0] != 'g') {
+                    std.debug.print("Unexpected `git describe` output: {s}\n", .{gitDescribe});
+                    break :v versionString;
+                }
+
+                // The version is reformatted in accordance with the https://semver.org specification.
+                break :v b.fmt("{s}-dev.{s}+{s}", .{ versionString, commitHeight, commitID[1..] });
+            },
+            else => {
+                std.debug.print("Unexpected `git describe` output: {s}\n", .{gitDescribe});
+                break :v versionString;
+            },
+        }
+    };
+    zincOptions.addOption([]const u8, "version_str", versionStr);
+    const zincOptionsModule = zincOptions.createModule();
+
     const zigModule = b.createModule(.{ .root_source_file = b.path("deps/lib.zig") });
     const zincBackend = b.addModule("zinc-backend", .{
         .root_source_file = b.path("src/backend.zig"),
@@ -29,6 +85,10 @@ pub fn build(b: *std.Build) !void {
             .{
                 .name = "zig",
                 .module = zigModule,
+            },
+            .{
+                .name = "build-options",
+                .module = zincOptionsModule,
             },
         },
     });
@@ -38,6 +98,10 @@ pub fn build(b: *std.Build) !void {
             .{
                 .name = "system-defaults",
                 .module = systemDefaults.createModule(),
+            },
+            .{
+                .name = "build-options",
+                .module = zincOptionsModule,
             },
             .{
                 .name = "backend",
@@ -53,7 +117,6 @@ pub fn build(b: *std.Build) !void {
         .optimize = mode,
         .single_threaded = true,
     });
-    exe.root_module.addOptions("system-defaults", systemDefaults);
     exe.root_module.addImport("zinc", zincModule);
 
     if (LinkLibc)
@@ -87,6 +150,7 @@ pub fn build(b: *std.Build) !void {
             .optimize = mode,
         });
         integration_tests.root_module.addImport("zinc", zincModule);
+
         const test_runner_options = b.addOptions();
         integration_tests.root_module.addOptions("build_options", test_runner_options);
         test_runner_options.addOption(bool, "TestAllAllocationFailures", TestAllAllocationFailures);

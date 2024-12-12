@@ -10,5 +10,5 @@ pub const CallingConvention = enum {
     vectorcall,
 };
 
-pub const VersionStr = "0.0.0-dev";
+pub const VersionStr = @import("build-options").version_str;
 pub const version = @import("std").SemanticVersion.parse(VersionStr) catch unreachable;
