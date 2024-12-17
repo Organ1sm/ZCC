@@ -651,18 +651,19 @@ fn processSource(
         bufferWriter.flush() catch {};
     }
 
-    var renderer = try IR.Renderer.init(d.comp.gpa, d.comp.target, &ir);
-    defer renderer.deinit();
+    var renderErrors: IR.Renderer.ErrorList = .{};
+    defer renderErrors.deinit(d.comp.gpa);
 
-    renderer.render() catch |e| switch (e) {
+    var obj = ir.render(d.comp.gpa, d.comp.target, &renderErrors) catch |e| switch (e) {
         error.OutOfMemory => return error.OutOfMemory,
         error.LowerFail => {
             return d.fatal(
                 "unable to render Ir to machine code: {s}",
-                .{renderer.errors.values()[0]},
+                .{renderErrors.values()[0]},
             );
         },
     };
+    defer obj.deinit();
 
     // If it's used, name_buf will either hold a filename or `/tmp/<12 random bytes with base-64 encoding>.<extension>`
     // both of which should fit into MAX_NAME_BYTES for all systems
@@ -696,7 +697,7 @@ fn processSource(
         return d.fatal("unable to create output file '{s}': {s}", .{ outFileName, Util.errorDescription(er) });
     defer outFile.close();
 
-    renderer.obj.finish(outFile) catch |er|
+    obj.finish(outFile) catch |er|
         return d.fatal("could not output to object file '{s}': {s}", .{ outFileName, Util.errorDescription(er) });
 
     if (d.onlyCompile) {
@@ -749,8 +750,16 @@ fn invokeLinker(d: *Driver, tc: *Toolchain, comptime fastExit: bool) !void {
         return d.fatal("unable to spawn linker: {s}", .{Util.errorDescription(er)});
     };
     switch (term) {
-        .Exited => |code| if (code != 0) d.exitWithCleanup(code),
-        else => std.process.abort(),
+        .Exited => |code| if (code != 0) {
+            const e = d.fatal("linker exited with an error code", .{});
+            if (fastExit) d.exitWithCleanup(code);
+            return e;
+        },
+        else => {
+            const e = d.fatal("linker crashed", .{});
+            if (fastExit) d.exitWithCleanup(1);
+            return e;
+        },
     }
 
     if (fastExit)
