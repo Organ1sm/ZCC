@@ -15,7 +15,7 @@ const Error = Compilation.Error;
 const assert = std.debug.assert;
 
 const Preprocessor = @This();
-const DefineMap = std.StringHashMap(Macro);
+const DefineMap = std.StringHashMapUnmanaged(Macro);
 const RawTokenList = std.ArrayList(RawToken);
 const MaxIncludeDepth = 200;
 
@@ -70,8 +70,9 @@ const Macro = struct {
     /// Is a predefined macro
     isBuiltin: bool = false,
     /// Location of macro in the source
-    /// `byteOffset` and `line` are used to define the range of tokens included in the macro.
     loc: Source.Location,
+    start: u32,
+    end: u32,
 
     fn eql(a: Macro, b: Macro, pp: *Preprocessor) bool {
         if (a.tokens.len != b.tokens.len)
@@ -103,7 +104,7 @@ const Macro = struct {
 comp: *Compilation,
 gpa: std.mem.Allocator,
 arena: std.heap.ArenaAllocator,
-defines: DefineMap,
+defines: DefineMap = .{},
 tokens: Token.List = .{},
 tokenBuffer: RawTokenList,
 charBuffer: std.ArrayList(u8),
@@ -163,12 +164,14 @@ const BuiltinMacros = struct {
 };
 
 pub fn addBuiltinMacro(pp: *Preprocessor, name: []const u8, isFunc: bool, tokens: []const RawToken) !void {
-    try pp.defines.putNoClobber(name, .{
+    try pp.defines.putNoClobber(pp.gpa, name, .{
         .params = &BuiltinMacros.args,
         .tokens = tokens,
         .varArgs = false,
         .isFunc = isFunc,
         .loc = .{ .id = .generated },
+        .start = 0,
+        .end = 0,
         .isBuiltin = true,
     });
 }
@@ -195,7 +198,6 @@ pub fn init(comp: *Compilation) Preprocessor {
         .comp = comp,
         .gpa = comp.gpa,
         .arena = std.heap.ArenaAllocator.init(comp.gpa),
-        .defines = DefineMap.init(comp.gpa),
         .tokenBuffer = RawTokenList.init(comp.gpa),
         .charBuffer = std.ArrayList(u8).init(comp.gpa),
         .poisonedIdentifiers = std.StringHashMap(void).init(comp.gpa),
@@ -216,7 +218,7 @@ pub fn initDefault(comp: *Compilation) !Preprocessor {
 }
 
 pub fn deinit(pp: *Preprocessor) void {
-    pp.defines.deinit();
+    pp.defines.deinit(pp.gpa);
     for (pp.tokens.items(.expansionLocs)) |loc| {
         Token.free(loc, pp.gpa);
     }
@@ -1691,17 +1693,18 @@ fn expandVaOpt(
 }
 
 fn shouldExpand(tok: Token, macro: *Macro) bool {
-    // macro.loc.line contains the macros end index
     if (tok.loc.id == macro.loc.id and
-        tok.loc.byteOffset >= macro.loc.byteOffset and
-        tok.loc.byteOffset <= macro.loc.line)
+        tok.loc.byteOffset >= macro.start and
+        tok.loc.byteOffset <= macro.end)
         return false;
+
     for (tok.expansionSlice()) |loc| {
         if (loc.id == macro.loc.id and
-            loc.byteOffset >= macro.loc.byteOffset and
-            loc.byteOffset <= macro.loc.line)
+            loc.byteOffset >= macro.start and
+            loc.byteOffset <= macro.end)
             return false;
     }
+
     if (tok.flags.expansionDisabled)
         return false;
     return true;
@@ -2230,13 +2233,22 @@ fn makeGeneratedToken(pp: *Preprocessor, start: usize, id: TokenType, source: To
 /// Defines a new macro and warns  if it  is a duplicate
 fn defineMacro(pp: *Preprocessor, nameToken: RawToken, macro: Macro) Error!void {
     const name = pp.getTokenSlice(nameToken);
-    const gop = try pp.defines.getOrPut(name);
+    const gop = try pp.defines.getOrPut(pp.gpa, name);
     if (gop.found_existing and !gop.value_ptr.eql(macro, pp)) {
+        const tag: Diagnostics.Tag = if (gop.value_ptr.isBuiltin) .builtin_macro_redefined else .macro_redefined;
+        const start = pp.comp.diagnostics.list.items.len;
         try pp.comp.addDiagnostic(.{
-            .tag = if (gop.value_ptr.isBuiltin) .builtin_macro_redefined else .macro_redefined,
+            .tag = tag,
             .loc = .{ .id = nameToken.source, .byteOffset = nameToken.start, .line = nameToken.line },
             .extra = .{ .str = name },
         }, &.{});
+
+        if (!gop.value_ptr.isBuiltin and pp.comp.diagnostics.list.items.len != start) {
+            try pp.comp.addDiagnostic(.{
+                .tag = .previous_definition,
+                .loc = gop.value_ptr.loc,
+            }, &.{});
+        }
     }
 
     if (pp.verbose)
@@ -2271,11 +2283,13 @@ fn define(pp: *Preprocessor, lexer: *Lexer) Error!void {
     var first = lexer.next();
     switch (first.id) {
         .NewLine, .Eof => return pp.defineMacro(macroName, .{
-            .params = undefined,
-            .tokens = undefined,
+            .params = &.{},
+            .tokens = &.{},
             .varArgs = false,
             .isFunc = false,
-            .loc = undefined,
+            .loc = tokenFromRaw(macroName).loc,
+            .start = 0,
+            .end = 0,
         }),
         .WhiteSpace => first = lexer.next(),
         .LParen => return pp.defineFunc(lexer, macroName, first),
@@ -2349,7 +2363,9 @@ fn define(pp: *Preprocessor, lexer: *Lexer) Error!void {
 
     const list = try pp.arena.allocator().dupe(RawToken, pp.tokenBuffer.items);
     try pp.defineMacro(macroName, .{
-        .loc = .{ .id = macroName.source, .byteOffset = macroName.start, .line = endIdx },
+        .loc = tokenFromRaw(macroName).loc,
+        .start = first.start,
+        .end = endIdx,
         .tokens = list,
         .params = undefined,
         .isFunc = false,
@@ -2748,7 +2764,9 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: RawToken, lParen: Raw
         .params = paramList,
         .varArgs = varArgs or gnuVarArgs.len != 0,
         .tokens = tokenList,
-        .loc = .{ .id = macroName.source, .byteOffset = startIdx, .line = endIdx },
+        .loc = tokenFromRaw(macroName).loc,
+        .start = startIdx,
+        .end = endIdx,
     });
 }
 

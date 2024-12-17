@@ -217,9 +217,7 @@ pub fn setAll(diag: *Diagnostics, to: Kind) void {
 }
 
 pub fn init(gpa: Allocator) Diagnostics {
-    return .{
-        .arena = std.heap.ArenaAllocator.init(gpa),
-    };
+    return .{ .arena = std.heap.ArenaAllocator.init(gpa) };
 }
 
 pub fn deinit(diag: *Diagnostics) void {
