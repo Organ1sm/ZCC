@@ -1554,17 +1554,37 @@ fn expandFuncMacro(
                     break :blk notFound;
                 } else res: {
                     var invalid: ?Token = null;
-                    var identifier: ?Token = null;
+                    var vendorIdent: ?Token = null;
+                    var coloncolon: ?Token = null;
+                    var attrIdent: ?Token = null;
                     for (arg) |tok| {
                         if (tok.isOneOf(.{ .MacroWS, .Comment })) continue;
+                        if (tok.is(.ColonColon)) {
+                            if (coloncolon != null or attrIdent == null) {
+                                invalid = tok;
+                                break;
+                            }
+                            vendorIdent = attrIdent;
+                            attrIdent = null;
+                            coloncolon = tok;
+                            continue;
+                        }
                         if (!tok.id.isMacroIdentifier()) {
                             invalid = tok;
                             break;
                         }
-                        if (identifier) |_| invalid = tok else identifier = tok;
+                        if (attrIdent) |_| {
+                            invalid = tok;
+                            break;
+                        } else attrIdent = tok;
                     }
 
-                    if (identifier == null and invalid == null) invalid = .{ .id = .Eof, .loc = loc };
+                    if (vendorIdent != null and attrIdent == null) {
+                        invalid = vendorIdent;
+                    } else if (attrIdent == null and invalid == null) {
+                        invalid = .{ .id = .Eof, .loc = loc };
+                    }
+
                     if (invalid) |some| {
                         try pp.comp.addDiagnostic(
                             .{ .tag = .feature_check_requires_identifier, .loc = some.loc },
@@ -1572,6 +1592,18 @@ fn expandFuncMacro(
                         );
                         break :res notFound;
                     }
+
+                    if (vendorIdent) |some| {
+                        const vendorStr = pp.expandedSlice(some);
+                        const attrStr = pp.expandedSlice(attrIdent.?);
+                        const exists = Attribute.fromString(.gnu, vendorStr, attrStr) != null;
+
+                        const start = pp.comp.generatedBuffer.items.len;
+                        try pp.comp.generatedBuffer.appendSlice(pp.gpa, if (exists) "1\n" else "0\n");
+                        try buf.append(try pp.makeGeneratedToken(start, .PPNumber, tokenFromRaw(raw)));
+                        continue;
+                    }
+
                     if (!pp.comp.langOpts.standard.atLeast(.c23)) break :res notFound;
 
                     const attrs = std.StaticStringMap([]const u8).initComptime(.{
@@ -1585,8 +1617,8 @@ fn expandFuncMacro(
                         .{ "reproducible", "202207L\n" },
                     });
 
-                    const identStr = pp.expandedSlice(identifier.?);
-                    break :res attrs.get(identStr) orelse notFound;
+                    const attrStr = Attribute.normalize(pp.expandedSlice(attrIdent.?));
+                    break :res attrs.get(attrStr) orelse notFound;
                 };
                 const start = pp.comp.generatedBuffer.items.len;
                 try pp.comp.generatedBuffer.appendSlice(pp.gpa, result);

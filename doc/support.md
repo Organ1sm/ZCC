@@ -40,7 +40,7 @@
 - [x] `__VA_ARGS__`
 - [x] [`__VA_OPT__`](../test/cases/__VA_OPT__.c)
 - [x] `__has_attribute`
-- [x] [`__has_c_attribute`](../test/cases/__has_c_attribute.c)
+- [x] [`__has_c_attribute`](../test/cases/standard-attributes.c)
 - [x] `__has_builtin`
 - [x] `__has_extension`
 - [x] `__has_feature`
