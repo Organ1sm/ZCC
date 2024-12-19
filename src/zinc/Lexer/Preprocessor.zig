@@ -152,6 +152,7 @@ const BuiltinMacros = struct {
     const hasBuiltin = [1]RawToken{makeFeatCheckMacro(.MacroParamHasBuiltin)};
     const hasInclude = [1]RawToken{makeFeatCheckMacro(.MacroParamHasInclude)};
     const hasIncludeNext = [1]RawToken{makeFeatCheckMacro(.MacroParamHasIncludeNext)};
+    const hasEmbed = [1]RawToken{makeFeatCheckMacro(.MacroParamHasEmbed)};
     const isIdentifier = [1]RawToken{makeFeatCheckMacro(.MacroParamIsIdentifier)};
     const file = [1]RawToken{makeFeatCheckMacro(.MacroFile)};
     const line = [1]RawToken{makeFeatCheckMacro(.MacroLine)};
@@ -186,6 +187,7 @@ pub fn addBuiltinMacros(pp: *Preprocessor) !void {
     try pp.addBuiltinMacro("__has_builtin", true, &BuiltinMacros.hasBuiltin);
     try pp.addBuiltinMacro("__has_include", true, &BuiltinMacros.hasInclude);
     try pp.addBuiltinMacro("__has_include_next", true, &BuiltinMacros.hasIncludeNext);
+    try pp.addBuiltinMacro("__has_embed", true, &BuiltinMacros.hasEmbed);
     try pp.addBuiltinMacro("__is_identifier", true, &BuiltinMacros.isIdentifier);
     try pp.addBuiltinMacro("_Pragma", true, &BuiltinMacros.pragmaOperator);
     try pp.addBuiltinMacro("__FILE__", false, &BuiltinMacros.file);
@@ -1219,7 +1221,7 @@ fn stringify(pp: *Preprocessor, tokens: []const Token) !void {
     try pp.charBuffer.appendSlice("\"\n");
 }
 
-fn reconstructIncludeString(pp: *Preprocessor, paramTokens: []const Token) !?[]const u8 {
+fn reconstructIncludeString(pp: *Preprocessor, paramTokens: []const Token, embedArgs: ?*[]const Token) !?[]const u8 {
     const charTop = pp.charBuffer.items.len;
     defer pp.charBuffer.items.len = charTop;
 
@@ -1239,7 +1241,7 @@ fn reconstructIncludeString(pp: *Preprocessor, paramTokens: []const Token) !?[]c
     }
 
     // no string pasting
-    if (params[0].is(.StringLiteral) and params.len > 1) {
+    if (embedArgs == null and params[0].is(.StringLiteral) and params.len > 1) {
         try pp.comp.addDiagnostic(.{
             .tag = .closing_paren,
             .loc = params[1].loc,
@@ -1247,9 +1249,15 @@ fn reconstructIncludeString(pp: *Preprocessor, paramTokens: []const Token) !?[]c
         return null;
     }
 
-    for (params) |tok| {
+    for (params, 0..) |tok, i| {
         const str = pp.expandedSliceExtra(tok, .PreserveMacroWS);
         try pp.charBuffer.appendSlice(str);
+        if (embedArgs) |some| {
+            if ((i == 0 and tok.is(.StringLiteral)) or tok.is(.AngleBracketRight)) {
+                some.* = params[i + 1 ..];
+                break;
+            }
+        }
     }
 
     const includeStr = pp.charBuffer.items[charTop..];
@@ -1385,7 +1393,7 @@ fn handleBuiltinMacro(
         },
 
         .MacroParamHasInclude, .MacroParamHasIncludeNext => {
-            const includeStr = (try pp.reconstructIncludeString(paramTokens)) orelse return false;
+            const includeStr = (try pp.reconstructIncludeString(paramTokens, null)) orelse return false;
             const includeType: Compilation.IncludeType = switch (includeStr[0]) {
                 '"' => .Quotes,
                 '<' => .AngleBrackets,
@@ -1622,6 +1630,144 @@ fn expandFuncMacro(
                 };
                 const start = pp.comp.generatedBuffer.items.len;
                 try pp.comp.generatedBuffer.appendSlice(pp.gpa, result);
+                try buf.append(try pp.makeGeneratedToken(start, .PPNumber, tokenFromRaw(raw)));
+            },
+
+            .MacroParamHasEmbed => {
+                const arg = expandedArgs.items[0];
+                const notFound = "0\n";
+                const result = if (arg.len == 0) blk: {
+                    const extra = Diagnostics.Message.Extra{ .arguments = .{ .expected = 1, .actual = 0 } };
+                    try pp.comp.addDiagnostic(.{ .tag = .expected_arguments, .loc = loc, .extra = extra }, &.{});
+                    break :blk notFound;
+                } else res: {
+                    var embedArgs: []const Token = &.{};
+                    const includeStr = (try pp.reconstructIncludeString(arg, &embedArgs)) orelse
+                        break :res notFound;
+
+                    var prev = tokenFromRaw(raw);
+                    prev.id = .Eof;
+                    var it: struct {
+                        i: u32 = 0,
+                        slice: []const Token,
+                        prev: Token,
+                        fn next(it: *@This()) Token {
+                            while (it.i < it.slice.len) switch (it.slice[it.i].id) {
+                                .MacroWS, .WhiteSpace => it.i += 1,
+                                else => break,
+                            } else return it.prev;
+                            defer it.i += 1;
+
+                            it.prev = it.slice[it.i];
+                            it.prev.id = .Eof;
+                            return it.slice[it.i];
+                        }
+                    } = .{ .slice = embedArgs, .prev = prev };
+
+                    while (true) {
+                        const paramFirst = it.next();
+                        if (paramFirst.is(.Eof)) break;
+                        if (paramFirst.isNot(.Identifier)) {
+                            try pp.comp.addDiagnostic(
+                                .{ .tag = .malformed_embed_param, .loc = paramFirst.loc },
+                                paramFirst.expansionSlice(),
+                            );
+                            continue;
+                        }
+
+                        const charTop = pp.charBuffer.items.len;
+                        defer pp.charBuffer.items.len = charTop;
+
+                        const maybeColon = it.next();
+                        const param = switch (maybeColon.id) {
+                            .ColonColon => blk: {
+                                // vendor::param
+                                const param = it.next();
+                                if (param.isNot(.Identifier)) {
+                                    try pp.comp.addDiagnostic(
+                                        .{ .tag = .malformed_embed_param, .loc = param.loc },
+                                        param.expansionSlice(),
+                                    );
+                                    continue;
+                                }
+
+                                const lparen = it.next();
+                                if (lparen.isNot(.LParen)) {
+                                    try pp.comp.addDiagnostic(
+                                        .{ .tag = .malformed_embed_param, .loc = lparen.loc },
+                                        lparen.expansionSlice(),
+                                    );
+                                    continue;
+                                }
+                                break :blk "doesn't exist";
+                            },
+                            .LParen => Attribute.normalize(pp.expandedSlice(paramFirst)),
+                            else => {
+                                try pp.comp.addDiagnostic(
+                                    .{ .tag = .malformed_embed_param, .loc = maybeColon.loc },
+                                    maybeColon.expansionSlice(),
+                                );
+                                continue;
+                            },
+                        };
+
+                        var argCount: u32 = 0;
+                        var firstArg: Token = undefined;
+                        while (true) {
+                            const next = it.next();
+                            if (next.is(.Eof)) {
+                                try pp.comp.addDiagnostic(
+                                    .{ .tag = .malformed_embed_limit, .loc = paramFirst.loc },
+                                    paramFirst.expansionSlice(),
+                                );
+                                break;
+                            }
+                            if (next.is(.RParen)) break;
+
+                            argCount += 1;
+                            if (argCount == 1) firstArg = next;
+                        }
+
+                        if (std.mem.eql(u8, param, "limit")) {
+                            if (argCount != 1) {
+                                try pp.comp.addDiagnostic(
+                                    .{ .tag = .malformed_embed_limit, .loc = paramFirst.loc },
+                                    paramFirst.expansionSlice(),
+                                );
+                                continue;
+                            }
+                            if (firstArg.isNot(.PPNumber)) {
+                                try pp.comp.addDiagnostic(
+                                    .{ .tag = .malformed_embed_limit, .loc = paramFirst.loc },
+                                    paramFirst.expansionSlice(),
+                                );
+                                continue;
+                            }
+                            _ = std.fmt.parseInt(u32, pp.expandedSlice(firstArg), 10) catch {
+                                break :res notFound;
+                            };
+                        } else if (!std.mem.eql(u8, param, "prefix") and !std.mem.eql(u8, param, "suffix") and
+                            !std.mem.eql(u8, param, "if_empty"))
+                        {
+                            break :res notFound;
+                        }
+                    }
+
+                    const includeType: Compilation.IncludeType = switch (includeStr[0]) {
+                        '"' => .Quotes,
+                        '<' => .AngleBrackets,
+                        else => unreachable,
+                    };
+                    const filename = includeStr[1 .. includeStr.len - 1];
+                    const contents = (try pp.comp.findEmbed(filename, arg[0].loc.id, includeType, 1)) orelse
+                        break :res notFound;
+
+                    defer pp.comp.gpa.free(contents);
+                    break :res if (contents.len != 0) "1\n" else "2\n";
+                };
+
+                const start = pp.comp.generatedBuffer.items.len;
+                try pp.comp.generatedBuffer.appendSlice(pp.comp.gpa, result);
                 try buf.append(try pp.makeGeneratedToken(start, .PPNumber, tokenFromRaw(raw)));
             },
 

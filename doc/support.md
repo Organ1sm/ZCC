@@ -45,6 +45,7 @@
 - [x] `__has_extension`
 - [x] `__has_feature`
 - [x] `__has_include`
+- [x] [`__has_embed`](../test/cases//#embed.c)
 
 [There defined so many macros](https://github.com/Organ1sm/ZCC/blob/fbaff1263fc379bed20cb85c7099ea43f936dec8/src/Basic/Compilation.zig#L140)
 
