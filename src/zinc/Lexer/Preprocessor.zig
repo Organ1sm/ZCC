@@ -143,24 +143,24 @@ pub const LineMarkers = enum {
 
 const BuiltinMacros = struct {
     const args = [1][]const u8{"X"};
-    const hasAttribute = [1]RawToken{makeFeatCheckMacro(.MacroParamHasAttribute)};
-    const hasCAttribute = [1]RawToken{makeFeatCheckMacro(.MacroParamHasCAttribute)};
-    const hasDeclspecAttribute = [1]RawToken{makeFeatCheckMacro(.MacroParamHasDeclspecAttribute)};
-    const hasWarning = [1]RawToken{makeFeatCheckMacro(.MacroParamHasWarning)};
-    const hasFeature = [1]RawToken{makeFeatCheckMacro(.MacroParamHasFeature)};
-    const hasExtension = [1]RawToken{makeFeatCheckMacro(.MacroParamHasExtension)};
-    const hasBuiltin = [1]RawToken{makeFeatCheckMacro(.MacroParamHasBuiltin)};
-    const hasInclude = [1]RawToken{makeFeatCheckMacro(.MacroParamHasInclude)};
-    const hasIncludeNext = [1]RawToken{makeFeatCheckMacro(.MacroParamHasIncludeNext)};
-    const hasEmbed = [1]RawToken{makeFeatCheckMacro(.MacroParamHasEmbed)};
-    const isIdentifier = [1]RawToken{makeFeatCheckMacro(.MacroParamIsIdentifier)};
-    const file = [1]RawToken{makeFeatCheckMacro(.MacroFile)};
-    const line = [1]RawToken{makeFeatCheckMacro(.MacroLine)};
-    const counter = [1]RawToken{makeFeatCheckMacro(.MacroCounter)};
-    const pragmaOperator = [1]RawToken{makeFeatCheckMacro(.MacroParamPragmaOperator)};
+    const hasAttribute = makeFeatCheckMacro(.MacroParamHasAttribute);
+    const hasCAttribute = makeFeatCheckMacro(.MacroParamHasCAttribute);
+    const hasDeclspecAttribute = makeFeatCheckMacro(.MacroParamHasDeclspecAttribute);
+    const hasWarning = makeFeatCheckMacro(.MacroParamHasWarning);
+    const hasFeature = makeFeatCheckMacro(.MacroParamHasFeature);
+    const hasExtension = makeFeatCheckMacro(.MacroParamHasExtension);
+    const hasBuiltin = makeFeatCheckMacro(.MacroParamHasBuiltin);
+    const hasInclude = makeFeatCheckMacro(.MacroParamHasInclude);
+    const hasIncludeNext = makeFeatCheckMacro(.MacroParamHasIncludeNext);
+    const hasEmbed = makeFeatCheckMacro(.MacroParamHasEmbed);
+    const isIdentifier = makeFeatCheckMacro(.MacroParamIsIdentifier);
+    const file = makeFeatCheckMacro(.MacroFile);
+    const line = makeFeatCheckMacro(.MacroLine);
+    const counter = makeFeatCheckMacro(.MacroCounter);
+    const pragmaOperator = makeFeatCheckMacro(.MacroParamPragmaOperator);
 
-    inline fn makeFeatCheckMacro(id: TokenType) RawToken {
-        return .{ .id = id, .source = .generated };
+    inline fn makeFeatCheckMacro(id: TokenType) [1]RawToken {
+        return [1]RawToken{.{ .id = id, .source = .generated }};
     }
 };
 
