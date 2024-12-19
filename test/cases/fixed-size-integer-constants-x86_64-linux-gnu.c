@@ -1,4 +1,4 @@
-//zcc-args --target=x86_64-linux-gnu -std=c23
+//zinc-args --target=x86_64-linux-gnu -std=c23
 
 #include "test-helpers.h"
 

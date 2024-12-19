@@ -1,4 +1,4 @@
-/* <stdatomic.h> for the ZCC C compiler */
+/* <stdatomic.h> for the Zinc C compiler */
 
 #pragma once
 

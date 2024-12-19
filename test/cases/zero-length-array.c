@@ -1,4 +1,4 @@
-//zcc-args -Wzero-length-array
+//zinc-args -Wzero-length-array
 
 struct S {
     int x;

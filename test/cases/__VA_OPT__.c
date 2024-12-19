@@ -1,4 +1,4 @@
-//zcc-args -E -P
+//zinc-args -E -P
 #define foo(...) __VA_OPT__(1, 2, ) __VA_OPT__(3, 4)
 foo(1)
 

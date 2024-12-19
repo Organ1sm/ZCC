@@ -1,4 +1,4 @@
-//zcc-args --target=x86_64-windows-msvc
+//zinc-args --target=x86_64-windows-msvc
 
 typedef struct {
     _Bool a: 4;

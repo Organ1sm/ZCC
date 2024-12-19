@@ -1,4 +1,4 @@
-//zcc-args -std=c17
+//zinc-args -std=c17
 
 void foo(void) {
     char8_t c = 0;

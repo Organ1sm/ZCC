@@ -1,4 +1,4 @@
-//zcc-args --target=x86_64-linux
+//zinc-args --target=x86_64-linux
 void cleanup_fn(void) {}
 void foo(void) {
     int __attribute__((access)) bar_1;

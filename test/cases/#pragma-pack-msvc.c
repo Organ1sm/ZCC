@@ -1,4 +1,4 @@
-//zcc-args --emulate=msvc
+//zinc-args --emulate=msvc
 
 struct A {
     char c;

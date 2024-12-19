@@ -1,4 +1,4 @@
-//zcc-args --target=x86_64-linux-gnu
+//zinc-args --target=x86_64-linux-gnu
 
 enum Small {
 	A

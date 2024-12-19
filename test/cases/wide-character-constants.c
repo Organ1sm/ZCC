@@ -1,4 +1,4 @@
-//zcc-args -Wfour-char-constants -Wno-c23-extensions
+//zinc-args -Wfour-char-constants -Wno-c23-extensions
 /*
 
     A multiline comment to test that the linenumber is correct.

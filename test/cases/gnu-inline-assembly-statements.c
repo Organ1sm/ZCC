@@ -1,4 +1,4 @@
-//zcc-args --target=x86-linux-gnu -pedantic
+//zinc-args --target=x86-linux-gnu -pedantic
 
 // Note: examples taken from here: https://gcc.gnu.org/onlinedocs/gcc/Extended-Asm.html
 // Some examples do not use real instructions or register names, which may cause failures once we do

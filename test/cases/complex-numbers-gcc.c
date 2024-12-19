@@ -1,4 +1,4 @@
-//zcc-args -std=c23 --emulate=gcc
+//zinc-args -std=c23 --emulate=gcc
 
 void foo(int x, float y) {
     _Static_assert(__imag(42) == 0);

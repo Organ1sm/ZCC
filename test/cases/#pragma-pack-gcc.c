@@ -1,4 +1,4 @@
-//zcc-args --emulate=gcc
+//zinc-args --emulate=gcc
 
 struct A {
     char c;

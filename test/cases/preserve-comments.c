@@ -1,4 +1,4 @@
-//zcc-args -E -P -C
+//zinc-args -E -P -C
 #define a() 1 /*foo*/ ## /*bar*/ 2
 a()
 

@@ -1,4 +1,4 @@
-//zcc-args -E -std=c99 -P
+//zinc-args -E -std=c99 -P
 
 #define ZERO_ARGS(...) foo(a, ##__VA_ARGS__)
 

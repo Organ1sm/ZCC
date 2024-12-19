@@ -1,4 +1,4 @@
-//zcc-args --target=x86_64-linux-gnu -funsigned-char -Wno-integer-overflow
+//zinc-args --target=x86_64-linux-gnu -funsigned-char -Wno-integer-overflow
 
 _Static_assert(__CHAR_UNSIGNED__ == 1, "");
 _Static_assert((char)-1 == 0xFF, "char should be unsigned");

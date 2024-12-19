@@ -1,5 +1,5 @@
-//zcc-args -E -P
-//zcc-env SourceDateEpoch=0
+//zinc-args -E -P
+//zinc-env SourceDateEpoch=0
 
 __DATE__
 __TIME__

@@ -1,4 +1,4 @@
-//zcc-args -fms-extensions -Wno-microsoft-include
+//zinc-args -fms-extensions -Wno-microsoft-include
 
 #include "include\other.h"
 

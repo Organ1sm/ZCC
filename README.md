@@ -1,4 +1,4 @@
-# ZCC
+# Zcc - Zinc C Compiler
 
 A C compiler with the goal of providing fast compilation and low memory usage with good diagnostics.
 

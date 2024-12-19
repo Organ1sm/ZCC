@@ -26,12 +26,12 @@ pub fn main() u8 {
 
     const fastExit = @import("builtin").mode != .Debug;
 
-    const zccName = std.fs.selfExePathAlloc(gpa) catch {
-        std.debug.print("unable to find Zcc executable path\n", .{});
+    const zincName = std.fs.selfExePathAlloc(gpa) catch {
+        std.debug.print("unable to find Zinc executable path\n", .{});
         if (fastExit) process.exit(1);
         return 1;
     };
-    defer gpa.free(zccName);
+    defer gpa.free(zincName);
 
     var comp = Compilation.initDefault(gpa) catch |er| switch (er) {
         error.OutOfMemory => {
@@ -42,7 +42,7 @@ pub fn main() u8 {
     };
     defer comp.deinit();
 
-    var driver = Driver{ .comp = &comp, .zccName = zccName };
+    var driver = Driver{ .comp = &comp, .zincName = zincName };
     defer driver.deinit();
 
     var toolChain: Toolchain = .{ .driver = &driver, .arena = arena };

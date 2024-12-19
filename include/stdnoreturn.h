@@ -1,4 +1,4 @@
-/* <stdnoreturn.h> for the ZCC C compiler */
+/* <stdnoreturn.h> for the Zinc C compiler */
 
 #pragma once
 

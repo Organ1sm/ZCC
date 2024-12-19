@@ -1,4 +1,4 @@
-//zcc-args --target=x86_64-windows-msvc
+//zinc-args --target=x86_64-windows-msvc
 
 enum Small {
 	A

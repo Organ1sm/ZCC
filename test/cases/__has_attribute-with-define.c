@@ -1,4 +1,4 @@
-//zcc-args -E -P
+//zinc-args -E -P
 
 #define foo __has_attribute(used)
 #define bar 1 + __has_attribute(does_not_exist)

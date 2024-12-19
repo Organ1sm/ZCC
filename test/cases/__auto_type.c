@@ -1,4 +1,4 @@
-//zcc-args -Wno-gnu-alignof-expression
+//zinc-args -Wno-gnu-alignof-expression
 #include "test-helpers.h"
 __auto_type foo(void);
 __auto_type foo1(void) {}

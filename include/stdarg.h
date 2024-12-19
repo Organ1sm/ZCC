@@ -1,4 +1,4 @@
-/* <stdarg.h> for the ZCC C compiler */
+/* <stdarg.h> for the Zinc C compiler */
 
 #pragma once
 /* Todo: Set to 202311L once header is compliant with C23 */

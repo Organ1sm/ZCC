@@ -1,4 +1,4 @@
-//zcc-args -pedantic
+//zinc-args -pedantic
 #define int foo
 #define include hello
 #include <stdbool.h>

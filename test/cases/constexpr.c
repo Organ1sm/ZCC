@@ -1,4 +1,4 @@
-//zcc-args -std=c23 -Wpedantic
+//zinc-args -std=c23 -Wpedantic
 
 constexpr int a = 1;
 static constexpr int b = 2;

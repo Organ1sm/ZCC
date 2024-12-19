@@ -1,4 +1,4 @@
-/* <stdbool.h> for the ZCC C compiler */
+/* <stdbool.h> for the Zinc C compiler */
 
 #pragma once
 

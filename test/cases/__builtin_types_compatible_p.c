@@ -1,4 +1,4 @@
-//zcc-args -std=c23
+//zinc-args -std=c23
 
 #if !__has_builtin(__builtin_types_compatible_p)
 #error Missing builtin __builtin_types_compatible_p

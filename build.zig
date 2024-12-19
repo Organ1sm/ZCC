@@ -13,7 +13,7 @@ pub fn build(b: *std.Build) !void {
     const EnableLinkerBuildId = b.option(bool, "enable-linker-build-id", "pass --build-id to linker") orelse false;
     const TestAllAllocationFailures = b.option(bool, "test-all-allocation-failures", "Test all allocation failures") orelse false;
     const LinkLibc = b.option(bool, "link-libc", "Force self-hosted compile to link libc") orelse (mode != .Debug);
-    const DefaultLinker = b.option([]const u8, "default-linker", "Default linker zcc will use if none is supplied via -fuse-ld") orelse "ld";
+    const DefaultLinker = b.option([]const u8, "default-linker", "Default linker zinc will use if none is supplied via -fuse-ld") orelse "ld";
     const DefaultSysroot = b.option([]const u8, "default-sysroot", "Default <path> to all compiler invocations for --sysroot=<path>.") orelse "";
     const DefaultRtlib = b.option([]const u8, "default-rtlib", "Default compiler runtime library if --rtlib is not specified") orelse "";
     const DefaultUnwindlib = b.option([]const u8, "default-unwindlib", "Default unwind library to use (\"none\" \"libgcc\" or \"libunwind\", empty to match runtime library.)") orelse

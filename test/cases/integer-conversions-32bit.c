@@ -1,4 +1,4 @@
-//zcc-args --target=x86-linux-gnu -Wno-unused-value -Wno-c23-extensions
+//zinc-args --target=x86-linux-gnu -Wno-unused-value -Wno-c23-extensions
 #include "include/test-helpers.h"
 
 void foo(void) {

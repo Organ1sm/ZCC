@@ -1,4 +1,4 @@
-//zcc-args -Wgnu-include-next -Wno-gnu-alignof-expression
+//zinc-args -Wgnu-include-next -Wno-gnu-alignof-expression
 #include <my-include.h> // test/cases/include/my_include.h
 #include_next <stdalign.h>
 #include_next "global-var.h"

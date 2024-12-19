@@ -1,4 +1,4 @@
-//zcc-args -Wno-sizeof-array-argument
+//zinc-args -Wno-sizeof-array-argument
 void foo(void) {
     char a[1];
     _Static_assert(sizeof(((void)0, a)) == sizeof(char *), "");

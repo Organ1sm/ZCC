@@ -1,7 +1,7 @@
 const std = @import("std");
 const assert = std.debug.assert;
 const print = std.debug.print;
-const zcc = @import("zcc");
+const zinc = @import("zinc");
 
 /// These tests don't work for any platform due to bugs.
 /// Skip entirely.
@@ -221,7 +221,7 @@ fn runTestCases(
 fn singleRun(alloc: std.mem.Allocator, testDir: []const u8, testCase: TestCase, stats: *Stats) !void {
     const path = testCase.path;
 
-    var comp = zcc.Compilation.init(alloc);
+    var comp = zinc.Compilation.init(alloc);
     defer comp.deinit();
 
     try comp.addDefaultPragmaHandlers();
@@ -233,7 +233,7 @@ fn singleRun(alloc: std.mem.Allocator, testDir: []const u8, testCase: TestCase, 
     switch (target.os.tag) {
         .hermit => {
             stats.recordResult(.invalidTarget);
-            return; // Skip targets zcc doesn't support.
+            return; // Skip targets zinc doesn't support.
         },
         else => {},
     }
@@ -260,7 +260,7 @@ fn singleRun(alloc: std.mem.Allocator, testDir: []const u8, testCase: TestCase, 
     var macroBuffer = std.ArrayList(u8).init(comp.gpa);
     defer macroBuffer.deinit();
 
-    comp.langOpts.setEmulatedCompiler(zcc.TargetUtil.systemCompiler(comp.target));
+    comp.langOpts.setEmulatedCompiler(zinc.TargetUtil.systemCompiler(comp.target));
 
     const macroWriter = macroBuffer.writer();
     try macroWriter.print("#define {s}\n", .{testCase.c_define});
@@ -272,7 +272,7 @@ fn singleRun(alloc: std.mem.Allocator, testDir: []const u8, testCase: TestCase, 
     const userMacros = try comp.addSourceFromBuffer("<command line>", macroBuffer.items);
     const builtinMacros = try comp.generateBuiltinMacros();
 
-    var pp = zcc.Preprocessor.init(&comp);
+    var pp = zinc.Preprocessor.init(&comp);
     defer pp.deinit();
     try pp.addBuiltinMacros();
 
@@ -285,7 +285,7 @@ fn singleRun(alloc: std.mem.Allocator, testDir: []const u8, testCase: TestCase, 
     };
     try pp.tokens.append(alloc, eof);
 
-    var tree = try zcc.Parser.parse(&pp);
+    var tree = try zinc.Parser.parse(&pp);
     defer tree.deinit();
     tree.dump(false, std.io.null_writer) catch {};
 
@@ -308,7 +308,7 @@ fn singleRun(alloc: std.mem.Allocator, testDir: []const u8, testCase: TestCase, 
     if (comp.diagnostics.list.items.len == 0 and expected.any()) {
         std.debug.print("\nTest Passed when failures expected:\n\texpected:{any}\n", .{expected});
     } else {
-        var m = zcc.Diagnostics.defaultMsgWriter(&comp);
+        var m = zinc.Diagnostics.defaultMsgWriter(&comp);
         defer m.deinit();
 
         var actual = ExpectedFailure{};
@@ -337,7 +337,7 @@ fn singleRun(alloc: std.mem.Allocator, testDir: []const u8, testCase: TestCase, 
         if (!expected.eql(actual)) {
             m.print("\nexp:{any}\nact:{any}\n", .{ expected, actual });
             for (comp.diagnostics.list.items) |msg| {
-                zcc.Diagnostics.renderMessage(&comp, &m, msg);
+                zinc.Diagnostics.renderMessage(&comp, &m, msg);
             }
             stats.recordResult(.fail);
         } else if (actual.any()) {
@@ -372,7 +372,7 @@ fn getTarget(zig_target_string: []const u8) !std.Target {
     return ret;
 }
 
-fn setTarget(comp: *zcc.Compilation, target: []const u8) !std.Target {
+fn setTarget(comp: *zinc.Compilation, target: []const u8) !std.Target {
     const compiler_split_index = std.mem.indexOf(u8, target, ":").?;
 
     const zig_target = try getTarget(target[0..compiler_split_index]);
@@ -381,7 +381,7 @@ fn setTarget(comp: *zcc.Compilation, target: []const u8) !std.Target {
     comp.target.os.version_range = zig_target.os.version_range;
     comp.target.abi = zig_target.abi;
 
-    comp.langOpts.emulate = zcc.TargetUtil.systemCompiler(comp.target);
+    comp.langOpts.emulate = zinc.TargetUtil.systemCompiler(comp.target);
 
     const expected_compiler_name = target[compiler_split_index + 1 ..];
     const set_name = @tagName(comp.langOpts.emulate);

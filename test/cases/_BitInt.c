@@ -1,4 +1,4 @@
-//zcc-args -std=c17 -Wpedantic
+//zinc-args -std=c17 -Wpedantic
 
 _BitInt(17) a;
 

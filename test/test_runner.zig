@@ -19,7 +19,7 @@ fn addCommandLineArgs(
 ) !struct { bool, zinc.Preprocessor.LineMarkers } {
     var onlyPreprocess = false;
     var lineMarkers: zinc.Preprocessor.LineMarkers = .None;
-    if (std.mem.startsWith(u8, file.buffer, "//zcc-args")) {
+    if (std.mem.startsWith(u8, file.buffer, "//zinc-args")) {
         var testArgs = std.ArrayList([]const u8).init(comp.gpa);
         defer testArgs.deinit();
 
@@ -38,7 +38,7 @@ fn addCommandLineArgs(
         }
     }
 
-    if (std.mem.indexOf(u8, file.buffer, "//zcc-env")) |idx| {
+    if (std.mem.indexOf(u8, file.buffer, "//zinc-env")) |idx| {
         const buf = file.buffer[idx..];
         const nl = std.mem.indexOfAny(u8, buf, "\n\r") orelse buf.len;
         var it = std.mem.tokenizeScalar(u8, buf[0..nl], ' ');

@@ -1,4 +1,4 @@
-//zcc-args -fno-gnu-inline-asm
+//zinc-args -fno-gnu-inline-asm
 
 __asm__("foo");
 __asm__("");

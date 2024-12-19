@@ -1,4 +1,4 @@
-//zcc-args -Wvla
+//zinc-args -Wvla
 void foo(int x) {
     int arr[x];
 }

@@ -1,4 +1,4 @@
-/* <iso646.h> for the ZCC C compiler */
+/* <iso646.h> for the Zinc C compiler */
 
 #pragma once
 

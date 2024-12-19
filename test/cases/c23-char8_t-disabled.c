@@ -1,4 +1,4 @@
-//zcc-args -std=c23 -fno-char8_t
+//zinc-args -std=c23 -fno-char8_t
 
 void foo(void) {
     char8_t c = 0;

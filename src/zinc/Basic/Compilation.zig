@@ -59,7 +59,7 @@ pub const Environment = struct {
     sourceDateEpoch: ?[]const u8 = null,
 
     /// Load all of the environment variables using the std.process API.
-    /// Do not use if using zcc as a shared library on Linux without libc
+    /// Do not use if using zinc as a shared library on Linux without libc
     /// See https://github.com/ziglang/zig/issues/4524
     pub fn loadAll(allocator: std.mem.Allocator) !Environment {
         var env: Environment = .{};
@@ -241,9 +241,9 @@ pub fn generateBuiltinMacros(comp: *Compilation) !Source {
 
     // Standard macros
     try w.writeAll(
-        \\#define __VERSION__ "Zcc 
+        \\#define __VERSION__ "Zinc 
     ++ @import("backend").VersionStr ++ "\"\n" ++
-        \\#define __Zcc__
+        \\#define __Zinc__
         \\#define __STDC__ 1
         \\#define __STDC_HOSTED__ 1
         \\#define __STDC_NO_ATOMICS__ 1
@@ -807,7 +807,7 @@ pub fn getCharSignedness(comp: *const Compilation) std.builtin.Signedness {
     return comp.langOpts.charSignednessOverride orelse comp.target.charSignedness();
 }
 
-/// Define the system header file include directories for Zcc
+/// Define the system header file include directories for Zinc
 ///
 /// This function will search the directory containing the executable,
 /// and recursively go upwards to find a directory containing stddef.h
@@ -822,11 +822,11 @@ pub fn getCharSignedness(comp: *const Compilation) std.builtin.Signedness {
 ///
 /// Errors:
 /// - SelfExeNotFound: Failed to obtain self executable path
-/// - ZccIncludeNotFound: Did not find system include directory
-pub fn defineSystemIncludes(comp: *Compilation, zccDir: []const u8) !void {
+/// - ZincIncludeNotFound: Did not find system include directory
+pub fn defineSystemIncludes(comp: *Compilation, zincDir: []const u8) !void {
     var stackFallback = std.heap.stackFallback(PathBufferStackLimit, comp.gpa);
     const allocator = stackFallback.get();
-    var searchPath = zccDir;
+    var searchPath = zincDir;
 
     while (std.fs.path.dirname(searchPath)) |dirname| : (searchPath = dirname) {
         var baseDir = std.fs.cwd().openDir(dirname, .{}) catch continue;
@@ -839,7 +839,7 @@ pub fn defineSystemIncludes(comp: *Compilation, zccDir: []const u8) !void {
         try comp.systemIncludeDirs.append(comp.gpa, path);
 
         break;
-    } else return error.ZccIncludeNotFound;
+    } else return error.ZincIncludeNotFound;
 
     if (comp.target.os.tag == .linux) {
         const tripleStr = try comp.target.linuxTriple(allocator);

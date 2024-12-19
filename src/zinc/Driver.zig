@@ -48,8 +48,8 @@ dumpTokens: bool = false,
 dumpRawTokens: bool = false,
 dumpLinkerArgs: bool = false,
 
-/// name of the zcc executable
-zccName: []const u8 = "",
+/// name of the zinc executable
+zincName: []const u8 = "",
 
 /// Value of --triple= passed via CLI
 rawTargetTriple: ?[]const u8 = null,
@@ -88,7 +88,7 @@ const usage =
     \\
     \\General Options:
     \\  -h, --help      Print this message.
-    \\  -v, --version   Print ZCC version.
+    \\  -v, --version   Print Zinc version.
     \\ 
     \\Compile Options:
     \\  -c, --compile           Only run preprocess, compile, and assemble steps
@@ -467,7 +467,7 @@ pub fn fatal(d: *Driver, comptime fmt: []const u8, args: anytype) error{FatalErr
     return d.comp.diagnostics.fatalNoSrc(fmt, args);
 }
 
-/// The entry point of the Zcc compiler.
+/// The entry point of the Zinc compiler.
 /// **MAY call `exit` if `fast_exit` is set.**
 pub fn main(d: *Driver, tc: *Toolchain, args: [][]const u8, comptime fastExit: bool) !void {
     var macroBuffer = std.ArrayList(u8).init(d.comp.gpa);
@@ -489,9 +489,9 @@ pub fn main(d: *Driver, tc: *Toolchain, args: [][]const u8, comptime fastExit: b
         for (d.linkObjects.items) |obj|
             try d.comp.addDiagnostic(.{ .tag = .cli_unused_link_object, .extra = .{ .str = obj } }, &.{});
 
-    d.comp.defineSystemIncludes(d.zccName) catch |er| switch (er) {
+    d.comp.defineSystemIncludes(d.zincName) catch |er| switch (er) {
         error.OutOfMemory => return error.OutOfMemory,
-        error.ZccIncludeNotFound => return d.fatal("unable to find ZCC builtin headers", .{}),
+        error.ZincIncludeNotFound => return d.fatal("unable to find Zinc builtin headers", .{}),
     };
 
     const builtinMacros = try d.comp.generateBuiltinMacros();

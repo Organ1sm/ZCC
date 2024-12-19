@@ -1,4 +1,4 @@
-//zcc-args -E -Wgnu-zero-variadic-macro-arguments -P
+//zinc-args -E -Wgnu-zero-variadic-macro-arguments -P
 
 #define eprintf(format, ...) fprintf (stderr, format, ##__VA_ARGS__)
 eprintf("foo");

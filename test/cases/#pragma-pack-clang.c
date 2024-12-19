@@ -1,4 +1,4 @@
-//zcc-args --emulate=clang
+//zinc-args --emulate=clang
 
 struct A {
     char c;

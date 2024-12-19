@@ -1,4 +1,4 @@
-//zcc-args -std=c23
+//zinc-args -std=c23
 bool a = true;
 bool b = false;
 bool c = 0;

@@ -1,4 +1,4 @@
-//zcc-args -Wno-int-conversion
+//zinc-args -Wno-int-conversion
 union U {
     int x;
     float y;

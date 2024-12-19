@@ -1,4 +1,4 @@
-//zcc-args -E -P
+//zinc-args -E -P
 
 #define CAT(a, ...) a ## __VA_ARGS__
 #define M(val) val

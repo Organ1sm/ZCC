@@ -1,4 +1,4 @@
-//zcc-args -fdeclspec
+//zinc-args -fdeclspec
 
 #pragma GCC diagnostic ignored "-Wgnu-alignof-expression"
 

@@ -1,4 +1,4 @@
-//zcc-args -E -P -C
+//zinc-args -E -P -C
 12
 12
 1

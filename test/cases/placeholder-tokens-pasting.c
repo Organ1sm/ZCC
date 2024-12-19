@@ -1,4 +1,4 @@
-//zcc-args -E -P
+//zinc-args -E -P
 
 #define CAT(a, b) a##b
 #define CAT2(a, b) (a##b)

@@ -1,4 +1,4 @@
-//zcc-args -std=c23 -pedantic
+//zinc-args -std=c23 -pedantic
 #include <stdbool.h>
 static_assert(1 == 1);
 static_assert(alignof(char) == 1);

@@ -1,4 +1,4 @@
-//zcc-args -E -P
+//zinc-args -E -P
 
 #define REC_EMPTY
 #define REC_DEFER(op) op REC_EMPTY

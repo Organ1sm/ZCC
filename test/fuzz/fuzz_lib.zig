@@ -1,13 +1,13 @@
 const std = @import("std");
-const zcc = @import("zcc");
+const zinc = @import("zinc");
 const mem = std.mem;
 const Allocator = mem.Allocator;
 const process = std.process;
-const Codegen = zcc.CodeGen;
-const Compilation = zcc.Compilation;
-const Source = zcc.Source;
-const Preprocessor = zcc.Preprocessor;
-const Parser = zcc.Parser;
+const Codegen = zinc.CodeGen;
+const Compilation = zinc.Compilation;
+const Source = zinc.Source;
+const Preprocessor = zinc.Preprocessor;
+const Parser = zinc.Parser;
 
 var fixed_buffer_mem: [10 * 1024 * 1024]u8 = undefined;
 

@@ -1,4 +1,4 @@
-//zcc-args -E -P
+//zinc-args -E -P
 
 #define F(x) G(x)
 #define G(x) F(x)

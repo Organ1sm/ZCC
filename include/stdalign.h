@@ -1,4 +1,4 @@
-/* <stdalign.h> for the ZCC C compiler */
+/* <stdalign.h> for the Zinc C compiler */
 
 #pragma once
 

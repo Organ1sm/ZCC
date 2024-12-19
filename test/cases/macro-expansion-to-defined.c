@@ -1,4 +1,4 @@
-//zcc-args -Wexpansion-to-defined
+//zinc-args -Wexpansion-to-defined
 
 #define FOO_IS_DEFINED defined(FOO)
 

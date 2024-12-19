@@ -1,4 +1,4 @@
-//zcc-args --target=aarch64-linux-gnu -fsigned-char -Wno-integer-overflow
+//zinc-args --target=aarch64-linux-gnu -fsigned-char -Wno-integer-overflow
 
 #if defined __CHAR_UNSIGNED__
 #error char should be signed

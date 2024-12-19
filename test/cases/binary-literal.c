@@ -1,4 +1,4 @@
-//zcc-args -Wpedantic
+//zinc-args -Wpedantic
 void foo() {
   0b11;
 }

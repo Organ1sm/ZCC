@@ -1,4 +1,4 @@
-//zcc-args -std=c23
+//zinc-args -std=c23
 #include <stdint.h>
 typedef __WCHAR_TYPE__ wchar_t;
 

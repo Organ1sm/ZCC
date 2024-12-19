@@ -1,4 +1,4 @@
-/* <limits.h> for the ZCC C compiler */
+/* <limits.h> for the Zinc C compiler */
 
 #pragma once
 

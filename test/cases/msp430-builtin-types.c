@@ -1,4 +1,4 @@
-//zcc-args --target=msp430-other-none
+//zinc-args --target=msp430-other-none
 #include <stddef.h>
 #include <stdarg.h>
 

@@ -1,4 +1,4 @@
-//zcc-args -E -P
+//zinc-args -E -P
 #define LINE __LINE__
 
 void foo(void) {

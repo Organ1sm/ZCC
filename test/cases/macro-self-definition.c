@@ -1,4 +1,4 @@
-//zcc-args -E -P
+//zinc-args -E -P
 #define FOO FOO
 
 FOO
