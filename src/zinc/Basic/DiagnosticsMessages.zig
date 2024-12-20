@@ -262,6 +262,7 @@ pub const spec_from_typedef = struct {
 pub const param_before_var_args = struct {
     pub const msg = "ISO C requires a named parameter before '...'";
     pub const kind = .@"error";
+    pub const suppress_version = .c23;
 };
 pub const void_only_param = struct {
     pub const msg = "'void' must be the only parameter if specified";
