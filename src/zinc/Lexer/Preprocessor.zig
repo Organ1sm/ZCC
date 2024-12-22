@@ -3163,7 +3163,23 @@ fn printLinemarker(
     try w.writeByte('#');
     if (pp.linemarkers == .LineDirectives) try w.writeAll("line");
     // lineNo is 0 indexed.
-    try w.print(" {d} \"{s}\"", .{ lineNO + 1, source.path });
+    try w.print(" {d} \"", .{lineNO + 1});
+    for (source.path) |byte| switch (byte) {
+        '\n' => try w.writeAll("\\n"),
+        '\r' => try w.writeAll("\\r"),
+        '\t' => try w.writeAll("\\t"),
+        '\\' => try w.writeAll("\\\\"),
+        '"' => try w.writeAll("\\\""),
+        ' ', '!', '#'...'&', '('...'[', ']'...'~' => try w.writeByte(byte),
+        // Use hex escapes for any non-ASCII/unprintable characters.
+        // This ensures that the parsed version of this string will end up
+        // containing the same bytes as the input regardless of encoding.
+        else => {
+            try w.writeAll("\\x");
+            try std.fmt.formatInt(byte, 16, .lower, .{ .width = 2, .fill = '0' }, w);
+        },
+    };
+    try w.writeByte('"');
     if (pp.linemarkers == .NumericDirectives) {
         switch (start_resume) {
             .none => {},
