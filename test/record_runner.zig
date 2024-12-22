@@ -287,10 +287,10 @@ fn singleRun(alloc: std.mem.Allocator, testDir: []const u8, testCase: TestCase, 
 
     var tree = try zinc.Parser.parse(&pp);
     defer tree.deinit();
-    tree.dump(false, std.io.null_writer) catch {};
+    tree.dump(.no_color, std.io.null_writer) catch {};
 
     if (testSingleTarget) {
-        comp.renderErrors();
+        zinc.Diagnostics.render(&comp, std.io.tty.detectConfig(std.io.getStdErr()));
         return;
     }
 
@@ -308,7 +308,7 @@ fn singleRun(alloc: std.mem.Allocator, testDir: []const u8, testCase: TestCase, 
     if (comp.diagnostics.list.items.len == 0 and expected.any()) {
         std.debug.print("\nTest Passed when failures expected:\n\texpected:{any}\n", .{expected});
     } else {
-        var m = zinc.Diagnostics.defaultMsgWriter(&comp);
+        var m = zinc.Diagnostics.defaultMsgWriter(std.io.tty.detectConfig(std.io.getStdErr()));
         defer m.deinit();
 
         var actual = ExpectedFailure{};

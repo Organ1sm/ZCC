@@ -5,9 +5,9 @@ const process = std.process;
 const backend = @import("backend");
 const IR = backend.Ir;
 const Object = backend.Object;
-const Util = backend.Util;
 const CodeGen = @import("CodeGen/CodeGen.zig");
 const Compilation = @import("Basic/Compilation.zig");
+const Diagnostic = @import("Basic/Diagnostics.zig");
 const LangOpts = @import("Basic/LangOpts.zig");
 const Lexer = @import("Lexer/Lexer.zig");
 const Preprocessor = @import("Lexer/Preprocessor.zig");
@@ -47,6 +47,7 @@ dumpIR: bool = false,
 dumpTokens: bool = false,
 dumpRawTokens: bool = false,
 dumpLinkerArgs: bool = false,
+color: ?bool = true,
 
 /// name of the zinc executable
 zincName: []const u8 = "",
@@ -179,8 +180,6 @@ pub fn parseArgs(
     macroBuffer: anytype,
     args: [][]const u8,
 ) !bool {
-    var colorSetting: enum { on, off, unset } = .unset;
-
     var commentArg: []const u8 = "";
     var i: usize = 1;
     while (i < args.len) : (i += 1) {
@@ -188,12 +187,12 @@ pub fn parseArgs(
         if (std.mem.startsWith(u8, arg, "-") and arg.len > 1) {
             if (std.mem.eql(u8, arg, "-h") or std.mem.eql(u8, arg, "--help")) {
                 stdOut.print(usage, .{args[0]}) catch |er| {
-                    return d.fatal("unable to print usage: {s}", .{Util.errorDescription(er)});
+                    return d.fatal("unable to print usage: {s}", .{errorDescription(er)});
                 };
                 return true;
             } else if (std.mem.eql(u8, arg, "-v") or std.mem.eql(u8, arg, "--version")) {
                 stdOut.writeAll(@import("backend").VersionStr ++ "\n") catch |er| {
-                    return d.fatal("unable to print version: {s}", .{Util.errorDescription(er)});
+                    return d.fatal("unable to print version: {s}", .{errorDescription(er)});
                 };
                 return true;
             } else if (std.mem.startsWith(u8, arg, "-D")) {
@@ -239,9 +238,9 @@ pub fn parseArgs(
             } else if (mem.eql(u8, arg, "-fno-char8_t")) {
                 d.comp.langOpts.hasChar8tOverride = false;
             } else if (std.mem.eql(u8, arg, "-fcolor-diagnostics")) {
-                colorSetting = .on;
+                d.color = true;
             } else if (std.mem.eql(u8, arg, "-fno-color-diagnostics")) {
-                colorSetting = .off;
+                d.color = false;
             } else if (std.mem.eql(u8, arg, "-fshort-enums")) {
                 d.comp.langOpts.shortEnums = true;
             } else if (std.mem.eql(u8, arg, "-fno-short-enums")) {
@@ -355,7 +354,7 @@ pub fn parseArgs(
                     continue;
                 };
                 const target = std.zig.system.resolveTargetQuery(query) catch |e| {
-                    return d.fatal("unable to resolve target: {s}", .{Util.errorDescription(e)});
+                    return d.fatal("unable to resolve target: {s}", .{errorDescription(e)});
                 };
                 d.comp.target = target;
                 d.comp.langOpts.setEmulatedCompiler(Target.systemCompiler(d.comp.target));
@@ -430,17 +429,11 @@ pub fn parseArgs(
             try d.linkObjects.append(d.comp.gpa, arg);
         } else {
             const file = d.addSource(arg) catch |er| {
-                return d.fatal("unable to add source file '{s}': {s}", .{ arg, Util.errorDescription(er) });
+                return d.fatal("unable to add source file '{s}': {s}", .{ arg, errorDescription(er) });
             };
             try d.inputs.append(d.comp.gpa, file);
         }
     }
-
-    d.comp.diagnostics.color = switch (colorSetting) {
-        .on => true,
-        .off => false,
-        .unset => Util.fileSupportsColor(std.io.getStdOut()) and !std.process.hasEnvVarConstant("NO_COLOR"),
-    };
 
     if (d.comp.langOpts.preserveComments and !d.onlyPreprocess)
         return d.fatal("invalid argument '{s}' only allowed with '-E'", .{commentArg});
@@ -462,9 +455,59 @@ pub fn err(d: *Driver, msg: []const u8) !void {
     try d.comp.addDiagnostic(.{ .tag = .cli_error, .extra = .{ .str = msg } }, &.{});
 }
 
-pub fn fatal(d: *Driver, comptime fmt: []const u8, args: anytype) error{FatalError} {
-    d.comp.renderErrors();
-    return d.comp.diagnostics.fatalNoSrc(fmt, args);
+pub fn fatal(d: *Driver, comptime fmt: []const u8, args: anytype) error{ FatalError, OutOfMemory } {
+    try d.comp.diagnostics.list.append(d.comp.gpa, .{
+        .tag = .cli_error,
+        .kind = .@"fatal error",
+        .extra = .{ .str = try std.fmt.allocPrint(d.comp.diagnostics.arena.allocator(), fmt, args) },
+    });
+    return error.FatalError;
+}
+
+pub fn renderErrors(d: *Driver) void {
+    Diagnostic.render(d.comp, d.detectConfig(std.io.getStdErr()));
+}
+
+pub fn detectConfig(d: *Driver, file: std.fs.File) std.io.tty.Config {
+    if (d.color == true) return .escape_codes;
+    if (d.color == false) return .no_color;
+
+    if (file.supportsAnsiEscapeCodes()) return .escape_codes;
+    if (@import("builtin").os.tag == .windows and file.isTty()) {
+        var info: std.os.windows.CONSOLE_SCREEN_BUFFER_INFO = undefined;
+        if (std.os.windows.kernel32.GetConsoleScreenBufferInfo(file.handle, &info) != std.os.windows.TRUE) {
+            return .no_color;
+        }
+        return .{
+            .windows_api = .{
+                .handle = file.handle,
+                .reset_attributes = info.wAttributes,
+            },
+        };
+    }
+
+    return .no_color;
+}
+
+pub fn errorDescription(e: anyerror) []const u8 {
+    return switch (e) {
+        error.OutOfMemory => "ran out of memory",
+        error.FileNotFound => "file not found",
+        error.IsDir => "is a directory",
+        error.NotDir => "is not a directory",
+        error.NotOpenForReading => "file is not open for reading",
+        error.NotOpenForWriting => "file is not open for writing",
+        error.InvalidUtf8 => "input is not valid UTF-8",
+        error.FileBusy => "file is busy",
+        error.NameTooLong => "file name is too long",
+        error.AccessDenied => "access denied",
+        error.FileTooBig => "file is too big",
+        error.ProcessFdQuotaExceeded, error.SystemFdQuotaExceeded => "ran out of file descriptors",
+        error.SystemResources => "ran out of system resources",
+        error.FatalError => "a fatal error occurred",
+        error.Unexpected => "an unexpected error occurred",
+        else => @errorName(e),
+    };
 }
 
 /// The entry point of the Zinc compiler.
@@ -500,7 +543,7 @@ pub fn main(d: *Driver, tc: *Toolchain, args: [][]const u8, comptime fastExit: b
     if (fastExit and d.inputs.items.len == 1) {
         processSource(tc, d.inputs.items[0], builtinMacros, userDefinedMacros, fastExit) catch |e| switch (e) {
             error.FatalError => {
-                d.comp.renderErrors();
+                d.renderErrors();
                 d.exitWithCleanup(1);
             },
             else => |er| return er,
@@ -510,7 +553,7 @@ pub fn main(d: *Driver, tc: *Toolchain, args: [][]const u8, comptime fastExit: b
 
     for (d.inputs.items) |source| {
         d.processSource(tc, source, builtinMacros, userDefinedMacros, fastExit) catch |e| switch (e) {
-            error.FatalError => d.comp.renderErrors(),
+            error.FatalError => d.renderErrors(),
             else => |er| return er,
         };
     }
@@ -555,7 +598,7 @@ fn processSource(
         try pp.preprocessSources(&.{ source, builtinMacro, userDefinedMacros });
 
     if (d.onlyPreprocess) {
-        d.comp.renderErrors();
+        d.renderErrors();
 
         if (d.comp.diagnostics.errors != 0) {
             if (fastExit) std.process.exit(1); // not linking, no need for cleanup
@@ -564,17 +607,17 @@ fn processSource(
 
         const file = if (d.outputName) |some|
             std.fs.cwd().createFile(some, .{}) catch |er|
-                return d.fatal("unable to create output file '{s}': {s}", .{ some, Util.errorDescription(er) })
+                return d.fatal("unable to create output file '{s}': {s}", .{ some, errorDescription(er) })
         else
             std.io.getStdOut();
         defer if (d.outputName != null) file.close();
 
         var bufWriter = std.io.bufferedWriter(file.writer());
         pp.prettyPrintTokens(bufWriter.writer()) catch |er|
-            return d.fatal("unable to write result: {s}", .{Util.errorDescription(er)});
+            return d.fatal("unable to write result: {s}", .{errorDescription(er)});
 
         bufWriter.flush() catch |er|
-            return d.fatal("unable to write result: {s}", .{Util.errorDescription(er)});
+            return d.fatal("unable to write result: {s}", .{errorDescription(er)});
 
         if (fastExit)
             std.process.exit(0); // Not linking, no need for clean up.
@@ -615,20 +658,18 @@ fn processSource(
             std.debug.print("{d}: {s}\n", .{ i, @tagName(nodeTag) });
 
         const stdout = std.io.getStdOut();
-        const color = d.comp.diagnostics.color and Util.fileSupportsColor(stdout);
-
         var buffWriter = std.io.bufferedWriter(stdout.writer());
-        tree.dump(color, buffWriter.writer()) catch {};
+
+        tree.dump(d.detectConfig(stdout), buffWriter.writer()) catch {};
         buffWriter.flush() catch {};
     }
 
     const prevErrors = d.comp.diagnostics.errors;
-    d.comp.renderErrors();
+    d.renderErrors();
 
     // do not compile if there were errors
     if (d.comp.diagnostics.errors != prevErrors) {
-        if (fastExit)
-            exitWithCleanup(1);
+        if (fastExit) exitWithCleanup(1);
         return; // Don't compile if there were errors
     }
 
@@ -650,21 +691,20 @@ fn processSource(
     if (d.dumpIR) {
         const stdout = std.io.getStdOut();
         var bufferWriter = std.io.bufferedWriter(stdout.writer());
-        const color = d.comp.diagnostics.color and Util.fileSupportsColor(stdout);
 
-        ir.dump(d.comp.gpa, color, bufferWriter.writer()) catch {};
+        ir.dump(d.comp.gpa, d.detectConfig(stdout), bufferWriter.writer()) catch {};
         bufferWriter.flush() catch {};
     }
 
-    var renderErrors: IR.Renderer.ErrorList = .{};
-    defer renderErrors.deinit(d.comp.gpa);
+    var renderErrorList: IR.Renderer.ErrorList = .{};
+    defer renderErrorList.deinit(d.comp.gpa);
 
-    var obj = ir.render(d.comp.gpa, d.comp.target, &renderErrors) catch |e| switch (e) {
+    var obj = ir.render(d.comp.gpa, d.comp.target, &renderErrorList) catch |e| switch (e) {
         error.OutOfMemory => return error.OutOfMemory,
         error.LowerFail => {
             return d.fatal(
                 "unable to render Ir to machine code: {s}",
-                .{renderErrors.values()[0]},
+                .{renderErrorList.values()[0]},
             );
         },
     };
@@ -699,11 +739,11 @@ fn processSource(
     };
 
     const outFile = std.fs.cwd().createFile(outFileName, .{}) catch |er|
-        return d.fatal("unable to create output file '{s}': {s}", .{ outFileName, Util.errorDescription(er) });
+        return d.fatal("unable to create output file '{s}': {s}", .{ outFileName, errorDescription(er) });
     defer outFile.close();
 
     obj.finish(outFile) catch |er|
-        return d.fatal("could not output to object file '{s}': {s}", .{ outFileName, Util.errorDescription(er) });
+        return d.fatal("could not output to object file '{s}': {s}", .{ outFileName, errorDescription(er) });
 
     if (d.onlyCompile) {
         if (fastExit)
@@ -742,7 +782,7 @@ fn invokeLinker(d: *Driver, tc: *Toolchain, comptime fastExit: bool) !void {
 
     if (d.dumpLinkerArgs) {
         printLinkerArgs(argv.items) catch |er|
-            return d.fatal("unable to dump linker args: {s}", .{Util.errorDescription(er)});
+            return d.fatal("unable to dump linker args: {s}", .{errorDescription(er)});
     }
 
     var child = std.process.Child.init(argv.items, d.comp.gpa);
@@ -752,7 +792,7 @@ fn invokeLinker(d: *Driver, tc: *Toolchain, comptime fastExit: bool) !void {
     child.stderr_behavior = .Inherit;
 
     const term = child.spawnAndWait() catch |er| {
-        return d.fatal("unable to spawn linker: {s}", .{Util.errorDescription(er)});
+        return d.fatal("unable to spawn linker: {s}", .{errorDescription(er)});
     };
     switch (term) {
         .Exited => |code| if (code != 0) {

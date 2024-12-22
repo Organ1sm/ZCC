@@ -272,7 +272,7 @@ pub fn main() !void {
                     continue;
                 }
             } else {
-                comp.renderErrors();
+                zinc.Diagnostics.render(&comp, std.io.tty.detectConfig(std.io.getStdErr()));
                 if (comp.diagnostics.errors != 0) {
                     failCount += 1;
                     continue;
@@ -325,12 +325,12 @@ pub fn main() !void {
             var actualAST = std.ArrayList(u8).init(gpa);
             defer actualAST.deinit();
 
-            try tree.dump(false, actualAST.writer());
+            try tree.dump(.no_color, actualAST.writer());
             std.testing.expectEqualStrings(expectedAST, actualAST.items) catch {
                 failCount += 1;
                 break;
             };
-        } else tree.dump(false, std.io.null_writer) catch {};
+        } else tree.dump(.no_color, std.io.null_writer) catch {};
 
         if (expectedTypes) |types| {
             const testFn = for (tree.rootDecls) |decl| {
@@ -387,7 +387,7 @@ pub fn main() !void {
             continue;
         }
 
-        comp.renderErrors();
+        zinc.Diagnostics.render(&comp, std.io.tty.detectConfig(std.io.getStdErr()));
 
         if (pp.defines.get("EXPECTED_OUTPUT")) |macro| blk: {
             if (comp.diagnostics.errors != 0) break :blk;

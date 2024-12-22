@@ -1,5 +1,4 @@
 const std = @import("std");
-const util = @import("backend").Util;
 const builtin = @import("builtin");
 const Source = @import("Source.zig");
 const TokenType = @import("TokenType.zig").TokenType;
@@ -183,7 +182,6 @@ pub const Options = struct {
 
 list: std.ArrayListUnmanaged(Message) = .{},
 arena: std.heap.ArenaAllocator,
-color: bool = true,
 fatalErrors: bool = false,
 options: Options = .{},
 errors: u32 = 0,
@@ -221,7 +219,7 @@ pub fn init(gpa: Allocator) Diagnostics {
 }
 
 pub fn deinit(diag: *Diagnostics) void {
-    diag.list.deinit(diag.arena.allocator());
+    diag.list.deinit(diag.arena.child_allocator);
     diag.arena.deinit();
 }
 
@@ -243,7 +241,7 @@ pub fn addExtra(
     if (expansionLocs.len != 0)
         copy.loc = expansionLocs[expansionLocs.len - 1];
 
-    try diag.list.append(diag.arena.allocator(), copy);
+    try diag.list.append(diag.arena.child_allocator, copy);
 
     if (expansionLocs.len != 0) {
         // Add macro backtrace notes in reverse order omitting from the middle if needed.
@@ -251,7 +249,7 @@ pub fn addExtra(
         const half = diag.macroBacktraceLimit / 2;
         const limit = if (i < diag.macroBacktraceLimit) 0 else i - half;
         try diag.list.ensureUnusedCapacity(
-            diag.arena.allocator(),
+            diag.arena.child_allocator,
             if (limit == 0) expansionLocs.len else diag.macroBacktraceLimit + 1,
         );
         while (i > limit) {
@@ -290,50 +288,14 @@ pub fn addExtra(
         return error.FatalError;
 }
 
-pub fn fatal(
-    diag: *Diagnostics,
-    path: []const u8,
-    line: []const u8,
-    lineNo: u32,
-    col: u32,
-    comptime fmt: []const u8,
-    args: anytype,
-) Compilation.Error {
-    var m = MsgWriter.init(diag.color);
-    defer m.deinit();
-
-    m.location(path, lineNo, col);
-    m.start(.@"fatal error");
-    m.print(fmt, args);
-    m.end(line, col, false);
-
-    diag.errors += 1;
-    return error.FatalError;
+pub fn defaultMsgWriter(config: std.io.tty.Config) MsgWriter {
+    return MsgWriter.init(config);
 }
 
-pub fn fatalNoSrc(diag: *Diagnostics, comptime fmt: []const u8, args: anytype) error{FatalError} {
-    if (!diag.color) {
-        std.debug.print("fatal error: " ++ fmt ++ "\n", args);
-    } else {
-        const std_err = std.io.getStdErr().writer();
-        util.setColor(.red, std_err);
-        std_err.writeAll("fatal error: ") catch {};
-        util.setColor(.white, std_err);
-        std_err.print(fmt ++ "\n", args) catch {};
-        util.setColor(.reset, std_err);
-    }
-    diag.errors += 1;
-    return error.FatalError;
-}
-
-pub fn defaultMsgWriter(comp: *const Compilation) MsgWriter {
-    return MsgWriter.init(comp.diagnostics.color);
-}
-
-pub fn render(comp: *Compilation) void {
+pub fn render(comp: *Compilation, config: std.io.tty.Config) void {
     if (comp.diagnostics.list.items.len == 0) return;
 
-    var m = defaultMsgWriter(comp);
+    var m = defaultMsgWriter(config);
     defer m.deinit();
 
     renderMessages(comp, &m);
@@ -535,13 +497,13 @@ fn tagKind(diag: *Diagnostics, tag: Tag, langOpts: LangOpts) Kind {
 
 const MsgWriter = struct {
     w: std.io.BufferedWriter(4096, std.fs.File.Writer),
-    color: bool,
+    config: std.io.tty.Config,
 
-    fn init(color: bool) MsgWriter {
+    fn init(config: std.io.tty.Config) MsgWriter {
         std.debug.lockStdErr();
         return .{
             .w = std.io.bufferedWriter(std.io.getStdErr().writer()),
-            .color = color,
+            .config = config,
         };
     }
 
@@ -558,56 +520,45 @@ const MsgWriter = struct {
         m.w.writer().writeAll(msg) catch {};
     }
 
-    fn setColor(m: *MsgWriter, color: util.Color) void {
-        util.setColor(color, m.w.writer());
+    fn setColor(m: *MsgWriter, color: std.io.tty.Color) void {
+        m.config.setColor(m.w.writer(), color) catch {};
     }
 
     fn location(m: *MsgWriter, path: []const u8, line: u32, col: u32) void {
+        m.setColor(.bold);
         const prefix = if (std.fs.path.dirname(path) == null and path[0] != '<') "." ++ std.fs.path.sep_str else "";
-        if (m.color) {
-            m.print("{s}{s}:{d}:{d}: ", .{ prefix, path, line, col });
-        } else {
-            m.setColor(.white);
-            m.print("{s}{s}:{d}:{d}: ", .{ prefix, path, line, col });
-        }
+        m.print("{s}{s}:{d}:{d}: ", .{ prefix, path, line, col });
     }
 
     fn start(m: *MsgWriter, kind: Kind) void {
-        if (!m.color) {
-            m.print("{s}: ", .{@tagName(kind)});
-        } else {
-            switch (kind) {
-                .@"fatal error", .@"error" => m.setColor(.red),
-                .note => m.setColor(.cyan),
-                .warning => m.setColor(.purple),
-                .off, .default => unreachable,
-            }
-            m.write(switch (kind) {
-                .@"fatal error" => "fatal error: ",
-                .@"error" => "error: ",
-                .note => "note: ",
-                .warning => "warning: ",
-                .off, .default => unreachable,
-            });
-            m.setColor(.white);
+        switch (kind) {
+            .@"fatal error", .@"error" => m.setColor(.bright_red),
+            .note => m.setColor(.bright_cyan),
+            .warning => m.setColor(.bright_magenta),
+            .off, .default => unreachable,
         }
+        m.write(switch (kind) {
+            .@"fatal error" => "fatal error: ",
+            .@"error" => "error: ",
+            .note => "note: ",
+            .warning => "warning: ",
+            .off, .default => unreachable,
+        });
+        m.setColor(.white);
     }
 
     fn end(m: *MsgWriter, maybe_line: ?[]const u8, col: u32, endWithSplice: bool) void {
         const line = maybe_line orelse {
             m.write("\n");
+            m.setColor(.reset);
             return;
         };
         const trailer = if (endWithSplice) "\\ " else "";
-        if (!m.color) {
-            m.print("\n{s}{s}\n", .{ line, trailer });
-            m.print("{s: >[1]}^\n", .{ "", col });
-        } else {
-            m.setColor(.reset);
-            m.print("\n{s}{s}\n{s: >[3]}", .{ line, trailer, "", col });
-            m.setColor(.green);
-            m.write("^\n");
-            m.setColor(.reset);
-        }
+        m.setColor(.reset);
+        m.print("\n{s}{s}\n{s: >[3]}", .{ line, trailer, "", col });
+        m.setColor(.bold);
+        m.setColor(.bright_green);
+        m.write("^\n");
+        m.setColor(.reset);
     }
 };

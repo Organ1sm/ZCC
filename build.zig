@@ -111,7 +111,7 @@ pub fn build(b: *std.Build) !void {
     });
 
     const exe = b.addExecutable(.{
-        .name = "Zcc",
+        .name = "zincc",
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = mode,

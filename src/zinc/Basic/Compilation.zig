@@ -1367,7 +1367,6 @@ pub const CharUnitSize = enum(u32) {
     }
 };
 
-pub const renderErrors = Diagnostics.render;
 pub const addDiagnostic = Diagnostics.add;
 
 test "addSourceFromReader" {

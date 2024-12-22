@@ -372,22 +372,21 @@ pub fn deinit(ir: *IR, gpa: std.mem.Allocator) void {
     ir.* = undefined;
 }
 
-const util = @import("Util.zig");
-const TYPE = util.Color.purple;
-const INST = util.Color.cyan;
-const REF = util.Color.blue;
-const LITERAL = util.Color.green;
-const ATTRIBUTE = util.Color.yellow;
+const TYPE = std.io.tty.Color.bright_magenta;
+const INST = std.io.tty.Color.bright_cyan;
+const REF = std.io.tty.Color.bright_blue;
+const LITERAL = std.io.tty.Color.bright_green;
+const ATTRIBUTE = std.io.tty.Color.bright_yellow;
 
 const RefMap = std.AutoArrayHashMap(Ref, void);
 
-pub fn dump(ir: *const IR, gpa: Allocator, color: bool, w: anytype) !void {
+pub fn dump(ir: *const IR, gpa: Allocator, config: std.io.tty.Config, w: anytype) !void {
     for (ir.decls.keys(), ir.decls.values()) |name, *decl| {
-        try ir.dumpDecl(decl, gpa, name, color, w);
+        try ir.dumpDecl(decl, gpa, name, config, w);
     }
 }
 
-pub fn dumpDecl(ir: *const IR, decl: *const Decl, gpa: Allocator, name: []const u8, color: bool, w: anytype) !void {
+fn dumpDecl(ir: *const IR, decl: *const Decl, gpa: Allocator, name: []const u8, config: std.io.tty.Config, w: anytype) !void {
     const tags = decl.instructions.items(.tag);
     const data = decl.instructions.items(.data);
 
@@ -402,10 +401,10 @@ pub fn dumpDecl(ir: *const IR, decl: *const Decl, gpa: Allocator, name: []const 
     const retInst = decl.body.items[decl.body.items.len - 1];
     const retOperand = data[@intFromEnum(retInst)].un;
     const retTy = if (retOperand == .none) .void else decl.instructions.items(.type)[@intFromEnum(retOperand)];
-    try ir.writeType(retTy, color, w);
-    if (color) util.setColor(REF, w);
+    try ir.writeType(retTy, config, w);
+    try config.setColor(w, REF);
     try w.print(" @{s}", .{name});
-    if (color) util.setColor(.reset, w);
+    try config.setColor(w, .reset);
     try w.writeAll("(");
 
     var argCount: u32 = 0;
@@ -415,8 +414,8 @@ pub fn dumpDecl(ir: *const IR, decl: *const Decl, gpa: Allocator, name: []const 
         if (tag != .Arg) break;
         if (argCount != 0) try w.writeAll(", ");
         try refMap.put(ref, {});
-        try ir.writeRef(decl, &refMap, ref, color, w);
-        if (color) util.setColor(.reset, w);
+        try ir.writeRef(decl, &refMap, ref, config, w);
+        try config.setColor(w, .reset);
     }
     try w.writeAll(") {\n");
 
@@ -452,7 +451,7 @@ pub fn dumpDecl(ir: *const IR, decl: *const Decl, gpa: Allocator, name: []const 
 
             .Label => {
                 const labelIdx = labelMap.getIndex(ref).?;
-                if (color) util.setColor(REF, w);
+                try config.setColor(w, REF);
                 try w.print("{s}.{d}:\n", .{ data[i].label, labelIdx });
             },
 
@@ -463,37 +462,37 @@ pub fn dumpDecl(ir: *const IR, decl: *const Decl, gpa: Allocator, name: []const 
 
             .Jmp => {
                 const un = data[i].un;
-                if (color) util.setColor(INST, w);
+                try config.setColor(w, INST);
                 try w.writeAll("    Jmp ");
-                try writeLabel(decl, &labelMap, un, color, w);
+                try writeLabel(decl, &labelMap, un, config, w);
                 try w.writeByte('\n');
             },
 
             .Branch => {
                 const br = data[i].branch;
-                if (color) util.setColor(INST, w);
+                try config.setColor(w, INST);
                 try w.writeAll("    Branch ");
-                try ir.writeRef(decl, &refMap, br.cond, color, w);
-                if (color) util.setColor(.reset, w);
+                try ir.writeRef(decl, &refMap, br.cond, config, w);
+                try config.setColor(w, .reset);
                 try w.writeAll(", ");
-                try writeLabel(decl, &labelMap, br.then, color, w);
-                if (color) util.setColor(.reset, w);
+                try writeLabel(decl, &labelMap, br.then, config, w);
+                try config.setColor(w, .reset);
                 try w.writeAll(", ");
-                try writeLabel(decl, &labelMap, br.@"else", color, w);
+                try writeLabel(decl, &labelMap, br.@"else", config, w);
                 try w.writeByte('\n');
             },
 
             .Select => {
                 const br = data[i].branch;
-                try ir.writeNewRef(decl, &refMap, ref, color, w);
+                try ir.writeNewRef(decl, &refMap, ref, config, w);
                 try w.writeAll("Select ");
-                try ir.writeRef(decl, &refMap, br.cond, color, w);
-                if (color) util.setColor(.reset, w);
+                try ir.writeRef(decl, &refMap, br.cond, config, w);
+                try config.setColor(w, .reset);
                 try w.writeAll(", ");
-                try ir.writeRef(decl, &refMap, br.then, color, w);
-                if (color) util.setColor(.reset, w);
+                try ir.writeRef(decl, &refMap, br.then, config, w);
+                try config.setColor(w, .reset);
                 try w.writeAll(", ");
-                try ir.writeRef(decl, &refMap, br.@"else", color, w);
+                try ir.writeRef(decl, &refMap, br.@"else", config, w);
                 try w.writeByte('\n');
             },
 
@@ -504,99 +503,99 @@ pub fn dumpDecl(ir: *const IR, decl: *const Decl, gpa: Allocator, name: []const 
 
             .Switch => {
                 const @"switch" = data[i].@"switch";
-                if (color) util.setColor(INST, w);
+                try config.setColor(w, INST);
                 try w.writeAll("    Switch ");
-                try ir.writeRef(decl, &refMap, @"switch".target, color, w);
-                if (color) util.setColor(.reset, w);
+                try ir.writeRef(decl, &refMap, @"switch".target, config, w);
+                try config.setColor(w, .reset);
                 try w.writeAll(" {");
                 for (@"switch".caseVals[0..@"switch".casesLen], @"switch".caseLabels) |valRef, labelRef| {
                     try w.writeAll("\n        ");
-                    try ir.writeValue(valRef, color, w);
-                    if (color) util.setColor(.reset, w);
+                    try ir.writeValue(valRef, config, w);
+                    try config.setColor(w, .reset);
                     try w.writeAll(" => ");
-                    try writeLabel(decl, &labelMap, labelRef, color, w);
-                    if (color) util.setColor(.reset, w);
+                    try writeLabel(decl, &labelMap, labelRef, config, w);
+                    try config.setColor(w, .reset);
                 }
-                if (color) util.setColor(LITERAL, w);
+                try config.setColor(w, LITERAL);
                 try w.writeAll("\n        default ");
-                if (color) util.setColor(.reset, w);
+                try config.setColor(w, .reset);
                 try w.writeAll("=> ");
-                try writeLabel(decl, &labelMap, @"switch".default, color, w);
-                if (color) util.setColor(.reset, w);
+                try writeLabel(decl, &labelMap, @"switch".default, config, w);
+                try config.setColor(w, .reset);
                 try w.writeAll("\n    }\n");
             },
 
             .Call => {
                 const call = data[i].call;
-                try ir.writeNewRef(decl, &refMap, ref, color, w);
+                try ir.writeNewRef(decl, &refMap, ref, config, w);
                 try w.writeAll("Call ");
-                try ir.writeRef(decl, &refMap, call.func, color, w);
-                if (color) util.setColor(.reset, w);
+                try ir.writeRef(decl, &refMap, call.func, config, w);
+                try config.setColor(w, .reset);
                 try w.writeAll("(");
 
                 for (call.args(), 0..) |arg, argIdx| {
                     if (argIdx != 0) try w.writeAll(", ");
-                    try ir.writeRef(decl, &refMap, arg, color, w);
-                    if (color) util.setColor(.reset, w);
+                    try ir.writeRef(decl, &refMap, arg, config, w);
+                    try config.setColor(w, .reset);
                 }
                 try w.writeAll(")\n");
             },
 
             .Alloc => {
                 const alloc = data[i].alloc;
-                try ir.writeNewRef(decl, &refMap, ref, color, w);
+                try ir.writeNewRef(decl, &refMap, ref, config, w);
                 try w.writeAll("Alloc ");
-                if (color) util.setColor(ATTRIBUTE, w);
+                try config.setColor(w, ATTRIBUTE);
                 try w.writeAll("size ");
-                if (color) util.setColor(LITERAL, w);
+                try config.setColor(w, LITERAL);
                 try w.print("{d}", .{alloc.size});
-                if (color) util.setColor(ATTRIBUTE, w);
+                try config.setColor(w, ATTRIBUTE);
                 try w.writeAll(" Align ");
-                if (color) util.setColor(LITERAL, w);
+                try config.setColor(w, LITERAL);
                 try w.print("{d}", .{alloc.@"align"});
                 try w.writeByte('\n');
             },
 
             .Phi => {
-                try ir.writeNewRef(decl, &refMap, ref, color, w);
+                try ir.writeNewRef(decl, &refMap, ref, config, w);
                 try w.writeAll("phi");
-                if (color) util.setColor(.reset, w);
+                try config.setColor(w, .reset);
                 try w.writeAll(" {");
                 for (data[i].phi.inputs()) |input| {
                     try w.writeAll("\n        ");
-                    try writeLabel(decl, &labelMap, input.label, color, w);
-                    if (color) util.setColor(.reset, w);
+                    try writeLabel(decl, &labelMap, input.label, config, w);
+                    try config.setColor(w, .reset);
                     try w.writeAll(" => ");
-                    try ir.writeRef(decl, &refMap, input.value, color, w);
-                    if (color) util.setColor(.reset, w);
+                    try ir.writeRef(decl, &refMap, input.value, config, w);
+                    try config.setColor(w, .reset);
                 }
-                if (color) util.setColor(.reset, w);
+                try config.setColor(w, .reset);
                 try w.writeAll("\n    }\n");
             },
 
             .Store => {
                 const bin = data[i].bin;
-                if (color) util.setColor(INST, w);
+                try config.setColor(w, INST);
                 try w.writeAll("    Store ");
-                try ir.writeRef(decl, &refMap, bin.lhs, color, w);
-                if (color) util.setColor(.reset, w);
+                try ir.writeRef(decl, &refMap, bin.lhs, config, w);
+                try config.setColor(w, .reset);
                 try w.writeAll(", ");
-                try ir.writeRef(decl, &refMap, bin.rhs, color, w);
+                try ir.writeRef(decl, &refMap, bin.rhs, config, w);
                 try w.writeByte('\n');
             },
 
             .Ret => {
-                if (color) util.setColor(INST, w);
+                try config.setColor(w, INST);
                 try w.writeAll("    Ret ");
                 if (data[i].un != .none)
-                    try ir.writeRef(decl, &refMap, data[i].un, color, w);
+                    try ir.writeRef(decl, &refMap, data[i].un, config, w);
                 try w.writeByte('\n');
             },
 
             .Load => {
-                try ir.writeNewRef(decl, &refMap, ref, color, w);
+                try ir.writeNewRef(decl, &refMap, ref, config, w);
                 try w.writeAll("Load ");
-                try ir.writeRef(decl, &refMap, data[i].un, color, w);
+                try ir.writeRef(decl, &refMap, data[i].un, config, w);
                 try w.writeByte('\n');
             },
 
@@ -618,12 +617,12 @@ pub fn dumpDecl(ir: *const IR, decl: *const Decl, gpa: Allocator, name: []const 
             .Mod,
             => {
                 const bin = data[i].bin;
-                try ir.writeNewRef(decl, &refMap, ref, color, w);
+                try ir.writeNewRef(decl, &refMap, ref, config, w);
                 try w.print("{s} ", .{@tagName(tag)});
-                try ir.writeRef(decl, &refMap, bin.lhs, color, w);
-                if (color) util.setColor(.reset, w);
+                try ir.writeRef(decl, &refMap, bin.lhs, config, w);
+                try config.setColor(w, .reset);
                 try w.writeAll(", ");
-                try ir.writeRef(decl, &refMap, bin.rhs, color, w);
+                try ir.writeRef(decl, &refMap, bin.rhs, config, w);
                 try w.writeByte('\n');
             },
 
@@ -634,34 +633,34 @@ pub fn dumpDecl(ir: *const IR, decl: *const Decl, gpa: Allocator, name: []const 
             .Sext,
             => {
                 const un = data[i].un;
-                try ir.writeNewRef(decl, &refMap, ref, color, w);
+                try ir.writeNewRef(decl, &refMap, ref, config, w);
                 try w.print("{s} ", .{@tagName(tag)});
-                try ir.writeRef(decl, &refMap, un, color, w);
+                try ir.writeRef(decl, &refMap, un, config, w);
                 try w.writeByte('\n');
             },
 
             .LabelAddr, .JmpVal => {},
         }
     }
-    if (color) util.setColor(.reset, w);
+    try config.setColor(w, .reset);
     try w.writeAll("}\n\n");
 }
 
-fn writeType(ir: IR, tyRef: Interner.Ref, color: bool, w: anytype) !void {
+fn writeType(ir: IR, tyRef: Interner.Ref, config: std.io.tty.Config, w: anytype) !void {
     const ty = ir.interner.get(tyRef);
-    if (color) util.setColor(TYPE, w);
+    try config.setColor(w, TYPE);
     switch (ty) {
         .ptrTy, .noreturnTy, .voidTy, .funcTy => try w.writeAll(@tagName(ty)),
         .intTy => |bits| try w.print("i{d}", .{bits}),
         .floatTy => |bits| try w.print("f{d}", .{bits}),
         .arrayTy => |info| {
             try w.print("[{d} * ", .{info.len});
-            try ir.writeType(info.child, false, w);
+            try ir.writeType(info.child, .no_color, w);
             try w.writeByte(']');
         },
         .vectorTy => |info| {
             try w.print("<{d} * ", .{info.len});
-            try ir.writeType(info.child, false, w);
+            try ir.writeType(info.child, .no_color, w);
             try w.writeByte('>');
         },
         .recordTy => |elems| {
@@ -669,7 +668,7 @@ fn writeType(ir: IR, tyRef: Interner.Ref, color: bool, w: anytype) !void {
             try w.writeAll("{ ");
             for (elems, 0..) |elem, i| {
                 if (i != 0) try w.writeAll(", ");
-                try ir.writeType(elem, color, w);
+                try ir.writeType(elem, config, w);
             }
             try w.writeAll(" }");
         },
@@ -677,8 +676,8 @@ fn writeType(ir: IR, tyRef: Interner.Ref, color: bool, w: anytype) !void {
     }
 }
 
-fn writeValue(ir: IR, val: Interner.Ref, color: bool, w: anytype) !void {
-    if (color) util.setColor(LITERAL, w);
+fn writeValue(ir: IR, val: Interner.Ref, config: std.io.tty.Config, w: anytype) !void {
+    try config.setColor(w, LITERAL);
     const key = ir.interner.get(val);
     switch (key) {
         .null => return w.writeAll("nullptr_t"),
@@ -693,46 +692,46 @@ fn writeValue(ir: IR, val: Interner.Ref, color: bool, w: anytype) !void {
     }
 }
 
-fn writeRef(ir: IR, decl: *const Decl, refMap: *RefMap, ref: Ref, color: bool, w: anytype) !void {
+fn writeRef(ir: IR, decl: *const Decl, refMap: *RefMap, ref: Ref, config: std.io.tty.Config, w: anytype) !void {
     assert(ref != .none);
     const index = @intFromEnum(ref);
     const tyRef = decl.instructions.items(.type)[index];
 
     if (decl.instructions.items(.tag)[index] == .Constant) {
-        try ir.writeType(tyRef, color, w);
+        try ir.writeType(tyRef, config, w);
         const vRef = decl.instructions.items(.data)[index].constant;
         try w.writeByte(' ');
-        try ir.writeValue(vRef, color, w);
+        try ir.writeValue(vRef, config, w);
         return;
     } else if (decl.instructions.items(.tag)[index] == .Symbol) {
         const name = decl.instructions.items(.data)[index].label;
-        try ir.writeType(tyRef, color, w);
-        if (color) util.setColor(REF, w);
+        try ir.writeType(tyRef, config, w);
+        try config.setColor(w, REF);
         try w.print(" @{s}", .{name});
         return;
     }
 
-    try ir.writeType(tyRef, color, w);
-    if (color) util.setColor(REF, w);
+    try ir.writeType(tyRef, config, w);
+    try config.setColor(w, REF);
     const refIndex = refMap.getIndex(ref).?;
     try w.print(" %{d}", .{refIndex});
 }
 
-fn writeNewRef(ir: IR, decl: *const Decl, refMap: *RefMap, ref: Ref, color: bool, w: anytype) !void {
+fn writeNewRef(ir: IR, decl: *const Decl, refMap: *RefMap, ref: Ref, config: std.io.tty.Config, w: anytype) !void {
     try refMap.put(ref, {});
     try w.writeAll("    ");
-    try ir.writeRef(decl, refMap, ref, color, w);
-    if (color) util.setColor(.reset, w);
+    try ir.writeRef(decl, refMap, ref, config, w);
+    try config.setColor(w, .reset);
     try w.writeAll(" = ");
-    if (color) util.setColor(INST, w);
+    try config.setColor(w, INST);
 }
 
-fn writeLabel(decl: *const Decl, labelMap: *RefMap, ref: Ref, color: bool, w: anytype) !void {
+fn writeLabel(decl: *const Decl, labelMap: *RefMap, ref: Ref, config: std.io.tty.Config, w: anytype) !void {
     assert(ref != .none);
     const index = @intFromEnum(ref);
     const label = decl.instructions.items(.data)[index].label;
 
-    if (color) util.setColor(REF, w);
+    try config.setColor(w, REF);
     const labelIndex = labelMap.getIndex(ref).?;
     try w.print("{s}.{d}", .{ label, labelIndex });
 }
