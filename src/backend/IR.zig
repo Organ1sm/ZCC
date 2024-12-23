@@ -224,9 +224,11 @@ pub fn render(
         .obj = obj,
         .ir = ir,
     };
-    defer renderer.deinit();
 
-    if (errors) |some| some.* = renderer.errors.move();
+    defer {
+        if (errors) |some| some.* = renderer.errors.move();
+        renderer.deinit();
+    }
 
     try renderer.render();
     return obj;

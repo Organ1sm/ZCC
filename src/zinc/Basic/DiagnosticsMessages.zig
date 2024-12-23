@@ -2379,3 +2379,19 @@ pub const case_not_in_switch = struct {
     pub const extra = .str;
     pub const kind = .@"error";
 };
+pub const c23_auto_plain_declarator = struct {
+    pub const msg = "'auto' requires a plain identifier declarator";
+    pub const kind = .@"error";
+};
+pub const c23_auto_single_declarator = struct {
+    pub const msg = "'auto' can only be used with a single declarator";
+    pub const kind = .@"error";
+};
+pub const c23_auto_requires_initializer = struct {
+    pub const msg = "'auto' requires an initializer";
+    pub const kind = .@"error";
+};
+pub const c23_auto_scalar_init = struct {
+    pub const msg = "'auto' requires a scalar initializer";
+    pub const kind = .@"error";
+};

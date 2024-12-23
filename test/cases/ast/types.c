@@ -41,24 +41,24 @@ TypeDef: 'int'
 TypeDef: '[2]int'
  name: I
 
-FnDef: 'fn (a: d[2]const int, b: d[2]const int) void'
+FnDef: 'fn (a: *d[2]const int, b: *d[2]const int) void'
  name: qux
  body:
   CompoundStmt: 'void'
-    AddAssignExpr: 'd[2]const int'
+    AddAssignExpr: '*d[2]const int'
      lhs:
-      DeclRefExpr: 'd[2]const int' lvalue
+      DeclRefExpr: '*d[2]const int' lvalue
        name: b
      rhs:
-      ImplicitCast: (IntToPointer) 'd[2]const int'
+      ImplicitCast: (IntToPointer) '*d[2]const int'
         IntLiteral: 'int' (value: 1)
 
-    AddAssignExpr: 'd[2]const int'
+    AddAssignExpr: '*d[2]const int'
      lhs:
-      DeclRefExpr: 'd[2]const int' lvalue
+      DeclRefExpr: '*d[2]const int' lvalue
        name: a
      rhs:
-      ImplicitCast: (IntToPointer) 'd[2]const int'
+      ImplicitCast: (IntToPointer) '*d[2]const int'
         IntLiteral: 'int' (value: 1)
 
     ImplicitReturn: 'void'

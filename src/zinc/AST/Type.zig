@@ -373,6 +373,8 @@ pub const Specifier = enum {
     /// GNU auto type
     /// This is a placeholder specifier - it must be replaced by the actual type specifier (determined by the initializer)
     AutoType,
+    /// c23 auto
+    C23Auto,
 
     Void,
     Bool,
@@ -1124,7 +1126,7 @@ pub fn sizeof(ty: Type, comp: *const Compilation) ?u64 {
         return comp.target.ptrBitWidth() / 8;
 
     return switch (ty.specifier) {
-        .AutoType => unreachable,
+        .AutoType, .C23Auto => unreachable,
         .VariableLenArray, .UnspecifiedVariableLenArray => null,
 
         .IncompleteArray => return if (comp.langOpts.emulate == .msvc) @as(?u64, 0) else null,
@@ -1247,7 +1249,7 @@ pub fn alignof(ty: Type, comp: *const Compilation) u29 {
 
     return switch (ty.specifier) {
         .Invalid => unreachable,
-        .AutoType => unreachable,
+        .AutoType, .C23Auto => unreachable,
 
         .UnspecifiedVariableLenArray,
         .VariableLenArray,
@@ -1606,7 +1608,7 @@ pub fn combine(inner: *Type, outer: Type) Parser.Error!void {
 
         .TypeofType, .TypeofExpr => assert(!inner.isDecayed()),
 
-        .Void => inner.* = outer,
+        .Void, .Invalid => inner.* = outer,
         else => unreachable,
     }
 }
@@ -2065,7 +2067,7 @@ pub fn dump(ty: Type, mapper: StringInterner.TypeMapper, langOpts: LangOpts, w: 
         },
 
         .Array, .StaticArray => {
-            if (ty.isDecayed()) try w.writeByte('d');
+            if (ty.isDecayed()) try w.writeAll("*d");
             try w.writeAll("[");
             if (ty.is(.StaticArray)) try w.writeAll("static ");
             try w.print("{d}]", .{ty.data.array.len});
@@ -2079,7 +2081,7 @@ pub fn dump(ty: Type, mapper: StringInterner.TypeMapper, langOpts: LangOpts, w: 
         },
 
         .IncompleteArray => {
-            if (ty.isDecayed()) try w.writeByte('d');
+            if (ty.isDecayed()) try w.writeAll("*d");
             try w.writeAll("[]");
             try ty.data.array.elem.dump(mapper, langOpts, w);
         },

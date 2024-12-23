@@ -697,7 +697,10 @@ fn processSource(
     }
 
     var renderErrorList: IR.Renderer.ErrorList = .{};
-    defer renderErrorList.deinit(d.comp.gpa);
+    defer {
+        for (renderErrorList.values()) |msg| d.comp.gpa.free(msg);
+        renderErrorList.deinit(d.comp.gpa);
+    }
 
     var obj = ir.render(d.comp.gpa, d.comp.target, &renderErrorList) catch |e| switch (e) {
         error.OutOfMemory => return error.OutOfMemory,

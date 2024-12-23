@@ -1163,6 +1163,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
     }
 
     // Declare all variable/typedef declarators.
+    var warnedAuto = false;
     while (true) {
         if (initDeclarator.d.oldTypeFunc) |tokenIdx|
             try p.errToken(.invalid_old_style_params, tokenIdx);
@@ -1197,7 +1198,16 @@ fn parseDeclaration(p: *Parser) Error!bool {
         if (p.eat(.Comma) == null)
             break;
 
-        if (declSpec.autoType) |tokenIdx| try p.errToken(.auto_type_requires_single_declarator, tokenIdx);
+        if (!warnedAuto) {
+            if (declSpec.autoType) |tokIdx| {
+                try p.errToken(.auto_type_requires_single_declarator, tokIdx);
+                warnedAuto = true;
+            }
+            if (p.comp.langOpts.standard.atLeast(.c23) and declSpec.storageClass == .auto) {
+                try p.errToken(.c23_auto_single_declarator, declSpec.storageClass.auto);
+                warnedAuto = true;
+            }
+        }
 
         initDeclarator = (try p.parseInitDeclarator(&declSpec, attrBufferTop)) orelse {
             try p.err(.expected_ident_or_l_paren);
@@ -1382,8 +1392,14 @@ fn parseDeclSpec(p: *Parser) Error!?DeclSpec {
     var d: DeclSpec = .{ .type = .{ .specifier = undefined } };
     var spec: TypeBuilder = .{};
 
+    var combinedAuto = !p.comp.langOpts.standard.atLeast(.c23);
     const start = p.tokenIdx;
     while (true) {
+        if (!combinedAuto and d.storageClass == .auto) {
+            try spec.combine(p, .C23Auto, d.storageClass.auto);
+            combinedAuto = true;
+        }
+
         if (try p.parseStorageClassSpec(&d)) continue;
         if (try p.parseTypeSpec(&spec)) continue;
 
@@ -1701,6 +1717,11 @@ fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec, attrBufferTop: usize) Er
 
     var ID = InitDeclarator{ .d = (try p.declarator(declSpec.type, .normal)) orelse return null };
 
+    if (declSpec.type.is(.C23Auto) and !ID.d.type.is(.C23Auto)) {
+        try p.errToken(.c23_auto_plain_declarator, declSpec.storageClass.auto);
+        return error.ParsingFailed;
+    }
+
     try p.attributeSpecifier(ID.d.name);
     _ = try p.parseAssembly(.declLabel);
     try p.attributeSpecifier(ID.d.name);
@@ -1733,6 +1754,11 @@ fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec, attrBufferTop: usize) Er
             return error.ParsingFailed;
         }
 
+        if (p.currToken() == .LBrace and ID.d.type.is(.C23Auto)) {
+            try p.errToken(.c23_auto_scalar_init, declSpec.storageClass.auto);
+            return error.ParsingFailed;
+        }
+
         try p.symStack.pushScope();
         defer p.symStack.popScope();
 
@@ -1749,11 +1775,15 @@ fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec, attrBufferTop: usize) Er
         }
     }
 
+    const c23Auto = ID.d.type.is(.C23Auto);
     const name = ID.d.name;
-    if (ID.d.type.is(.AutoType)) {
+    if (ID.d.type.is(.AutoType) or c23Auto) {
         if (ID.initializer.node == .none) {
             ID.d.type = Type.Invalid;
-            try p.errStr(.auto_type_requires_initializer, name, p.getTokenText(name));
+            if (c23Auto)
+                try p.errStr(.c23_auto_requires_initializer, declSpec.storageClass.auto, p.getTokenText(name))
+            else
+                try p.errStr(.auto_type_requires_initializer, name, p.getTokenText(name));
             return ID;
         } else {
             ID.d.type.specifier = ID.initializer.ty.specifier;
@@ -3012,17 +3042,17 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: Declarator
         var maxBits = p.comp.target.ptrBitWidth();
         if (maxBits > 61) maxBits = 61;
 
-        // `outer` is validated later so it may be invalid here
-        const outerSize = outer.sizeof(p.comp);
         const maxBytes = (@as(u64, 1) << @as(u6, @truncate(maxBits))) - 1;
-        const maxElems = maxBytes / @max(1, outerSize orelse 1);
 
         if (!size.ty.isInt()) {
             try p.errStr(.array_size_non_int, sizeToken, try p.typeStr(size.ty));
             return error.ParsingFailed;
         }
 
-        if (size.value.isNone()) {
+        if (baseType.is(.C23Auto)) {
+            // issue error later.
+            return Type.Invalid;
+        } else if (size.value.isNone()) {
             if (size.node != .none) {
                 try p.errToken(.vla, sizeToken);
                 if (p.func.type == null and kind != .param and p.record.kind == .Invalid)
@@ -3049,6 +3079,10 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: Declarator
                 resType.specifier = .IncompleteArray;
             }
         } else {
+            // `outer` is validated later so it may be invalid here
+            const outerSize = outer.sizeof(p.comp);
+            const maxElems = maxBytes / @max(1, outerSize orelse 1);
+
             var sizeValue = size.value;
             if (sizeValue.isZero(p.comp)) {
                 try p.errToken(.zero_length_array, lb);
@@ -3090,10 +3124,9 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: Declarator
 
         if (try p.parseParamDecls(d)) |params| {
             funcType.params = params;
-            if (p.eat(.Ellipsis)) |_|
-                specifier = .VarArgsFunc;
+            if (p.eat(.Ellipsis)) |_| specifier = .VarArgsFunc;
         } else if (p.currToken() == .RParen) {
-            specifier = .OldStyleFunc;
+            specifier = if (p.comp.langOpts.standard.atLeast(.c23)) .Func else .OldStyleFunc;
         } else if (p.currToken() == .Identifier or p.currToken() == .ExtendedIdentifier) {
             d.oldTypeFunc = p.tokenIdx;
 
@@ -3773,9 +3806,10 @@ fn coerceInit(p: *Parser, item: *Result, token: TokenIndex, target: Type) !void 
     try item.lvalConversion(p);
     if (target.is(.AutoType)) {
         if (p.getNode(node, .MemberAccessExpr) orelse p.getNode(node, .MemberAccessPtrExpr)) |memberNode| {
-            if (p.tempTree().isBitField(memberNode))
-                try p.errToken(.auto_type_from_bitfield, token);
+            if (p.tempTree().isBitField(memberNode)) try p.errToken(.auto_type_from_bitfield, token);
         }
+        return;
+    } else if (target.is(.C23Auto)) {
         return;
     }
     try item.coerce(p, target, token, .init);
@@ -4935,7 +4969,11 @@ fn nextStmt(p: *Parser, lBrace: TokenIndex) !void {
                 parens -= 1;
             },
 
-            .Semicolon,
+            .Semicolon => if (parens == 0) {
+                p.tokenIdx += 1;
+                return;
+            },
+
             .KeywordFor,
             .KeywordWhile,
             .KeywordDo,

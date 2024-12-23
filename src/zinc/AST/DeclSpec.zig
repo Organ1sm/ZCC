@@ -91,7 +91,10 @@ pub fn validate(d: DeclSpec, p: *Parser, ty: *Type, hasInit: bool) Error!AstTag 
             try p.errStr(.func_spec_non_func, tokenIndex, "_Noreturn");
 
         switch (d.storageClass) {
-            .auto, .register => if (p.func.type == null) try p.err(.illegal_storage_on_global),
+            .auto => if (p.func.type == null and !p.comp.langOpts.standard.atLeast(.c23)) {
+                try p.err(.illegal_storage_on_global);
+            },
+            .register => if (p.func.type == null) try p.err(.illegal_storage_on_global),
             .typedef => return AstTag.TypeDef,
             else => {},
         }

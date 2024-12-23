@@ -17,8 +17,6 @@ FnDef: 'fn () void'
     Var: 'vector((2, float)'
      name: b
 
-    NullStmt: 'void'
-
     MulAssignExpr: 'vector((2, float)'
      lhs:
       DeclRefExpr: 'vector((2, float)' lvalue
@@ -27,8 +25,6 @@ FnDef: 'fn () void'
       ImplicitCast: (VectorSplat) 'float'
         ImplicitCast: (IntToFloat) 'float' (value: 2)
           IntLiteral: 'int' (value: 2)
-
-    NullStmt: 'void'
 
     ImplicitReturn: 'void'
 

@@ -47,7 +47,7 @@ FnDef: 'fn () void'
       DeclRefExpr: '*int' lvalue
        name: p
      rhs:
-      ImplicitCast: (ArrayToPointer) 'd[2]int'
+      ImplicitCast: (ArrayToPointer) '*d[2]int'
         DeclRefExpr: '[2]int' lvalue
          name: arr
 

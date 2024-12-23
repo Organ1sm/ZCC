@@ -29,6 +29,8 @@ pub const Specifier = union(enum) {
     Void,
     /// GNU __auto_type extension
     AutoType,
+    /// c23 auto,
+    C23Auto,
     NullPtrTy,
     Bool,
     Char,
@@ -146,6 +148,7 @@ pub const Specifier = union(enum) {
             .None => unreachable,
 
             .AutoType => "__auto_type",
+            .C23Auto => "auto",
 
             .Void => "void",
             .NullPtrTy => "nullptr_t",
@@ -307,6 +310,7 @@ pub fn finish(b: @This(), p: *Parser) Parser.Error!Type {
         Specifier.NullPtrTy => unreachable,
 
         Specifier.AutoType => ty.specifier = .AutoType,
+        Specifier.C23Auto => ty.specifier = .C23Auto,
         Specifier.Void => ty.specifier = .Void,
         Specifier.Bool => ty.specifier = .Bool,
         Specifier.Char => ty.specifier = .Char,
@@ -786,6 +790,11 @@ fn combineExtra(b: *@This(), p: *Parser, new: Specifier, sourceToken: TokenIndex
             else => return b.cannotCombine(p, sourceToken),
         },
 
+        .C23Auto => b.specifier = switch (b.specifier) {
+            .None => .C23Auto,
+            else => return b.cannotCombine(p, sourceToken),
+        },
+
         .FP16 => b.specifier = switch (b.specifier) {
             .None => .FP16,
             .Complex => .ComplexFP16,
@@ -916,6 +925,7 @@ pub fn fromType(ty: Type) Specifier {
     return switch (ty.specifier) {
         .Void => Specifier.Void,
         .AutoType => Specifier.AutoType,
+        .C23Auto => Specifier.C23Auto,
         .NullPtrTy => Specifier.NullPtrTy,
         .Bool => Specifier.Bool,
         .Char => Specifier.Char,
