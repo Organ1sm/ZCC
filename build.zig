@@ -1,4 +1,5 @@
 const std = @import("std");
+const GenerateDef = @import("build/GenerateDef.zig");
 
 const ZincVersion = std.SemanticVersion{
     .major = 0,
@@ -107,6 +108,7 @@ pub fn build(b: *std.Build) !void {
                 .name = "backend",
                 .module = zincBackend,
             },
+            GenerateDef.create(b, .{ .name = "Attribute/names.def" }),
         },
     });
 

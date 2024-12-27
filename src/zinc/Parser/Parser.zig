@@ -956,7 +956,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
     };
 
     if (declSpec.noreturn) |token| {
-        const attr = Attribute{ .tag = .noreturn, .args = .{ .noreturn = {} }, .syntax = .keyword };
+        const attr = Attribute{ .tag = .noreturn, .args = .{ .noreturn = .{} }, .syntax = .keyword };
         try p.attrBuffer.append(p.gpa, .{ .attr = attr, .tok = token });
     }
 
