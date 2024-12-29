@@ -37,7 +37,7 @@ _Static_assert(FOO == 1, "<stdarg.h> not found");
 #if __has_include("global-var.h")
 #define BAR 2
 #endif
-_Static_assert(BAR == 2, "\"include/global_var.h\" not found");
+_Static_assert(BAR == 2, "\"include/global-var.h\" not found");
 
 #if __has_include("foo.h")
 #error "foo.h" should not exist

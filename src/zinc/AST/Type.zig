@@ -1953,6 +1953,10 @@ fn printPrologue(ty: Type, mapper: StringInterner.TypeMapper, langOpts: LangOpts
             _ = try elem_ty.printPrologue(mapper, langOpts, w);
             try w.writeAll("' values)");
         },
+
+        .BitInt => try w.print("{s} _BitInt({d})", .{ @tagName(ty.data.int.signedness), ty.data.int.bits }),
+        .ComplexBitInt => try w.print("_Complex {s} _BitInt({d})", .{ @tagName(ty.data.int.signedness), ty.data.int.bits }),
+
         else => try w.writeAll(TypeBuilder.fromType(ty).toString(langOpts).?),
     }
 
@@ -2143,11 +2147,11 @@ pub fn dump(ty: Type, mapper: StringInterner.TypeMapper, langOpts: LangOpts, w: 
         },
 
         .SpecialVaStart => try w.writeAll("(var start param)"),
-        else => {
-            try w.writeAll(TypeBuilder.fromType(ty).toString(langOpts).?);
-            if (ty.specifier == .BitInt or ty.specifier == .ComplexBitInt)
-                try w.print("({d})", .{ty.data.int.bits});
-        },
+
+        .BitInt => try w.print("{s} _BitInt({d})", .{ @tagName(ty.data.int.signedness), ty.data.int.bits }),
+        .ComplexBitInt => try w.print("_Complex {s} _BitInt({d})", .{ @tagName(ty.data.int.signedness), ty.data.int.bits }),
+
+        else => try w.writeAll(TypeBuilder.fromType(ty).toString(langOpts).?),
     }
 }
 

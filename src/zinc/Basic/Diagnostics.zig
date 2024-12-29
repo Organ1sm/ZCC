@@ -5,7 +5,6 @@ const TokenType = @import("TokenType.zig").TokenType;
 const Tree = @import("../AST/AST.zig");
 const Compilation = @import("Compilation.zig");
 const Attribute = @import("../Lexer/Attribute.zig");
-const DiagnosticsMessages = @import("../Basic/DiagnosticsMessages.zig");
 const LangOpts = @import("../Basic/LangOpts.zig");
 const IsWindows = @import("builtin").os.tag == .windows;
 
@@ -64,7 +63,35 @@ pub const Message = struct {
     };
 };
 
-pub const Tag = std.meta.DeclEnum(DiagnosticsMessages);
+const Properties = struct {
+    msg: []const u8,
+    kind: Kind,
+    extra: std.meta.FieldEnum(Message.Extra) = .none,
+    opt: ?u8 = null,
+    all: bool = false,
+    w_extra: bool = false,
+    pedantic: bool = false,
+    suppress_version: ?LangOpts.Standard = null,
+    suppress_unless_version: ?LangOpts.Standard = null,
+    suppress_gnu: bool = false,
+    suppress_gcc: bool = false,
+    suppress_clang: bool = false,
+    suppress_msvc: bool = false,
+
+    pub fn makeOpt(comptime str: []const u8) u16 {
+        return @offsetOf(Options, str);
+    }
+
+    pub fn getKind(prop: Properties, options: *Options) Kind {
+        const opt = @as([*]Kind, @ptrCast(options))[prop.opt orelse return prop.kind];
+        if (opt == .default) return prop.kind;
+        return opt;
+    }
+
+    pub const max_bits = Compilation.BitIntMaxBits;
+};
+
+pub const Tag = @import("Diagnostics/messages.def").with(Properties).Tag;
 
 pub const Kind = enum { @"fatal error", @"error", note, warning, off, default };
 
@@ -178,6 +205,7 @@ pub const Options = struct {
     @"invalid-pp-token": Kind = .default,
     @"duplicate-embed-param": Kind = .default,
     @"unsupported-embed-param": Kind = .default,
+    @"unused-result": Kind = .default,
 };
 
 list: std.ArrayListUnmanaged(Message) = .{},
@@ -358,141 +386,116 @@ pub fn renderMessage(comp: *Compilation, m: anytype, msg: Message) void {
     } else 0;
 
     m.start(msg.kind);
-    @setEvalBranchQuota(1500);
-    switch (msg.tag) {
-        inline else => |tag| {
-            const info = @field(DiagnosticsMessages, @tagName(tag));
-            if (@hasDecl(info, "extra")) {
-                switch (info.extra) {
-                    .str => m.print(info.msg, .{msg.extra.str}),
-                    .tok_id => m.print(info.msg, .{
-                        msg.extra.tokenId.expected.symbol(),
-                        msg.extra.tokenId.actual.symbol(),
-                    }),
-                    .tok_id_expected => m.print(info.msg, .{msg.extra.expectedTokenId.symbol()}),
-                    .arguments => m.print(info.msg, .{ msg.extra.arguments.expected, msg.extra.arguments.actual }),
-                    .codepoints => m.print(info.msg, .{
-                        msg.extra.codePoints.actual,
-                        msg.extra.codePoints.resembles,
-                    }),
-                    .attr_arg_count => m.print(info.msg, .{
-                        @tagName(msg.extra.attrArgCount.attribute),
-                        msg.extra.attrArgCount.expected,
-                    }),
-                    .attr_arg_type => m.print(info.msg, .{
-                        msg.extra.attrArgType.expected.toString(),
-                        msg.extra.attrArgType.actual.toString(),
-                    }),
-                    .actual_codepoint => m.print(info.msg, .{msg.extra.actualCodePoint}),
-                    .ascii => m.print(info.msg, .{msg.extra.ascii}),
-                    .pow_2_as_string => m.print(info.msg, .{switch (msg.extra.pow2AsString) {
-                        63 => "9223372036854775808",
-                        64 => "18446744073709551616",
-                        127 => "170141183460469231731687303715884105728",
-                        128 => "340282366920938463463374607431768211456",
-                        else => unreachable,
-                    }}),
-                    .offset => m.write(info.msg),
-                    .unsigned => m.print(info.msg, .{msg.extra.unsigned}),
-                    .attr_enum => m.print(info.msg, .{
-                        @tagName(msg.extra.attrEnum.tag),
-                        Attribute.Formatting.choices(msg.extra.attrEnum.tag),
-                    }),
-                    .ignored_record_attr => m.print(info.msg, .{
-                        @tagName(msg.extra.ignoredRecordAttr.tag),
-                        @tagName(msg.extra.ignoredRecordAttr.specifier),
-                    }),
-                    .invalid_escape => {
-                        if (std.ascii.isPrint(msg.extra.invalidEscape.char)) {
-                            const str: [1]u8 = .{msg.extra.invalidEscape.char};
-                            m.print(info.msg, .{&str});
-                        } else {
-                            var buf: [3]u8 = undefined;
-                            _ = std.fmt.bufPrint(&buf, "x{x}", .{std.fmt.fmtSliceHexLower(&.{msg.extra.invalidEscape.char})}) catch unreachable;
-                            m.print(info.msg, .{&buf});
-                        }
-                    },
-                    else => @compileError("invalid extra kind " ++ @tagName(info.extra)),
-                }
+    const prop = msg.tag.property();
+    switch (prop.extra) {
+        .str => printRt(m, prop.msg, .{"{s}"}, .{msg.extra.str}),
+        .tokenId => printRt(m, prop.msg, .{ "{s}", "{s}" }, .{
+            msg.extra.tokenId.expected.symbol(),
+            msg.extra.tokenId.actual.symbol(),
+        }),
+        .expectedTokenId => printRt(m, prop.msg, .{"{s}"}, .{msg.extra.expectedTokenId.symbol()}),
+        .arguments => printRt(m, prop.msg, .{ "{d}", "{d}" }, .{
+            msg.extra.arguments.expected,
+            msg.extra.arguments.actual,
+        }),
+        .codePoints => printRt(m, prop.msg, .{ "{X:0>4}", "{u}" }, .{
+            msg.extra.codePoints.actual,
+            msg.extra.codePoints.resembles,
+        }),
+        .attrArgCount => printRt(m, prop.msg, .{ "{s}", "{d}" }, .{
+            @tagName(msg.extra.attrArgCount.attribute),
+            msg.extra.attrArgCount.expected,
+        }),
+        .attrArgType => printRt(m, prop.msg, .{ "{s}", "{s}" }, .{
+            msg.extra.attrArgType.expected.toString(),
+            msg.extra.attrArgType.actual.toString(),
+        }),
+        .actualCodePoint => printRt(m, prop.msg, .{"{X:0>4}"}, .{msg.extra.actualCodePoint}),
+        .ascii => printRt(m, prop.msg, .{"{c}"}, .{msg.extra.ascii}),
+        .unsigned => printRt(m, prop.msg, .{"{d}"}, .{msg.extra.unsigned}),
+        .pow2AsString => printRt(m, prop.msg, .{"{s}"}, .{switch (msg.extra.pow2AsString) {
+            63 => "9223372036854775808",
+            64 => "18446744073709551616",
+            127 => "170141183460469231731687303715884105728",
+            128 => "340282366920938463463374607431768211456",
+            else => unreachable,
+        }}),
+        .signed => printRt(m, prop.msg, .{"{d}"}, .{msg.extra.signed}),
+        .attrEnum => printRt(m, prop.msg, .{ "{s}", "{s}" }, .{
+            @tagName(msg.extra.attrEnum.tag),
+            Attribute.Formatting.choices(msg.extra.attrEnum.tag),
+        }),
+        .ignoredRecordAttr => printRt(m, prop.msg, .{ "{s}", "{s}" }, .{
+            @tagName(msg.extra.ignoredRecordAttr.tag),
+            @tagName(msg.extra.ignoredRecordAttr.specifier),
+        }),
+        .invalidEscape => {
+            if (std.ascii.isPrint(msg.extra.invalidEscape.char)) {
+                const str: [1]u8 = .{msg.extra.invalidEscape.char};
+                printRt(m, prop.msg, .{"{s}"}, .{&str});
             } else {
-                m.write(info.msg);
-            }
-
-            if (@hasDecl(info, "opt")) {
-                if (msg.kind == .@"error" and info.kind != .@"error") {
-                    m.print(" [-Werror, -W{s}]", .{info.opt});
-                } else if (msg.kind != .note) {
-                    m.print(" [-W{s}]", .{info.opt});
-                }
+                var buf: [3]u8 = undefined;
+                const str = std.fmt.bufPrint(&buf, "x{x}", .{std.fmt.fmtSliceHexLower(&.{msg.extra.invalidEscape.char})}) catch unreachable;
+                printRt(m, prop.msg, .{"{s}"}, .{str});
             }
         },
+        .none, .offset => m.write(prop.msg),
+    }
+
+    if (prop.opt) |some| {
+        if (msg.kind == .@"error" and prop.kind != .@"error") {
+            m.print(" [-Werror, -W{s}]", .{optName(some)});
+        } else if (msg.kind != .note) {
+            m.print(" [-W{s}]", .{optName(some)});
+        }
     }
 
     m.end(line, width, endWithSplice);
 }
 
-fn tagKind(diag: *Diagnostics, tag: Tag, langOpts: LangOpts) Kind {
-    var kind: Kind = undefined;
-    switch (tag) {
-        inline else => |tagVal| {
-            const info = @field(DiagnosticsMessages, @tagName(tagVal));
-            kind = info.kind;
-
-            // stage1 doesn't like when I combine these ifs
-            if (@hasDecl(info, "all")) {
-                if (diag.options.all != .default)
-                    kind = diag.options.all;
-            }
-
-            if (@hasDecl(info, "w_extra")) {
-                if (diag.options.extra != .default)
-                    kind = diag.options.extra;
-            }
-
-            if (@hasDecl(info, "pedantic")) {
-                if (diag.options.pedantic != .default)
-                    kind = diag.options.pedantic;
-            }
-
-            if (@hasDecl(info, "opt")) {
-                if (@field(diag.options, info.opt) != .default)
-                    kind = @field(diag.options, info.opt);
-            }
-
-            if (@hasDecl(info, "suppress_version"))
-                if (langOpts.standard.atLeast(info.suppress_version))
-                    return .off;
-
-            if (@hasDecl(info, "suppress_unless_version"))
-                if (!langOpts.standard.atLeast(info.suppress_unless_version))
-                    return .off;
-
-            if (@hasDecl(info, "suppress_gnu"))
-                if (langOpts.standard.isExplicitGNU())
-                    return .off;
-
-            if (@hasDecl(info, "suppress_language_option"))
-                if (!@field(langOpts, info.suppress_language_option))
-                    return .off;
-
-            if (@hasDecl(info, "suppress_gcc"))
-                if (langOpts.emulate == .gcc)
-                    return .off;
-
-            if (@hasDecl(info, "suppress_clang"))
-                if (langOpts.emulate == .clang)
-                    return .off;
-
-            if (@hasDecl(info, "suppress_msvc"))
-                if (langOpts.emulate == .msvc)
-                    return .off;
-
-            if (kind == .@"error" and diag.fatalErrors)
-                kind = .@"fatal error";
-
-            return kind;
-        },
+fn printRt(m: anytype, str: []const u8, comptime fmts: anytype, args: anytype) void {
+    var i: usize = 0;
+    inline for (fmts, args) |fmt, arg| {
+        const new = std.mem.indexOfPos(u8, str, i, fmt).?;
+        m.write(str[i..new]);
+        i = new + fmt.len;
+        m.print(fmt, .{arg});
     }
+    m.write(str[i..]);
+}
+
+fn optName(offset: u16) []const u8 {
+    return std.meta.fieldNames(Options)[offset / @sizeOf(Kind)];
+}
+
+fn tagKind(diag: *Diagnostics, tag: Tag, langOpts: LangOpts) Kind {
+    const prop = tag.property();
+    var kind = prop.getKind(&diag.options);
+
+    if (prop.all) {
+        if (diag.options.all != .default)
+            kind = diag.options.all;
+    }
+
+    if (prop.w_extra) {
+        if (diag.options.extra != .default)
+            kind = diag.options.extra;
+    }
+
+    if (prop.pedantic) {
+        if (diag.options.pedantic != .default)
+            kind = diag.options.pedantic;
+    }
+
+    if (prop.suppress_version) |some| if (langOpts.standard.atLeast(some)) return .off;
+    if (prop.suppress_unless_version) |some| if (!langOpts.standard.atLeast(some)) return .off;
+    if (prop.suppress_gnu and langOpts.standard.isExplicitGNU()) return .off;
+    if (prop.suppress_gcc and langOpts.emulate == .gcc) return .off;
+    if (prop.suppress_clang and langOpts.emulate == .clang) return .off;
+    if (prop.suppress_msvc and langOpts.emulate == .msvc) return .off;
+    if (kind == .@"error" and diag.fatalErrors) kind = .@"fatal error";
+
+    return kind;
 }
 
 const MsgWriter = struct {

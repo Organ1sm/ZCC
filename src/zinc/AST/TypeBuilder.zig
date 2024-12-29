@@ -188,10 +188,6 @@ pub const Specifier = union(enum) {
             .UInt128 => "unsigned __int128",
             .SInt128 => "signed __int128",
 
-            .BitInt => "_BitInt",
-            .SBitInt => "signed _BitInt",
-            .UBitInt => "unsigned _BitInt",
-
             .ComplexChar => "_Complex char",
             .ComplexSChar => "_Complex signed char",
             .ComplexUChar => "_Complex unsigned char",
@@ -221,9 +217,6 @@ pub const Specifier = union(enum) {
             .ComplexInt128 => "_Complex __int128",
             .ComplexSInt128 => "_Complex signed __int128",
             .ComplexUInt128 => "_Complex unsigned __int128",
-            .ComplexBitInt => "_Complex _BitInt",
-            .ComplexSBitInt => "_Complex signed _BitInt",
-            .ComplexUBitInt => "_Complex unsigned _BitInt",
 
             .FP16 => "__fp16",
             .Float => "float",
@@ -378,21 +371,22 @@ pub fn finish(b: @This(), p: *Parser) Parser.Error!Type {
         Specifier.ComplexUBitInt,
         Specifier.ComplexSBitInt,
         => |bits| {
+            const complexStr = if (b.complexToken != null) "_Complex " else "";
             const unsigned = b.specifier == .UBitInt or b.specifier == .ComplexUBitInt;
             if (unsigned) {
                 if (bits < 1) {
-                    try p.errStr(.unsigned_bit_int_too_small, b.bitIntToken.?, b.specifier.toString(p.comp.langOpts).?);
+                    try p.errStr(.unsigned_bit_int_too_small, b.bitIntToken.?, complexStr);
                     return Type.Invalid;
                 }
             } else {
                 if (bits < 2) {
-                    try p.errStr(.signed_bit_int_too_small, b.bitIntToken.?, b.specifier.toString(p.comp.langOpts).?);
+                    try p.errStr(.signed_bit_int_too_small, b.bitIntToken.?, complexStr);
                     return Type.Invalid;
                 }
             }
 
             if (bits > Compilation.BitIntMaxBits) {
-                try p.errStr(.bit_int_too_big, b.bitIntToken.?, b.specifier.toString(p.comp.langOpts).?);
+                try p.errStr(if (unsigned) .unsigned_bit_int_too_big else .signed_bit_int_too_big, b.bitIntToken.?, complexStr);
                 return Type.Invalid;
             }
 
