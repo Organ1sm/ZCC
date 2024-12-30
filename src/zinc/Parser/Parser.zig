@@ -956,7 +956,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
     };
 
     if (declSpec.noreturn) |token| {
-        const attr = Attribute{ .tag = .noreturn, .args = .{ .noreturn = {} }, .syntax = .keyword };
+        const attr = Attribute{ .tag = .noreturn, .args = .{ .noreturn = .{} }, .syntax = .keyword };
         try p.attrBuffer.append(p.gpa, .{ .attr = attr, .tok = token });
     }
 
@@ -7205,20 +7205,6 @@ fn bitInt(p: *Parser, base: u8, buf: []const u8, suffix: NumberSuffix, tokenIdx:
         const count = @max(1, c.bitCountTwosComp());
         const signBits = @intFromBool(suffix.isSignedInteger());
         const bitsNeeded = count + signBits;
-
-        if (bitsNeeded > Compilation.BitIntMaxBits) {
-            const specifier: TypeBuilder.Specifier = switch (suffix) {
-                .WB => .{ .BitInt = 0 },
-                .UWB => .{ .UBitInt = 0 },
-                .IWB => .{ .ComplexBitInt = 0 },
-                .IUWB => .{ .ComplexUBitInt = 0 },
-                else => unreachable,
-            };
-
-            try p.errStr(.bit_int_too_big, tokenIdx, specifier.toString(p.comp.langOpts).?);
-            return error.ParsingFailed;
-        }
-
         break :blk @intCast(bitsNeeded);
     };
 
