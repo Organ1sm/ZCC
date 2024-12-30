@@ -279,6 +279,15 @@ pub fn addIncludeResume(pp: *Preprocessor, source: Source.ID, offset: u32, line:
     });
 }
 
+fn invalidTokenDiagnostic(tokType: TokenType) Diagnostics.Tag {
+    return switch (tokType) {
+        .UnterminatedStringLiteral => .unterminated_string_literal_warning,
+        .UnterminatedCharLiteral => .unterminated_char_literal_warning,
+        .EmptyCharLiteral => .empty_char_literal_warning,
+        else => unreachable,
+    };
+}
+
 /// Preprocess a compilation unit of sources into a parsable list of tokens.
 pub fn preprocessSources(pp: *Preprocessor, sources: []const Source) Error!void {
     assert(sources.len > 1);
@@ -580,20 +589,17 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!Token {
                 return tokenFromRaw(token);
             },
 
+            .UnterminatedStringLiteral, .UnterminatedCharLiteral, .EmptyCharLiteral => |tag| {
+                startOfLine = false;
+                try pp.addError(token, invalidTokenDiagnostic(tag));
+                try pp.expandMacro(&lexer, token);
+            },
+
+            .UnterminatedComment => try pp.addError(token, .unterminated_comment),
+
             else => {
                 if (token.id.isMacroIdentifier() and pp.poisonedIdentifiers.get(pp.getTokenSlice(token)) != null)
                     try pp.addError(token, .poisoned_identifier);
-
-                switch (token.id) {
-                    .UnterminatedStringLiteral => try pp.addError(token, .unterminated_string_literal_warning),
-                    .UnterminatedCharLiteral => try pp.addError(token, .unterminated_char_literal_warning),
-                    .EmptyCharLiteral => try pp.addError(token, .empty_char_literal_warning),
-                    .UnterminatedComment => {
-                        try pp.addError(token, .unterminated_comment);
-                        continue;
-                    },
-                    else => {},
-                }
 
                 if (std.mem.eql(u8, lexer.buffer[token.start..token.end], "__has_include")) {
                     token.id.simplifyMacroKeyword();
@@ -2523,19 +2529,12 @@ fn define(pp: *Preprocessor, lexer: *Lexer) Error!void {
                 try pp.tokenBuffer.append(token);
             },
             .WhiteSpace => needWS = true,
-            .UnterminatedStringLiteral => {
-                try pp.addError(token, .unterminated_string_literal_warning);
-                try pp.tokenBuffer.append(token);
-            },
-            .UnterminatedCharLiteral => {
-                try pp.addError(token, .unterminated_char_literal_warning);
-                try pp.tokenBuffer.append(token);
-            },
-            .EmptyCharLiteral => {
-                try pp.addError(token, .empty_char_literal_warning);
+            .UnterminatedStringLiteral, .UnterminatedCharLiteral, .EmptyCharLiteral => |tag| {
+                try pp.addError(token, invalidTokenDiagnostic(tag));
                 try pp.tokenBuffer.append(token);
             },
             .UnterminatedComment => try pp.addError(token, .unterminated_comment),
+
             else => {
                 if (token.id != .WhiteSpace and needWS) {
                     needWS = false;
@@ -2867,18 +2866,8 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: RawToken, lParen: Raw
                 try pp.tokenBuffer.append(token);
             },
 
-            .UnterminatedStringLiteral => {
-                try pp.addError(token, .unterminated_string_literal_warning);
-                try pp.tokenBuffer.append(token);
-            },
-
-            .UnterminatedCharLiteral => {
-                try pp.addError(token, .unterminated_char_literal_warning);
-                try pp.tokenBuffer.append(token);
-            },
-
-            .EmptyCharLiteral => {
-                try pp.addError(token, .empty_char_literal_warning);
+            .UnterminatedStringLiteral, .UnterminatedCharLiteral, .EmptyCharLiteral => |tag| {
+                try pp.addError(token, invalidTokenDiagnostic(tag));
                 try pp.tokenBuffer.append(token);
             },
 
