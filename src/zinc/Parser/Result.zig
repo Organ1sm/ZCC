@@ -772,7 +772,7 @@ pub fn saveValue(res: *Result, p: *Parser) !void {
     res.value = .{};
 }
 
-pub fn castType(res: *Result, p: *Parser, to: Type, tok: TokenIndex) !void {
+pub fn castType(res: *Result, p: *Parser, to: Type, operandToken: TokenIndex, lparen: TokenIndex) !void {
     var explicitCastKind: AST.CastKind = undefined;
     if (to.is(.Void)) {
         // everything can cast to void
@@ -782,7 +782,7 @@ pub fn castType(res: *Result, p: *Parser, to: Type, tok: TokenIndex) !void {
         if (res.ty.is(.NullPtrTy)) {
             explicitCastKind = .NoOP;
         } else {
-            try p.errStr(.invalid_object_cast, tok, try p.typePairStrExtra(res.ty, " to ", to));
+            try p.errStr(.invalid_object_cast, lparen, try p.typePairStrExtra(res.ty, " to ", to));
             return error.ParsingFailed;
         }
     } else if (res.ty.is(.NullPtrTy)) {
@@ -795,7 +795,7 @@ pub fn castType(res: *Result, p: *Parser, to: Type, tok: TokenIndex) !void {
         } else if (to.isPointer()) {
             try res.nullCast(p, to);
         } else {
-            try p.errStr(.invalid_object_cast, tok, try p.typePairStrExtra(res.ty, " to ", to));
+            try p.errStr(.invalid_object_cast, lparen, try p.typePairStrExtra(res.ty, " to ", to));
             return error.ParsingFailed;
         }
         explicitCastKind = .NoOP;
@@ -806,10 +806,10 @@ pub fn castType(res: *Result, p: *Parser, to: Type, tok: TokenIndex) !void {
         const newIsFloat = to.isFloat();
 
         if (newIsFloat and res.ty.isPointer()) {
-            try p.errStr(.invalid_cast_to_float, tok, try p.typeStr(to));
+            try p.errStr(.invalid_cast_to_float, lparen, try p.typeStr(to));
             return error.ParsingFailed;
         } else if (oldIsFloat and to.isPointer()) {
-            try p.errStr(.invalid_cast_to_pointer, tok, try p.typeStr(res.ty));
+            try p.errStr(.invalid_cast_to_pointer, lparen, try p.typeStr(res.ty));
             return error.ParsingFailed;
         }
 
@@ -892,6 +892,9 @@ pub fn castType(res: *Result, p: *Parser, to: Type, tok: TokenIndex) !void {
                     try res.implicitCast(p, .ComplexIntToReal);
                 }
                 explicitCastKind = .IntToPointer;
+            } else {
+                try p.errStr(.cond_expr_type, operandToken, try p.typeStr(res.ty));
+                return error.ParsingFailed;
             }
         } else if (newIsFloat) {
             if (res.ty.is(.Bool)) {
@@ -946,7 +949,7 @@ pub fn castType(res: *Result, p: *Parser, to: Type, tok: TokenIndex) !void {
             try res.value.floatCast(to, p.comp);
         } else if (oldInt and newInt) {
             if (to.hasIncompleteSize()) {
-                try p.errStr(.cast_to_incomplete_type, tok, try p.typeStr(to));
+                try p.errStr(.cast_to_incomplete_type, lparen, try p.typeStr(to));
                 return error.ParsingFailed;
             }
             try res.value.intCast(to, p.comp);
@@ -954,26 +957,26 @@ pub fn castType(res: *Result, p: *Parser, to: Type, tok: TokenIndex) !void {
     } else if (to.get(.Union)) |unionTy| {
         if (unionTy.data.record.hasFieldOfType(res.ty, p.comp)) {
             explicitCastKind = .UnionCast;
-            try p.errToken(.gnu_union_cast, tok);
+            try p.errToken(.gnu_union_cast, lparen);
         } else {
             if (unionTy.data.record.isIncomplete())
-                try p.errStr(.cast_to_incomplete_type, tok, try p.typeStr(to))
+                try p.errStr(.cast_to_incomplete_type, lparen, try p.typeStr(to))
             else
-                try p.errStr(.invalid_union_cast, tok, try p.typeStr(res.ty));
+                try p.errStr(.invalid_union_cast, lparen, try p.typeStr(res.ty));
             return error.ParsingFailed;
         }
     } else {
         if (to.is(.AutoType))
-            try p.errToken(.invalid_cast_to_auto_type, tok)
+            try p.errToken(.invalid_cast_to_auto_type, lparen)
         else
-            try p.errStr(.invalid_cast_type, tok, try p.typeStr(to));
+            try p.errStr(.invalid_cast_type, lparen, try p.typeStr(to));
         return error.ParsingFailed;
     }
 
     if (to.containAnyQual())
-        try p.errStr(.qual_cast, tok, try p.typeStr(to));
+        try p.errStr(.qual_cast, lparen, try p.typeStr(to));
     if (to.isInt() and res.ty.isPointer() and to.sizeCompare(res.ty, p.comp) == .lt)
-        try p.errStr(.cast_to_smaller_int, tok, try p.typePairStrExtra(to, " from ", res.ty));
+        try p.errStr(.cast_to_smaller_int, lparen, try p.typePairStrExtra(to, " from ", res.ty));
 
     res.ty = to;
     res.ty.qual = .{};

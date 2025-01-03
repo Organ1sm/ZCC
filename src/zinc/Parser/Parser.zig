@@ -5631,11 +5631,12 @@ fn parseCastExpr(p: *Parser) Error!Result {
             break :castExpr;
         }
 
+        const operandToken = p.tokenIdx;
         var operand = try p.parseCastExpr();
         try operand.expect(p);
 
         try operand.lvalConversion(p);
-        try operand.castType(p, ty, lp);
+        try operand.castType(p, ty, operandToken, lp);
 
         return operand;
     }
