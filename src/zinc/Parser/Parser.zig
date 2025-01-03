@@ -4244,7 +4244,13 @@ fn parseAsmString(p: *Parser) Error!Result {
             try p.errStr(.invalid_asm_str, p.tokenIdx, "wide");
             return error.ParsingFailed;
         },
-        else => break,
+        else => {
+            if (i == p.tokenIdx) {
+                try p.errStr(.expected_str_literal_in, p.tokenIdx, "asm");
+                return error.ParsingFailed;
+            }
+            break;
+        },
     };
     return try p.parseStringLiteral();
 }
