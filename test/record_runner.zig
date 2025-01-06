@@ -155,20 +155,20 @@ pub fn main() !void {
         try parseTargetsFromCode(&testCases, path, source);
     }
 
-    const root_node = std.Progress.start(.{
+    const rootNode = std.Progress.start(.{
         .disable_printing = false,
         .root_name = "Layout",
         .estimated_total_items = testCases.items.len,
     });
 
-    var stats = Stats{ .rootNode = root_node };
+    var stats = Stats{ .rootNode = rootNode };
 
     for (0..threadCount) |i| {
         waitGroup.start();
         try threadPool.spawn(runTestCases, .{ gpa, testDir, &waitGroup, testCases.items[i..], threadCount, &stats });
     }
     threadPool.waitAndWork(&waitGroup);
-    root_node.end();
+    rootNode.end();
 
     std.debug.print("max mem used = {:.2}\n", .{std.fmt.fmtIntSizeBin(stats.maxAlloc)});
     if (stats.okCount == cases.items.len and stats.skipCount == 0) {
@@ -227,13 +227,20 @@ fn singleRun(alloc: std.mem.Allocator, testDir: []const u8, testCase: TestCase, 
     try comp.addDefaultPragmaHandlers();
     try comp.defineSystemIncludes(testDir);
 
-    const target = setTarget(&comp, testCase.target) catch |err| switch (err) {
-        error.UnknownCpuModel => unreachable,
-    };
-    switch (target.os.tag) {
+    try setTarget(&comp, testCase.target);
+    switch (comp.target.os.tag) {
         .hermit => {
             stats.recordResult(.invalidTarget);
             return; // Skip targets zinc doesn't support.
+        },
+        .ios, .macos => {
+            switch (comp.target.cpu.arch) {
+                .x86, .arm => {
+                    stats.recordResult(.invalid_target);
+                    return; // Skip targets Aro doesn't support.
+                },
+                else => {},
+            }
         },
         else => {},
     }
@@ -350,37 +357,27 @@ fn singleRun(alloc: std.mem.Allocator, testDir: []const u8, testCase: TestCase, 
 
 /// Get Zig std.Target from string in the arch-cpu-os-abi format.
 fn getTarget(zig_target_string: []const u8) !std.Target {
-    var ret: std.Target = undefined;
+    var buffer: [128]u8 = undefined;
     var iter = std.mem.tokenizeScalar(u8, zig_target_string, '-');
 
-    ret.cpu.arch = std.meta.stringToEnum(std.Target.Cpu.Arch, iter.next().?).?;
-    ret.cpu.model = try std.Target.Cpu.Arch.parseCpuModel(ret.cpu.arch, iter.next().?);
+    const arch = iter.next().?;
+    const model = iter.next().?;
+    const os = iter.next().?;
+    const abi = iter.next().?;
+    var fb = std.io.fixedBufferStream(&buffer);
+    try std.fmt.format(fb.writer(), "{s}-{s}-{s}", .{ arch, os, abi });
 
-    const tag = std.meta.stringToEnum(std.Target.Os.Tag, iter.next().?).?;
-    // `defaultVersionRange` will panic for invalid targets, check that
-    // here and return an error instead.
-    var os: ?std.Target.Os = null;
-    if (tag == .macos) {
-        switch (ret.cpu.arch) {
-            .x86_64, .aarch64 => {},
-            else => os = .{ .version_range = .{ .none = {} }, .tag = .macos },
-        }
-    }
-
-    ret.os = os orelse std.Target.Os.Tag.defaultVersionRange(tag, ret.cpu.arch);
-    ret.abi = std.meta.stringToEnum(std.Target.Abi, iter.next().?).?;
-    return ret;
+    const query = try std.Target.Query.parse(.{
+        .arch_os_abi = fb.getWritten(),
+        .cpu_features = model,
+    });
+    return std.zig.system.resolveTargetQuery(query);
 }
 
-fn setTarget(comp: *zinc.Compilation, target: []const u8) !std.Target {
+fn setTarget(comp: *zinc.Compilation, target: []const u8) !void {
     const compiler_split_index = std.mem.indexOf(u8, target, ":").?;
 
-    const zig_target = try getTarget(target[0..compiler_split_index]);
-    comp.target.cpu = std.Target.Cpu.Model.toCpu(zig_target.cpu.model, zig_target.cpu.arch);
-    comp.target.os.tag = zig_target.os.tag;
-    comp.target.os.version_range = zig_target.os.version_range;
-    comp.target.abi = zig_target.abi;
-
+    comp.target = try getTarget(target[0..compiler_split_index]);
     comp.langOpts.emulate = zinc.TargetUtil.systemCompiler(comp.target);
 
     const expected_compiler_name = target[compiler_split_index + 1 ..];
@@ -389,8 +386,6 @@ fn setTarget(comp: *zinc.Compilation, target: []const u8) !std.Target {
     // std.debug.print(" '{s}': {s}\n", .{ expected_compiler_name, set_name });
 
     assert(std.ascii.eqlIgnoreCase(set_name, expected_compiler_name));
-
-    return zig_target;
 }
 
 fn parseTargetsFromCode(cases: *TestCase.List, path: []const u8, source: []const u8) !void {
