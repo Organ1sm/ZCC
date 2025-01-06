@@ -495,8 +495,11 @@ pub const TokenType = enum(u8) {
 
     pub fn lexeme(id: TokenType) ?[]const u8 {
         return switch (id) {
-            .IncludeStart, .IncludeResume, .UnterminatedComment => unreachable,
+            .IncludeStart,
+            .IncludeResume,
+            => unreachable,
 
+            .UnterminatedComment,
             .Invalid,
             .Identifier,
             .ExtendedIdentifier,
