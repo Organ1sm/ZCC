@@ -80,7 +80,7 @@ fn diagnosticHandler(self: *GCC, pp: *Preprocessor, startIdx: TokenIndex) Pragma
                         .tag = .pragma_requires_string_literal,
                         .loc = diagnosticToken.loc,
                         .extra = .{ .str = "pragma diagnostic" },
-                    }, diagnosticToken.expansionSlice());
+                    }, pp.expansionSlice(startIdx));
                 },
                 else => |e| return e,
             };
@@ -90,7 +90,7 @@ fn diagnosticHandler(self: *GCC, pp: *Preprocessor, startIdx: TokenIndex) Pragma
                     .tag = .malformed_warning_check,
                     .loc = next.loc,
                     .extra = .{ .str = "pragma diagnostic" },
-                }, next.expansionSlice());
+                }, pp.expansionSlice(startIdx + 1));
             }
             const newKind = switch (diagnostic) {
                 .ignored => Diagnostics.Kind.off,
@@ -127,7 +127,7 @@ fn preprocessorHandler(pragma: *Pragma, pp: *Preprocessor, startIdx: TokenIndex)
                         .tag = .pragma_requires_string_literal,
                         .loc = directiveToken.loc,
                         .extra = .{ .str = @tagName(gccPragma) },
-                    }, directiveToken.expansionSlice());
+                    }, pp.expansionSlice(startIdx + 1));
                 },
                 else => |e| return e,
             };
@@ -135,7 +135,7 @@ fn preprocessorHandler(pragma: *Pragma, pp: *Preprocessor, startIdx: TokenIndex)
             const diagnosticTag: Diagnostics.Tag = if (gccPragma == .warning) .pragma_warning_message else .pragma_error_message;
             return pp.comp.addDiagnostic(
                 .{ .tag = diagnosticTag, .loc = directiveToken.loc, .extra = extra },
-                directiveToken.expansionSlice(),
+                pp.expansionSlice(startIdx + 1),
             );
         },
         .diagnostic => return self.diagnosticHandler(pp, startIdx + 2) catch |err| switch (err) {
@@ -144,12 +144,12 @@ fn preprocessorHandler(pragma: *Pragma, pp: *Preprocessor, startIdx: TokenIndex)
                 return pp.comp.addDiagnostic(.{
                     .tag = .unknown_gcc_pragma_directive,
                     .loc = tok.loc,
-                }, tok.expansionSlice());
+                }, pp.expansionSlice(startIdx + 2));
             },
             else => |e| return e,
         },
         .poison => {
-            var i: usize = 2;
+            var i: u32 = 2;
             while (true) : (i += 1) {
                 const tok = pp.tokens.get(startIdx + i);
                 if (tok.is(.NewLine))
@@ -159,14 +159,14 @@ fn preprocessorHandler(pragma: *Pragma, pp: *Preprocessor, startIdx: TokenIndex)
                     return pp.comp.addDiagnostic(.{
                         .tag = .pragma_poison_identifier,
                         .loc = tok.loc,
-                    }, tok.expansionSlice());
+                    }, pp.expansionSlice(startIdx + i));
                 }
                 const str = pp.expandedSlice(tok);
                 if (pp.defines.get(str) != null) {
                     try pp.comp.addDiagnostic(.{
                         .tag = .pragma_poison_macro,
                         .loc = tok.loc,
-                    }, tok.expansionSlice());
+                    }, pp.expansionSlice(startIdx + i));
                 }
                 try pp.poisonedIdentifiers.put(str, {});
             }

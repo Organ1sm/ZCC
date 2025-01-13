@@ -37,7 +37,7 @@ fn parserHandler(pragma: *Pragma, p: *Parser, startIdx: TokenIndex) Compilation.
         return p.comp.addDiagnostic(.{
             .tag = .pragma_pack_lparen,
             .loc = lparen.loc,
-        }, lparen.expansionSlice());
+        }, p.pp.expansionSlice(idx));
     }
     idx += 1;
 

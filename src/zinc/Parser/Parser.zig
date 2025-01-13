@@ -360,20 +360,20 @@ pub fn errStr(p: *Parser, tag: Diagnostics.Tag, index: TokenIndex, str: []const 
     return p.errExtra(tag, index, .{ .str = str });
 }
 
-pub fn errExtra(p: *Parser, tag: Diagnostics.Tag, index: TokenIndex, extra: Diagnostics.Message.Extra) Compilation.Error!void {
+pub fn errExtra(p: *Parser, tag: Diagnostics.Tag, tokIdx: TokenIndex, extra: Diagnostics.Message.Extra) Compilation.Error!void {
     @branchHint(.cold);
-    const token = p.pp.tokens.get(index);
+    const token = p.pp.tokens.get(tokIdx);
     var loc = token.loc;
 
-    if (index != 0 and token.is(.Eof)) {
-        const prev = p.pp.tokens.get(index - 1);
+    if (tokIdx != 0 and token.is(.Eof)) {
+        const prev = p.pp.tokens.get(tokIdx - 1);
         loc = prev.loc;
-        loc.byteOffset += @intCast(p.getTokenText(index - 1).len);
+        loc.byteOffset += @intCast(p.getTokenText(tokIdx - 1).len);
     }
 
     try p.comp.addDiagnostic(
         .{ .tag = tag, .loc = loc, .extra = extra },
-        token.expansionSlice(),
+        p.pp.expansionSlice(tokIdx),
     );
 }
 

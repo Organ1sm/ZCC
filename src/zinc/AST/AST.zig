@@ -4,9 +4,9 @@ const Interner = @import("backend").Interner;
 const Type = @import("Type.zig");
 const Compilation = @import("../Basic/Compilation.zig");
 const CodeGen = @import("../CodeGen/CodeGen.zig");
+const NumberAffixes = @import("../Lexer/NumberAffixes.zig");
 const Source = @import("../Basic/Source.zig");
 const Lexer = @import("../Lexer/Lexer.zig");
-const TokenType = @import("../Basic/TokenType.zig").TokenType;
 const AstTag = @import("AstTag.zig").Tag;
 const Attribute = @import("../Lexer/Attribute.zig");
 const Value = @import("Value.zig");
@@ -45,6 +45,32 @@ pub const GNUAssemblyQualifiers = struct {
 
 pub const Token = struct {
     id: TokenType,
+    loc: Source.Location,
+
+    pub inline fn is(self: Token, kind: TokenType) bool {
+        return self.id == kind;
+    }
+
+    pub inline fn isNot(self: Token, kind: TokenType) bool {
+        return self.id != kind;
+    }
+
+    pub fn isOneOf(self: Token, kinds: anytype) bool {
+        inline for (kinds) |k| {
+            if (self.id == k) {
+                return true;
+            }
+        }
+        return false;
+    }
+    pub const TokenType = @import("../Basic/TokenType.zig").TokenType;
+    pub const List = std.MultiArrayList(Token);
+    pub const NumberPrefix = NumberAffixes.Prefix;
+    pub const NumberSuffix = NumberAffixes.Suffix;
+};
+
+pub const TokenWithExpansionLocs = struct {
+    id: Token.TokenType,
     flags: packed struct {
         expansionDisabled: bool = false,
         isMacroArg: bool = false,
@@ -54,14 +80,14 @@ pub const Token = struct {
     loc: Source.Location,
     expansionLocs: ?[*]Source.Location = null,
 
-    pub fn expansionSlice(tok: Token) []const Source.Location {
+    pub fn expansionSlice(tok: TokenWithExpansionLocs) []const Source.Location {
         const locs = tok.expansionLocs orelse return &[0]Source.Location{};
         var i: usize = 0;
         while (locs[i].id != .unused) : (i += 1) {}
         return locs[0..i];
     }
 
-    pub fn addExpansionLocation(tok: *Token, gpa: std.mem.Allocator, new: []const Source.Location) !void {
+    pub fn addExpansionLocation(tok: *TokenWithExpansionLocs, gpa: std.mem.Allocator, new: []const Source.Location) !void {
         if (new.len == 0 or tok.id == .WhiteSpace) return;
         var list = std.ArrayList(Source.Location).init(gpa);
         defer {
@@ -100,14 +126,14 @@ pub const Token = struct {
         gpa.free(locs[0 .. i + 1]);
     }
 
-    pub fn dupe(tok: Token, gpa: std.mem.Allocator) !Token {
+    pub fn dupe(tok: TokenWithExpansionLocs, gpa: std.mem.Allocator) !Token {
         var copy = tok;
         copy.expansionLocs = null;
         try copy.addExpansionLocation(gpa, tok.expansionSlice());
         return copy;
     }
 
-    pub fn checkMsEof(tok: Token, source: Source, comp: *Compilation) !void {
+    pub fn checkMsEof(tok: TokenWithExpansionLocs, source: Source, comp: *Compilation) !void {
         std.debug.assert(tok.id == .Eof);
         if (source.buffer.len > tok.loc.byteOffset and source.buffer[tok.loc.byteOffset] == 0x1A) {
             try comp.addDiagnostic(.{
@@ -121,15 +147,15 @@ pub const Token = struct {
         }
     }
 
-    pub inline fn is(self: Token, kind: TokenType) bool {
+    pub inline fn is(self: TokenWithExpansionLocs, kind: Token.TokenType) bool {
         return self.id == kind;
     }
 
-    pub inline fn isNot(self: Token, kind: TokenType) bool {
+    pub inline fn isNot(self: TokenWithExpansionLocs, kind: Token.TokenType) bool {
         return self.id != kind;
     }
 
-    pub fn isOneOf(self: Token, kinds: anytype) bool {
+    pub fn isOneOf(self: TokenWithExpansionLocs, kinds: anytype) bool {
         inline for (kinds) |k| {
             if (self.id == k) {
                 return true;
@@ -137,10 +163,6 @@ pub const Token = struct {
         }
         return false;
     }
-
-    /// How many source locations do we track for each token.
-    /// Must be at least 2.
-    pub const List = std.MultiArrayList(Token);
 };
 
 pub const Range = struct { start: u32, end: u32 };
