@@ -250,7 +250,7 @@ pub fn main() !void {
             std.debug.print("could not preprocess file '{s}': {s}\n", .{ path, @errorName(err) });
             continue;
         };
-        try pp.tokens.append(gpa, eof);
+        try pp.addToken(eof);
 
         if (pp.defines.get("TESTS_SKIPPED")) |macro| {
             if (macro.isFunc or macro.tokens.len != 1 or macro.tokens[0].isNot(.PPNumber)) {

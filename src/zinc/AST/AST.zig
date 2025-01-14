@@ -126,7 +126,7 @@ pub const TokenWithExpansionLocs = struct {
         gpa.free(locs[0 .. i + 1]);
     }
 
-    pub fn dupe(tok: TokenWithExpansionLocs, gpa: std.mem.Allocator) !Token {
+    pub fn dupe(tok: TokenWithExpansionLocs, gpa: std.mem.Allocator) !TokenWithExpansionLocs {
         var copy = tok;
         copy.expansionLocs = null;
         try copy.addExpansionLocation(gpa, tok.expansionSlice());

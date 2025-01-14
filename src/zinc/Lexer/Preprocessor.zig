@@ -238,8 +238,8 @@ pub fn deinit(pp: *Preprocessor) void {
     pp.topExpansionBuffer.deinit();
     pp.includeGuards.deinit(pp.gpa);
 
-    for (pp.tokens.items(.expansionLocs)) |loc| {
-        TokenWithExpansionLocs.free(loc, pp.gpa);
+    for (pp.expansionLocs.items(.locs)) |locs| {
+        TokenWithExpansionLocs.free(locs, pp.gpa);
     }
 
     pp.expansionLocs.deinit(pp.gpa);
@@ -247,8 +247,7 @@ pub fn deinit(pp: *Preprocessor) void {
 
 pub fn expansionSlice(pp: *Preprocessor, tok: Tree.TokenIndex) []Source.Location {
     const S = struct {
-        fn orderTokenIndex(context: void, lhs: Tree.TokenIndex, rhs: Tree.TokenIndex) std.math.Order {
-            _ = context;
+        fn orderTokenIndex(lhs: Tree.TokenIndex, rhs: Tree.TokenIndex) std.math.Order {
             return std.math.order(lhs, rhs);
         }
     };
@@ -647,7 +646,7 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!TokenWithExpans
 }
 
 /// Tokenize a file without any preprocessing, returns eof token.
-pub fn tokenize(pp: *Preprocessor, source: Source) Error!Token {
+pub fn tokenize(pp: *Preprocessor, source: Source) Error!TokenWithExpansionLocs {
     assert(pp.linemarkers == .None);
     assert(pp.preserveWhitespace == false);
     var tokenizer = Lexer{
@@ -720,6 +719,17 @@ fn fatal(pp: *Preprocessor, raw: RawToken, comptime fmt: []const u8, args: anyty
         },
     });
     return error.FatalError;
+}
+
+fn fatalNotFound(pp: *Preprocessor, tok: TokenWithExpansionLocs, filename: []const u8) Compilation.Error {
+    const old = pp.comp.diagnostics.fatalErrors;
+    pp.comp.diagnostics.fatalErrors = true;
+    defer pp.comp.diagnostics.fatalErrors = old;
+
+    try pp.comp.diagnostics.addExtra(pp.comp.langOpts, .{ .tag = .cli_error, .loc = tok.loc, .extra = .{
+        .str = try std.fmt.allocPrint(pp.comp.diagnostics.arena.allocator(), "'{s}' not found", .{filename}),
+    } }, tok.expansionSlice(), false);
+    unreachable; // addExtra should've returned FatalError
 }
 
 fn verboseLog(pp: *Preprocessor, raw: RawToken, comptime fmt: []const u8, args: anytype) void {
@@ -1546,7 +1556,7 @@ fn expandFuncMacro(
                 const slice = if (args.items[raw.end].len > 0)
                     args.items[raw.end]
                 else
-                    &[1]Token{tokenFromRaw(.{ .id = .PlaceMarker, .source = .generated })};
+                    &[1]TokenWithExpansionLocs{tokenFromRaw(.{ .id = .PlaceMarker, .source = .generated })};
                 const rawLoc = Source.Location{ .id = raw.source, .byteOffset = raw.start, .line = raw.line };
                 try bufCopyTokens(&buf, slice, &.{rawLoc});
             },
@@ -1923,7 +1933,7 @@ fn expandVaOpt(
     }
 }
 
-fn shouldExpand(tok: Token, macro: *Macro) bool {
+fn shouldExpand(tok: TokenWithExpansionLocs, macro: *Macro) bool {
     if (tok.loc.id == macro.loc.id and
         tok.loc.byteOffset >= macro.start and
         tok.loc.byteOffset <= macro.end)
@@ -2396,7 +2406,7 @@ fn pasteTokens(pp: *Preprocessor, lhsTokens: *ExpandBuffer, rhsTokens: []const T
     const lhs = while (lhsTokens.popOrNull()) |lhs| {
         if ((pp.comp.langOpts.preserveCommentsInMacros and lhs.is(.Comment)) or !lhs.isOneOf(.{ .MacroWS, .Comment }))
             break lhs;
-        Token.free(lhs.expansionLocs, pp.gpa);
+        TokenWithExpansionLocs.free(lhs.expansionLocs, pp.gpa);
     } else {
         return bufCopyTokens(lhsTokens, rhsTokens, &.{});
     };
@@ -2606,6 +2616,7 @@ fn embed(pp: *Preprocessor, lexer: *Lexer) MacroError!void {
         error.InvalidInclude => return,
         else => |e| return e,
     };
+    defer TokenWithExpansionLocs.free(fileNameToken.expansionLocs, pp.gpa);
 
     // Check for empty filename.
     const tokSlice = pp.expandedSliceExtra(fileNameToken, .SingleMacroWS);
@@ -2738,7 +2749,7 @@ fn embed(pp: *Preprocessor, lexer: *Lexer) MacroError!void {
     }
 
     const embedBytes = (try pp.comp.findEmbed(filename, first.source, includeType, limit)) orelse
-        return pp.fatal(first, "'{s}' not found", .{filename});
+        return pp.fatalNotFound(fileNameToken, filename);
     defer pp.comp.gpa.free(embedBytes);
 
     try Range.expand(prefix, pp, lexer);
@@ -3014,7 +3025,7 @@ fn include(pp: *Preprocessor, lexer: *Lexer, which: Compilation.WhichInclude) Ma
     try pp.addIncludeStart(newSource);
     const eof = pp.preprocessExtra(newSource) catch |err| switch (err) {
         error.StopPreprocessing => {
-            for (pp.expansionLocs.items(.expansionLocs)[locsStart..]) |loc| TokenWithExpansionLocs.free(loc, pp.gpa);
+            for (pp.expansionLocs.items(.locs)[locsStart..]) |loc| TokenWithExpansionLocs.free(loc, pp.gpa);
             pp.tokens.len = tokenStart;
             pp.expansionLocs.len = locsStart;
             return;
@@ -3061,7 +3072,7 @@ fn makePragmaToken(
 
 pub fn addToken(pp: *Preprocessor, tok: TokenWithExpansionLocs) !void {
     const idx: u32 = @intCast(pp.tokens.len);
-    try pp.addToken(.{ .id = tok.id, .loc = tok.loc });
+    try pp.tokens.append(pp.gpa, .{ .id = tok.id, .loc = tok.loc });
     if (tok.expansionLocs) |expansionLocs| {
         try pp.expansionLocs.append(pp.gpa, .{ .idx = idx, .locs = expansionLocs });
     }
@@ -3069,7 +3080,7 @@ pub fn addToken(pp: *Preprocessor, tok: TokenWithExpansionLocs) !void {
 
 pub fn addTokenAssumeCapacity(pp: *Preprocessor, tok: TokenWithExpansionLocs) void {
     const idx: u32 = @intCast(pp.tokens.len);
-    pp.addTokenAssumeCapacity(.{ .id = tok.id, .loc = tok.loc });
+    pp.tokens.appendAssumeCapacity(.{ .id = tok.id, .loc = tok.loc });
     if (tok.expansionLocs) |expansionLocs| {
         pp.expansionLocs.appendAssumeCapacity(.{ .idx = idx, .locs = expansionLocs });
     }
@@ -3081,7 +3092,7 @@ pub fn ensureTotalTokenCapacity(pp: *Preprocessor, capacity: usize) !void {
 }
 
 pub fn ensureUnusedTokenCapacity(pp: *Preprocessor, capacity: usize) !void {
-    try pp.ensureUnusedTokenCapacity(capacity);
+    try pp.tokens.ensureUnusedCapacity(pp.gpa, capacity);
     try pp.expansionLocs.ensureUnusedCapacity(pp.gpa, capacity);
 }
 
@@ -3138,9 +3149,6 @@ fn findIncludeFilenameToken(
     lexer: *Lexer,
     trailingTokenBehavior: enum { IgnoreTrailingTokens, expectNlEof },
 ) !TokenWithExpansionLocs {
-    const start = pp.tokens.len;
-    defer pp.tokens.len = start;
-
     var first = firstToken;
     if (first.is(.AngleBracketLeft)) to_end: {
         while (lexer.index < lexer.buffer.len) : (lexer.index += 1) {
@@ -3167,30 +3175,52 @@ fn findIncludeFilenameToken(
         try pp.addError(first, .header_str_match);
     }
 
-    // Try expand if the argument is a macro
-    try pp.expandMacro(lexer, first);
+    const sourceToken = tokenFromRaw(first);
+    const filenameToken, const expandedTrailing = switch (sourceToken.id) {
+        .StringLiteral, .MacroString => .{ sourceToken, false },
+        else => expanded: {
+            pp.topExpansionBuffer.items.len = 0;
+            defer for (pp.topExpansionBuffer.items) |tok|
+                TokenWithExpansionLocs.free(tok.expansionLocs, pp.gpa);
+            try pp.topExpansionBuffer.append(sourceToken);
+            pp.expansionSourceLoc = sourceToken.loc;
 
-    // check that we actually got a string
-    const filenameToken = pp.tokens.get(start);
-    switch (filenameToken.id) {
-        .StringLiteral, .MacroString => {},
-        else => {
-            try pp.addError(first, .expected_filename);
-            try pp.expectNewLine(lexer);
-            return error.InvalidInclude;
+            try pp.expandMacroExhaustive(lexer, &pp.topExpansionBuffer, 0, 1, true, .NonExpr);
+            var trailingTokens: []const TokenWithExpansionLocs = &.{};
+            const includeStr = (try pp.reconstructIncludeString(pp.topExpansionBuffer.items, &trailingTokens)) orelse {
+                try pp.addError(first, .expected_filename);
+                try pp.expectNewLine(lexer);
+                return error.InvalidInclude;
+            };
+            const start = pp.comp.generatedBuffer.items.len;
+            try pp.comp.generatedBuffer.appendSlice(pp.gpa, includeStr);
+
+            break :expanded .{ try pp.makeGeneratedToken(start, switch (includeStr[0]) {
+                '"' => .StringLiteral,
+                '<' => .MacroString,
+                else => unreachable,
+            }, pp.topExpansionBuffer.items[0]), trailingTokens.len != 0 };
         },
-    }
+    };
 
     // error on the extra tokens.
     switch (trailingTokenBehavior) {
         .expectNlEof => {
             const newLine = lexer.nextNoWhiteSpace();
-            if ((newLine.id != .NewLine and newLine.id != .Eof) or pp.tokens.len > start + 1) {
+            if ((newLine.id != .NewLine and newLine.id != .Eof) or expandedTrailing) {
                 skipToNewLine(lexer);
-                try pp.addError(first, .extra_tokens_directive_end);
+                try pp.comp.diagnostics.addExtra(pp.comp.langOpts, .{
+                    .tag = .extra_tokens_directive_end,
+                    .loc = filenameToken.loc,
+                }, filenameToken.expansionSlice(), false);
             }
         },
-        .IgnoreTrailingTokens => {},
+        .IgnoreTrailingTokens => if (expandedTrailing) {
+            try pp.comp.diagnostics.addExtra(pp.comp.langOpts, .{
+                .tag = .extra_tokens_directive_end,
+                .loc = filenameToken.loc,
+            }, filenameToken.expansionSlice(), false);
+        },
     }
 
     return filenameToken;
@@ -3203,6 +3233,7 @@ fn findIncludeSource(
     which: Compilation.WhichInclude,
 ) !Source {
     const filenameToken = try pp.findIncludeFilenameToken(first, lexer, .expectNlEof);
+    defer TokenWithExpansionLocs.free(filenameToken.expansionLocs, pp.gpa);
 
     // check for empty filename
     const tkSlice = pp.expandedSliceExtra(filenameToken, .SingleMacroWS);
@@ -3219,7 +3250,7 @@ fn findIncludeSource(
         else => unreachable,
     };
     return (try pp.comp.findInclude(filename, first, includeType, which)) orelse
-        pp.fatal(first, "'{s}' not found", .{filename});
+        pp.fatalNotFound(filenameToken, filename);
 }
 
 fn printLinemarker(

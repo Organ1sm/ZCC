@@ -233,6 +233,7 @@ pub fn set(diag: *Diagnostics, name: []const u8, to: Kind) !void {
         .{},
         .{ .tag = .unknown_warning, .extra = .{ .str = name } },
         &.{},
+        true,
     );
 }
 
@@ -252,7 +253,7 @@ pub fn deinit(diag: *Diagnostics) void {
 }
 
 pub fn add(comp: *Compilation, msg: Message, expansionLocs: []const Source.Location) Compilation.Error!void {
-    return comp.diagnostics.addExtra(comp.langOpts, msg, expansionLocs);
+    return comp.diagnostics.addExtra(comp.langOpts, msg, expansionLocs, true);
 }
 
 pub fn addExtra(
@@ -260,6 +261,7 @@ pub fn addExtra(
     langopts: LangOpts,
     msg: Message,
     expansionLocs: []const Source.Location,
+    noteMsgLoc: bool,
 ) Compilation.Error!void {
     const kind = diag.tagKind(msg.tag, langopts);
     if (kind == .off) return;
@@ -305,7 +307,7 @@ pub fn addExtra(
             }
         }
 
-        diag.list.appendAssumeCapacity(.{
+        if (noteMsgLoc) diag.list.appendAssumeCapacity(.{
             .tag = .expanded_from_here,
             .kind = .note,
             .loc = msg.loc,

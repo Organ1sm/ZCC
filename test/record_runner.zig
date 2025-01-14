@@ -236,7 +236,7 @@ fn singleRun(alloc: std.mem.Allocator, testDir: []const u8, testCase: TestCase, 
         .ios, .macos => {
             switch (comp.target.cpu.arch) {
                 .x86, .arm => {
-                    stats.recordResult(.invalid_target);
+                    stats.recordResult(.invalidTarget);
                     return; // Skip targets Aro doesn't support.
                 },
                 else => {},
@@ -290,7 +290,7 @@ fn singleRun(alloc: std.mem.Allocator, testDir: []const u8, testCase: TestCase, 
         std.debug.print("could not preprocess file '{s}': {s}\n", .{ path, @errorName(err) });
         return;
     };
-    try pp.tokens.append(alloc, eof);
+    try pp.addToken(eof);
 
     var tree = try zinc.Parser.parse(&pp);
     defer tree.deinit();

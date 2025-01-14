@@ -117,7 +117,7 @@ fn preprocessorHandler(pragma: *Pragma, pp: *Preprocessor, startIdx: TokenIndex)
         return pp.comp.addDiagnostic(.{
             .tag = .unknown_gcc_pragma,
             .loc = directiveToken.loc,
-        }, directiveToken.expansionSlice());
+        }, pp.expansionSlice(startIdx + 1));
     };
     switch (gccPragma) {
         .warning, .@"error" => {
