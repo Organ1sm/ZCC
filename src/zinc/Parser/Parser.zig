@@ -24,11 +24,10 @@ const Value = @import("../AST/Value.zig");
 const StringInterner = @import("../Basic/StringInterner.zig");
 const StringId = StringInterner.StringId;
 const RecordLayout = @import("../Basic/RecordLayout.zig");
-const NumberAffixes = @import("../Lexer/NumberAffixes.zig");
-const NumberPrefix = NumberAffixes.Prefix;
-const NumberSuffix = NumberAffixes.Suffix;
 
 const Token = AST.Token;
+const NumberPrefix = Token.NumberPrefix;
+const NumberSuffix = Token.NumberSuffix;
 const TokenIndex = AST.TokenIndex;
 const NodeIndex = AST.NodeIndex;
 const Allocator = std.mem.Allocator;
