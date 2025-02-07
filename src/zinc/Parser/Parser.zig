@@ -277,7 +277,7 @@ fn expectIdentifier(p: *Parser) Error!TokenIndex {
     if (actual != .Identifier and actual != .ExtendedIdentifier)
         return p.errExpectedToken(.Identifier, actual);
 
-    return (try p.eatIdentifier()) orelse unreachable;
+    return (try p.eatIdentifier()) orelse error.ParsingFailed;
 }
 
 fn eat(p: *Parser, expected: TokenType) ?TokenIndex {
@@ -4698,7 +4698,7 @@ fn parseLabeledStmt(p: *Parser) Error!?NodeIndex {
         p.currToken() == .ExtendedIdentifier) and
         p.lookAhead(1) == .Colon)
     {
-        const nameToken = p.expectIdentifier() catch unreachable;
+        const nameToken = try p.expectIdentifier();
         const str = p.getTokenText(nameToken);
         if (p.findLabel(str)) |some| {
             try p.errStr(.duplicate_label, nameToken, str);
@@ -6713,7 +6713,7 @@ fn checkArrayBounds(p: *Parser, index: Result, array: Result, token: TokenIndex)
 ///  | char-literal
 ///  | string-literal
 ///  | '(' expression ')'
-///  | generic-selection
+///  | generic-selectioncatch unreachable
 fn parsePrimaryExpr(p: *Parser) Error!Result {
     if (p.eat(.LParen)) |lp| {
         var e = try p.parseExpr();
@@ -6725,7 +6725,7 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
 
     switch (p.currToken()) {
         .Identifier, .ExtendedIdentifier => {
-            const nameToken = p.expectIdentifier() catch unreachable;
+            const nameToken = try p.expectIdentifier();
             const name = p.getTokenText(nameToken);
             const internedName = try StringInterner.intern(p.comp, name);
             if (p.comp.builtins.get(name)) |some| {
