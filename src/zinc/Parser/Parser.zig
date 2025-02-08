@@ -2933,7 +2933,7 @@ fn declarator(p: *Parser, baseType: Type, kind: DeclaratorKind) Error!?Declarato
         try res.type.combine(outer);
         try res.type.validateCombinedType(p, suffixStart);
         res.oldTypeFunc = d.oldTypeFunc;
-        res.funcDeclarator = d.funcDeclarator;
+        if (d.funcDeclarator) |some| res.funcDeclarator = some;
         return res;
     }
 

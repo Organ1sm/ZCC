@@ -354,7 +354,7 @@ pub fn defineParam(self: *SymbolStack, name: StringId, ty: Type, token: TokenInd
                 try self.p.errStr(.redefinition_different_sym, token, self.p.getTokenText(token));
                 try self.p.errToken(.previous_definition, prev.token);
             },
-            else => unreachable,
+            else => unreachable
         }
     }
     try self.define(.{
