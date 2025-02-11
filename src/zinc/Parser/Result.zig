@@ -85,17 +85,17 @@ pub fn maybeWarnUnused(res: Result, p: *Parser, exprStart: TokenIndex, errStart:
 
             .CallExprOne => {
                 const fnPtr = p.nodes.items(.data)[@intFromEnum(curNode)].binExpr.lhs;
-                const fnTy = p.nodes.items(.type)[@intFromEnum(fnPtr)].getElemType();
-                if (fnTy.hasAttribute(.nodiscard)) try p.errStr(.nodiscard_unused, exprStart, "TODO get name");
-                if (fnTy.hasAttribute(.warn_unused_result)) try p.errStr(.warn_unused_result, exprStart, "TODO get name");
+                const callInfo = p.tempTree().callableResultUsage(fnPtr) orelse return;
+                if (callInfo.nodiscard) try p.errStr(.nodiscard_unused, exprStart, p.getTokenText(callInfo.token));
+                if (callInfo.warnUnusedResult) try p.errStr(.warn_unused_result, exprStart, p.getTokenText(callInfo.token));
                 return;
             },
 
             .CallExpr => {
                 const fnPtr = p.data.items[p.nodes.items(.data)[@intFromEnum(curNode)].range.start];
-                const fnTy = p.nodes.items(.type)[@intFromEnum(fnPtr)].getElemType();
-                if (fnTy.hasAttribute(.nodiscard)) try p.errStr(.nodiscard_unused, exprStart, "TODO get name");
-                if (fnTy.hasAttribute(.warn_unused_result)) try p.errStr(.warn_unused_result, exprStart, "TODO get name");
+                const callInfo = p.tempTree().callableResultUsage(fnPtr) orelse return;
+                if (callInfo.nodiscard) try p.errStr(.nodiscard_unused, exprStart, p.getTokenText(callInfo.token));
+                if (callInfo.warnUnusedResult) try p.errStr(.warn_unused_result, exprStart, p.getTokenText(callInfo.token));
                 return;
             },
 

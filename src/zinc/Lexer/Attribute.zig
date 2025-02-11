@@ -848,7 +848,7 @@ pub fn applyFieldAttributes(p: *Parser, fieldTy: *Type, attrBufferStart: usize) 
 
     for (attrs, toks) |attr, tok| switch (attr.tag) {
         // zig fmt: off
-        .@"packed", .may_alias, .deprecated, .unavailable, .unused, .warn_if_not_aligned, .mode,
+        .@"packed", .may_alias, .deprecated, .unavailable, .unused, .warn_if_not_aligned, .mode,.warn_unused_result, .nodiscard,
         => try p.attrApplicationBuffer.append(p.gpa, attr),
         // zig fmt: on
 

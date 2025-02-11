@@ -366,6 +366,59 @@ pub fn isLValueExtra(tree: *const AST, node: NodeIndex, isConst: *bool) bool {
     }
 }
 
+const CallableResultUsage = struct {
+    /// name token of the thing being called, for diagnostics
+    token: TokenIndex,
+    /// true if `nodiscard` attribute present
+    nodiscard: bool,
+    /// true if `warn_unused_result` attribute present
+    warnUnusedResult: bool,
+};
+
+pub fn callableResultUsage(tree: *const AST, node: NodeIndex) ?CallableResultUsage {
+    const data = tree.nodes.items(.data);
+
+    var curNode = node;
+    while (true) switch (tree.nodes.items(.tag)[@intFromEnum(curNode)]) {
+        .DeclRefExpr => {
+            const tok = data[@intFromEnum(curNode)].declRef;
+            const fnTy = tree.nodes.items(.type)[@intFromEnum(node)].getElemType();
+            return .{
+                .token = tok,
+                .nodiscard = fnTy.hasAttribute(.nodiscard),
+                .warnUnusedResult = fnTy.hasAttribute(.warn_unused_result),
+            };
+        },
+        .ParenExpr => curNode = data[@intFromEnum(curNode)].unExpr,
+        .CommaExpr => curNode = data[@intFromEnum(curNode)].binExpr.rhs,
+
+        .ExplicitCast, .ImplicitCast => curNode = data[@intFromEnum(curNode)].cast.operand,
+        .AddrOfExpr, .DerefExpr => curNode = data[@intFromEnum(curNode)].unExpr,
+        .CallExprOne => curNode = data[@intFromEnum(curNode)].binExpr.lhs,
+        .CallExpr => curNode = tree.data[data[@intFromEnum(curNode)].range.start],
+
+        .MemberAccessExpr, .MemberAccessPtrExpr => {
+            const member = data[@intFromEnum(curNode)].member;
+            var ty = tree.nodes.items(.type)[@intFromEnum(member.lhs)];
+            if (ty.isPointer()) ty = ty.getElemType();
+
+            const record = ty.getRecord().?;
+            const field = record.fields[member.index];
+            const attributes = if (record.fieldAttributes) |attrs| attrs[member.index] else &.{};
+            return .{
+                .token = field.nameToken,
+                .nodiscard = for (attributes) |attr| {
+                    if (attr.tag == .nodiscard) break true;
+                } else false,
+                .warnUnusedResult = for (attributes) |attr| {
+                    if (attr.tag == .warn_unused_result) break true;
+                } else false,
+            };
+        },
+        else => return null,
+    };
+}
+
 pub fn getTokenSlice(tree: AST, index: TokenIndex) []const u8 {
     if (tree.tokens.items(.id)[index].lexeme()) |some|
         return some;
