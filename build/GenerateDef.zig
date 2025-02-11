@@ -253,7 +253,14 @@ fn generate(self: *GenerateDef, input: []const u8) ![]const u8 {
             \\
             \\/// Integer starting at 0 derived from the unique index,
             \\/// corresponds with the data array index.
-            \\pub const Tag = enum(u16) { _ };
+            \\pub const Tag = enum(u16) {
+            \\
+        );
+        for (valuesArray) |value| {
+            try writer.print("    {},\n", .{std.zig.fmtId(value.name)});
+        }
+        try writer.writeAll(
+            \\};
             \\
             \\const Self = @This();
             \\
@@ -468,9 +475,8 @@ fn writeData(writer: anytype, values: []const Value) !void {
     try writer.print("    @setEvalBranchQuota({d});\n", .{values.len * 7});
     try writer.writeAll("    break :blk [_]@This(){\n");
 
-    for (values, 0..) |value, i| {
-        try writer.print("        // {s}\n", .{value.name});
-        try writer.print("        .{{ .tag = @enumFromInt({}), .properties = .{{", .{i});
+    for (values) |value| {
+        try writer.print("        .{{ .tag = .{}, .properties = .{{", .{std.zig.fmtId(value.name)});
         for (value.properties, 0..) |property, j| {
             if (j != 0) try writer.writeByte(',');
             try writer.writeByte(' ');

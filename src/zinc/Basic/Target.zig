@@ -1,6 +1,7 @@
 const std = @import("std");
 const LangOpts = @import("LangOpts.zig");
 const Type = @import("../AST/Type.zig");
+const TargetSet = @import("../Builtins/Properties.zig").TargetSet;
 
 /// intmax_t for this target
 pub fn intMaxType(target: std.Target) Type {
@@ -149,6 +150,10 @@ pub fn isTlsSupported(target: std.Target) bool {
         .bpfel, .bpfeb, .msp430, .nvptx, .nvptx64, .x86, .arm, .armeb, .thumb, .thumbeb => false,
         else => true,
     };
+}
+
+pub fn isLP64(target: std.Target) bool {
+    return target.cTypeBitSize(.int) == 32 and target.ptrBitWidth() == 64;
 }
 
 pub fn isKnownWindowsMSVCEnvironment(target: std.Target) bool {
@@ -635,4 +640,24 @@ test "target size/align tests" {
 /// The canonical integer representation of nullptr_t.
 pub fn nullRepr(_: std.Target) u64 {
     return 0;
+}
+
+pub fn builtinEnabled(target: std.Target, enabled_for: TargetSet) bool {
+    var it = enabled_for.iterator();
+    while (it.next()) |val| {
+        switch (val) {
+            .basic => return true,
+            .x86_64 => if (target.cpu.arch == .x86_64) return true,
+            .aarch64 => if (target.cpu.arch == .aarch64) return true,
+            .arm => if (target.cpu.arch == .arm) return true,
+            .ppc => switch (target.cpu.arch) {
+                .powerpc, .powerpc64, .powerpc64le => return true,
+                else => {},
+            },
+            else => {
+                // Todo: handle other target predicates
+            },
+        }
+    }
+    return false;
 }
