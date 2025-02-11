@@ -1408,7 +1408,7 @@ fn handleBuiltinMacro(
                 },
                 .MacroParamHasFeature => Features.hasFeature(pp.comp, identifierStr),
                 .MacroParamHasExtension => Features.hasExtension(pp.comp, identifierStr),
-                .MacroParamHasBuiltin => pp.comp.builtins.hasBuiltin(identifierStr),
+                .MacroParamHasBuiltin => pp.comp.hasBuiltin(identifierStr),
                 else => unreachable,
             };
         },

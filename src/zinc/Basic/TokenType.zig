@@ -756,6 +756,7 @@ pub const TokenType = enum(u8) {
             .StringLiteralUTF_16,
             .StringLiteralUTF_32,
             .StringLiteralWide,
+            .UnterminatedStringLiteral,
             => "a string literal",
 
             .CharLiteral,
@@ -763,6 +764,8 @@ pub const TokenType = enum(u8) {
             .CharLiteralUTF_16,
             .CharLiteralUTF_32,
             .CharLiteralWide,
+            .UnterminatedCharLiteral,
+            .EmptyCharLiteral,
             => "a character literal",
 
             .PPNumber, .EmbedByte => "A number",

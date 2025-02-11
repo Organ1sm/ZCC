@@ -2,10 +2,10 @@
 /// and declared symbols as well and house all compiler operation
 const std = @import("std");
 const assert = std.debug.assert;
-const builtin = @import("builtin");
 const Source = @import("Source.zig");
 const Diagnostics = @import("../Basic/Diagnostics.zig");
-const Builtins = @import("Builtins.zig");
+const Builtins = @import("../Builtins.zig");
+const Builtin = Builtins.Builtin;
 const Token = @import("../Lexer/Token.zig").Token;
 const LangOpts = @import("LangOpts.zig");
 const Type = @import("../AST/Type.zig");
@@ -99,7 +99,7 @@ environment: Environment = .{},
 sources: std.StringArrayHashMapUnmanaged(Source) = .{},
 includeDirs: std.ArrayListUnmanaged([]const u8) = .{},
 systemIncludeDirs: std.ArrayListUnmanaged([]const u8) = .{},
-target: std.Target = builtin.target,
+target: std.Target = @import("builtin").target,
 pragmaHandlers: std.StringArrayHashMapUnmanaged(*Pragma) = .{},
 langOpts: LangOpts = .{},
 generatedBuffer: std.ArrayListUnmanaged(u8) = .{},
@@ -230,7 +230,6 @@ fn generateDateAndTime(w: anytype, timestamp: u47) !void {
 /// Generate builtin macros that will be available to each source file.
 pub fn generateBuiltinMacros(comp: *Compilation) !Source {
     try comp.generateBuiltinTypes();
-    comp.builtins = try Builtins.create(comp);
 
     var buf = std.ArrayList(u8).init(comp.gpa);
     defer buf.deinit();
@@ -1350,6 +1349,27 @@ pub fn pragmaEvent(comp: *Compilation, event: PragmaEvent) void {
             .AfterParse => pragma.afterParse,
         };
         if (maybeFunc) |func| func(pragma, comp);
+    }
+}
+
+pub fn hasBuiltin(comp: *const Compilation, name: []const u8) bool {
+    if (std.mem.eql(u8, name, "__builtin_va_arg") or
+        std.mem.eql(u8, name, "__builtin_choose_expr") or
+        std.mem.eql(u8, name, "__builtin_bitoffsetof") or
+        std.mem.eql(u8, name, "__builtin_offsetof") or
+        std.mem.eql(u8, name, "__builtin_types_compatible_p")) return true;
+
+    const builtin = Builtin.fromName(name) orelse return false;
+    return comp.hasBuiltinFunction(builtin);
+}
+
+pub fn hasBuiltinFunction(comp: *const Compilation, builtin: Builtin) bool {
+    if (!Target.builtinEnabled(comp.target, builtin.properties.target_set)) return false;
+
+    switch (builtin.properties.language) {
+        .all_languages => return true,
+        .all_ms_languages => return comp.langOpts.emulate == .msvc,
+        .gnu_lang, .all_gnu_languages => return comp.langOpts.standard.isGNU(),
     }
 }
 

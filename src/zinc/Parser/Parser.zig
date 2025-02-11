@@ -24,6 +24,8 @@ const Value = @import("../AST/Value.zig");
 const StringInterner = @import("../Basic/StringInterner.zig");
 const StringId = StringInterner.StringId;
 const RecordLayout = @import("../Basic/RecordLayout.zig");
+const Builtins = @import("../Builtins.zig");
+const Builtin = Builtins.Builtin;
 
 const Token = AST.Token;
 const NumberPrefix = Token.NumberPrefix;
@@ -2933,7 +2935,7 @@ fn declarator(p: *Parser, baseType: Type, kind: DeclaratorKind) Error!?Declarato
         try res.type.combine(outer);
         try res.type.validateCombinedType(p, suffixStart);
         res.oldTypeFunc = d.oldTypeFunc;
-        res.funcDeclarator = d.funcDeclarator;
+        if (d.funcDeclarator) |some| res.funcDeclarator = some;
         return res;
     }
 
@@ -6528,6 +6530,127 @@ fn fieldAccessExtra(
     unreachable;
 }
 
+fn checkVaStartArg(
+    p: *Parser,
+    builtinToken: TokenIndex,
+    firstAfter: TokenIndex,
+    paramToken: TokenIndex,
+    arg: *Result,
+    idx: u32,
+) !void {
+    assert(idx != 0);
+    if (idx > 1) {
+        try p.errToken(.closing_paren, firstAfter);
+        return error.ParsingFailed;
+    }
+
+    var funcTy = p.func.type orelse {
+        try p.errToken(.va_start_not_in_func, builtinToken);
+        return;
+    };
+    const funcParams = funcTy.getParams();
+    if (funcTy.specifier != .VarArgsFunc or funcParams.len == 0) {
+        return p.errToken(.va_start_fixed_args, builtinToken);
+    }
+    const lastParamName = funcParams[funcParams.len - 1].name;
+    const declRef = p.getNode(arg.node, .DeclRefExpr);
+    if (declRef == null or lastParamName != try StringInterner.intern(p.comp, p.getTokenText(p.nodes.items(.data)[@intFromEnum(declRef.?)].declRef))) {
+        try p.errToken(.va_start_not_last_param, paramToken);
+    }
+}
+
+const CallExpr = union(enum) {
+    standard: NodeIndex,
+    builtin: struct {
+        node: NodeIndex,
+        tag: Builtin.Tag,
+    },
+
+    fn init(p: *Parser, callNode: NodeIndex, funcNode: NodeIndex) CallExpr {
+        if (p.getNode(callNode, .BuiltinCallExprOne)) |node| {
+            const data = p.nodes.items(.data)[@intFromEnum(node)];
+            const name = p.getTokenText(data.decl.name);
+            const builtinTy = p.comp.builtins.lookup(name);
+            return .{ .builtin = .{ .node = node, .tag = builtinTy.builtin.tag } };
+        }
+        return .{ .standard = funcNode };
+    }
+
+    fn shouldPerformLvalConversion(self: CallExpr, arg_idx: u32) bool {
+        return switch (self) {
+            .standard => true,
+            .builtin => |builtin| switch (builtin.tag) {
+                .__builtin_va_start, .__va_start, .va_start => arg_idx != 1,
+                else => true,
+            },
+        };
+    }
+
+    fn shouldPromoteVarArg(self: CallExpr, arg_idx: u32) bool {
+        return switch (self) {
+            .standard => true,
+            .builtin => |builtin| switch (builtin.tag) {
+                .__builtin_va_start, .__va_start, .va_start => arg_idx != 1,
+                else => true,
+            },
+        };
+    }
+
+    fn shouldCoerceArg(self: CallExpr, arg_idx: u32) bool {
+        _ = self;
+        _ = arg_idx;
+        return true;
+    }
+
+    fn checkVarArg(self: CallExpr, p: *Parser, first_after: TokenIndex, param_tok: TokenIndex, arg: *Result, arg_idx: u32) !void {
+        if (self == .standard) return;
+
+        const builtin_tok = p.nodes.items(.data)[@intFromEnum(self.builtin.node)].decl.name;
+        switch (self.builtin.tag) {
+            .__builtin_va_start, .__va_start, .va_start => return p.checkVaStartArg(builtin_tok, first_after, param_tok, arg, arg_idx),
+            else => {},
+        }
+    }
+
+    fn finish(self: CallExpr, p: *Parser, ty: Type, listBufferTop: usize, argCount: u32) Error!Result {
+        switch (self) {
+            .standard => |funcNode| {
+                var callNode: AST.Node = .{
+                    .tag = .CallExprOne,
+                    .type = ty.getReturnType(),
+                    .data = .{ .binExpr = .{ .lhs = funcNode, .rhs = .none } },
+                };
+                const args = p.listBuffer.items[listBufferTop..];
+                switch (argCount) {
+                    0 => {},
+                    1 => callNode.data.binExpr.rhs = args[1], // args[0] == func.node
+                    else => {
+                        callNode.tag = .CallExpr;
+                        callNode.data = .{ .range = try p.addList(args) };
+                    },
+                }
+                return Result{ .node = try p.addNode(callNode), .ty = callNode.type };
+            },
+            .builtin => |builtin| {
+                const index = @intFromEnum(builtin.node);
+                var callNode = p.nodes.get(index);
+                defer p.nodes.set(index, callNode);
+                const args = p.listBuffer.items[listBufferTop..];
+                switch (argCount) {
+                    0 => {},
+                    1 => callNode.data.decl.node = args[1], // args[0] == func.node
+                    else => {
+                        callNode.tag = .BuiltinCallExpr;
+                        args[0] = @enumFromInt(callNode.data.decl.name);
+                        callNode.data = .{ .range = try p.addList(args) };
+                    },
+                }
+                return Result{ .node = builtin.node, .ty = callNode.type.getReturnType() };
+            },
+        }
+    }
+};
+
 fn parseCallExpr(p: *Parser, lhs: Result) Error!Result {
     const lParen = p.tokenIdx;
     p.tokenIdx += 1;
@@ -6544,10 +6667,10 @@ fn parseCallExpr(p: *Parser, lhs: Result) Error!Result {
     defer p.listBuffer.items.len = listBufferTop;
     try p.listBuffer.append(func.node);
     var argCount: u32 = 0;
-
-    const builtinNode = p.getNode(lhs.node, .BuiltinCallExprOne);
-
     var firstAfter = lParen;
+
+    const callExpr = CallExpr.init(p, lhs.node, func.node);
+
     while (p.eat(.RParen) == null) {
         const paramToken = p.tokenIdx;
         if (argCount == params.len)
@@ -6555,14 +6678,19 @@ fn parseCallExpr(p: *Parser, lhs: Result) Error!Result {
 
         var arg = try p.parseAssignExpr();
         try arg.expect(p);
-        const rawArgNode = arg.node;
-        try arg.lvalConversion(p);
+
+        if (callExpr.shouldPerformLvalConversion(argCount))
+            try arg.lvalConversion(p);
+
         if (arg.ty.hasIncompleteSize() and !arg.ty.is(.Void))
             return error.ParsingFailed;
 
         if (argCount >= params.len) {
-            if (arg.ty.isInt()) try arg.intCast(p, arg.ty.integerPromotion(p.comp), paramToken);
-            if (arg.ty.is(.Float)) try arg.floatCast(p, Type.Double);
+            if (callExpr.shouldPromoteVarArg(argCount)) {
+                if (arg.ty.isInt()) try arg.intCast(p, arg.ty.integerPromotion(p.comp), paramToken);
+                if (arg.ty.is(.Float)) try arg.floatCast(p, Type.Double);
+            }
+            try callExpr.checkVarArg(p, firstAfter, paramToken, &arg, argCount);
             try arg.saveValue(p);
             try p.listBuffer.append(arg.node);
             argCount += 1;
@@ -6575,27 +6703,7 @@ fn parseCallExpr(p: *Parser, lhs: Result) Error!Result {
         }
 
         const paramType = params[argCount].ty;
-        if (paramType.is(.SpecialVaStart)) vaStart: {
-            const builtinToken = p.nodes.items(.data)[@intFromEnum(builtinNode.?)].decl.name;
-            const funcType = p.func.type orelse {
-                try p.errToken(.va_start_not_in_func, builtinToken);
-                break :vaStart;
-            };
-
-            const funcParams = funcType.getParams();
-            if (funcType.specifier != .VarArgsFunc or funcParams.len == 0) {
-                try p.errToken(.va_start_fixed_args, builtinToken);
-                break :vaStart;
-            }
-
-            const lastParamName = funcParams[funcType.data.func.params.len - 1].name;
-            const declRef = p.getNode(rawArgNode, .DeclRefExpr);
-            if (declRef == null or
-                try p.getInternString(p.nodes.items(.data)[@intFromEnum(declRef.?)].declRef) != lastParamName)
-            {
-                try p.errToken(.va_start_not_last_param, paramToken);
-            }
-        } else {
+        if (callExpr.shouldCoerceArg(argCount)) {
             try arg.coerce(p, paramType, paramToken, .{ .arg = params[argCount].nameToken });
         }
 
@@ -6627,40 +6735,7 @@ fn parseCallExpr(p: *Parser, lhs: Result) Error!Result {
     if (ty.is(.VarArgsFunc) and argCount < params.len)
         try p.errExtra(.expected_at_least_arguments, firstAfter, extra);
 
-    if (builtinNode) |some| {
-        const index = @intFromEnum(some);
-        var callNode = p.nodes.get(index);
-        defer p.nodes.set(index, callNode);
-
-        const args = p.listBuffer.items[listBufferTop..];
-        switch (argCount) {
-            0 => {},
-            1 => callNode.data.decl.node = args[1], // args[0] == func.node
-            else => {
-                callNode.tag = .BuiltinCallExpr;
-                args[0] = @enumFromInt(callNode.data.decl.name);
-                callNode.data = .{ .range = try p.addList(args) };
-            },
-        }
-        return Result{ .node = some, .ty = callNode.type.getReturnType() };
-    }
-
-    var callNode: AST.Node = .{
-        .tag = .CallExprOne,
-        .type = ty.getReturnType(),
-        .data = .{ .binExpr = .{ .lhs = func.node, .rhs = .none } },
-    };
-
-    const args = p.listBuffer.items[listBufferTop..];
-    switch (argCount) {
-        0 => {},
-        1 => callNode.data.binExpr.rhs = args[1], //args[0]  == lhs.node
-        else => {
-            callNode.tag = .CallExpr;
-            callNode.data = .{ .range = try p.addList(args) };
-        },
-    }
-    return Result{ .node = try p.addNode(callNode), .ty = callNode.type };
+    return callExpr.finish(p, ty, listBufferTop, argCount);
 }
 
 fn checkArrayBounds(p: *Parser, index: Result, array: Result, token: TokenIndex) !void {
@@ -6727,7 +6802,7 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
             const nameToken = try p.expectIdentifier();
             const name = p.getTokenText(nameToken);
             const internedName = try StringInterner.intern(p.comp, name);
-            if (p.comp.builtins.get(name)) |some| {
+            if (try p.comp.builtins.getOrCreate(p.comp, name, p.arena)) |some| {
                 for (p.tokenIds[p.tokenIdx..]) |id| switch (id) {
                     .RParen => {}, // closing grouped expr
                     .LParen => break, // beginning of a call
@@ -6738,10 +6813,10 @@ fn parsePrimaryExpr(p: *Parser) Error!Result {
                 };
                 const node = try p.addNode(.{
                     .tag = .BuiltinCallExprOne,
-                    .type = some,
+                    .type = some.ty,
                     .data = .{ .decl = .{ .name = nameToken, .node = .none } },
                 });
-                return Result{ .ty = some, .node = node };
+                return Result{ .ty = some.ty, .node = node };
             }
             if (p.symStack.findSymbol(internedName)) |sym| {
                 try p.checkDeprecatedUnavailable(sym.type, nameToken, sym.token);
