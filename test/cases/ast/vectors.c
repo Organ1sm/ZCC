@@ -11,15 +11,15 @@ FnDef: 'fn () void'
  name: foo
  body:
   CompoundStmt: 'void'
-    Var: 'vector((2, float)'
+    Var: 'f2v': 'vector((2, float)'
      name: a
 
-    Var: 'vector((2, float)'
+    Var: 'f2v': 'vector((2, float)'
      name: b
 
-    MulAssignExpr: 'vector((2, float)'
+    MulAssignExpr: 'f2v': 'vector((2, float)'
      lhs:
-      DeclRefExpr: 'vector((2, float)' lvalue
+      DeclRefExpr: 'f2v': 'vector((2, float)' lvalue
        name: a
      rhs:
       ImplicitCast: (VectorSplat) 'float'

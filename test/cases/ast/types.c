@@ -29,13 +29,13 @@ FnProto: 'attributed(fn () void)'
 TypeDef: 'int'
  name: A
 
-TypeDef: 'int'
+TypeDef: 'A': 'int'
  name: B
 
-TypeDef: 'int'
+TypeDef: 'A': 'int'
  name: C
 
-TypeDef: 'int'
+TypeDef: 'C': 'int'
  name: B
 
 TypeDef: '[2]int'
@@ -45,20 +45,20 @@ FnDef: 'fn (a: *d[2]const int, b: *d[2]const int) void'
  name: qux
  body:
   CompoundStmt: 'void'
-    AddAssignExpr: '*d[2]const int'
+    AddAssignExpr: 'I': '*d[2]const int'
      lhs:
-      DeclRefExpr: '*d[2]const int' lvalue
+      DeclRefExpr: 'I': '*d[2]const int' lvalue
        name: b
      rhs:
-      ImplicitCast: (IntToPointer) '*d[2]const int'
+      ImplicitCast: (IntToPointer) 'I': '*d[2]const int'
         IntLiteral: 'int' (value: 1)
 
-    AddAssignExpr: '*d[2]const int'
+    AddAssignExpr: 'I': '*d[2]const int'
      lhs:
-      DeclRefExpr: '*d[2]const int' lvalue
+      DeclRefExpr: 'I': '*d[2]const int' lvalue
        name: a
      rhs:
-      ImplicitCast: (IntToPointer) '*d[2]const int'
+      ImplicitCast: (IntToPointer) 'I': '*d[2]const int'
         IntLiteral: 'int' (value: 1)
 
     ImplicitReturn: 'void'

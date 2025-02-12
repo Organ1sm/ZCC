@@ -33,6 +33,8 @@ data: union {
 qual: Qualifiers = .{},
 specifier: Specifier,
 decayed: bool = false,
+/// typedef name, if any
+name: StringId = .empty,
 
 pub const Invalid = create(.Invalid);
 pub const Void = create(.Void);
@@ -1340,6 +1342,15 @@ pub fn alignof(ty: Type, comp: *const Compilation) u29 {
 pub fn enumIsPacked(ty: Type, comp: *const Compilation) bool {
     assert(ty.is(.Enum));
     return comp.langOpts.shortEnums or Target.packAllEnums(comp.target) or ty.hasAttribute(.@"packed");
+}
+
+pub fn getName(ty: Type) StringId {
+    return switch (ty.specifier) {
+        .TypeofType => if (ty.name == .empty) ty.data.subType.getName() else ty.name,
+        .TypeofExpr => if (ty.name == .empty) ty.data.expr.ty.getName() else ty.name,
+        .Attributed => if (ty.name == .empty) ty.data.attributed.base.getName() else ty.name,
+        else => ty.name,
+    };
 }
 
 pub fn requestedAlignment(ty: Type, comp: *const Compilation) ?u29 {
