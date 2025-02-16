@@ -11,7 +11,7 @@ const mem = std.mem;
 const Allocator = mem.Allocator;
 const Token = Tree.Token;
 const TokenIndex = Tree.TokenIndex;
-const NodeIndex = Tree.NodeIndex;
+const Node = Tree.Node;
 
 const SymbolStack = @This();
 
@@ -23,7 +23,7 @@ pub const Symbol = struct {
     /// The token index that represents this symbol.
     token: TokenIndex,
     /// The node index in the AST (Abstract Syntax Tree) that represents this symbol.
-    node: NodeIndex = .none,
+    node: Node.Index,
     /// The kind of the symbol, which categorizes it into various types like typedef, enum, etc.
     kind: Kind,
     /// The value of the symbol, if it has one.
@@ -203,7 +203,7 @@ pub fn defineTypedef(
     name: StringId,
     ty: Type,
     token: TokenIndex,
-    node: NodeIndex,
+    node: Node.Index,
 ) !void {
     if (self.get(name, .vars)) |prev| {
         switch (prev.kind) {
@@ -258,7 +258,7 @@ pub fn defineSymbol(
     name: StringId,
     ty: Type,
     token: TokenIndex,
-    node: NodeIndex,
+    node: Node.Index,
     val: Value,
     constexpr: bool,
 ) !void {
@@ -309,7 +309,7 @@ pub fn declareSymbol(
     name: StringId,
     ty: Type,
     token: TokenIndex,
-    node: NodeIndex,
+    node: Node.Index,
 ) !void {
     if (self.get(name, .vars)) |prev| {
         switch (prev.kind) {

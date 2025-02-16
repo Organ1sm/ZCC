@@ -12,7 +12,7 @@ const LangOpts = @import("../Basic/LangOpts.zig");
 
 const Type = @This();
 
-const NodeIndex = Tree.NodeIndex;
+const Node = Tree.Node;
 const TokenIndex = Tree.TokenIndex;
 
 data: union {
@@ -211,7 +211,7 @@ pub const Array = struct {
 };
 
 pub const Expr = struct {
-    node: NodeIndex,
+    node: Node.Index,
     ty: Type,
 };
 
@@ -247,7 +247,7 @@ pub const Enum = struct {
         ty: Type,
         name: StringId,
         nameToken: TokenIndex,
-        node: NodeIndex,
+        node: Node.Index,
     };
 
     pub fn isIncomplete(e: Enum) bool {

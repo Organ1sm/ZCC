@@ -9,7 +9,6 @@ const Result = @import("../Parser/Result.zig");
 const Type = @import("../AST/Type.zig");
 const Tree = @import("../AST/AST.zig");
 const Value = @import("../AST/Value.zig");
-const NodeIndex = Tree.NodeIndex;
 const TokenIndex = Tree.TokenIndex;
 
 const Attribute = @This();
@@ -366,7 +365,6 @@ const EnumTypes = enum {
     identifier,
 };
 pub const Alignment = struct {
-    node: NodeIndex = .none,
     requested: u29,
 };
 pub const Identifier = struct {

@@ -7,13 +7,13 @@ const Value = @import("../AST/Value.zig");
 const AstTag = @import("../AST/AstTag.zig").Tag;
 const Parser = @import("Parser.zig");
 
-const NodeIndex = AST.NodeIndex;
+const Node = AST.Node;
 const TokenIndex = AST.TokenIndex;
 const Error = Parser.Error;
 
 const Result = @This();
 
-node: NodeIndex = .none,
+node: ?Node.Index = null,
 ty: Type = Type.Int,
 value: Value = .{},
 
@@ -85,7 +85,7 @@ pub fn maybeWarnUnused(res: Result, p: *Parser, exprStart: TokenIndex, errStart:
 
             .CallExprOne => {
                 const fnPtr = p.nodes.items(.data)[@intFromEnum(curNode)].binExpr.lhs;
-                const callInfo = p.tempTree().callableResultUsage(fnPtr) orelse return;
+                const callInfo = p.tree.callableResultUsage(fnPtr) orelse return;
                 if (callInfo.nodiscard) try p.errStr(.nodiscard_unused, exprStart, p.getTokenText(callInfo.token));
                 if (callInfo.warnUnusedResult) try p.errStr(.warn_unused_result, exprStart, p.getTokenText(callInfo.token));
                 return;
@@ -93,7 +93,7 @@ pub fn maybeWarnUnused(res: Result, p: *Parser, exprStart: TokenIndex, errStart:
 
             .CallExpr => {
                 const fnPtr = p.data.items[p.nodes.items(.data)[@intFromEnum(curNode)].range.start];
-                const callInfo = p.tempTree().callableResultUsage(fnPtr) orelse return;
+                const callInfo = p.tree.callableResultUsage(fnPtr) orelse return;
                 if (callInfo.nodiscard) try p.errStr(.nodiscard_unused, exprStart, p.getTokenText(callInfo.token));
                 if (callInfo.warnUnusedResult) try p.errStr(.warn_unused_result, exprStart, p.getTokenText(callInfo.token));
                 return;
@@ -420,7 +420,7 @@ pub fn lvalConversion(res: *Result, p: *Parser) Error!void {
         try res.implicitCast(p, .ArrayToPointer);
     }
     // Perform l-value to r-value conversion
-    else if (!p.inMacro and p.tempTree().isLValue(res.node)) {
+    else if (!p.inMacro and p.tree.isLValue(res.node)) {
         res.ty.qual = .{};
         try res.implicitCast(p, .LValToRVal);
     }

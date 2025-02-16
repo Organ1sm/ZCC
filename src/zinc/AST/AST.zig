@@ -2625,8 +2625,6 @@ pub fn isLValue(tree: *const Tree, node: Node.Index) bool {
 pub fn isLValueExtra(tree: *const Tree, node: Node.Index, isConst: *bool) bool {
     isConst.* = false;
 
-    const data = tree.nodes.items(.data)[@intFromEnum(node)];
-
     var curNode = node;
     switch (curNode.get(tree)) {
         .compoundLiteralExpr => |literal| {

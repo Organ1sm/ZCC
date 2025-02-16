@@ -31,9 +31,9 @@ const Token = AST.Token;
 const NumberPrefix = Token.NumberPrefix;
 const NumberSuffix = Token.NumberSuffix;
 const TokenIndex = AST.TokenIndex;
-const NodeIndex = AST.NodeIndex;
+const Node = AST.Node;
 const Allocator = std.mem.Allocator;
-const NodeList = std.ArrayList(NodeIndex);
+const NodeList = std.ArrayList(Node.Index);
 
 const Parser = @This();
 pub const Error = Compilation.Error || error{ParsingFailed};
@@ -64,11 +64,9 @@ gpa: Allocator,
 tokenIds: []const TokenType,
 tokenIdx: u32 = 0,
 
-// value of incomplete AST
+tree: AST,
+// references tree.arena
 arena: Allocator,
-nodes: AST.Node.List = .{},
-data: NodeList,
-valueMap: AST.ValueMap,
 
 // buffers used during compilation
 symStack: SymbolStack = .{},
@@ -533,17 +531,12 @@ fn errDeprecated(p: *Parser, tag: Diagnostics.Tag, tokenIdx: TokenIndex, msg: ?V
     return p.errStr(tag, tokenIdx, str);
 }
 
-pub fn addNode(p: *Parser, node: AST.Node) Allocator.Error!NodeIndex {
-    if (p.inMacro)
-        return .none;
-
-    const res = p.nodes.len;
-    try p.nodes.append(p.gpa, node);
-
-    return @enumFromInt(res);
+pub fn addNode(p: *Parser, node: AST.Node) Allocator.Error!Node.Index {
+    if (p.inMacro) return .none;
+    return p.tree.addNode(node);
 }
 
-fn addList(p: *Parser, nodes: []const NodeIndex) Allocator.Error!AST.Range {
+fn addList(p: *Parser, nodes: []const Node.Index) Allocator.Error!AST.Range {
     if (p.inMacro)
         return AST.Range{ .start = 0, .end = 0 };
     const start: u32 = @intCast(p.data.items.len);
@@ -563,11 +556,11 @@ fn findLabel(p: *Parser, name: []const u8) ?TokenIndex {
     return null;
 }
 
-fn nodeIs(p: *Parser, node: NodeIndex, tag: AstTag) bool {
+fn nodeIs(p: *Parser, node: Node.Index, tag: AstTag) bool {
     return p.getNode(node, tag) != null;
 }
 
-fn nodeIsCompoundLiteral(p: *Parser, node: NodeIndex) bool {
+fn nodeIsCompoundLiteral(p: *Parser, node: Node.Index) bool {
     var cur = node;
     const tags = p.nodes.items(.tag);
     const data = p.nodes.items(.data);
@@ -584,7 +577,7 @@ fn nodeIsCompoundLiteral(p: *Parser, node: NodeIndex) bool {
     }
 }
 
-fn getNode(p: *Parser, node: NodeIndex, tag: AstTag) ?NodeIndex {
+fn getNode(p: *Parser, node: Node.Index, tag: AstTag) ?Node.Index {
     var cur = node;
     const tags = p.nodes.items(.tag);
     const data = p.nodes.items(.data);
@@ -669,12 +662,18 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
         .pp = pp,
         .comp = pp.comp,
         .gpa = pp.comp.gpa,
-        .arena = arena.allocator(),
+        .arena = undefined,
         .tokenIds = pp.tokens.items(.id),
-        .data = NodeList.init(pp.comp.gpa),
+
+        .tree = .{
+            .comp = pp.comp,
+            .generated = pp.comp.generatedBuffer.items,
+            .tokens = pp.tokens.slice(),
+            .arena = .init(pp.comp.gpa),
+        },
+
         .labels = std.ArrayList(Label).init(pp.comp.gpa),
         .strings = std.ArrayList(u8).init(pp.comp.gpa),
-        .valueMap = AST.ValueMap.init(pp.comp.gpa),
         .listBuffer = NodeList.init(pp.comp.gpa),
         .declBuffer = NodeList.init(pp.comp.gpa),
         .paramBuffer = std.ArrayList(Type.Function.Param).init(pp.comp.gpa),
@@ -687,13 +686,10 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
         },
     };
 
-    errdefer {
-        p.nodes.deinit(pp.comp.gpa);
-        p.valueMap.deinit();
-    }
+    p.arena = p.tree.arena.allocator();
+    errdefer p.tree.deinit();
 
     defer {
-        p.data.deinit();
         p.labels.deinit();
         p.strings.deinit();
         p.symStack.deinit(pp.comp.gpa);
@@ -715,7 +711,7 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
     try p.symStack.pushScope();
     defer p.symStack.popScope();
 
-    // NodeIndex 0 must be invalid
+    // Node.Index 0 must be invalid
     _ = try p.addNode(.{ .tag = .Invalid, .type = undefined, .data = undefined });
     {
         if (p.comp.langOpts.hasChar8_t())
@@ -806,16 +802,7 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
     const data = try p.data.toOwnedSlice();
     errdefer pp.comp.gpa.free(data);
 
-    return AST{
-        .comp = pp.comp,
-        .tokens = pp.tokens.slice(),
-        .arena = arena,
-        .generated = pp.comp.generatedBuffer.items,
-        .nodes = p.nodes.toOwnedSlice(),
-        .data = data,
-        .rootDecls = rootDecls,
-        .valueMap = p.valueMap,
-    };
+    return p.tree;
 }
 
 fn parseOrNextDecl(p: *Parser, comptime func: fn (*Parser) Error!bool) Compilation.Error!bool {
@@ -1220,7 +1207,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
     return true;
 }
 
-fn staticAssertMessage(p: *Parser, condNode: NodeIndex, message: Result) !?[]const u8 {
+fn staticAssertMessage(p: *Parser, condNode: Node.Index, message: Result) !?[]const u8 {
     const condTag = p.nodes.items(.tag)[@intFromEnum(condNode)];
     if (condTag != .BuiltinTypesCompatibleP and message.node == .none) return null;
 
@@ -2316,7 +2303,7 @@ fn parseRecordDeclarator(p: *Parser) Error!bool {
             ty = Type.Invalid;
         }
 
-        var bitsNode: NodeIndex = .none;
+        var bitsNode: Node.Index = .none;
         var bits: ?u32 = null;
         const firstToken = p.tokenIdx;
         if (try p.declarator(ty, .record)) |d| {
@@ -2760,7 +2747,7 @@ const Enumerator = struct {
     }
 };
 
-const EnumFieldAndNode = struct { field: Type.Enum.Field, node: NodeIndex };
+const EnumFieldAndNode = struct { field: Type.Enum.Field, node: Node.Index };
 
 /// enumerator : identifier ('=' integer-constant-expression)
 fn enumerator(p: *Parser, e: *Enumerator) Error!?EnumFieldAndNode {
@@ -3807,7 +3794,7 @@ fn coerceInit(p: *Parser, item: *Result, token: TokenIndex, target: Type) !void 
     try item.lvalConversion(p);
     if (target.is(.AutoType)) {
         if (p.getNode(node, .MemberAccessExpr) orelse p.getNode(node, .MemberAccessPtrExpr)) |memberNode| {
-            if (p.tempTree().isBitField(memberNode)) try p.errToken(.auto_type_from_bitfield, token);
+            if (p.tree.isBitField(memberNode)) try p.errToken(.auto_type_from_bitfield, token);
         }
         return;
     } else if (target.is(.C23Auto)) {
@@ -3838,7 +3825,7 @@ fn isStringInit(p: *Parser, ty: Type) bool {
 }
 
 /// Convert InitList into an AST
-fn convertInitList(p: *Parser, il: InitList, initType: Type) Error!NodeIndex {
+fn convertInitList(p: *Parser, il: InitList, initType: Type) Error!Node.Index {
     const isComplex = initType.isComplex();
     if (initType.isScalar() and !isComplex) {
         if (il.node == .none)
@@ -3978,7 +3965,7 @@ fn convertInitList(p: *Parser, il: InitList, initType: Type) Error!NodeIndex {
     }
 }
 
-fn parseMSVCAsmStmt(p: *Parser) Error!?NodeIndex {
+fn parseMSVCAsmStmt(p: *Parser) Error!?Node.Index {
     return p.todo("MSVC assembly statements");
 }
 
@@ -4022,7 +4009,7 @@ fn parseAsmOperands(p: *Parser, names: *std.ArrayList(?TokenIndex), constraints:
 ///  | asmStr ':' asmOperand* ':' asmOperand*
 ///  | asmStr ':' asmOperand* ':' asmOperand* : asmStr? (',' asmStr)*
 ///  | asmStr ':' asmOperand* ':' asmOperand* : asmStr? (',' asmStr)* : Identifier (',' Identifier)*
-fn parseGNUAsmStmt(p: *Parser, quals: AST.GNUAssemblyQualifiers, lparen: TokenIndex) Error!NodeIndex {
+fn parseGNUAsmStmt(p: *Parser, quals: AST.GNUAssemblyQualifiers, lparen: TokenIndex) Error!Node.Index {
     const asmString = try p.parseAsmString();
     try p.checkAsmStr(asmString.value, lparen);
 
@@ -4035,7 +4022,7 @@ fn parseGNUAsmStmt(p: *Parser, quals: AST.GNUAssemblyQualifiers, lparen: TokenIn
     }
 
     const expectedItems = 8; // arbitrarily chosen, most assembly will have fewer than 8 inputs/outputs/constraints/names
-    const bytesNeeded = expectedItems * @sizeOf(?TokenIndex) + expectedItems * 3 * @sizeOf(NodeIndex);
+    const bytesNeeded = expectedItems * @sizeOf(?TokenIndex) + expectedItems * 3 * @sizeOf(Node.Index);
 
     var stackFallback = std.heap.stackFallback(bytesNeeded, p.gpa);
     const allocator = stackFallback.get();
@@ -4169,7 +4156,7 @@ fn checkAsmStr(p: *Parser, asmString: Value, tok: TokenIndex) !void {
 ///  : keyword-asm asmQual* '(' asmStr ')'
 ///  | keyword-asm asmQual* '(' gnuAsmStmt ')'
 ///  | keyword-asm msvcAsmStmt
-fn parseAssembly(p: *Parser, kind: enum { global, declLabel, stmt }) Error!?NodeIndex {
+fn parseAssembly(p: *Parser, kind: enum { global, declLabel, stmt }) Error!?Node.Index {
     const asmToken = p.tokenIdx;
     switch (p.currToken()) {
         .KeywordGccAsm => {
@@ -4204,7 +4191,7 @@ fn parseAssembly(p: *Parser, kind: enum { global, declLabel, stmt }) Error!?Node
     };
 
     const lparen = try p.expectToken(.LParen);
-    var resultNode: NodeIndex = .none;
+    var resultNode: Node.Index = .none;
     switch (kind) {
         .declLabel => {
             const asmString = try p.parseAsmString();
@@ -4284,7 +4271,7 @@ fn parseAsmString(p: *Parser) Error!Result {
 ///  | `continue` ';'
 ///  | `break` ';'
 ///  | return-statement
-fn parseStmt(p: *Parser) Error!NodeIndex {
+fn parseStmt(p: *Parser) Error!Node.Index {
     if (try p.parseLabeledStmt()) |some|
         return some;
 
@@ -4358,7 +4345,7 @@ fn parseStmt(p: *Parser) Error!NodeIndex {
 /// if-statement
 ///  : `if` '(' expression ')' statement
 ///  | `if` '(' expression ')' statement `else` statement
-fn parseIfStmt(p: *Parser) Error!NodeIndex {
+fn parseIfStmt(p: *Parser) Error!Node.Index {
     const lp = try p.expectToken(.LParen);
     const condToken = p.tokenIdx;
     var cond = try p.parseExpr();
@@ -4395,7 +4382,7 @@ fn parseIfStmt(p: *Parser) Error!NodeIndex {
 /// for-statement
 ///  : `for` '(' expression? ';' expression? ';' expression? ')' statement
 ///  | `for` '(' declaration expression? ';' expression? ')' statement
-fn parseForStmt(p: *Parser) Error!NodeIndex {
+fn parseForStmt(p: *Parser) Error!Node.Index {
     try p.symStack.pushScope();
     const declBufferTop = p.declBuffer.items.len;
 
@@ -4469,7 +4456,7 @@ fn parseForStmt(p: *Parser) Error!NodeIndex {
 }
 
 /// while-statement : `while` '(' expression ')' statement ';'
-fn parseWhileStmt(p: *Parser) Error!NodeIndex {
+fn parseWhileStmt(p: *Parser) Error!Node.Index {
     const lp = try p.expectToken(.LParen);
     const condToken = p.tokenIdx;
     var cond = try p.parseExpr();
@@ -4498,7 +4485,7 @@ fn parseWhileStmt(p: *Parser) Error!NodeIndex {
 }
 
 /// do-while-statement : `do` statement `while` '(' expression ')' ';'
-fn parseDoWhileStmt(p: *Parser) Error!NodeIndex {
+fn parseDoWhileStmt(p: *Parser) Error!Node.Index {
     const body = body: {
         const oldLoop = p.inLoop;
         p.inLoop = true;
@@ -4526,7 +4513,7 @@ fn parseDoWhileStmt(p: *Parser) Error!NodeIndex {
 }
 
 /// goto-statement : `goto` ( identifier | ( '*' expr)) ';'
-fn parseGotoStmt(p: *Parser, gotoToken: TokenIndex) Error!NodeIndex {
+fn parseGotoStmt(p: *Parser, gotoToken: TokenIndex) Error!Node.Index {
     if (p.eat(.Asterisk)) |_| {
         const expr = p.tokenIdx;
         var e = try p.parseExpr();
@@ -4569,7 +4556,7 @@ fn parseGotoStmt(p: *Parser, gotoToken: TokenIndex) Error!NodeIndex {
 }
 
 /// switch-statement : `switch` '(' expression ')' statement
-fn parseSwitchStmt(p: *Parser) Error!NodeIndex {
+fn parseSwitchStmt(p: *Parser) Error!Node.Index {
     const lp = try p.expectToken(.LParen);
     const condToken = p.tokenIdx;
     var cond = try p.parseExpr();
@@ -4606,7 +4593,7 @@ fn parseSwitchStmt(p: *Parser) Error!NodeIndex {
 }
 
 /// case-statement : `case` integer-constant-expression ':'
-fn parseCaseStmt(p: *Parser, caseToken: u32) Error!?NodeIndex {
+fn parseCaseStmt(p: *Parser, caseToken: u32) Error!?Node.Index {
     const firstItem = try p.parseIntegerConstExpr(.GNUFoldingExtension);
     const ellipsis = p.tokenIdx; // `...`
     const secondItem = if (p.eat(.Ellipsis) != null) blk: {
@@ -4658,7 +4645,7 @@ fn parseCaseStmt(p: *Parser, caseToken: u32) Error!?NodeIndex {
 }
 
 /// default-statement : `default` ':'
-fn parseDefaultStmt(p: *Parser, defaultToken: u32) Error!?NodeIndex {
+fn parseDefaultStmt(p: *Parser, defaultToken: u32) Error!?Node.Index {
     _ = try p.expectToken(.Colon);
     const s = try p.labelableStmt();
 
@@ -4682,7 +4669,7 @@ fn parseDefaultStmt(p: *Parser, defaultToken: u32) Error!?NodeIndex {
     return node;
 }
 
-fn labelableStmt(p: *Parser) Error!NodeIndex {
+fn labelableStmt(p: *Parser) Error!Node.Index {
     if (p.currToken() == .RBrace) {
         try p.err(.label_compound_end);
         return p.addNode(.{ .tag = .NullStmt, .data = undefined });
@@ -4694,7 +4681,7 @@ fn labelableStmt(p: *Parser) Error!NodeIndex {
 /// : identifier ':' statement
 /// | case-statement
 /// | default-statement
-fn parseLabeledStmt(p: *Parser) Error!?NodeIndex {
+fn parseLabeledStmt(p: *Parser) Error!?Node.Index {
     if ((p.currToken() == .Identifier or
         p.currToken() == .ExtendedIdentifier) and
         p.lookAhead(1) == .Colon)
@@ -4745,7 +4732,7 @@ const StmtExprState = struct {
 
 /// compound-statement
 /// : '{' ( decl | GccExtensionDecl | static-assert-declaration | statememt)* '}'
-fn parseCompoundStmt(p: *Parser, isFnBody: bool, stmtExprState: ?*StmtExprState) Error!?NodeIndex {
+fn parseCompoundStmt(p: *Parser, isFnBody: bool, stmtExprState: ?*StmtExprState) Error!?Node.Index {
     const lBrace = p.eat(.LBrace) orelse return null;
     const declBufferTop = p.declBuffer.items.len;
 
@@ -4869,7 +4856,7 @@ fn parseCompoundStmt(p: *Parser, isFnBody: bool, stmtExprState: ?*StmtExprState)
 }
 
 /// return-statement : `return` expression? ';'
-fn parseReturnStmt(p: *Parser) Error!?NodeIndex {
+fn parseReturnStmt(p: *Parser) Error!?Node.Index {
     const retToken = p.eat(.KeywordReturn) orelse return null;
     const eToken = p.tokenIdx;
 
@@ -4898,7 +4885,7 @@ fn parseReturnStmt(p: *Parser) Error!?NodeIndex {
 
 const NoreturnKind = enum { no, yes, complex };
 
-fn nodeIsNoreturn(p: *Parser, node: NodeIndex) NoreturnKind {
+fn nodeIsNoreturn(p: *Parser, node: Node.Index) NoreturnKind {
     switch (p.nodes.items(.tag)[@intFromEnum(node)]) {
         .BreakStmt, .ContinueStmt, .ReturnStmt => return .yes,
         .IfThenElseStmt => {
@@ -4936,19 +4923,6 @@ fn nodeIsNoreturn(p: *Parser, node: NodeIndex) NoreturnKind {
 
         else => return .no,
     }
-}
-
-pub fn tempTree(p: *Parser) AST {
-    return .{
-        .nodes = p.nodes.slice(),
-        .data = p.data.items,
-        .valueMap = p.valueMap,
-        .comp = p.comp,
-        .arena = undefined,
-        .generated = undefined,
-        .tokens = undefined,
-        .rootDecls = undefined,
-    };
 }
 
 fn parseOrNextStmt(p: *Parser, comptime func: fn (*Parser) Error!bool, lbrace: TokenIndex) !bool {
@@ -5139,7 +5113,7 @@ fn parseAssignExpr(p: *Parser) Error!Result {
     try rhs.lvalConversion(p);
 
     var isConst: bool = undefined;
-    if (!p.tempTree().isLValueExtra(lhs.node, &isConst) or isConst) {
+    if (!p.tree.isLValueExtra(lhs.node, &isConst) or isConst) {
         try p.errToken(.not_assignable, token);
         return error.ParsingFailed;
     }
@@ -5890,15 +5864,14 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
             var operand = try p.parseCastExpr();
             try operand.expect(p);
 
-            const tree = p.tempTree();
             if (p.getNode(operand.node, .MemberAccessExpr) orelse
                 p.getNode(operand.node, .MemberAccessPtrExpr)) |memberNode|
             {
-                if (tree.isBitField(memberNode))
+                if (p.tree.isBitField(memberNode))
                     try p.errToken(.addr_of_bitfield, token);
             }
 
-            if (!tree.isLValue(operand.node))
+            if (!p.tree.isLValue(operand.node))
                 try p.errToken(.addr_of_rvalue, token);
 
             if (operand.ty.qual.register)
@@ -6006,7 +5979,7 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
             if (operand.ty.isComplex())
                 try p.errStr(.complex_prefix_postfix_op, p.tokenIdx, try p.typeStr(operand.ty));
 
-            if (!p.tempTree().isLValue(operand.node) or operand.ty.isConst()) {
+            if (!p.tree.isLValue(operand.node) or operand.ty.isConst()) {
                 try p.errToken(.not_assignable, token);
                 return error.ParsingFailed;
             }
@@ -6035,7 +6008,7 @@ fn parseUnaryExpr(p: *Parser) Error!Result {
             if (operand.ty.isComplex())
                 try p.errStr(.complex_prefix_postfix_op, p.tokenIdx, try p.typeStr(operand.ty));
 
-            if (!p.tempTree().isLValue(operand.node) or operand.ty.isConst()) {
+            if (!p.tree.isLValue(operand.node) or operand.ty.isConst()) {
                 try p.errToken(.not_assignable, token);
                 return error.ParsingFailed;
             }
@@ -6391,7 +6364,7 @@ fn parseSuffixExpr(p: *Parser, lhs: Result) Error!Result {
             if (operand.ty.isComplex())
                 try p.errStr(.complex_prefix_postfix_op, p.tokenIdx, try p.typeStr(operand.ty));
 
-            if (!p.tempTree().isLValue(operand.node) or operand.ty.isConst()) {
+            if (!p.tree.isLValue(operand.node) or operand.ty.isConst()) {
                 try p.err(.not_assignable);
                 return error.ParsingFailed;
             }
@@ -6412,7 +6385,7 @@ fn parseSuffixExpr(p: *Parser, lhs: Result) Error!Result {
             if (operand.ty.isComplex())
                 try p.errStr(.complex_prefix_postfix_op, p.tokenIdx, try p.typeStr(operand.ty));
 
-            if (!p.tempTree().isLValue(operand.node) or operand.ty.isConst()) {
+            if (!p.tree.isLValue(operand.node) or operand.ty.isConst()) {
                 try p.err(.not_assignable);
                 return error.ParsingFailed;
             }
@@ -6495,7 +6468,7 @@ fn validateFieldAccess(
 /// An Error or Result
 fn fieldAccessExtra(
     p: *Parser,
-    lhs: NodeIndex,
+    lhs: Node.Index,
     recordType: Type,
     fieldName: StringId,
     isArrow: bool, // is arrow operator
@@ -6560,13 +6533,13 @@ fn checkVaStartArg(
 }
 
 const CallExpr = union(enum) {
-    standard: NodeIndex,
+    standard: Node.Index,
     builtin: struct {
-        node: NodeIndex,
+        node: Node.Index,
         tag: Builtin.Tag,
     },
 
-    fn init(p: *Parser, callNode: NodeIndex, funcNode: NodeIndex) CallExpr {
+    fn init(p: *Parser, callNode: Node.Index, funcNode: Node.Index) CallExpr {
         if (p.getNode(callNode, .BuiltinCallExprOne)) |node| {
             const data = p.nodes.items(.data)[@intFromEnum(node)];
             const name = p.getTokenText(data.decl.name);
