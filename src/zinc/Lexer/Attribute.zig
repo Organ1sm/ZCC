@@ -248,8 +248,8 @@ fn diagnoseField(
     p: *Parser,
 ) !?Diagnostics.Message {
     if (res.value.isNone()) {
-        if (Wanted == Identifier and node.tag == .DeclRefExpr) {
-            @field(@field(arguments, decl.name), field.name) = Identifier{ .tok = node.data.declRef };
+        if (Wanted == Identifier and node == .declRefExpr) {
+            @field(@field(arguments, decl.name), field.name) = .{ .tok = node.declRefExpr.nameToken };
             return null;
         }
         return invalidArgMsg(Wanted, .expression);
@@ -267,9 +267,9 @@ fn diagnoseField(
         },
         .bytes => |bytes| {
             if (Wanted == Value) {
-                std.debug.assert(node.tag == .StringLiteralExpr);
+                std.debug.assert(node == .stringLiteralExpr);
 
-                const nodeElemTy = node.type.getElemType();
+                const nodeElemTy = node.stringLiteralExpr.type.getElemType();
                 if (!nodeElemTy.is(.Char) and !nodeElemTy.is(.UChar)) {
                     return .{
                         .tag = .attribute_requires_string,
@@ -1023,7 +1023,8 @@ pub fn applyFunctionAttributes(p: *Parser, ty: Type, attrBufferStart: usize) !Ty
     return ty.withAttributes(p.arena, p.attrApplicationBuffer.items);
 }
 
-pub fn applyLabelAttributes(p: *Parser, ty: Type, attrBufferStart: usize) !Type {
+pub fn applyLabelAttributes(p: *Parser, attrBufferStart: usize) !Type {
+    const ty = Type.Void;
     const attrs = p.attrBuffer.items(.attr)[attrBufferStart..];
     const toks = p.attrBuffer.items(.tok)[attrBufferStart..];
     p.attrApplicationBuffer.items.len = 0;
@@ -1035,7 +1036,8 @@ pub fn applyLabelAttributes(p: *Parser, ty: Type, attrBufferStart: usize) !Type 
     return ty.withAttributes(p.arena, p.attrApplicationBuffer.items);
 }
 
-pub fn applyStatementAttributes(p: *Parser, ty: Type, exprStart: TokenIndex, attrBufferStart: usize) !Type {
+pub fn applyStatementAttributes(p: *Parser, exprStart: TokenIndex, attrBufferStart: usize) !Type {
+    const ty = Type.Void;
     const attrs = p.attrBuffer.items(.attr)[attrBufferStart..];
     const toks = p.attrBuffer.items(.tok)[attrBufferStart..];
     p.attrApplicationBuffer.items.len = 0;

@@ -23,7 +23,7 @@ pub const Symbol = struct {
     /// The token index that represents this symbol.
     token: TokenIndex,
     /// The node index in the AST (Abstract Syntax Tree) that represents this symbol.
-    node: Node.Index,
+    node: ?Node.Index = null,
     /// The kind of the symbol, which categorizes it into various types like typedef, enum, etc.
     kind: Kind,
     /// The value of the symbol, if it has one.
@@ -203,7 +203,7 @@ pub fn defineTypedef(
     name: StringId,
     ty: Type,
     token: TokenIndex,
-    node: Node.Index,
+    node: ?Node.Index,
 ) !void {
     if (self.get(name, .vars)) |prev| {
         switch (prev.kind) {
@@ -309,7 +309,7 @@ pub fn declareSymbol(
     name: StringId,
     ty: Type,
     token: TokenIndex,
-    node: Node.Index,
+    node: ?Node.Index,
 ) !void {
     if (self.get(name, .vars)) |prev| {
         switch (prev.kind) {
@@ -368,6 +368,7 @@ pub fn defineParam(self: *SymbolStack, name: StringId, ty: Type, token: TokenInd
         .token = token,
         .type = ty,
         .value = .{},
+        .node = null,
     });
 }
 

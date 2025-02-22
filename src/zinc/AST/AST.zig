@@ -1,5 +1,4 @@
 const std = @import("std");
-const assert = std.debug.assert;
 const Interner = @import("backend").Interner;
 const Type = @import("Type.zig");
 const Compilation = @import("../Basic/Compilation.zig");
@@ -49,7 +48,7 @@ pub const TypeHashContext = struct {
             .TypeofExpr,
             => std.hash.autoHash(&hasher, @intFromPtr(ty.data.expr)),
 
-            .Struct.Union => std.hash.autoHash(&hasher, @intFromPtr(ty.data.record)),
+            .Struct, .Union => std.hash.autoHash(&hasher, @intFromPtr(ty.data.record)),
             .Enum => std.hash.autoHash(&hasher, @intFromPtr(ty.data.@"enum")),
             .Attributed => std.hash.autoHash(&hasher, @intFromPtr(ty.data.attributed)),
 
@@ -355,7 +354,7 @@ pub const Node = union(enum) {
         expr: Node.Index,
     },
     continueStmt: struct {
-        contineToken: TokenIndex,
+        continueToken: TokenIndex,
     },
     breakStmt: struct {
         breakToken: TokenIndex,
@@ -515,7 +514,7 @@ pub const Node = union(enum) {
     },
     /// Inserted in record and scalar initializers for unspecified elements.
     defaultInitExpr: struct {
-        last_tok: TokenIndex,
+        lastToken: TokenIndex,
         type: Type,
     },
 
@@ -842,7 +841,7 @@ pub const Node = union(enum) {
                         .bitWidth = unpackOptIndex(nodeData[1]),
                     },
                 },
-                .LabelStmt => .{
+                .LabeledStmt => .{
                     .labeledStmt = .{
                         .labelToken = nodeToken,
                         .type = tree.typeMap.keys()[nodeData[0]],
@@ -945,7 +944,7 @@ pub const Node = union(enum) {
                 },
                 .NullStmt => .{
                     .nullStmt = .{
-                        .semicolonOrRbraceTok = nodeToken,
+                        .semicolonOrRbraceToken = nodeToken,
                         .type = tree.typeMap.keys()[nodeData[0]],
                     },
                 },
@@ -1332,7 +1331,7 @@ pub const Node = union(enum) {
                 },
                 .AddrOfLabel => .{
                     .addrOfLabel = .{
-                        .label_tok = nodeToken,
+                        .labelToken = nodeToken,
                         .type = tree.typeMap.keys()[nodeData[0]],
                     },
                 },
@@ -1361,7 +1360,7 @@ pub const Node = union(enum) {
                     },
                 },
                 .BuiltinCallExpr => .{
-                    .BuiltinCallExpr = .{
+                    .builtinCallExpr = .{
                         .builtinToken = nodeToken,
                         .type = tree.typeMap.keys()[nodeData[0]],
                         .args = @ptrCast(tree.extra.items[nodeData[1]..][0..nodeData[2]]),
@@ -1480,8 +1479,8 @@ pub const Node = union(enum) {
                 },
                 .GenericAssociationExpr => .{
                     .genericAssociationExpr = .{
-                        .colon_tok = nodeToken,
-                        .association_type = tree.typeMap.keys()[nodeData[0]],
+                        .colonToken = nodeToken,
+                        .associationType = tree.typeMap.keys()[nodeData[0]],
                         .expr = @enumFromInt(nodeData[1]),
                     },
                 },
@@ -1527,7 +1526,7 @@ pub const Node = union(enum) {
                 },
                 .ArrayInitExprTwo => .{
                     .arrayInitExpr = .{
-                        .LBraceTok = nodeToken,
+                        .lbraceToken = nodeToken,
                         .containerType = tree.typeMap.keys()[nodeData[0]],
                         .items = unPackElems(nodeData[1..]),
                     },
@@ -1557,7 +1556,7 @@ pub const Node = union(enum) {
                     .unionInitExpr = .{
                         .lbraceToken = nodeToken,
                         .unionType = tree.typeMap.keys()[nodeData[0]],
-                        .field_index = nodeData[1],
+                        .fieldIndex = nodeData[1],
                         .initializer = unpackOptIndex(nodeData[2]),
                     },
                 },
@@ -1798,8 +1797,20 @@ pub const Node = union(enum) {
 };
 
 pub fn addNode(tree: *Tree, node: Node) !Node.Index {
+    const index = try tree.nodes.addOne(tree.comp.gpa);
+    try tree.addNodeExtra(index, node);
+    return @enumFromInt(index);
+}
+
+pub fn addNodeExtra(tree: *Tree, index: usize, node: Node) !void {
     var repr: Node.Repr = undefined;
     switch (node) {
+        .staticAssert => |assert| {
+            repr.tag = .StaticAssert;
+            repr.data[0] = @intFromEnum(assert.cond);
+            repr.data[1] = packOptIndex(assert.message);
+            repr.tok = assert.assertToken;
+        },
         .fnProto => |proto| {
             repr.tag = .FnProto;
             repr.data[0] = try tree.addType(proto.type);
@@ -1903,12 +1914,13 @@ pub fn addNode(tree: *Tree, node: Node) !Node.Index {
         .enumField => |field| {
             repr.tag = .EnumField;
             repr.data[0] = try tree.addType(field.type);
+            repr.data[1] = packOptIndex(field.init);
             repr.tok = field.nameToken;
         },
         .recordField => |field| {
             repr.tag = .RecordField;
             repr.data[0] = try tree.addType(field.type);
-            repr.data[1] = packOptIndex(field.bit_width);
+            repr.data[1] = packOptIndex(field.bitWidth);
             repr.tok = field.nameOrFirstToken;
         },
         .labeledStmt => |labeled| {
@@ -2000,7 +2012,7 @@ pub fn addNode(tree: *Tree, node: Node) !Node.Index {
         },
         .continueStmt => |@"continue"| {
             repr.tag = .ContinueStmt;
-            repr.tok = @"continue".contineToken;
+            repr.tok = @"continue".continueToken;
         },
         .breakStmt => |@"break"| {
             repr.tag = .BreakStmt;
@@ -2250,7 +2262,7 @@ pub fn addNode(tree: *Tree, node: Node) !Node.Index {
             repr.data[0] = try tree.addType(cast.type);
             repr.data[1] = @intFromEnum(cast.kind);
             repr.data[2] = @intFromEnum(cast.operand);
-            repr.tok = cast.l_paren;
+            repr.tok = cast.lparen;
         },
         .addrOfExpr => |un| {
             repr.tag = .AddrOfExpr;
@@ -2387,14 +2399,14 @@ pub fn addNode(tree: *Tree, node: Node) !Node.Index {
             repr.tag = .MemberAccessExpr;
             repr.data[0] = try tree.addType(access.type);
             repr.data[1] = @intFromEnum(access.base);
-            repr.data[2] = access.member_index;
+            repr.data[2] = access.memberIndex;
             repr.tok = access.accessToken;
         },
         .memberAccessPtrExpr => |access| {
             repr.tag = .MemberAccessPtrExpr;
             repr.data[0] = try tree.addType(access.type);
             repr.data[1] = @intFromEnum(access.base);
-            repr.data[2] = access.member_index;
+            repr.data[2] = access.memberIndex;
             repr.tok = access.accessToken;
         },
         .declRefExpr => |declRef| {
@@ -2475,7 +2487,7 @@ pub fn addNode(tree: *Tree, node: Node) !Node.Index {
         },
         .genericAssociationExpr => |association| {
             repr.tag = .GenericAssociationExpr;
-            repr.data[0] = try tree.addType(association.association_type);
+            repr.data[0] = try tree.addType(association.associationType);
             repr.data[1] = @intFromEnum(association.expr);
             repr.tok = association.colonToken;
         },
@@ -2558,15 +2570,14 @@ pub fn addNode(tree: *Tree, node: Node) !Node.Index {
             repr.data[0] = try tree.addType(literal.type);
             repr.data[1] = @bitCast(Node.Repr.DeclAttr{
                 .static = literal.static,
-                .thread_local = literal.threadLocal,
+                .threadLocal = literal.threadLocal,
             });
             repr.data[2] = @intFromEnum(literal.initializer);
             repr.tok = literal.lparenToken;
         },
     }
-    const index = tree.nodes.len;
-    try tree.nodes.append(tree.comp.gpa, repr);
-    return @enumFromInt(index);
+
+    tree.nodes.set(index, repr);
 }
 
 fn packOptIndex(opt: ?Node.Index) u32 {
@@ -2689,35 +2700,29 @@ const CallableResultUsage = struct {
 };
 
 pub fn callableResultUsage(tree: *const Tree, node: Node.Index) ?CallableResultUsage {
-    const data = tree.nodes.items(.data);
-
     var curNode = node;
-    while (true) switch (tree.nodes.items(.tag)[@intFromEnum(curNode)]) {
-        .DeclRefExpr => {
-            const tok = data[@intFromEnum(curNode)].declRef;
-            const fnTy = tree.nodes.items(.type)[@intFromEnum(node)].getElemType();
+    while (true) switch (curNode.get(tree)) {
+        .declRefExpr => |declRef| {
+            const fnTy = declRef.type.getElemType();
             return .{
-                .token = tok,
+                .token = declRef.nameToken,
                 .nodiscard = fnTy.hasAttribute(.nodiscard),
                 .warnUnusedResult = fnTy.hasAttribute(.warn_unused_result),
             };
         },
-        .ParenExpr => curNode = data[@intFromEnum(curNode)].unExpr,
-        .CommaExpr => curNode = data[@intFromEnum(curNode)].binExpr.rhs,
+        .parenExpr, .addrOfExpr, .derefExpr => |un| curNode = un.operand,
+        .commaExpr => |bin| curNode = bin.rhs,
 
-        .ExplicitCast, .ImplicitCast => curNode = data[@intFromEnum(curNode)].cast.operand,
-        .AddrOfExpr, .DerefExpr => curNode = data[@intFromEnum(curNode)].unExpr,
-        .CallExprOne => curNode = data[@intFromEnum(curNode)].binExpr.lhs,
-        .CallExpr => curNode = tree.data[data[@intFromEnum(curNode)].range.start],
+        .explicitCast, .implicitCast => |cast| curNode = cast.operand,
+        .callExpr => |call| curNode = call.callee,
 
-        .MemberAccessExpr, .MemberAccessPtrExpr => {
-            const member = data[@intFromEnum(curNode)].member;
-            var ty = tree.nodes.items(.type)[@intFromEnum(member.lhs)];
+        .memberAccessExpr, .memberAccessPtrExpr => |access| {
+            var ty = access.base.type(tree);
             if (ty.isPointer()) ty = ty.getElemType();
 
             const record = ty.getRecord().?;
-            const field = record.fields[member.index];
-            const attributes = if (record.fieldAttributes) |attrs| attrs[member.index] else &.{};
+            const field = record.fields[access.memberIndex];
+            const attributes = if (record.fieldAttributes) |attrs| attrs[access.memberIndex] else &.{};
             return .{
                 .token = field.nameToken,
                 .nodiscard = for (attributes) |attr| {
@@ -2777,7 +2782,7 @@ fn dumpAttribute(tree: *const Tree, attr: Attribute, writer: anytype) !void {
             }
             try writer.writeByte(' ');
             inline for (fields, 0..) |f, i| {
-                if (comptime std.mem.eql(u8, f.name, "__nameTokenen")) continue;
+                if (comptime std.mem.eql(u8, f.name, "__nameToken")) continue;
                 if (i != 0)
                     try writer.writeAll(", ");
 
@@ -3037,9 +3042,6 @@ fn dumpNode(
         },
 
         .BuiltinTypesCompatibleP => {
-            assert(tree.nodes.items(.tag)[@intFromEnum(data.binExpr.lhs)] == .Invalid);
-            assert(tree.nodes.items(.tag)[@intFromEnum(data.binExpr.rhs)] == .Invalid);
-
             try w.writeByteNTimes(' ', level + half);
             try w.writeAll("lhs: ");
 

@@ -247,7 +247,7 @@ pub const Enum = struct {
         ty: Type,
         name: StringId,
         nameToken: TokenIndex,
-        node: Node.Index,
+        init: ?Node.Index,
     };
 
     pub fn isIncomplete(e: Enum) bool {
@@ -350,6 +350,15 @@ pub const Record = struct {
             if (ty.eql(f.ty, comp, false)) return true;
         }
 
+        return false;
+    }
+
+    pub fn hasField(self: *const Record, name: StringId) bool {
+        std.debug.assert(!self.isIncomplete());
+        for (self.fields) |f| {
+            if (f.isAnonymousRecord() and f.ty.getRecord().?.hasField(name)) return true;
+            if (name == f.name) return true;
+        }
         return false;
     }
 
@@ -1088,21 +1097,7 @@ pub fn minInt(ty: Type, comp: *const Compilation) i64 {
 
 /// Check if the given type `ty` has a field with the specified `name`
 pub fn hasField(ty: Type, name: StringId) bool {
-    switch (ty.specifier) {
-        .Struct, .Union => {
-            assert(!ty.data.record.isIncomplete());
-            for (ty.data.record.fields) |f| {
-                if (f.isAnonymousRecord() and f.ty.hasField(name)) return true;
-                if (name == f.name) return true;
-            }
-        },
-        .TypeofType => return ty.data.subType.hasField(name),
-        .TypeofExpr => return ty.data.expr.ty.hasField(name),
-        .Attributed => return ty.data.attributed.base.hasField(name),
-        .Invalid => return false,
-        else => unreachable,
-    }
-    return false;
+    return ty.getRecord().?.hasField(name);
 }
 
 const TypeSizeOrder = enum {

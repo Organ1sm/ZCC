@@ -902,19 +902,18 @@ fn expr(pp: *Preprocessor, lexer: *Lexer) MacroError!bool {
         .loc = tokenFromRaw(eof).loc,
     });
 
-    var parser = Parser{
+    var parser: Parser = .{
         .pp = pp,
         .comp = pp.comp,
         .gpa = pp.gpa,
         .tokenIds = pp.tokens.items(.id),
         .tokenIdx = @intCast(start),
-        .arena = pp.arena.allocator(),
         .inMacro = true,
         .strings = std.ArrayList(u8).init(pp.comp.gpa),
 
-        .data = undefined,
+        .tree = undefined,
+        .arena = undefined,
         .labels = undefined,
-        .valueMap = undefined,
         .declBuffer = undefined,
         .listBuffer = undefined,
         .paramBuffer = undefined,
