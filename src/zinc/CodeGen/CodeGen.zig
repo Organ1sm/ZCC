@@ -172,7 +172,7 @@ fn genType(c: *CodeGen, baseTy: Type) !Interner.Ref {
 }
 
 fn genFn(c: *CodeGen, def: Node.FnDef) Error!void {
-    const name = c.tree.getTokenSlice(def.nameToken);
+    const name = c.tree.tokenSlice(def.nameToken);
     const funcTy = def.type.canonicalize(.standard);
     c.retNodes.items.len = 0;
 
@@ -193,7 +193,7 @@ fn genFn(c: *CodeGen, def: Node.FnDef) Error!void {
 
     // Generate body
     c.returnLabel = try c.builder.makeLabel("return");
-    try c.genStmt(def.bpdy);
+    try c.genStmt(def.body);
 
     // Relocate returns
     if (c.retNodes.items.len != 1)
@@ -253,7 +253,7 @@ fn genExpr(c: *CodeGen, nodeIdx: Node.Index) Error!IR.Ref {
         .boolLiteral,
         .intLiteral,
         .charLiteral,
-        .FloatLiteral,
+        .floatLiteral,
         .imaginaryLiteral,
         .stringLiteralExpr,
         => unreachable, // These should have an entry in value_map.
@@ -263,7 +263,7 @@ fn genExpr(c: *CodeGen, nodeIdx: Node.Index) Error!IR.Ref {
 
         .staticAssert,
         .fnProto,
-        .typeDef,
+        .typedef,
         .structDecl,
         .unionDecl,
         .enumDecl,
@@ -283,7 +283,7 @@ fn genExpr(c: *CodeGen, nodeIdx: Node.Index) Error!IR.Ref {
             const size: u32 = @intCast(variable.type.sizeof(c.comp).?);
             const @"align" = variable.type.alignof(c.comp);
             const alloc = try c.builder.addAlloc(size, @"align");
-            const name = try StringInterner.intern(c.comp, c.tree.getTokenSlice(variable.nameToken));
+            const name = try StringInterner.intern(c.comp, c.tree.tokenSlice(variable.nameToken));
 
             try c.symbols.append(c.comp.gpa, .{ .name = name, .value = alloc });
 
@@ -509,7 +509,7 @@ fn genExpr(c: *CodeGen, nodeIdx: Node.Index) Error!IR.Ref {
         .gotoStmt,
         .computedGotoStmt,
         .nullptrLiteral,
-        => return c.fail("TODO CodeGen.genStmt {}\n", .{@tagName(node)}),
+        => return c.fail("TODO CodeGen.genStmt {s}\n", .{@tagName(node)}),
 
         .commaExpr => |bin| {
             _ = try c.genExpr(bin.lhs);
@@ -539,32 +539,32 @@ fn genExpr(c: *CodeGen, nodeIdx: Node.Index) Error!IR.Ref {
         .bitAndExpr => |bin| return c.genBinOp(bin, .BitAnd),
 
         .equalExpr => |bin| {
-            const cmp = try c.genComparison(node, .CmpEQ);
+            const cmp = try c.genComparison(bin, .CmpEQ);
             return c.addUn(.Zext, cmp, bin.type);
         },
 
         .notEqualExpr => |bin| {
-            const cmp = try c.genComparison(node, .CmpNE);
+            const cmp = try c.genComparison(bin, .CmpNE);
             return c.addUn(.Zext, cmp, bin.type);
         },
 
         .lessThanExpr => |bin| {
-            const cmp = try c.genComparison(node, .CmpLT);
+            const cmp = try c.genComparison(bin, .CmpLT);
             return c.addUn(.Zext, cmp, bin.type);
         },
 
         .lessThanEqualExpr => |bin| {
-            const cmp = try c.genComparison(node, .CmpLTE);
+            const cmp = try c.genComparison(bin, .CmpLTE);
             return c.addUn(.Zext, cmp, bin.type);
         },
 
         .greaterThanExpr => |bin| {
-            const cmp = try c.genComparison(node, .CmpGT);
+            const cmp = try c.genComparison(bin, .CmpGT);
             return c.addUn(.Zext, cmp, bin.type);
         },
 
         .greaterThanEqualExpr => |bin| {
-            const cmp = try c.genComparison(node, .CmpGTE);
+            const cmp = try c.genComparison(bin, .CmpGTE);
             return c.addUn(.Zext, cmp, bin.type);
         },
 
@@ -594,7 +594,7 @@ fn genExpr(c: *CodeGen, nodeIdx: Node.Index) Error!IR.Ref {
                 const offset = try c.genExpr(bin.rhs);
                 return c.genPtrArithmetic(ptr, offset, bin.rhs.type(c.tree), bin.type);
             }
-            return c.genBinOp(node, .Sub);
+            return c.genBinOp(bin, .Sub);
         },
 
         .mulExpr => |bin| return c.genBinOp(bin, .Mul),
@@ -604,7 +604,7 @@ fn genExpr(c: *CodeGen, nodeIdx: Node.Index) Error!IR.Ref {
         .addrOfExpr => |un| return try c.genLval(un.operand),
         .derefExpr => |un| {
             const operandNode = un.operand.get(c.tree);
-            if (operandNode == .ImplicitCast and
+            if (operandNode == .implicitCast and
                 operandNode.implicitCast.kind == .FunctionToPointer)
                 return c.genExpr(un.operand);
 
@@ -883,7 +883,7 @@ fn genExpr(c: *CodeGen, nodeIdx: Node.Index) Error!IR.Ref {
                     return c.genExpr(assoc.expr);
                 },
                 .genericDefaultExpr => |default| {
-                    return c.genExpr(default.epxr);
+                    return c.genExpr(default.expr);
                 },
                 else => unreachable,
             }
@@ -902,13 +902,12 @@ fn genExpr(c: *CodeGen, nodeIdx: Node.Index) Error!IR.Ref {
             return c.genExpr(compoundStmt.body[compoundStmt.body.len - 1]);
         },
 
-        .AddrOfLabel,
-        .ImagExpr,
-        .RealExpr,
-        .BuiltinCallExprOne,
-        .BuiltinCallExpr,
-        .SizeOfExpr,
-        => return c.fail("TODO CodeGen.genExpr {}\n", .{@tagName(node)}),
+        .addrOfLabel,
+        .imagExpr,
+        .realExpr,
+        .builtinCallExpr,
+        .sizeofExpr,
+        => return c.fail("TODO CodeGen.genExpr {s}\n", .{@tagName(node)}),
 
         else => unreachable, // Not an expression.
     }
@@ -929,7 +928,7 @@ fn genLval(c: *CodeGen, nodeIndex: Node.Index) Error!IR.Ref {
         .parenExpr => |un| return c.genLval(un.operand),
 
         .declRefExpr => |declRef| {
-            const slice = c.tree.getTokenSlice(declRef.nameToken);
+            const slice = c.tree.tokenSlice(declRef.nameToken);
             const name = try StringInterner.intern(c.comp, slice);
             var i = c.symbols.items.len;
             while (i > 0) {
@@ -951,7 +950,7 @@ fn genLval(c: *CodeGen, nodeIndex: Node.Index) Error!IR.Ref {
         .derefExpr => |un| return c.genExpr(un.operand),
 
         .compoundLiteralExpr => |literal| {
-            if (literal.static or literal.thread_local) {
+            if (literal.static or literal.threadLocal) {
                 return c.fail("TODO CodeGen.compound_literal_expr static or thread_local\n", .{});
             }
             const size: u32 = @intCast(literal.type.sizeof(c.comp).?); // TODO add error in parser
@@ -972,7 +971,7 @@ fn genLval(c: *CodeGen, nodeIndex: Node.Index) Error!IR.Ref {
         .memberAccessExpr,
         .memberAccessPtrExpr,
         .arrayAccessExpr,
-        => return c.fail("TODO CodeGen.genLval {}\n", .{@tagName(node)}),
+        => return c.fail("TODO CodeGen.genLval {s}\n", .{@tagName(node)}),
 
         else => unreachable, // not an lvalue expression.
     }
@@ -1144,8 +1143,8 @@ fn genBoolExpr(c: *CodeGen, base: Node.Index, trueLabel: IR.Ref, falseLabel: IR.
 fn genCall(c: *CodeGen, call: Node.Call) Error!IR.Ref {
     // Detect direct calls.
     const fnRef = blk: {
-        const callee = call.callee.get(c.tre);
-        if (callee != .ImplicitCast or callee.implicitCast.kind != .FunctionToPointer)
+        const callee = call.callee.get(c.tree);
+        if (callee != .implicitCast or callee.implicitCast.kind != .FunctionToPointer)
             break :blk try c.genExpr(call.callee);
 
         var cur = callee.implicitCast.operand;
@@ -1160,7 +1159,7 @@ fn genCall(c: *CodeGen, call: Node.Call) Error!IR.Ref {
             },
 
             .declRefExpr => |declRef| {
-                const slice = c.tree.getTokenSlice(declRef.nameToken);
+                const slice = c.tree.tokenSlice(declRef.nameToken);
                 const name = try StringInterner.intern(c.comp, slice);
                 var i = c.symbols.items.len;
                 while (i > 0) {
@@ -1239,7 +1238,7 @@ fn genInitializer(c: *CodeGen, ptr: IR.Ref, destTy: Type, initializer: Node.Inde
         .unionInitExpr,
         .arrayFillerExpr,
         .defaultInitExpr,
-        => return c.fail("TODO CodeGen.genInitializer {}\n", .{@tagName(node)}),
+        => return c.fail("TODO CodeGen.genInitializer {s}\n", .{@tagName(node)}),
 
         .stringLiteralExpr => {
             const val = c.tree.valueMap.get(initializer).?;

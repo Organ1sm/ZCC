@@ -14,7 +14,7 @@ const Parser = @import("Parser.zig");
 const InitList = @This();
 
 const Item = struct {
-    list: InitList = .{},
+    list: InitList,
     index: u64,
 
     fn order(_: void, a: Item, b: Item) std.math.Order {
@@ -22,7 +22,7 @@ const Item = struct {
     }
 };
 
-node: ?Node.Index = null,
+node: Node.OptIndex = .null,
 tok: TokenIndex = 0,
 list: std.ArrayListUnmanaged(Item) = .{},
 
@@ -43,7 +43,7 @@ pub fn put(il: *InitList, gpa: Allocator, index: usize, node: Node.Index, tok: T
     if (left == right) {
         const item = try il.list.addOne(gpa);
         item.* = .{
-            .list = .{ .node = node, .tok = tok },
+            .list = .{ .node = .pack(node), .tok = tok },
             .index = index,
         };
         return null;
@@ -59,7 +59,7 @@ pub fn put(il: *InitList, gpa: Allocator, index: usize, node: Node.Index, tok: T
                 const prev = items[mid].list.tok;
                 items[mid].list.deinit(gpa);
                 items[mid] = .{
-                    .list = .{ .node = node, .tok = tok },
+                    .list = .{ .node = .pack(node), .tok = tok },
                     .index = index,
                 };
                 return prev;
@@ -71,7 +71,7 @@ pub fn put(il: *InitList, gpa: Allocator, index: usize, node: Node.Index, tok: T
 
     // Insert a new value into a sorted position.
     try il.list.insert(gpa, left, .{
-        .list = .{ .node = node, .tok = tok },
+        .list = .{ .node = .pack(node), .tok = tok },
         .index = index,
     });
     return null;
@@ -87,7 +87,7 @@ pub fn find(il: *InitList, gpa: Allocator, index: u64) !*InitList {
     if (left == right) {
         const item = try il.list.addOne(gpa);
         item.* = .{
-            .list = .{ .node = null, .tok = 0 },
+            .list = .{ .node = .null, .tok = 0 },
             .index = index,
         };
         return &item.list;
@@ -106,7 +106,7 @@ pub fn find(il: *InitList, gpa: Allocator, index: u64) !*InitList {
 
     // Insert a new value into a sorted position.
     try il.list.insert(gpa, left, .{
-        .list = .{ .node = null, .tok = 0 },
+        .list = .{ .node = .null, .tok = 0 },
         .index = index,
     });
     return &il.list.items[left].list;
@@ -120,7 +120,7 @@ test "basic usage" {
     {
         var i: usize = 0;
         while (i < 5) : (i += 1) {
-            const prev = try il.put(gpa, i, null, 0);
+            const prev = try il.put(gpa, i, undefined, 0);
             try testing.expect(prev == null);
         }
     }

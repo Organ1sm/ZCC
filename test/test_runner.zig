@@ -6,7 +6,7 @@ const zinc = @import("zinc");
 const CodeGen = zinc.CodeGen;
 const Tree = zinc.Tree;
 const Token = Tree.Token;
-const NodeIndex = Tree.NodeIndex;
+const Node = Tree.Node;
 const AllocatorError = std.mem.Allocator.Error;
 
 var general_purpose_allocator = std.heap.GeneralPurposeAllocator(.{}){};
@@ -333,8 +333,9 @@ pub fn main() !void {
         } else tree.dump(.no_color, std.io.null_writer) catch {};
 
         if (expectedTypes) |types| {
-            const testFn = for (tree.rootDecls) |decl| {
-                if (tree.nodes.items(.tag)[@intFromEnum(decl)] == .FnDef) break tree.nodes.items(.data)[@intFromEnum(decl)];
+            const testFn = for (tree.rootDecls.items) |decl| {
+                const node = decl.get(&tree);
+                if (node == .fnDef) break node.fnDef;
             } else {
                 failCount += 1;
                 std.debug.print("EXPECTED_TYPES requires a function to be defined\n", .{});
@@ -347,7 +348,7 @@ pub fn main() !void {
             const mapper = try tree.comp.stringInterner.getFastTypeMapper(gpa);
             defer mapper.deinit(gpa);
 
-            try actual.dump(&tree, mapper, testFn.decl.node, gpa);
+            try actual.dump(&tree, mapper, testFn.body, gpa);
 
             var i: usize = 0;
             for (types.tokens) |str| {
@@ -587,14 +588,16 @@ const StmtTypeDumper = struct {
         };
     }
 
-    fn dumpNode(self: *StmtTypeDumper, tree: *const Tree, mapper: zinc.TypeMapper, node: NodeIndex, m: *MsgWriter) AllocatorError!void {
-        if (node == .none)
-            return;
-        const tag = tree.nodes.items(.tag)[@intFromEnum(node)];
-        if (tag == .ImplicitReturn)
-            return;
+    fn dumpNode(
+        self: *StmtTypeDumper,
+        tree: *const Tree,
+        mapper: zinc.TypeMapper,
+        node: Node.Index,
+        m: *MsgWriter,
+    ) AllocatorError!void {
+        if (node.get(tree) == .implicitReturn) return;
 
-        const ty = tree.nodes.items(.type)[@intFromEnum(node)];
+        const ty = node.type(tree);
         ty.dump(mapper, tree.comp.langOpts, m.buf.writer()) catch {};
 
         const owned = try m.buf.toOwnedSlice();
@@ -603,28 +606,19 @@ const StmtTypeDumper = struct {
         try self.types.append(owned);
     }
 
-    fn dump(self: *StmtTypeDumper, tree: *const Tree, mapper: zinc.TypeMapper, declIdx: NodeIndex, allocator: std.mem.Allocator) AllocatorError!void {
+    fn dump(
+        self: *StmtTypeDumper,
+        tree: *const Tree,
+        mapper: zinc.TypeMapper,
+        body: Node.Index,
+        allocator: std.mem.Allocator,
+    ) AllocatorError!void {
         var m = MsgWriter.init(allocator);
         defer m.deinit();
 
-        const idx = @intFromEnum(declIdx);
-
-        const tag = tree.nodes.items(.tag)[idx];
-        const data = tree.nodes.items(.data)[idx];
-
-        switch (tag) {
-            .CompoundStmtTwo => {
-                try self.dumpNode(tree, mapper, data.binExpr.lhs, &m);
-                try self.dumpNode(tree, mapper, data.binExpr.rhs, &m);
-            },
-
-            .CompoundStmt => {
-                for (tree.data[data.range.start..data.range.end]) |stmt| {
-                    try self.dumpNode(tree, mapper, stmt, &m);
-                }
-            },
-
-            else => unreachable,
+        const compound = body.get(tree).compoundStmt;
+        for (compound.body) |stmt| {
+            try self.dumpNode(tree, mapper, stmt, &m);
         }
     }
 };

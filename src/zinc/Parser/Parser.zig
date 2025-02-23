@@ -763,7 +763,7 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
         try p.diagnoseIncompleteDefinitions();
 
     p.tree.rootDecls = p.declBuffer.moveToUnmanaged();
-    if (p.rootDecls.items.len == 0)
+    if (p.tree.rootDecls.items.len == 0)
         try p.errToken(.empty_translation_unit, p.tokenIdx - 1);
 
     pp.comp.pragmaEvent(.AfterParse);
@@ -2624,7 +2624,7 @@ fn parseEnumSpec(p: *Parser) Error!Type {
     const node = try p.addNode(.{
         .enumDecl = .{
             .nameOrKindToken = maybeIdent orelse enumToken,
-            .container_type = ty,
+            .containerType = ty,
             .fields = fieldNodes,
         },
     });
@@ -3355,7 +3355,7 @@ pub fn initializerItem(p: *Parser, il: *InitList, initType: Type) Error!bool {
             try p.errToken(.initializer_overrides, token);
             try p.errToken(.previous_initializer, il.tok);
         }
-        il.node = res.node;
+        il.node = .pack(res.node);
         il.tok = token;
         return true;
     };
@@ -3371,7 +3371,7 @@ pub fn initializerItem(p: *Parser, il: *InitList, initType: Type) Error!bool {
             try p.errToken(.initializer_overrides, lb);
             try p.errToken(.previous_initializer, il.tok);
         }
-        il.node = null;
+        il.node = .null;
         il.tok = lb;
         return true;
     }
@@ -3468,7 +3468,7 @@ pub fn initializerItem(p: *Parser, il: *InitList, initType: Type) Error!bool {
 
         var saw = false;
         if (isStrInit and p.isStringInit(initType)) {
-            var tempIL = InitList{};
+            var tempIL: InitList = .{};
             defer tempIL.deinit(p.gpa);
             saw = try p.initializerItem(&tempIL, Type.Void);
         } else if (count == 0 and p.isStringInit(initType)) {
@@ -3476,7 +3476,7 @@ pub fn initializerItem(p: *Parser, il: *InitList, initType: Type) Error!bool {
             saw = try p.initializerItem(il, initType);
         } else if (isScalar and count >= scalarInitsNeeds) {
             // discard further scalars
-            var tempIL = InitList{};
+            var tempIL: InitList = .{};
             defer tempIL.deinit(p.gpa);
             saw = try p.initializerItem(&tempIL, Type.Void);
         } else if (p.currToken() == .LBrace) {
@@ -3487,7 +3487,7 @@ pub fn initializerItem(p: *Parser, il: *InitList, initType: Type) Error!bool {
                 saw = try p.initializerItem(curIL, curType);
             } else {
                 // discard further values
-                var tempIL = InitList{};
+                var tempIL: InitList = .{};
                 defer tempIL.deinit(p.gpa);
 
                 saw = try p.initializerItem(curIL, curType);
@@ -3522,7 +3522,7 @@ pub fn initializerItem(p: *Parser, il: *InitList, initType: Type) Error!bool {
                 try p.errToken(.initializer_overrides, firstToken);
                 try p.errToken(.previous_initializer, curIL.tok);
             }
-            curIL.node = res.node;
+            curIL.node = .pack(res.node);
             curIL.tok = firstToken;
         }
 
@@ -3553,7 +3553,7 @@ pub fn initializerItem(p: *Parser, il: *InitList, initType: Type) Error!bool {
         try p.errToken(.initializer_overrides, lb);
         try p.errToken(.previous_initializer, il.tok);
     }
-    il.node = null;
+    il.node = .null;
     il.tok = lb;
     return true;
 }
@@ -3568,7 +3568,7 @@ fn findScalarInitializerAt(
     startIdx: *u64,
 ) Error!bool {
     if (ty.isArray()) {
-        if (il.*.node != null) return false;
+        if (il.*.node != .null) return false;
         startIdx.* += 1;
 
         const arrType = ty.*;
@@ -3588,7 +3588,7 @@ fn findScalarInitializerAt(
         }
         return false;
     } else if (ty.get(.Struct)) |structType| {
-        if (il.*.node != null) return false;
+        if (il.*.node != .null) return false;
         startIdx.* += 1;
         const fields = structType.data.record.fields;
         if (fields.len == 0) {
@@ -3608,7 +3608,7 @@ fn findScalarInitializerAt(
     } else if (ty.get(.Union)) |_| {
         return false;
     }
-    return il.*.node == null;
+    return il.*.node == .null;
 }
 
 /// Returns true if the value is unused.
@@ -3620,7 +3620,7 @@ fn findScalarInitializer(
     firstToken: TokenIndex,
 ) Error!bool {
     if (ty.isArray() or ty.isComplex()) {
-        if (il.*.node != null) return false;
+        if (il.*.node != .null) return false;
         const startIdx = il.*.list.items.len;
         var index = if (startIdx != 0) il.*.list.items[startIdx - 1].index else startIdx;
 
@@ -3636,14 +3636,14 @@ fn findScalarInitializer(
         while (index < elemCount) : (index += 1) {
             ty.* = elemTy;
             il.* = try arrayIL.find(p.gpa, index);
-            if (il.*.node == null and actualTy.eql(elemTy, p.comp, false))
+            if (il.*.node == .null and actualTy.eql(elemTy, p.comp, false))
                 return true;
             if (try p.findScalarInitializer(il, ty, actualTy, firstToken))
                 return true;
         }
         return false;
     } else if (ty.get(.Struct)) |structType| {
-        if (il.*.node != null) return false;
+        if (il.*.node != .null) return false;
         if (actualTy.eql(ty.*, p.comp, false)) return true;
 
         const startIdx = il.*.list.items.len;
@@ -3659,14 +3659,14 @@ fn findScalarInitializer(
             const field = fields[@intCast(index)];
             ty.* = field.ty;
             il.* = try structIL.find(p.gpa, index);
-            if (il.*.node == null and actualTy.eql(field.ty, p.comp, false))
+            if (il.*.node == .null and actualTy.eql(field.ty, p.comp, false))
                 return true;
             if (try p.findScalarInitializer(il, ty, actualTy, firstToken))
                 return true;
         }
         return false;
     } else if (ty.get(.Union)) |unionType| {
-        if (il.*.node != null)
+        if (il.*.node != .null)
             return false;
         if (actualTy.eql(ty.*, p.comp, false))
             return true;
@@ -3680,12 +3680,12 @@ fn findScalarInitializer(
             return true;
         return false;
     }
-    return il.*.node == null;
+    return il.*.node == .null;
 }
 
 fn findAggregateInitializer(p: *Parser, il: **InitList, ty: *Type, startIdx: *?u64) Error!bool {
     if (ty.isArray()) {
-        if (il.*.node != null) return false;
+        if (il.*.node != .null) return false;
         const listIdx = il.*.list.items.len;
         const index = if (startIdx.*) |*some| blk: {
             some.* += 1;
@@ -3705,7 +3705,7 @@ fn findAggregateInitializer(p: *Parser, il: **InitList, ty: *Type, startIdx: *?u
         }
         return false;
     } else if (ty.get(.Struct)) |structType| {
-        if (il.*.node != null)
+        if (il.*.node != .null)
             return false;
         const listIdx = il.*.list.items.len;
         const index = if (startIdx.*) |*some| blk: {
@@ -3724,7 +3724,7 @@ fn findAggregateInitializer(p: *Parser, il: **InitList, ty: *Type, startIdx: *?u
         }
         return false;
     } else if (ty.get(.Union)) |unionType| {
-        if (il.*.node != null)
+        if (il.*.node != .null)
             return false;
         if (startIdx.*) |_| return false; // overrides
         if (unionType.data.record.fields.len == 0)
@@ -3734,7 +3734,7 @@ fn findAggregateInitializer(p: *Parser, il: **InitList, ty: *Type, startIdx: *?u
         return true;
     } else {
         try p.err(.too_many_scalar_init_braces);
-        return il.*.node == null;
+        return il.*.node == .null;
     }
 }
 
@@ -3822,7 +3822,7 @@ fn isStringInit(p: *Parser, ty: Type) bool {
 fn convertInitList(p: *Parser, il: InitList, initType: Type) Error!Node.Index {
     const isComplex = initType.isComplex();
     if (initType.isScalar() and !isComplex) {
-        return il.node.upack() orelse
+        return il.node.unpack() orelse
             try p.addNode(.{
             .defaultInitExpr = .{
                 .lastToken = il.tok,
@@ -3832,7 +3832,7 @@ fn convertInitList(p: *Parser, il: InitList, initType: Type) Error!Node.Index {
     } else if (initType.is(.VariableLenArray)) {
         return error.ParsingFailed; // vla invalid, reported earlier
     } else if (initType.isArray() or isComplex) {
-        if (il.node) |some| return some;
+        if (il.node.unpack()) |some| return some;
 
         const listBuffTop = p.listBuffer.items.len;
         defer p.listBuffer.items.len = listBuffTop;
@@ -3888,7 +3888,7 @@ fn convertInitList(p: *Parser, il: InitList, initType: Type) Error!Node.Index {
     } else if (initType.get(.Struct)) |structType| {
         assert(!structType.hasIncompleteSize());
 
-        if (il.node) |some| return some;
+        if (il.node.unpack()) |some| return some;
 
         const listBuffTop = p.listBuffer.items.len;
         defer p.listBuffer.items.len = listBuffTop;
@@ -3913,7 +3913,7 @@ fn convertInitList(p: *Parser, il: InitList, initType: Type) Error!Node.Index {
             },
         });
     } else if (initType.get(.Union)) |unionType| {
-        if (il.node) |some| return some;
+        if (il.node.unpack()) |some| return some;
 
         const initNode, const index = if (unionType.data.record.fields.len == 0)
             // do nothing for empty unions
