@@ -1,9 +1,9 @@
-Var: 'const int'
+variable: 'const int'
  name: a
 
-Var: 'typeof(<expr>: const int)'
+variable: 'typeof(<expr>: const int)'
  name: b
 
-Var: 'typeof(<expr>: int)'
+variable: 'typeof(<expr>: int)'
  name: c
 

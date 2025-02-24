@@ -8,7 +8,6 @@ const Inst = IR.Inst;
 const Interner = backend.Interner;
 const Compilation = @import("../Basic/Compilation.zig");
 const Tree = @import("../AST/AST.zig");
-const TreeTag = @import("../AST/AstTag.zig").Tag;
 const Node = Tree.Node;
 const Type = @import("../AST/Type.zig");
 const Value = @import("../AST/Value.zig");

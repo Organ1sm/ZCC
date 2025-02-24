@@ -1,90 +1,94 @@
-StructDeclTwo: 'struct S1'
+structDecl: 'struct S1'
 
-StructDeclTwo: 'struct S2'
-  RecordFieldDecl: 'int'
+structDecl: 'struct S2'
+  recordField: 'int'
    name: x
    field attr: packed
 
-StructDeclTwo: 'struct S3'
-  RecordFieldDecl: 'int'
+structDecl: 'struct S3'
+  recordField: 'int'
    name: x
    field attr: packed
 
-StructDeclTwo: 'struct S4'
-  RecordFieldDecl: 'int'
+structDecl: 'struct S4'
+  recordField: 'int'
    name: x
    field attr: packed
 
-StructDeclTwo: 'struct S5'
-  RecordFieldDecl: 'int'
+structDecl: 'struct S5'
+  recordField: 'int'
    name: x
    field attr: packed
-  RecordFieldDecl: 'int'
+
+  recordField: 'int'
    name: y
    field attr: packed
 
-StructDeclTwo: 'struct S6'
-  RecordFieldDecl: 'int'
+structDecl: 'struct S6'
+  recordField: 'int'
    name: x
    field attr: packed
-  RecordFieldDecl: 'int'
+
+  recordField: 'int'
    name: y
    field attr: packed
 
-StructDeclTwo: 'struct S7'
-  RecordFieldDecl: 'int'
+structDecl: 'struct S7'
+  recordField: 'int'
    name: x
    field attr: packed
-  RecordFieldDecl: 'int'
+
+  recordField: 'int'
    name: y
 
-StructDeclTwo: 'struct S8'
-  RecordFieldDecl: 'int'
+structDecl: 'struct S8'
+  recordField: 'int'
    name: x
-  RecordFieldDecl: 'int'
+
+  recordField: 'int'
    name: y
    field attr: packed
 
-StructDecl: 'struct S9'
-  RecordFieldDecl: 'int'
+structDecl: 'struct S9'
+  recordField: 'int'
    name: x
    field attr: packed
    field attr: aligned alignment: null
 
-  RecordFieldDecl: 'float'
+  recordField: 'float'
    name: f
 
-  RecordFieldDecl: 'long'
+  recordField: 'long'
    name: l
    field attr: packed
-   field attr: aligned alignment: zinc.Lexer.Attribute.Alignment{ .node = zinc.AST.AST.NodeIndex.none, .requested = 16 }
-   field attr: warn_if_not_aligned alignment: zinc.Lexer.Attribute.Alignment{ .node = zinc.AST.AST.NodeIndex.none, .requested = 16 }
+   field attr: aligned alignment: zinc.Lexer.Attribute.Alignment{ .node = zinc.AST.AST.Node.OptIndex.null, .requested = 16 }
+   field attr: warn_if_not_aligned alignment: zinc.Lexer.Attribute.Alignment{ .node = zinc.AST.AST.Node.OptIndex.null, .requested = 16 }
 
-UnionDecl: 'union U1'
-  RecordFieldDecl: 'long'
+unionDecl: 'union U1'
+  recordField: 'long'
    name: x
 
-  RecordFieldDecl: 'int'
+  recordField: 'int'
    name: y
-   field attr: aligned alignment: zinc.Lexer.Attribute.Alignment{ .node = zinc.AST.AST.NodeIndex.none, .requested = 32 }
+   field attr: aligned alignment: zinc.Lexer.Attribute.Alignment{ .node = zinc.AST.AST.Node.OptIndex.null, .requested = 32 }
 
-  RecordFieldDecl: 'unsigned int'
+  recordField: 'unsigned int'
    name: z
    field attr: packed
 
-UnionDecl: 'union U2'
-  RecordFieldDecl: 'int'
+unionDecl: 'union U2'
+  recordField: 'int'
    name: x
    field attr: packed
 
-  RecordFieldDecl: 'int'
+  recordField: 'int'
    name: y
 
-  RecordFieldDecl: 'int'
+  recordField: 'int'
    name: z
    field attr: packed
 
-  RecordFieldDecl: 'int'
+  recordField: 'int'
    name: w
    field attr: aligned alignment: null
 

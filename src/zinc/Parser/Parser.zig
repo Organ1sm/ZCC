@@ -7,7 +7,6 @@ const TokenType = @import("../Basic/TokenType.zig").TokenType;
 const Lexer = @import("../Lexer/Lexer.zig");
 const Preprocessor = @import("../Lexer/Preprocessor.zig");
 const AST = @import("../AST/AST.zig");
-const AstTag = @import("../AST/AstTag.zig").Tag;
 const Type = @import("../AST/Type.zig");
 const TypeBuilder = @import("../AST/TypeBuilder.zig");
 const Diagnostics = @import("../Basic/Diagnostics.zig");
@@ -1132,7 +1131,14 @@ fn parseDeclaration(p: *Parser) Error!bool {
             try p.errToken(.invalid_old_style_params, tokenIdx);
 
         try declSpec.validate(p, &initDeclarator.d.type);
-        const node = if (initDeclarator.d.type.isFunc())
+        const node = if (declSpec.storageClass == .typedef)
+            try p.addNode(.{
+                .typedef = .{
+                    .nameToken = initDeclarator.d.name,
+                    .type = initDeclarator.d.type,
+                },
+            })
+        else if (initDeclarator.d.type.isFunc())
             try p.addNode(.{
                 .fnProto = .{
                     .nameToken = initDeclarator.d.name,
@@ -1922,7 +1928,7 @@ fn parseTypeSpec(p: *Parser, ty: *TypeBuilder) Error!bool {
                             p.skipTo(.RParen);
                             return error.ParsingFailed;
                         }
-                        // args.aligned.alignment.?.node = res.node;
+                        args.aligned.alignment.?.node = .pack(res.node);
                         try p.attrBuffer.append(p.gpa, .{
                             .attr = .{ .tag = .aligned, .args = args, .syntax = .keyword },
                             .tok = alignToken,
@@ -5362,7 +5368,7 @@ fn parseEqExpr(p: *Parser) Error!?Result {
 
 /// compare-expression : shirt-expression (('<' | '<=' | '>' | '>=') shirt-expression)*
 fn parseCompExpr(p: *Parser) Error!?Result {
-    var lhs = try p.expect(parseShiftExpr);
+    var lhs = (try p.parseShiftExpr()) orelse return null;
 
     while (true) {
         const tok = p.tokenIdx;

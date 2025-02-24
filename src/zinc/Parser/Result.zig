@@ -4,7 +4,6 @@ const Type = @import("../AST/Type.zig");
 const AST = @import("../AST/AST.zig");
 const Diagnostics = @import("../Basic/Diagnostics.zig");
 const Value = @import("../AST/Value.zig");
-const AstTag = @import("../AST/AstTag.zig").Tag;
 const Parser = @import("Parser.zig");
 
 const Node = AST.Node;

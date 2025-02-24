@@ -6,7 +6,6 @@ const CodeGen = @import("../CodeGen/CodeGen.zig");
 const NumberAffixes = @import("NumberAffixes.zig");
 const Source = @import("../Basic/Source.zig");
 const Lexer = @import("../Lexer/Lexer.zig");
-const AstTag = @import("AstTag.zig").Tag;
 const Attribute = @import("../Lexer/Attribute.zig");
 const Value = @import("Value.zig");
 const StringInterner = @import("../Basic/StringInterner.zig");
@@ -2784,7 +2783,7 @@ fn dumpAttribute(tree: *const Tree, attr: Attribute, writer: anytype) !void {
             }
             try writer.writeByte(' ');
             inline for (fields, 0..) |f, i| {
-                if (comptime std.mem.eql(u8, f.name, "__nameToken")) continue;
+                if (comptime std.mem.eql(u8, f.name, "__name_token")) continue;
                 if (i != 0)
                     try writer.writeAll(", ");
 

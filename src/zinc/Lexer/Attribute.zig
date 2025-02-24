@@ -365,6 +365,7 @@ const EnumTypes = enum {
     identifier,
 };
 pub const Alignment = struct {
+    node: Tree.Node.OptIndex = .null,
     requested: u29,
 };
 pub const Identifier = struct {
