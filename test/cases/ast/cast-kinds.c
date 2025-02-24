@@ -1,228 +1,229 @@
-UnionDeclTwo: 'union U'
-  RecordFieldDecl: 'int'
+unionDecl: 'union U'
+  recordField: 'int'
    name: x
-  RecordFieldDecl: 'float'
+
+  recordField: 'float'
    name: y
 
-FnDef: 'fn () int'
+fnDef: 'fn () int'
  name: bar
  body:
-  CompoundStmtTwo: 'void'
-    ReturnStmt: 'void'
+  compoundStmt: 'void'
+    returnStmt: 'int'
      expr:
-      IntLiteral: 'int' (value: 42)
+      intLiteral: 'int' (value: 42)
 
-FnDef: 'fn () void'
+fnDef: 'fn () void'
  name: foo
  body:
-  CompoundStmt: 'void'
-    Var: 'int'
+  compoundStmt: 'void'
+    variable: 'int'
      name: x
 
-    Var: 'float'
+    variable: 'float'
      name: f
 
-    Var: 'double'
+    variable: 'double'
      name: d
 
-    Var: '[2]int'
+    variable: '[2]int'
      name: arr
 
-    Var: '*int'
+    variable: '*int'
      name: p
 
-    AssignExpr: '*int'
+    assignExpr: '*int'
      lhs:
-      DeclRefExpr: '*int' lvalue
+      declRefExpr: '*int' lvalue
        name: p
      rhs:
-      ExplicitCast: (Bitcast) '*int'
-        AddrOfExpr: '*float'
+      explicitCast: (Bitcast) '*int'
+        addrOfExpr: '*float'
          operand:
-          DeclRefExpr: 'float' lvalue
+          declRefExpr: 'float' lvalue
            name: f
 
-    AssignExpr: '*int'
+    assignExpr: '*int'
      lhs:
-      DeclRefExpr: '*int' lvalue
+      declRefExpr: '*int' lvalue
        name: p
      rhs:
-      ImplicitCast: (ArrayToPointer) '*d[2]int'
-        DeclRefExpr: '[2]int' lvalue
+      implicitCast: (ArrayToPointer) '*d[2]int'
+        declRefExpr: '[2]int' lvalue
          name: arr
 
-    AssignExpr: 'int'
+    assignExpr: 'int'
      lhs:
-      DeclRefExpr: 'int' lvalue
+      declRefExpr: 'int' lvalue
        name: x
      rhs:
-      CallExprOne: 'int'
-       lhs:
-        ImplicitCast: (FunctionToPointer) '*fn () int'
-          DeclRefExpr: 'fn () int' lvalue
+      callExpr: 'int'
+       callee:
+        implicitCast: (FunctionToPointer) '*fn () int'
+          declRefExpr: 'fn () int' lvalue
            name: bar
 
-    Var: '_Bool'
+    variable: '_Bool'
      name: b
      init:
-      ImplicitCast: (PointerToBool) '_Bool'
-        ImplicitCast: (LValToRVal) '*int'
-          DeclRefExpr: '*int' lvalue
+      implicitCast: (PointerToBool) '_Bool'
+        implicitCast: (LValToRVal) '*int'
+          declRefExpr: '*int' lvalue
            name: p
 
-    AssignExpr: 'int'
+    assignExpr: 'int'
      lhs:
-      DeclRefExpr: 'int' lvalue
+      declRefExpr: 'int' lvalue
        name: x
      rhs:
-      ImplicitCast: (PointerToInt) 'int'
-        ImplicitCast: (LValToRVal) '*int'
-          DeclRefExpr: '*int' lvalue
+      implicitCast: (PointerToInt) 'int'
+        implicitCast: (LValToRVal) '*int'
+          declRefExpr: '*int' lvalue
            name: p
 
-    AssignExpr: 'int'
+    assignExpr: 'int'
      lhs:
-      DeclRefExpr: 'int' lvalue
+      declRefExpr: 'int' lvalue
        name: x
      rhs:
-      ImplicitCast: (BoolToInt) 'int'
-        ImplicitCast: (LValToRVal) '_Bool'
-          DeclRefExpr: '_Bool' lvalue
+      implicitCast: (BoolToInt) 'int'
+        implicitCast: (LValToRVal) '_Bool'
+          declRefExpr: '_Bool' lvalue
            name: b
 
-    AssignExpr: 'float'
+    assignExpr: 'float'
      lhs:
-      DeclRefExpr: 'float' lvalue
+      declRefExpr: 'float' lvalue
        name: f
      rhs:
-      ImplicitCast: (BoolToFloat) 'float'
-        ImplicitCast: (LValToRVal) '_Bool'
-          DeclRefExpr: '_Bool' lvalue
+      implicitCast: (BoolToFloat) 'float'
+        implicitCast: (LValToRVal) '_Bool'
+          declRefExpr: '_Bool' lvalue
            name: b
 
-    AssignExpr: '*int'
+    assignExpr: '*int'
      lhs:
-      DeclRefExpr: '*int' lvalue
+      declRefExpr: '*int' lvalue
        name: p
      rhs:
-      ImplicitCast: (BoolToPointer) '*int'
-        ImplicitCast: (LValToRVal) '_Bool'
-          DeclRefExpr: '_Bool' lvalue
+      implicitCast: (BoolToPointer) '*int'
+        implicitCast: (LValToRVal) '_Bool'
+          declRefExpr: '_Bool' lvalue
            name: b
 
-    AssignExpr: '_Bool'
+    assignExpr: '_Bool'
      lhs:
-      DeclRefExpr: '_Bool' lvalue
+      declRefExpr: '_Bool' lvalue
        name: b
      rhs:
-      ImplicitCast: (IntToBool) '_Bool'
-        ImplicitCast: (LValToRVal) 'int'
-          DeclRefExpr: 'int' lvalue
+      implicitCast: (IntToBool) '_Bool'
+        implicitCast: (LValToRVal) 'int'
+          declRefExpr: 'int' lvalue
            name: x
 
-    AssignExpr: 'float'
+    assignExpr: 'float'
      lhs:
-      DeclRefExpr: 'float' lvalue
+      declRefExpr: 'float' lvalue
        name: f
      rhs:
-      ImplicitCast: (IntToFloat) 'float'
-        ImplicitCast: (LValToRVal) 'int'
-          DeclRefExpr: 'int' lvalue
+      implicitCast: (IntToFloat) 'float'
+        implicitCast: (LValToRVal) 'int'
+          declRefExpr: 'int' lvalue
            name: x
 
-    AssignExpr: '*int'
+    assignExpr: '*int'
      lhs:
-      DeclRefExpr: '*int' lvalue
+      declRefExpr: '*int' lvalue
        name: p
      rhs:
-      ImplicitCast: (IntToPointer) '*int'
-        ImplicitCast: (LValToRVal) 'int'
-          DeclRefExpr: 'int' lvalue
+      implicitCast: (IntToPointer) '*int'
+        implicitCast: (LValToRVal) 'int'
+          declRefExpr: 'int' lvalue
            name: x
 
-    AssignExpr: '_Bool'
+    assignExpr: '_Bool'
      lhs:
-      DeclRefExpr: '_Bool' lvalue
+      declRefExpr: '_Bool' lvalue
        name: b
      rhs:
-      ImplicitCast: (FloatToBool) '_Bool'
-        ImplicitCast: (LValToRVal) 'float'
-          DeclRefExpr: 'float' lvalue
+      implicitCast: (FloatToBool) '_Bool'
+        implicitCast: (LValToRVal) 'float'
+          declRefExpr: 'float' lvalue
            name: f
 
-    AssignExpr: 'int'
+    assignExpr: 'int'
      lhs:
-      DeclRefExpr: 'int' lvalue
+      declRefExpr: 'int' lvalue
        name: x
      rhs:
-      ImplicitCast: (FloatToInt) 'int'
-        ImplicitCast: (LValToRVal) 'float'
-          DeclRefExpr: 'float' lvalue
+      implicitCast: (FloatToInt) 'int'
+        implicitCast: (LValToRVal) 'float'
+          declRefExpr: 'float' lvalue
            name: f
 
-    AssignExpr: 'int'
+    assignExpr: 'int'
      lhs:
-      DeclRefExpr: 'int' lvalue
+      declRefExpr: 'int' lvalue
        name: x
      rhs:
-      ImplicitCast: (IntCast) 'int'
-        IntLiteral: 'long' (value: 1)
+      implicitCast: (IntCast) 'int'
+        intLiteral: 'long' (value: 1)
 
-    AssignExpr: 'float'
+    assignExpr: 'float'
      lhs:
-      DeclRefExpr: 'float' lvalue
+      declRefExpr: 'float' lvalue
        name: f
      rhs:
-      ImplicitCast: (FloatCast) 'float'
-        ImplicitCast: (LValToRVal) 'double'
-          DeclRefExpr: 'double' lvalue
+      implicitCast: (FloatCast) 'float'
+        implicitCast: (LValToRVal) 'double'
+          declRefExpr: 'double' lvalue
            name: d
 
-    AssignExpr: 'double'
+    assignExpr: 'double'
      lhs:
-      DeclRefExpr: 'double' lvalue
+      declRefExpr: 'double' lvalue
        name: d
      rhs:
-      ImplicitCast: (FloatCast) 'double'
-        ImplicitCast: (LValToRVal) 'float'
-          DeclRefExpr: 'float' lvalue
+      implicitCast: (FloatCast) 'double'
+        implicitCast: (LValToRVal) 'float'
+          declRefExpr: 'float' lvalue
            name: f
 
-    AssignExpr: '*int'
+    assignExpr: '*int'
      lhs:
-      DeclRefExpr: '*int' lvalue
+      declRefExpr: '*int' lvalue
        name: p
      rhs:
-      ImplicitCast: (NullToPointer) '*int'
-        IntLiteral: 'int' (value: 0)
+      implicitCast: (NullToPointer) '*int'
+        intLiteral: 'int' (value: 0)
 
-    ExplicitCast: (ToVoid) 'void'
-      ImplicitCast: (LValToRVal) '*int'
-        DeclRefExpr: '*int' lvalue
+    explicitCast: (ToVoid) 'void'
+      implicitCast: (LValToRVal) '*int'
+        declRefExpr: '*int' lvalue
          name: p
 
-    Var: 'union U'
+    variable: 'union U'
      name: u
 
-    AssignExpr: 'union U'
+    assignExpr: 'union U'
      lhs:
-      DeclRefExpr: 'union U' lvalue
+      declRefExpr: 'union U' lvalue
        name: u
      rhs:
-      ExplicitCast: (UnionCast) 'union U'
-        ImplicitCast: (LValToRVal) 'int'
-          DeclRefExpr: 'int' lvalue
+      explicitCast: (UnionCast) 'union U'
+        implicitCast: (LValToRVal) 'int'
+          declRefExpr: 'int' lvalue
            name: x
 
-    AssignExpr: 'union U'
+    assignExpr: 'union U'
      lhs:
-      DeclRefExpr: 'union U' lvalue
+      declRefExpr: 'union U' lvalue
        name: u
      rhs:
-      ExplicitCast: (UnionCast) 'union U'
-        ImplicitCast: (LValToRVal) 'float'
-          DeclRefExpr: 'float' lvalue
+      explicitCast: (UnionCast) 'union U'
+        implicitCast: (LValToRVal) 'float'
+          declRefExpr: 'float' lvalue
            name: f
 
-    ImplicitReturn: 'void'
+    implicitReturn: 'void'
 

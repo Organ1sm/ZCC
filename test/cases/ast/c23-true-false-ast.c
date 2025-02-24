@@ -1,44 +1,44 @@
-Var: 'bool'
+variable: 'bool'
  name: a
  init:
-  BoolLiteral: 'bool' (value: true)
+  boolLiteral: 'bool' (value: true)
 
-Var: 'bool'
+variable: 'bool'
  name: b
  init:
-  BoolLiteral: 'bool' (value: false)
+  boolLiteral: 'bool' (value: false)
 
-Var: 'bool'
+variable: 'bool'
  name: c
  init:
-  ImplicitCast: (IntToBool) 'bool'
-    IntLiteral: 'int' (value: 0)
+  implicitCast: (IntToBool) 'bool'
+    intLiteral: 'int' (value: 0)
 
-Var: 'bool'
+variable: 'bool'
  name: d
  init:
-  ImplicitCast: (IntToBool) 'bool'
-    IntLiteral: 'int' (value: 1)
+  implicitCast: (IntToBool) 'bool'
+    intLiteral: 'int' (value: 1)
 
-Var: 'int'
+variable: 'int'
  name: e
  init:
-  ImplicitCast: (BoolToInt) 'int'
-    BoolLiteral: 'bool' (value: true)
+  implicitCast: (BoolToInt) 'int'
+    boolLiteral: 'bool' (value: true)
 
-Var: 'int'
+variable: 'int'
  name: f
  init:
-  ImplicitCast: (BoolToInt) 'int'
-    BoolLiteral: 'bool' (value: false)
+  implicitCast: (BoolToInt) 'int'
+    boolLiteral: 'bool' (value: false)
 
-Var: 'int'
+variable: 'int'
  name: g
  init:
-  AddExpr: 'int'
+  addExpr: 'int'
    lhs:
-    ImplicitCast: (BoolToInt) 'int'
-      BoolLiteral: 'bool' (value: true)
+    implicitCast: (BoolToInt) 'int'
+      boolLiteral: 'bool' (value: true)
    rhs:
-    IntLiteral: 'int' (value: 1)
+    intLiteral: 'int' (value: 1)
 

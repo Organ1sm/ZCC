@@ -1,53 +1,58 @@
-FnDef: 'fn () void'
+fnDef: 'fn () void'
  name: foo
  body:
-  CompoundStmt: 'void'
-    Var: '_Complex double'
+  compoundStmt: 'void'
+    variable: '_Complex double'
      name: cd
      init:
-      ArrayInitExprTwo: '_Complex double'
-        FloatLiteral: 'double' (value: 1)
-        FloatLiteral: 'double' (value: 2)
+      arrayInitExpr: '_Complex double'
+        floatLiteral: 'double' (value: 1)
 
-    Var: '_Complex float'
+        floatLiteral: 'double' (value: 2)
+
+    variable: '_Complex float'
      name: cf
      init:
-      ArrayInitExprTwo: '_Complex float'
-        FloatLiteral: 'float' (value: 1)
-        FloatLiteral: 'float' (value: 2)
+      arrayInitExpr: '_Complex float'
+        floatLiteral: 'float' (value: 1)
 
-    Var: '_Complex int'
+        floatLiteral: 'float' (value: 2)
+
+    variable: '_Complex int'
      name: ci
      init:
-      ArrayInitExprTwo: '_Complex int'
-        IntLiteral: 'int' (value: 1)
-        IntLiteral: 'int' (value: 2)
+      arrayInitExpr: '_Complex int'
+        intLiteral: 'int' (value: 1)
 
-    AssignExpr: '_Complex double'
+        intLiteral: 'int' (value: 2)
+
+    assignExpr: '_Complex double'
      lhs:
-      DeclRefExpr: '_Complex double' lvalue
+      declRefExpr: '_Complex double' lvalue
        name: cd
      rhs:
-      ImplicitCast: (LValToRVal) '_Complex double'
-        CompoundLiteralExpr: '_Complex double' lvalue
-         ArrayInitExprTwo: '_Complex double'
-           ImplicitCast: (FloatCast) 'double'
-             FloatLiteral: 'float' (value: 1)
-           ImplicitCast: (FloatCast) 'double'
-             FloatLiteral: 'float' (value: 2)
+      implicitCast: (LValToRVal) '_Complex double'
+        compoundLiteralExpr: '_Complex double' lvalue
+         arrayInitExpr: '_Complex double'
+           implicitCast: (FloatCast) 'double'
+             floatLiteral: 'float' (value: 1)
 
-    AssignExpr: '_Complex float'
+           implicitCast: (FloatCast) 'double'
+             floatLiteral: 'float' (value: 2)
+
+    assignExpr: '_Complex float'
      lhs:
-      DeclRefExpr: '_Complex float' lvalue
+      declRefExpr: '_Complex float' lvalue
        name: cf
      rhs:
-      ImplicitCast: (LValToRVal) '_Complex float'
-        CompoundLiteralExpr: '_Complex float' lvalue
-         ArrayInitExprTwo: '_Complex float'
-           ImplicitCast: (FloatCast) 'float'
-             FloatLiteral: 'double' (value: 1)
-           ImplicitCast: (FloatCast) 'float'
-             FloatLiteral: 'double' (value: 2)
+      implicitCast: (LValToRVal) '_Complex float'
+        compoundLiteralExpr: '_Complex float' lvalue
+         arrayInitExpr: '_Complex float'
+           implicitCast: (FloatCast) 'float'
+             floatLiteral: 'double' (value: 1)
 
-    ImplicitReturn: 'void'
+           implicitCast: (FloatCast) 'float'
+             floatLiteral: 'double' (value: 2)
+
+    implicitReturn: 'void'
 

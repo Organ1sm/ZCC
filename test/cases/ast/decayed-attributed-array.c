@@ -1,44 +1,44 @@
-Var: 'attributed([1]int)'
+variable: 'attributed([1]int)'
  attr: aligned alignment: null
  name: arr
  init:
-  ArrayInitExprTwo: '[1]int'
-    IntLiteral: 'int' (value: 0)
+  arrayInitExpr: '[1]int'
+    intLiteral: 'int' (value: 0)
 
-Var: '*int'
+variable: '*int'
  name: ptr
  init:
-  ImplicitCast: (ArrayToPointer) '*d:attributed([1]int)'
+  implicitCast: (ArrayToPointer) '*d:attributed([1]int)'
    attr: aligned alignment: null
-    DeclRefExpr: 'attributed([1]int)' lvalue
+    declRefExpr: 'attributed([1]int)' lvalue
      attr: aligned alignment: null
      name: arr
 
-FnDef: 'fn () void'
+fnDef: 'fn () void'
  name: foo
  body:
-  CompoundStmt: 'void'
-    Var: 'attributed([64]char)'
-     attr: aligned alignment: zinc.Lexer.Attribute.Alignment{ .node = zinc.AST.AST.NodeIndex(9), .requested = 8 }
+  compoundStmt: 'void'
+    variable: 'attributed([64]char)'
+     attr: aligned alignment: zinc.Lexer.Attribute.Alignment{ .node = zinc.AST.AST.Node.OptIndex(8), .requested = 8 }
      name: x
 
-    Var: '*char'
+    variable: '*char'
      name: y
      init:
-      AddrOfExpr: '*char'
+      addrOfExpr: '*char'
        operand:
-        ArrayAccessExpr: 'char' lvalue
+        arrayAccessExpr: 'char' lvalue
          lhs:
-          ImplicitCast: (ArrayToPointer) '*d:attributed([64]char)'
-           attr: aligned alignment: zinc.Lexer.Attribute.Alignment{ .node = zinc.AST.AST.NodeIndex(9), .requested = 8 }
-            ParenExpr: 'attributed([64]char)' lvalue
-             attr: aligned alignment: zinc.Lexer.Attribute.Alignment{ .node = zinc.AST.AST.NodeIndex(9), .requested = 8 }
+          implicitCast: (ArrayToPointer) '*d:attributed([64]char)'
+           attr: aligned alignment: zinc.Lexer.Attribute.Alignment{ .node = zinc.AST.AST.Node.OptIndex(8), .requested = 8 }
+            parenExpr: 'attributed([64]char)' lvalue
+             attr: aligned alignment: zinc.Lexer.Attribute.Alignment{ .node = zinc.AST.AST.Node.OptIndex(8), .requested = 8 }
              operand:
-              DeclRefExpr: 'attributed([64]char)' lvalue
-               attr: aligned alignment: zinc.Lexer.Attribute.Alignment{ .node = zinc.AST.AST.NodeIndex(9), .requested = 8 }
+              declRefExpr: 'attributed([64]char)' lvalue
+               attr: aligned alignment: zinc.Lexer.Attribute.Alignment{ .node = zinc.AST.AST.Node.OptIndex(8), .requested = 8 }
                name: x
          index:
-          IntLiteral: 'int' (value: 0)
+          intLiteral: 'int' (value: 0)
 
-    ImplicitReturn: 'void'
+    implicitReturn: 'void'
 

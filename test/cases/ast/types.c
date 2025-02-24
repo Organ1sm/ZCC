@@ -1,79 +1,80 @@
-Var: 'attributed(int)'
- attr: aligned alignment: zinc.Lexer.Attribute.Alignment{ .node = zinc.AST.AST.NodeIndex.none, .requested = 4 }
- attr: aligned alignment: zinc.Lexer.Attribute.Alignment{ .node = zinc.AST.AST.NodeIndex.none, .requested = 4 }
- attr: aligned alignment: zinc.Lexer.Attribute.Alignment{ .node = zinc.AST.AST.NodeIndex(1), .requested = 16 }
+variable: 'attributed(int)'
+ attr: aligned alignment: zinc.Lexer.Attribute.Alignment{ .node = zinc.AST.AST.Node.OptIndex.null, .requested = 4 }
+ attr: aligned alignment: zinc.Lexer.Attribute.Alignment{ .node = zinc.AST.AST.Node.OptIndex.null, .requested = 4 }
+ attr: aligned alignment: zinc.Lexer.Attribute.Alignment{ .node = zinc.AST.AST.Node.OptIndex(0), .requested = 16 }
  name: a
 
-Var: 'const volatile int'
+variable: 'const volatile int'
  name: b
 
-Var: 'const volatile int'
+variable: 'const volatile int'
  name: c
 
-Var: 'const volatile int'
+variable: 'const volatile int'
  name: d
 
-FnProto: 'fn (a: restrict *int, b: restrict *int, c: restrict *int) int'
+fnProto: 'fn (a: restrict *int, b: restrict *int, c: restrict *int) int'
  name: foo
 
-FnProto: 'fn (n: int, bar: *d[<expr>]int) int'
+fnProto: 'fn (n: int, bar: *d[<expr>]int) int'
  name: bar
 
-TypeDef: 'void'
+typedef: 'void'
  name: baz
 
-FnProto: 'attributed(fn () void)'
+fnProto: 'attributed(fn () void)'
  attr: noreturn
  name: abort
 
-TypeDef: 'int'
+typedef: 'int'
  name: A
 
-TypeDef: 'int'
+typedef: 'A': 'int'
  name: B
 
-TypeDef: 'int'
+typedef: 'A': 'int'
  name: C
 
-TypeDef: 'int'
+typedef: 'C': 'int'
  name: B
 
-TypeDef: '[2]int'
+typedef: '[2]int'
  name: I
 
-FnDef: 'fn (a: *d[2]const int, b: *d[2]const int) void'
+fnDef: 'fn (a: *d[2]const int, b: *d[2]const int) void'
  name: qux
  body:
-  CompoundStmt: 'void'
-    AddAssignExpr: '*d[2]const int'
+  compoundStmt: 'void'
+    addAssignExpr: 'I': '*d[2]const int'
      lhs:
-      DeclRefExpr: '*d[2]const int' lvalue
+      declRefExpr: 'I': '*d[2]const int' lvalue
        name: b
      rhs:
-      ImplicitCast: (IntToPointer) '*d[2]const int'
-        IntLiteral: 'int' (value: 1)
+      implicitCast: (IntToPointer) 'I': '*d[2]const int'
+        intLiteral: 'int' (value: 1)
 
-    AddAssignExpr: '*d[2]const int'
+    addAssignExpr: 'I': '*d[2]const int'
      lhs:
-      DeclRefExpr: '*d[2]const int' lvalue
+      declRefExpr: 'I': '*d[2]const int' lvalue
        name: a
      rhs:
-      ImplicitCast: (IntToPointer) '*d[2]const int'
-        IntLiteral: 'int' (value: 1)
+      implicitCast: (IntToPointer) 'I': '*d[2]const int'
+        intLiteral: 'int' (value: 1)
 
-    ImplicitReturn: 'void'
+    implicitReturn: 'void'
 
-EnumDeclTwo: 'enum E: unsigned int'
-  EnumFieldDecl: 'int' (value: 2)
+enumDecl: 'enum E: unsigned int'
+  enumField: 'int' (value: 2)
    name: D
-   value:
-    ImplicitCast: (IntCast) 'int'
-      ExplicitCast: (IntCast) 'char' (value: 2)
-        IntLiteral: 'int' (value: 2)
-  EnumFieldDecl: 'int' (value: 3)
+   init:
+    implicitCast: (IntCast) 'int'
+      explicitCast: (IntCast) 'char' (value: 2)
+        intLiteral: 'int' (value: 2)
+
+  enumField: 'int' (value: 3)
    name: E
-   value:
-    ImplicitCast: (IntCast) 'int'
-      ExplicitCast: (IntCast) 'long' (value: 3)
-        IntLiteral: 'int' (value: 3)
+   init:
+    implicitCast: (IntCast) 'int'
+      explicitCast: (IntCast) 'long' (value: 3)
+        intLiteral: 'int' (value: 3)
 
