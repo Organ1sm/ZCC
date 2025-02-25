@@ -275,7 +275,7 @@ fn genExpr(c: *CodeGen, nodeIdx: Node.Index) Error!IR.Ref {
         => {},
 
         .variable => |variable| {
-            if (variable.@"extern" or variable.static) {
+            if (variable.storageClass == .@"extern" or variable.storageClass == .static) {
                 try c.genVar(variable);
                 return .none;
             }
@@ -949,7 +949,7 @@ fn genLval(c: *CodeGen, nodeIndex: Node.Index) Error!IR.Ref {
         .derefExpr => |un| return c.genExpr(un.operand),
 
         .compoundLiteralExpr => |literal| {
-            if (literal.static or literal.threadLocal) {
+            if (literal.storageClass == .static or literal.threadLocal) {
                 return c.fail("TODO CodeGen.compound_literal_expr static or thread_local\n", .{});
             }
             const size: u32 = @intCast(literal.type.sizeof(c.comp).?); // TODO add error in parser

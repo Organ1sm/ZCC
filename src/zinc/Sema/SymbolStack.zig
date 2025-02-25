@@ -348,7 +348,13 @@ pub fn declareSymbol(
     });
 }
 
-pub fn defineParam(self: *SymbolStack, name: StringId, ty: Type, token: TokenIndex) !void {
+pub fn defineParam(
+    self: *SymbolStack,
+    name: StringId,
+    ty: Type,
+    token: TokenIndex,
+    node: ?Node.Index,
+) !void {
     if (self.get(name, .vars)) |prev| {
         switch (prev.kind) {
             .enumeration, .declaration, .definition, .constexpr => {
@@ -367,6 +373,7 @@ pub fn defineParam(self: *SymbolStack, name: StringId, ty: Type, token: TokenInd
         .name = name,
         .token = token,
         .type = ty,
+        .node = .packOpt(node),
         .value = .{},
     });
 }

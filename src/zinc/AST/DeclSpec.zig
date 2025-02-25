@@ -25,8 +25,7 @@ type: Type,
 
 pub fn validateParam(d: DeclSpec, p: *Parser, ty: *Type) Error!void {
     switch (d.storageClass) {
-        .none => {},
-        .register => ty.qual.register = true,
+        .none, .register => {},
         .auto, .@"extern", .static, .typedef => |tokenIndex| try p.errToken(.invalid_storage_on_param, tokenIndex),
     }
 
@@ -72,6 +71,5 @@ pub fn validate(d: DeclSpec, p: *Parser, ty: *Type) Error!void {
             .register => if (p.func.type == null) try p.err(.illegal_storage_on_global),
             else => {},
         }
-        ty.qual.register = (d.storageClass == .register);
     }
 }

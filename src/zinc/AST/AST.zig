@@ -20,7 +20,7 @@ pub const TypeHashContext = struct {
         var hasher = std.hash.Wyhash.init(0);
 
         std.hash.autoHash(&hasher, ty.specifier);
-        std.hash.autoHash(&hasher, @as(u5, @bitCast(ty.qual)));
+        std.hash.autoHash(&hasher, @as(u4, @bitCast(ty.qual)));
         std.hash.autoHash(&hasher, ty.decayed);
         std.hash.autoHash(&hasher, ty.name);
 
@@ -270,6 +270,7 @@ pub const Node = union(enum) {
         definition: ?Node.Index,
     },
     fnDef: FnDef,
+    param: Param,
     variable: Variable,
     typedef: struct {
         nameToken: TokenIndex,
@@ -449,7 +450,8 @@ pub const Node = union(enum) {
     memberAccessPtrExpr: MemberAccess,
 
     declRefExpr: DeclRef,
-    enumerationRef: DeclRef,
+    enumerationRef: NoDeclRef,
+    builtinRef: NoDeclRef,
 
     /// C23 bool literal `true` / `false`
     boolLiteral: Literal,
@@ -520,9 +522,9 @@ pub const Node = union(enum) {
     compoundLiteralExpr: struct {
         lparenToken: TokenIndex,
         type: Type,
-        static: bool,
         threadLocal: bool,
         initializer: Node.Index,
+        storageClass: enum { auto, static, register },
     },
 
     pub const FnDef = struct {
@@ -533,11 +535,16 @@ pub const Node = union(enum) {
         body: Node.Index,
     };
 
+    pub const Param = struct {
+        nameToken: TokenIndex,
+        type: Type,
+        storageClass: enum { auto, register },
+    };
+
     pub const Variable = struct {
         nameToken: TokenIndex,
         type: Type,
-        @"extern": bool,
-        static: bool,
+        storageClass: enum { auto, static, @"extern", register },
         threadLocal: bool,
         /// From predefined macro  __func__, __FUNCTION__ or __PRETTY_FUNCTION__.
         /// Implies `static == true`.
@@ -670,6 +677,12 @@ pub const Node = union(enum) {
     pub const DeclRef = struct {
         nameToken: TokenIndex,
         type: Type,
+        decl: Node.Index,
+    };
+
+    pub const NoDeclRef = struct {
+        nameToken: TokenIndex,
+        type: Type,
     };
 
     pub const Conditional = struct {
@@ -737,14 +750,30 @@ pub const Node = union(enum) {
                         },
                     };
                 },
+                .Param => {
+                    const attr: Node.Repr.DeclAttr = @bitCast(nodeData[1]);
+                    return .{
+                        .param = .{
+                            .nameToken = nodeToken,
+                            .type = tree.typeMap.keys()[nodeData[0]],
+                            .storageClass = if (attr.register) .register else .auto,
+                        },
+                    };
+                },
                 .Variable => {
                     const attr: Node.Repr.DeclAttr = @bitCast(nodeData[1]);
                     return .{
                         .variable = .{
                             .nameToken = nodeToken,
                             .type = tree.typeMap.keys()[nodeData[0]],
-                            .@"extern" = attr.@"extern",
-                            .static = attr.static,
+                            .storageClass = if (attr.static)
+                                .static
+                            else if (attr.@"extern")
+                                .@"extern"
+                            else if (attr.register)
+                                .register
+                            else
+                                .auto,
                             .threadLocal = attr.threadLocal,
                             .implicit = attr.implicit,
                             .initializer = unpackOptIndex(nodeData[2]),
@@ -1392,10 +1421,17 @@ pub const Node = union(enum) {
                     .declRefExpr = .{
                         .nameToken = nodeToken,
                         .type = tree.typeMap.keys()[nodeData[0]],
+                        .decl = @enumFromInt(nodeData[1]),
                     },
                 },
                 .EnumerationRef => .{
                     .enumerationRef = .{
+                        .nameToken = nodeToken,
+                        .type = tree.typeMap.keys()[nodeData[0]],
+                    },
+                },
+                .BuiltinRef => .{
+                    .builtinRef = .{
                         .nameToken = nodeToken,
                         .type = tree.typeMap.keys()[nodeData[0]],
                     },
@@ -1578,7 +1614,12 @@ pub const Node = union(enum) {
                         .compoundLiteralExpr = .{
                             .lparenToken = nodeToken,
                             .type = tree.typeMap.keys()[nodeData[0]],
-                            .static = attr.static,
+                            .storageClass = if (attr.static)
+                                .static
+                            else if (attr.register)
+                                .register
+                            else
+                                .auto,
                             .threadLocal = attr.threadLocal,
                             .initializer = @enumFromInt(nodeData[2]),
                         },
@@ -1632,16 +1673,18 @@ pub const Node = union(enum) {
         pub const DeclAttr = packed struct(u32) {
             @"extern": bool = false,
             static: bool = false,
+            register: bool = false,
             @"inline": bool = false,
             threadLocal: bool = false,
             implicit: bool = false,
-            _: u27 = 0,
+            _: u26 = 0,
         };
 
         pub const Tag = enum(u8) {
             StaticAssert,
             FnProto,
             FnDef,
+            Param,
             Variable,
             Typedef,
             GlobalAsm,
@@ -1731,6 +1774,7 @@ pub const Node = union(enum) {
             MemberAccessPtrExpr,
             DeclRefExpr,
             EnumerationRef,
+            BuiltinRef,
             BoolLiteral,
             NullptrLiteral,
             IntLiteral,
@@ -1797,11 +1841,11 @@ pub const Node = union(enum) {
 
 pub fn addNode(tree: *Tree, node: Node) !Node.Index {
     const index = try tree.nodes.addOne(tree.comp.gpa);
-    try tree.addNodeExtra(index, node);
+    try tree.setNode(index, node);
     return @enumFromInt(index);
 }
 
-pub fn addNodeExtra(tree: *Tree, index: usize, node: Node) !void {
+pub fn setNode(tree: *Tree, index: usize, node: Node) !void {
     var repr: Node.Repr = undefined;
     switch (node) {
         .staticAssert => |assert| {
@@ -1831,12 +1875,21 @@ pub fn addNodeExtra(tree: *Tree, index: usize, node: Node) !void {
             repr.data[2] = @intFromEnum(def.body);
             repr.tok = def.nameToken;
         },
+        .param => |param| {
+            repr.tag = .Param;
+            repr.data[0] = try tree.addType(param.type);
+            repr.data[1] = @bitCast(Node.Repr.DeclAttr{
+                .register = param.storageClass == .register,
+            });
+            repr.tok = param.nameToken;
+        },
         .variable => |variable| {
             repr.tag = .Variable;
             repr.data[0] = try tree.addType(variable.type);
             repr.data[1] = @bitCast(Node.Repr.DeclAttr{
-                .@"extern" = variable.@"extern",
-                .static = variable.static,
+                .@"extern" = variable.storageClass == .@"extern",
+                .static = variable.storageClass == .static,
+                .register = variable.storageClass == .register,
                 .threadLocal = variable.threadLocal,
                 .implicit = variable.implicit,
             });
@@ -2411,12 +2464,18 @@ pub fn addNodeExtra(tree: *Tree, index: usize, node: Node) !void {
         .declRefExpr => |declRef| {
             repr.tag = .DeclRefExpr;
             repr.data[0] = try tree.addType(declRef.type);
+            repr.data[1] = @intFromEnum(declRef.decl);
             repr.tok = declRef.nameToken;
         },
-        .enumerationRef => |declRef| {
+        .enumerationRef => |enumRef| {
             repr.tag = .EnumerationRef;
-            repr.data[0] = try tree.addType(declRef.type);
-            repr.tok = declRef.nameToken;
+            repr.data[0] = try tree.addType(enumRef.type);
+            repr.tok = enumRef.nameToken;
+        },
+        .builtinRef => |builtinRef| {
+            repr.tag = .BuiltinRef;
+            repr.data[0] = try tree.addType(builtinRef.type);
+            repr.tok = builtinRef.nameToken;
         },
         .boolLiteral => |literal| {
             repr.tag = .BoolLiteral;
@@ -2568,7 +2627,8 @@ pub fn addNodeExtra(tree: *Tree, index: usize, node: Node) !void {
             repr.tag = .CompoundLiteralExpr;
             repr.data[0] = try tree.addType(literal.type);
             repr.data[1] = @bitCast(Node.Repr.DeclAttr{
-                .static = literal.static,
+                .static = literal.storageClass == .static,
+                .register = literal.storageClass == .register,
                 .threadLocal = literal.threadLocal,
             });
             repr.data[2] = @intFromEnum(literal.initializer);
@@ -2940,12 +3000,34 @@ fn dumpNode(
             try config.setColor(w, .reset);
         },
 
+        .param => |param| {
+            try w.writeByteNTimes(' ', level + half);
+
+            switch (param.storageClass) {
+                .auto => {},
+                .register => {
+                    try config.setColor(w, ATTRIBUTE);
+                    try w.writeAll("register ");
+                    try config.setColor(w, .reset);
+                },
+            }
+
+            try w.writeAll("name: ");
+            try config.setColor(w, NAME);
+            try w.print("{s}\n", .{tree.tokenSlice(param.nameToken)});
+            try config.setColor(w, .reset);
+        },
+
         .variable => |variable| {
             try w.writeByteNTimes(' ', level + half);
 
             try config.setColor(w, ATTRIBUTE);
-            if (variable.static) try w.writeAll("static ");
-            if (variable.@"extern") try w.writeAll("extern ");
+            switch (variable.storageClass) {
+                .auto => {},
+                .static => try w.writeAll("static "),
+                .@"extern" => try w.writeAll("extern "),
+                .register => try w.writeAll("register "),
+            }
             if (variable.threadLocal) try w.writeAll("thread_local ");
             if (variable.implicit) try w.writeAll("implicit ");
 
@@ -3047,12 +3129,15 @@ fn dumpNode(
         },
 
         .compoundLiteralExpr => |literal| {
-            if (literal.static or literal.threadLocal) {
+            if (literal.storageClass != .auto or literal.threadLocal) {
                 try w.writeByteNTimes(' ', level + half - 1);
 
                 try config.setColor(w, ATTRIBUTE);
-                if (literal.static) try w.writeAll(" static");
-                if (literal.threadLocal) try w.writeAll(" thread_local");
+                switch (literal.storageClass) {
+                    .auto => {},
+                    .static => try w.writeAll(" static"),
+                    .register => try w.writeAll(" register"),
+                }
                 try w.writeByte('\n');
                 try config.setColor(w, .reset);
             }
@@ -3335,12 +3420,21 @@ fn dumpNode(
             try tree.dumpNode(un.operand, level + delta, mapper, config, w);
         },
 
-        .declRefExpr, .enumerationRef => |dr| {
+        .declRefExpr => |dr| {
             try w.writeByteNTimes(' ', level + 1);
             try w.writeAll("name: ");
 
             try config.setColor(w, NAME);
             try w.print("{s}\n", .{tree.tokenSlice(dr.nameToken)});
+            try config.setColor(w, .reset);
+        },
+
+        .builtinRef, .enumerationRef => |ndr| {
+            try w.writeByteNTimes(' ', level + 1);
+            try w.writeAll("name: ");
+
+            try config.setColor(w, NAME);
+            try w.print("{s}\n", .{tree.tokenSlice(ndr.nameToken)});
             try config.setColor(w, .reset);
         },
 

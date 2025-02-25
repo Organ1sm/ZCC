@@ -884,7 +884,8 @@ fn skipTo(p: *Parser, id: TokenType) void {
 ///  : init-declarator (',' init-declarator)*
 fn parseDeclaration(p: *Parser) Error!bool {
     _ = try p.pragma();
-    const firstTokenIndex = p.tokenIdx;
+    const firstToken = p.tokenIdx;
+
     const attrBufferTop = p.attrBuffer.len;
     defer p.attrBuffer.len = attrBufferTop;
 
@@ -892,13 +893,13 @@ fn parseDeclaration(p: *Parser) Error!bool {
 
     var declSpec = if (try p.parseDeclSpec()) |some| some else blk: {
         if (p.func.type != null) {
-            p.tokenIdx = firstTokenIndex;
+            p.tokenIdx = firstToken;
             return false;
         }
 
-        switch (p.tokenIds[firstTokenIndex]) {
+        switch (p.tokenIds[firstToken]) {
             .Asterisk, .LParen, .Identifier => {},
-            else => if (p.tokenIdx != firstTokenIndex) {
+            else => if (p.tokenIdx != firstToken) {
                 try p.err(.expected_ident_or_l_paren);
                 return error.ParsingFailed;
             } else return false,
@@ -913,7 +914,13 @@ fn parseDeclaration(p: *Parser) Error!bool {
         try p.attrBuffer.append(p.gpa, .{ .attr = attr, .tok = token });
     }
 
-    var initDeclarator = (try p.parseInitDeclarator(&declSpec, attrBufferTop)) orelse {
+    var declNode = try p.tree.addNode(.{
+        .nullStmt = .{
+            .semicolonOrRbraceToken = firstToken,
+            .type = Type.Invalid,
+        },
+    });
+    var initDeclarator = (try p.parseInitDeclarator(&declSpec, attrBufferTop, declNode)) orelse {
         _ = try p.expectToken(.Semicolon); // eat ';'
         if (declSpec.type.is(.Enum) or
             (declSpec.type.isRecord() and
@@ -943,7 +950,11 @@ fn parseDeclaration(p: *Parser) Error!bool {
             return true;
         }
 
-        try p.errToken(.missing_declaration, firstTokenIndex);
+        if (p.tree.nodes.len == @intFromEnum(declNode)) {
+            p.tree.nodes.len -= 1;
+        }
+
+        try p.errToken(.missing_declaration, firstToken);
         return true;
     };
 
@@ -971,11 +982,8 @@ fn parseDeclaration(p: *Parser) Error!bool {
         if (p.func.type != null)
             try p.err(.func_not_in_root);
 
-        const reservedIndex = try p.tree.nodes.addOne(p.gpa); // reserve space
-        const node: Node.Index = @enumFromInt(reservedIndex);
-
         const internedDeclaratorName = try p.getInternString(initDeclarator.d.name);
-        try p.symStack.defineSymbol(internedDeclaratorName, initDeclarator.d.type, initDeclarator.d.name, node, .{}, false);
+        try p.symStack.defineSymbol(internedDeclaratorName, initDeclarator.d.type, initDeclarator.d.name, declNode, .{}, false);
 
         const func = p.func;
         defer p.func = func;
@@ -1010,7 +1018,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
                     defer p.attrBuffer.len = attrBufferTopDeclarator;
 
                     var d = (try p.declarator(paramDeclSpec.type, .param)) orelse {
-                        try p.errToken(.missing_declaration, firstTokenIndex);
+                        try p.errToken(.missing_declaration, firstToken);
                         _ = try p.expectToken(.Semicolon);
                         continue :paramLoop;
                     };
@@ -1049,6 +1057,19 @@ fn parseDeclaration(p: *Parser) Error!bool {
 
                     d.type = try Attribute.applyParameterAttributes(p, d.type, attrBufferTop, .alignas_on_param);
 
+                    try paramDeclSpec.validateParam(p, &d.type);
+                    const paramNode = try p.addNode(.{
+                        .param = .{
+                            .nameToken = d.name,
+                            .type = d.type,
+                            .storageClass = switch (paramDeclSpec.storageClass) {
+                                .none => .auto,
+                                .register => .register,
+                                else => .auto, // Error reported in `validateParam`
+                            },
+                        },
+                    });
+
                     // bypass redefinition check to avoid duplicate errors
                     try p.symStack.define(.{
                         .kind = .definition,
@@ -1056,6 +1077,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
                         .token = d.name,
                         .type = d.type,
                         .value = .{},
+                        .node = .pack(paramNode),
                     });
                     if (p.eat(.Comma) == null) break;
                 }
@@ -1080,6 +1102,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
                     .token = param.nameToken,
                     .type = param.ty,
                     .value = .{},
+                    .node = param.node,
                 });
             }
         }
@@ -1092,7 +1115,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
 
         try declSpec.validateFnDef(p);
 
-        try p.tree.addNodeExtra(reservedIndex, .{
+        try p.tree.setNode(@intFromEnum(declNode), .{
             .fnDef = .{
                 .nameToken = initDeclarator.d.name,
                 .@"inline" = declSpec.@"inline" != null,
@@ -1101,7 +1124,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
                 .body = body,
             },
         });
-        try p.declBuffer.append(node);
+        try p.declBuffer.append(declNode);
 
         // check gotos
         if (func.type == null) {
@@ -1131,15 +1154,15 @@ fn parseDeclaration(p: *Parser) Error!bool {
             try p.errToken(.invalid_old_style_params, tokenIdx);
 
         try declSpec.validate(p, &initDeclarator.d.type);
-        const node = if (declSpec.storageClass == .typedef)
-            try p.addNode(.{
+        try p.tree.setNode(@intFromEnum(declNode), if (declSpec.storageClass == .typedef)
+            .{
                 .typedef = .{
                     .nameToken = initDeclarator.d.name,
                     .type = initDeclarator.d.type,
                 },
-            })
+            }
         else if (initDeclarator.d.type.isFunc())
-            try p.addNode(.{
+            .{
                 .fnProto = .{
                     .nameToken = initDeclarator.d.name,
                     .type = initDeclarator.d.type,
@@ -1147,38 +1170,43 @@ fn parseDeclaration(p: *Parser) Error!bool {
                     .@"inline" = declSpec.@"inline" != null,
                     .definition = null,
                 },
-            })
+            }
         else
-            try p.addNode(.{
+            .{
                 .variable = .{
                     .nameToken = initDeclarator.d.name,
                     .type = initDeclarator.d.type,
-                    .@"extern" = declSpec.storageClass == .@"extern" and initDeclarator.initializer == null,
-                    .static = declSpec.storageClass == .static,
+                    .storageClass =  switch (declSpec.storageClass) {
+                        .auto => .auto,
+                        .register => .register,
+                        .static => .static,
+                        .@"extern" => if (initDeclarator.initializer == null) .@"extern" else .auto,
+                        else => .auto, // Error reported in `validate`
+                    },
                     .threadLocal = declSpec.threadLocal != null,
                     .implicit = false,
                     .initializer = if (initDeclarator.initializer) |some| some.node else null,
                 },
             });
-        try p.declBuffer.append(node);
+        try p.declBuffer.append(declNode);
 
         const internedName = try p.getInternString(initDeclarator.d.name);
         if (declSpec.storageClass == .typedef) {
-            try p.symStack.defineTypedef(internedName, initDeclarator.d.type, initDeclarator.d.name, node);
+            try p.symStack.defineTypedef(internedName, initDeclarator.d.type, initDeclarator.d.name, declNode);
         } else if (initDeclarator.initializer) |init| {
             // TODO validate global variable/constexpr initializer comptime known
             try p.symStack.defineSymbol(
                 internedName,
                 initDeclarator.d.type,
                 initDeclarator.d.name,
-                node,
+                declNode,
                 if (initDeclarator.d.type.isConst()) init.value else .{},
                 declSpec.constexpr != null,
             );
         } else if (p.func.type != null and declSpec.storageClass != .@"extern") {
-            try p.symStack.defineSymbol(internedName, initDeclarator.d.type, initDeclarator.d.name, node, .{}, false);
+            try p.symStack.defineSymbol(internedName, initDeclarator.d.type, initDeclarator.d.name, declNode, .{}, false);
         } else {
-            try p.symStack.declareSymbol(internedName, initDeclarator.d.type, initDeclarator.d.name, node);
+            try p.symStack.declareSymbol(internedName, initDeclarator.d.type, initDeclarator.d.name, declNode);
         }
 
         if (p.eat(.Comma) == null)
@@ -1195,7 +1223,8 @@ fn parseDeclaration(p: *Parser) Error!bool {
             }
         }
 
-        initDeclarator = (try p.parseInitDeclarator(&declSpec, attrBufferTop)) orelse {
+        declNode = try p.tree.addNode(.{ .nullStmt = .{ .semicolonOrRbraceToken = firstToken, .type = Type.Invalid } });
+        initDeclarator = (try p.parseInitDeclarator(&declSpec, attrBufferTop, declNode)) orelse {
             try p.err(.expected_ident_or_l_paren);
             continue;
         };
@@ -1326,7 +1355,7 @@ fn typeof(p: *Parser) Error!?Type {
         const typeofType = try p.arena.create(Type);
         typeofType.* = .{
             .data = ty.data,
-            .qual = if (unqual) .{} else ty.qual.inheritFromTypeof(),
+            .qual = if (unqual) .{} else ty.qual,
             .specifier = ty.specifier,
         };
 
@@ -1339,7 +1368,7 @@ fn typeof(p: *Parser) Error!?Type {
     if (typeofExpr.ty.is(.NullPtrTy))
         return Type{
             .specifier = .NullPtrTy,
-            .qual = if (unqual) .{} else typeofExpr.ty.qual.inheritFromTypeof(),
+            .qual = if (unqual) .{} else typeofExpr.ty.qual,
         };
 
     const inner = try p.arena.create(Type.Expr);
@@ -1347,7 +1376,7 @@ fn typeof(p: *Parser) Error!?Type {
         .node = typeofExpr.node,
         .ty = .{
             .data = typeofExpr.ty.data,
-            .qual = if (unqual) .{} else typeofExpr.ty.qual.inheritFromTypeof(),
+            .qual = if (unqual) .{} else typeofExpr.ty.qual,
             .specifier = typeofExpr.ty.specifier,
             .decayed = typeofExpr.ty.decayed,
         },
@@ -1694,7 +1723,7 @@ fn attributeSpecifier(p: *Parser, declaratorName: ?TokenIndex) Error!void {
 const InitDeclarator = struct { d: Declarator, initializer: ?Result = null };
 
 /// init-declarator : declarator assembly? attribute-specifier? ('=' initializer)?
-fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec, attrBufferTop: usize) Error!?InitDeclarator {
+fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec, attrBufferTop: usize, declNode: Node.Index) Error!?InitDeclarator {
     const thisAttrBufferTop = p.attrBuffer.len;
     defer p.attrBuffer.len = thisAttrBufferTop;
 
@@ -1746,7 +1775,7 @@ fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec, attrBufferTop: usize) Er
         defer p.symStack.popScope();
 
         const internedName = try p.getInternString(ID.d.name);
-        try p.symStack.declareSymbol(internedName, ID.d.type, ID.d.name, null);
+        try p.symStack.declareSymbol(internedName, ID.d.type, ID.d.name, declNode);
 
         var initListExpr = try p.initializer(ID.d.type);
         ID.initializer = initListExpr;
@@ -2611,7 +2640,7 @@ fn parseEnumSpec(p: *Parser) Error!Type {
                 newFieldNode.enumField.init = res.node;
             }
 
-            try p.tree.addNodeExtra(@intFromEnum(fieldNode), newFieldNode);
+            try p.tree.setNode(@intFromEnum(fieldNode), newFieldNode);
         }
     }
 
@@ -3138,11 +3167,12 @@ fn directDeclarator(p: *Parser, baseType: Type, d: *Declarator, kind: Declarator
             while (true) {
                 const nameToken = try p.expectIdentifier();
                 const internedName = try p.getInternString(nameToken);
-                try p.symStack.defineParam(internedName, undefined, nameToken);
+                try p.symStack.defineParam(internedName, undefined, nameToken, null);
                 try p.paramBuffer.append(.{
                     .name = internedName,
                     .nameToken = nameToken,
                     .ty = Type.Int,
+                    .node = .null,
                 });
 
                 if (p.eat(.Comma) == null) break;
@@ -3218,6 +3248,7 @@ fn parseParamDecls(p: *Parser, d: *Declarator) Error!?[]Type.Function.Param {
                 .name = try StringInterner.intern(p.comp, p.getTokenText(identifier)),
                 .nameToken = identifier,
                 .ty = Type.Int,
+                .node = .null,
             });
 
             if (p.eat(.Comma) == null) break;
@@ -3232,6 +3263,7 @@ fn parseParamDecls(p: *Parser, d: *Declarator) Error!?[]Type.Function.Param {
         };
 
         var nameToken: TokenIndex = 0;
+        var paramNode: Node.OptIndex = .null;
         const firstToken = p.tokenIdx;
         var paramType = paramDeclSpec.type;
         if (try p.declarator(paramDeclSpec.type, .param)) |some| {
@@ -3241,14 +3273,26 @@ fn parseParamDecls(p: *Parser, d: *Declarator) Error!?[]Type.Function.Param {
             try p.parseAttrSpec();
 
             nameToken = some.name;
-            paramType = some.type;
+            paramType = try Attribute.applyParameterAttributes(p, some.type, attrBufferTop, .alignas_on_param);
             if (some.name != 0) {
+                const node = try p.addNode(.{
+                    .param = .{
+                        .nameToken = nameToken,
+                        .type = paramType,
+                        .storageClass = switch (paramDeclSpec.storageClass) {
+                            .none => .auto,
+                            .register => .register,
+                            else => .auto, // Error reported in `validateParam`
+                        },
+                    },
+                });
+                paramNode = .pack(node);
                 const internedName = try p.getInternString(nameToken);
-                try p.symStack.defineParam(internedName, paramType, nameToken);
+                try p.symStack.defineParam(internedName, paramType, nameToken, node);
             }
+        } else {
+            paramType = try Attribute.applyParameterAttributes(p, paramType, attrBufferTop, .alignas_on_param);
         }
-
-        paramType = try Attribute.applyParameterAttributes(p, paramType, attrBufferTop, .alignas_on_param);
 
         if (paramType.isFunc()) {
             // params declared as functions are converted to function pointers
@@ -3283,13 +3327,11 @@ fn parseParamDecls(p: *Parser, d: *Declarator) Error!?[]Type.Function.Param {
             .name = if (nameToken == 0) .empty else try p.getInternString(nameToken),
             .nameToken = if (nameToken == 0) firstToken else nameToken,
             .ty = paramType,
+            .node = paramNode,
         });
 
-        if (p.eat(.Comma) == null)
-            break;
-
-        if (p.currToken() == .Ellipsis)
-            break;
+        if (p.eat(.Comma) == null) break;
+        if (p.currToken() == .Ellipsis) break;
     }
 
     return try p.arena.dupe(Type.Function.Param, p.paramBuffer.items[paramBufferTop..]);
@@ -5862,8 +5904,20 @@ fn parseUnaryExpr(p: *Parser) Error!?Result {
             if (!p.tree.isLValue(operand.node))
                 try p.errToken(.addr_of_rvalue, token);
 
-            if (operand.ty.qual.register)
-                try p.errToken(.addr_of_register, token);
+            if (p.getNode(operand.node, .declRefExpr)) |declRef| {
+                switch (declRef.decl.get(&p.tree)) {
+                    .variable => |variable| {
+                        if (variable.storageClass == .register)
+                            try p.errToken(.addr_of_register, token);
+                    },
+                    else => {},
+                }
+            } else if (p.getNode(operand.node, .compoundLiteralExpr)) |literal| {
+                switch (literal.storageClass) {
+                    .register => try p.errToken(.addr_of_register, token),
+                    else => {},
+                }
+            }
 
             const elemType = try p.arena.create(Type);
             elemType.* = operand.ty;
@@ -6248,6 +6302,7 @@ fn parseCompoundLiteral(p: *Parser) Error!?Result {
             try p.errStr(.invalid_compound_literal_storage_class, tok, @tagName(d.storageClass));
             d.storageClass = .none;
         },
+        .register => if (p.func.type == null) try p.err(.illegal_storage_on_global),
         else => {},
     }
 
@@ -6259,7 +6314,6 @@ fn parseCompoundLiteral(p: *Parser) Error!?Result {
         }
         return null;
     };
-    if (d.storageClass == .register) ty.qual.register = true;
     try p.expectClosing(lparen, .RParen);
 
     if (ty.isFunc()) {
@@ -6279,7 +6333,11 @@ fn parseCompoundLiteral(p: *Parser) Error!?Result {
     initlistExpr.node = try p.addNode(.{
         .compoundLiteralExpr = .{
             .lparenToken = lparen,
-            .static = d.storageClass == .static,
+            .storageClass = switch (d.storageClass) {
+                .register => .register,
+                .static => .static,
+                else => .auto,
+            },
             .threadLocal = d.threadLocal != null,
             .initializer = initlistExpr.node,
             .type = initlistExpr.ty,
@@ -6548,12 +6606,10 @@ const CallExpr = union(enum) {
     },
 
     fn init(p: *Parser, callNode: Node.Index, funcNode: Node.Index) CallExpr {
-        if (p.getNode(callNode, .declRefExpr)) |declRef| {
-            const name = p.getTokenText(declRef.nameToken);
-            // If this is a builtin then primaryExpr() already created it.
-            if (p.comp.builtins.getOrCreate(p.comp, name, p.arena) catch unreachable) |expanded| {
-                return .{ .builtin = .{ .builtinToken = declRef.nameToken, .tag = expanded.builtin.tag } };
-            }
+        if (p.getNode(callNode, .builtinRef)) |builtinRef| {
+            const name = p.getTokenText(builtinRef.nameToken);
+            const expanded = p.comp.builtins.lookup(name);
+            return .{ .builtin = .{ .builtinToken = builtinRef.nameToken, .tag = expanded.builtin.tag } };
         }
         return .{ .standard = funcNode };
     }
@@ -6815,7 +6871,7 @@ fn parsePrimaryExpr(p: *Parser) Error!?Result {
                 return .{
                     .ty = some.ty,
                     .node = try p.addNode(.{
-                        .declRefExpr = .{
+                        .builtinRef = .{
                             .nameToken = nameToken,
                             .type = some.ty,
                         },
@@ -6833,6 +6889,7 @@ fn parsePrimaryExpr(p: *Parser) Error!?Result {
                             .declRefExpr = .{
                                 .nameToken = nameToken,
                                 .type = sym.type,
+                                .decl = sym.node.unpack().?,
                             },
                         }),
                     };
@@ -6846,11 +6903,21 @@ fn parsePrimaryExpr(p: *Parser) Error!?Result {
                     }
                 }
 
-                const dr: Node.DeclRef = .{ .nameToken = nameToken, .type = sym.type };
+                const node = try p.addNode(if (sym.kind == .enumeration)
+                    .{ .enumerationRef = .{ .nameToken = nameToken, .type = sym.type } }
+                else
+                    .{
+                        .declRefExpr = .{
+                            .nameToken = nameToken,
+                            .type = sym.type,
+                            .decl = sym.node.unpack().?,
+                        },
+                    });
+
                 return Result{
                     .value = if (p.constDeclFolding == .NoConstDeclFolding and sym.kind != .enumeration) Value{} else sym.value,
                     .ty = sym.type,
-                    .node = try p.addNode(if (sym.kind == .enumeration) .{ .enumerationRef = dr } else .{ .declRefExpr = dr }),
+                    .node = node,
                 };
             }
 
@@ -6885,6 +6952,7 @@ fn parsePrimaryExpr(p: *Parser) Error!?Result {
                         .declRefExpr = .{
                             .nameToken = nameToken,
                             .type = ty,
+                            .decl = node,
                         },
                     }),
                 };
@@ -6966,6 +7034,7 @@ fn parsePrimaryExpr(p: *Parser) Error!?Result {
                     .declRefExpr = .{
                         .nameToken = tok,
                         .type = ty,
+                        .decl = p.func.ident.?.node,
                     },
                 }),
             };
@@ -7007,6 +7076,7 @@ fn parsePrimaryExpr(p: *Parser) Error!?Result {
                     .declRefExpr = .{
                         .nameToken = p.tokenIdx,
                         .type = ty,
+                        .decl = undefined, //TODO
                     },
                 }),
             };
@@ -7115,8 +7185,7 @@ fn makePredefinedIdentifier(p: *Parser, stringsTop: usize) !Result {
             .variable = .{
                 .nameToken = p.tokenIdx,
                 .type = ty,
-                .@"extern" = false,
-                .static = true,
+                .storageClass = .static,
                 .threadLocal = false,
                 .implicit = true,
                 .initializer = strLit,
@@ -7754,7 +7823,7 @@ fn parseGenericSelection(p: *Parser) Error!?Result {
             });
 
             try p.listBuffer.append(res.node);
-            try p.paramBuffer.append(.{ .name = undefined, .ty = ty, .nameToken = start });
+            try p.paramBuffer.append(.{ .name = undefined, .ty = ty, .nameToken = start, .node = undefined });
 
             if (ty.eql(controllingTy, p.comp, false)) {
                 if (chosenToken == null) {
