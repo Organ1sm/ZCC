@@ -102,7 +102,6 @@ pub const TypeHashContext = struct {
 comp: *Compilation,
 
 /// Values from Preprocessor
-generated: []const u8,
 tokens: Token.List.Slice,
 
 // Values owned by this Tree
@@ -275,6 +274,7 @@ pub const Node = union(enum) {
     typedef: struct {
         nameToken: TokenIndex,
         type: Type,
+        implicit: bool,
     },
     globalAsm: SimpleAsm,
 
@@ -409,8 +409,7 @@ pub const Node = union(enum) {
     divExpr: BinaryExpr,
     modExpr: BinaryExpr,
 
-    explicitCast: Cast,
-    implicitCast: Cast,
+    cast: Cast,
 
     addrOfExpr: UnaryExpr,
     derefExpr: UnaryExpr,
@@ -450,7 +449,7 @@ pub const Node = union(enum) {
     memberAccessPtrExpr: MemberAccess,
 
     declRefExpr: DeclRef,
-    enumerationRef: NoDeclRef,
+    enumerationRef: DeclRef,
     builtinRef: NoDeclRef,
 
     /// C23 bool literal `true` / `false`
@@ -582,6 +581,7 @@ pub const Node = union(enum) {
         lparen: TokenIndex,
         kind: Kind,
         operand: Node.Index,
+        implicit: bool,
 
         pub const Kind = enum(u8) {
             /// Does nothing except possibly add qualifiers
@@ -784,6 +784,7 @@ pub const Node = union(enum) {
                     .typedef = .{
                         .nameToken = nodeToken,
                         .type = tree.typeMap.keys()[nodeData[0]],
+                        .implicit = nodeData[1] != 0,
                     },
                 },
                 .GlobalAsm => .{
@@ -1237,19 +1238,21 @@ pub const Node = union(enum) {
                     },
                 },
                 .ExplicitCast => .{
-                    .explicitCast = .{
+                    .cast = .{
                         .lparen = nodeToken,
                         .type = tree.typeMap.keys()[nodeData[0]],
                         .kind = @enumFromInt(nodeData[1]),
                         .operand = @enumFromInt(nodeData[2]),
+                        .implicit = false,
                     },
                 },
                 .ImplicitCast => .{
-                    .implicitCast = .{
+                    .cast = .{
                         .lparen = nodeToken,
                         .type = tree.typeMap.keys()[nodeData[0]],
                         .kind = @enumFromInt(nodeData[1]),
                         .operand = @enumFromInt(nodeData[2]),
+                        .implicit = true,
                     },
                 },
                 .AddrOfExpr => .{
@@ -1428,6 +1431,7 @@ pub const Node = union(enum) {
                     .enumerationRef = .{
                         .nameToken = nodeToken,
                         .type = tree.typeMap.keys()[nodeData[0]],
+                        .decl = @enumFromInt(nodeData[1]),
                     },
                 },
                 .BuiltinRef => .{
@@ -1832,8 +1836,10 @@ pub const Node = union(enum) {
 
     pub fn isImplicit(node: Node) bool {
         return switch (node) {
-            .implicitCast, .implicitReturn, .arrayFillerExpr, .defaultInitExpr, .condDummyExpr => true,
+            .implicitReturn, .arrayFillerExpr, .defaultInitExpr, .condDummyExpr => true,
+            .cast => |cast| cast.implicit,
             .variable => |info| info.implicit,
+            .typedef => |info| info.implicit,
             else => false,
         };
     }
@@ -1899,6 +1905,7 @@ pub fn setNode(tree: *Tree, index: usize, node: Node) !void {
         .typedef => |typedef| {
             repr.tag = .Typedef;
             repr.data[0] = try tree.addType(typedef.type);
+            repr.data[1] = @intFromBool(typedef.implicit);
             repr.tok = typedef.nameToken;
         },
         .globalAsm => |globalAsm| {
@@ -2302,15 +2309,8 @@ pub fn setNode(tree: *Tree, index: usize, node: Node) !void {
             repr.data[2] = @intFromEnum(bin.rhs);
             repr.tok = bin.opToken;
         },
-        .explicitCast => |cast| {
-            repr.tag = .ExplicitCast;
-            repr.data[0] = try tree.addType(cast.type);
-            repr.data[1] = @intFromEnum(cast.kind);
-            repr.data[2] = @intFromEnum(cast.operand);
-            repr.tok = cast.lparen;
-        },
-        .implicitCast => |cast| {
-            repr.tag = .ImplicitCast;
+        .cast => |cast| {
+            repr.tag = if (cast.implicit) .ImplicitCast else .ExplicitCast;
             repr.data[0] = try tree.addType(cast.type);
             repr.data[1] = @intFromEnum(cast.kind);
             repr.data[2] = @intFromEnum(cast.operand);
@@ -2470,6 +2470,7 @@ pub fn setNode(tree: *Tree, index: usize, node: Node) !void {
         .enumerationRef => |enumRef| {
             repr.tag = .EnumerationRef;
             repr.data[0] = try tree.addType(enumRef.type);
+            repr.data[1] = @intFromEnum(enumRef.decl);
             repr.tok = enumRef.nameToken;
         },
         .builtinRef => |builtinRef| {
@@ -2680,7 +2681,7 @@ pub fn isBitField(tree: *const Tree, node: Node.Index) bool {
 pub fn bitfieldWidth(tree: *const Tree, node: Node.Index, inspectLval: bool) ?u32 {
     switch (node.get(tree)) {
         .memberAccessExpr, .memberAccessPtrExpr => |access| return access.isBitFieldWidth(tree),
-        .implicitCast => |cast| {
+        .cast => |cast| {
             if (!inspectLval) return null;
 
             return switch (cast.kind) {
@@ -2774,7 +2775,7 @@ pub fn callableResultUsage(tree: *const Tree, node: Node.Index) ?CallableResultU
         .parenExpr, .addrOfExpr, .derefExpr => |un| curNode = un.operand,
         .commaExpr => |bin| curNode = bin.rhs,
 
-        .explicitCast, .implicitCast => |cast| curNode = cast.operand,
+        .cast => |cast| curNode = cast.operand,
         .callExpr => |call| curNode = call.callee,
 
         .memberAccessExpr, .memberAccessPtrExpr => |access| {
@@ -2885,10 +2886,15 @@ fn dumpNode(
     const ty = nodeIndex.type(tree);
     try w.writeByteNTimes(' ', level);
 
-    try config.setColor(w, if (node.isImplicit()) IMPLICIT else TAG);
+    if (config == .no_color) {
+        if (node.isImplicit()) try w.writeAll("implicit ");
+    } else {
+        try config.setColor(w, if (node.isImplicit()) IMPLICIT else TAG);
+    }
+
     try w.print("{s}: ", .{@tagName(node)});
     switch (node) {
-        .implicitCast, .explicitCast => |cast| {
+        .cast => |cast| {
             try config.setColor(w, .white);
             try w.print("({s}) ", .{@tagName(cast.kind)});
         },
@@ -3029,7 +3035,6 @@ fn dumpNode(
                 .register => try w.writeAll("register "),
             }
             if (variable.threadLocal) try w.writeAll("thread_local ");
-            if (variable.implicit) try w.writeAll("implicit ");
 
             try config.setColor(w, .reset);
             try w.writeAll("name: ");
@@ -3395,9 +3400,7 @@ fn dumpNode(
             try tree.dumpNode(bin.rhs, level + delta, mapper, config, w);
         },
 
-        .explicitCast,
-        .implicitCast,
-        => |cast| try tree.dumpNode(cast.operand, level + delta, mapper, config, w),
+        .cast => |cast| try tree.dumpNode(cast.operand, level + delta, mapper, config, w),
 
         .addrOfExpr,
         .derefExpr,
@@ -3420,7 +3423,7 @@ fn dumpNode(
             try tree.dumpNode(un.operand, level + delta, mapper, config, w);
         },
 
-        .declRefExpr => |dr| {
+        .declRefExpr, .enumerationRef => |dr| {
             try w.writeByteNTimes(' ', level + 1);
             try w.writeAll("name: ");
 
@@ -3429,7 +3432,7 @@ fn dumpNode(
             try config.setColor(w, .reset);
         },
 
-        .builtinRef, .enumerationRef => |ndr| {
+        .builtinRef => |ndr| {
             try w.writeByteNTimes(' ', level + 1);
             try w.writeAll("name: ");
 

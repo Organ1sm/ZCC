@@ -603,8 +603,7 @@ fn genExpr(c: *CodeGen, nodeIdx: Node.Index) Error!IR.Ref {
         .addrOfExpr => |un| return try c.genLval(un.operand),
         .derefExpr => |un| {
             const operandNode = un.operand.get(c.tree);
-            if (operandNode == .implicitCast and
-                operandNode.implicitCast.kind == .FunctionToPointer)
+            if (operandNode == .cast and operandNode.cast.kind == .FunctionToPointer)
                 return c.genExpr(un.operand);
 
             const operand = try c.genLval(un.operand);
@@ -664,7 +663,7 @@ fn genExpr(c: *CodeGen, nodeIdx: Node.Index) Error!IR.Ref {
 
         .parenExpr => |un| return c.genExpr(un.operand),
         .declRefExpr => unreachable, // Lval expression.
-        .explicitCast, .implicitCast => |cast| switch (cast.kind) {
+        .cast => |cast| switch (cast.kind) {
             .NoOP => return c.genExpr(cast.operand),
             .ToVoid => {
                 _ = try c.genExpr(cast.operand);
@@ -1068,7 +1067,7 @@ fn genBoolExpr(c: *CodeGen, base: Node.Index, trueLabel: IR.Ref, falseLabel: IR.
             return c.addBranch(cmp, trueLabel, falseLabel);
         },
 
-        .explicitCast, .implicitCast => |cast| switch (cast.kind) {
+        .cast => |cast| switch (cast.kind) {
             .BoolToInt => {
                 const operand = try c.genExpr(cast.operand);
                 if (c.condDummyTy != null) c.condDummyRef = operand;
@@ -1143,14 +1142,14 @@ fn genCall(c: *CodeGen, call: Node.Call) Error!IR.Ref {
     // Detect direct calls.
     const fnRef = blk: {
         const callee = call.callee.get(c.tree);
-        if (callee != .implicitCast or callee.implicitCast.kind != .FunctionToPointer)
+        if (callee != .cast or callee.cast.kind != .FunctionToPointer)
             break :blk try c.genExpr(call.callee);
 
-        var cur = callee.implicitCast.operand;
+        var cur = callee.cast.operand;
         while (true) switch (cur.get(c.tree)) {
             .parenExpr, .addrOfExpr, .derefExpr => |un| cur = un.operand,
 
-            .implicitCast => |cast| {
+            .cast => |cast| {
                 if (cast.kind != .FunctionToPointer) {
                     break :blk try c.genExpr(call.callee);
                 }

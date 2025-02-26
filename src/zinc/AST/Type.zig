@@ -54,7 +54,7 @@ pub const Long = create(.Long);
 pub const LongLong = create(.LongLong);
 pub const ULongLong = create(.ULongLong);
 pub const Int128 = create(.Int128);
-pub const UInt128 = create(.Int128);
+pub const UInt128 = create(.UInt128);
 
 pub const Float = create(.Float);
 pub const Double = create(.Double);

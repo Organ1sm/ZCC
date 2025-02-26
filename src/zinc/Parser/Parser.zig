@@ -621,6 +621,33 @@ fn diagnoseIncompleteDefinitions(p: *Parser) !void {
     assert(errorsAdded == 2 * p.tentativeDefs.count()); // Each tentative def should add an error + note
 }
 
+fn addImplicitTypedef(p: *Parser, name: []const u8, ty: Type) !void {
+    const start = p.comp.generatedBuffer.items.len;
+    try p.comp.generatedBuffer.appendSlice(p.comp.gpa, name);
+    try p.comp.generatedBuffer.append(p.comp.gpa, '\n');
+
+    const nameToken: u32 = @intCast(p.pp.tokens.len);
+    try p.pp.tokens.append(p.gpa, .{ .id = .Identifier, .loc = .{
+        .id = .generated,
+        .byteOffset = @intCast(start),
+        .line = p.pp.generatedLine,
+    } });
+    p.pp.generatedLine += 1;
+
+    // Reset in case there was an allocation.
+    p.tree.tokens = p.pp.tokens.slice();
+
+    const node = try p.addNode(.{
+        .typedef = .{
+            .nameToken = nameToken,
+            .type = ty,
+            .implicit = true,
+        },
+    });
+    try p.symStack.defineTypedef(try StringInterner.intern(p.comp, name), ty, nameToken, node);
+    try p.declBuffer.append(node);
+}
+
 /// root : (decl | inline assembly ';' | static-assert-declaration)*
 pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
     assert(pp.linemarkers == .None);
@@ -638,7 +665,6 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
 
         .tree = .{
             .comp = pp.comp,
-            .generated = pp.comp.generatedBuffer.items,
             .tokens = pp.tokens.slice(),
             .arena = .init(pp.comp.gpa),
         },
@@ -684,25 +710,25 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
 
     {
         if (p.comp.langOpts.hasChar8_t())
-            try p.symStack.defineTypedef(try StringInterner.intern(p.comp, "char8_t"), Type.UChar, 0, null);
+            try p.addImplicitTypedef("char8_t", Type.UChar);
 
-        try p.symStack.defineTypedef(try StringInterner.intern(p.comp, "__int128_t"), Type.Int128, 0, null);
-        try p.symStack.defineTypedef(try StringInterner.intern(p.comp, "__uint128_t"), Type.UInt128, 0, null);
+        try p.addImplicitTypedef("__int128_t", Type.Int128);
+        try p.addImplicitTypedef("__uint128_t", Type.UInt128);
 
         const elemTy = try p.arena.create(Type);
         elemTy.* = Type.Char;
-        try p.symStack.defineTypedef(
-            try StringInterner.intern(p.comp, "__builtin_ms_va_list"),
-            .{ .specifier = .Pointer, .data = .{ .subType = elemTy } },
-            0,
-            null,
-        );
+        try p.addImplicitTypedef("__builtin_ms_va_list", .{
+            .specifier = .Pointer,
+            .data = .{ .subType = elemTy },
+        });
 
         const ty = &pp.comp.types.vaList;
-        try p.symStack.defineTypedef(try StringInterner.intern(p.comp, "__builtin_va_list"), ty.*, 0, null);
+        try p.addImplicitTypedef("__builtin_va_list", ty.*);
         if (ty.isArray())
             ty.decayArray();
     }
+
+    const implicitTypedefCount = p.declBuffer.items.len;
 
     while (p.eat(.Eof) == null) {
         if (try p.pragma())
@@ -762,7 +788,7 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
         try p.diagnoseIncompleteDefinitions();
 
     p.tree.rootDecls = p.declBuffer.moveToUnmanaged();
-    if (p.tree.rootDecls.items.len == 0)
+    if (p.tree.rootDecls.items.len == implicitTypedefCount)
         try p.errToken(.empty_translation_unit, p.tokenIdx - 1);
 
     pp.comp.pragmaEvent(.AfterParse);
@@ -1159,6 +1185,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
                 .typedef = .{
                     .nameToken = initDeclarator.d.name,
                     .type = initDeclarator.d.type,
+                    .implicit = false,
                 },
             }
         else if (initDeclarator.d.type.isFunc())
@@ -1176,7 +1203,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
                 .variable = .{
                     .nameToken = initDeclarator.d.name,
                     .type = initDeclarator.d.type,
-                    .storageClass =  switch (declSpec.storageClass) {
+                    .storageClass = switch (declSpec.storageClass) {
                         .auto => .auto,
                         .register => .register,
                         .static => .static,
@@ -2835,8 +2862,6 @@ fn enumerator(p: *Parser, e: *Enumerator) Error!?EnumFieldAndNode {
         }
     }
 
-    const internedName = try p.getInternString(nameToken);
-    try p.symStack.defineEnumeration(internedName, attrTy, nameToken, e.value);
     const node = try p.addNode(.{
         .enumField = .{
             .nameToken = nameToken,
@@ -2846,6 +2871,9 @@ fn enumerator(p: *Parser, e: *Enumerator) Error!?EnumFieldAndNode {
     });
 
     try p.tree.valueMap.put(p.gpa, node, e.value);
+
+    const internedName = try p.getInternString(nameToken);
+    try p.symStack.defineEnumeration(internedName, attrTy, nameToken, e.value, node);
 
     return .{
         .field = .{
@@ -6903,16 +6931,15 @@ fn parsePrimaryExpr(p: *Parser) Error!?Result {
                     }
                 }
 
+                const dr: Node.DeclRef = .{
+                    .nameToken = nameToken,
+                    .type = sym.type,
+                    .decl = sym.node.unpack().?,
+                };
                 const node = try p.addNode(if (sym.kind == .enumeration)
-                    .{ .enumerationRef = .{ .nameToken = nameToken, .type = sym.type } }
+                    .{ .enumerationRef = dr }
                 else
-                    .{
-                        .declRefExpr = .{
-                            .nameToken = nameToken,
-                            .type = sym.type,
-                            .decl = sym.node.unpack().?,
-                        },
-                    });
+                    .{ .declRefExpr = dr });
 
                 return Result{
                     .value = if (p.constDeclFolding == .NoConstDeclFolding and sym.kind != .enumeration) Value{} else sym.value,

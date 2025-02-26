@@ -1,7 +1,19 @@
+implicit typedef: '__int128'
+ name: __int128_t
+
+implicit typedef: 'unsigned __int128'
+ name: __uint128_t
+
+implicit typedef: '*char'
+ name: __builtin_ms_va_list
+
+implicit typedef: '[1]struct __va_list_tag'
+ name: __builtin_va_list
+
 variable: 'attributed(int)'
  attr: aligned alignment: zinc.Lexer.Attribute.Alignment{ .node = zinc.AST.AST.Node.OptIndex.null, .requested = 4 }
  attr: aligned alignment: zinc.Lexer.Attribute.Alignment{ .node = zinc.AST.AST.Node.OptIndex.null, .requested = 4 }
- attr: aligned alignment: zinc.Lexer.Attribute.Alignment{ .node = zinc.AST.AST.Node.OptIndex(0), .requested = 16 }
+ attr: aligned alignment: zinc.Lexer.Attribute.Alignment{ .node = zinc.AST.AST.Node.OptIndex(16), .requested = 16 }
  name: a
 
 variable: 'const volatile int'
@@ -50,7 +62,7 @@ fnDef: 'fn (a: *d[2]const int, b: *d[2]const int) void'
       declRefExpr: 'I': '*d[2]const int' lvalue
        name: b
      rhs:
-      implicitCast: (IntToPointer) 'I': '*d[2]const int'
+      implicit cast: (IntToPointer) 'I': '*d[2]const int'
         intLiteral: 'int' (value: 1)
 
     addAssignExpr: 'I': '*d[2]const int'
@@ -58,7 +70,7 @@ fnDef: 'fn (a: *d[2]const int, b: *d[2]const int) void'
       declRefExpr: 'I': '*d[2]const int' lvalue
        name: a
      rhs:
-      implicitCast: (IntToPointer) 'I': '*d[2]const int'
+      implicit cast: (IntToPointer) 'I': '*d[2]const int'
         intLiteral: 'int' (value: 1)
 
     implicitReturn: 'void'
@@ -67,14 +79,14 @@ enumDecl: 'enum E: unsigned int'
   enumField: 'int' (value: 2)
    name: D
    init:
-    implicitCast: (IntCast) 'int'
-      explicitCast: (IntCast) 'char' (value: 2)
+    implicit cast: (IntCast) 'int'
+      cast: (IntCast) 'char' (value: 2)
         intLiteral: 'int' (value: 2)
 
   enumField: 'int' (value: 3)
    name: E
    init:
-    implicitCast: (IntCast) 'int'
-      explicitCast: (IntCast) 'long' (value: 3)
+    implicit cast: (IntCast) 'int'
+      cast: (IntCast) 'long' (value: 3)
         intLiteral: 'int' (value: 3)
 
