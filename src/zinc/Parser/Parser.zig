@@ -950,8 +950,8 @@ fn parseDeclaration(p: *Parser) Error!bool {
         _ = try p.expectToken(.Semicolon); // eat ';'
         if (declSpec.type.is(.Enum) or
             (declSpec.type.isRecord() and
-            !declSpec.type.isAnonymousRecord(p.comp) and
-            !declSpec.type.isTypeof()))
+                !declSpec.type.isAnonymousRecord(p.comp) and
+                !declSpec.type.isTypeof()))
         {
             const specifier = declSpec.type.canonicalize(.standard).specifier;
             const attrs = p.attrBuffer.items(.attr)[attrBufferTop..];
@@ -3900,11 +3900,11 @@ fn convertInitList(p: *Parser, il: InitList, initType: Type) Error!Node.Index {
     if (initType.isScalar() and !isComplex) {
         return il.node.unpack() orelse
             try p.addNode(.{
-            .defaultInitExpr = .{
-                .lastToken = il.tok,
-                .type = initType,
-            },
-        });
+                .defaultInitExpr = .{
+                    .lastToken = il.tok,
+                    .type = initType,
+                },
+            });
     } else if (initType.is(.VariableLenArray)) {
         return error.ParsingFailed; // vla invalid, reported earlier
     } else if (initType.isArray() or isComplex) {
@@ -4886,10 +4886,10 @@ fn parseCompoundStmt(p: *Parser, isFnBody: bool, stmtExprState: ?*StmtExprState)
             }
 
             const implicitRet = try p.addNode(.{
-                .implicitReturn = .{
-                    .rbraceToken = rbrace,
+                .returnStmt = .{
+                    .returnToken = rbrace,
                     .returnType = retTy,
-                    .zero = returnZero,
+                    .operand = .{ .implicit = returnZero },
                 },
             });
             try p.declBuffer.append(implicitRet);
@@ -4935,7 +4935,7 @@ fn parseReturnStmt(p: *Parser) Error!?Node.Index {
         .returnStmt = .{
             .returnToken = retToken,
             .returnType = returnType,
-            .expr = if (retExpr) |some| some.node else null,
+            .operand = if (retExpr) |some| .{ .expr = some.node } else .none,
         },
     });
 }

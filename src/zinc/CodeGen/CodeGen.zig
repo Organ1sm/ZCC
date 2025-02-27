@@ -490,19 +490,22 @@ fn genExpr(c: *CodeGen, nodeIdx: Node.Index) Error!IR.Ref {
         .breakStmt => try c.builder.addJump(c.breakLabel),
 
         .returnStmt => |@"return"| {
-            if (@"return".expr) |expr| {
-                const operand = try c.genExpr(expr);
-                try c.retNodes.append(c.comp.gpa, .{ .value = operand, .label = c.builder.currentLabel });
+            switch (@"return".operand) {
+                .expr => |expr| {
+                    const operand = try c.genExpr(expr);
+                    try c.retNodes.append(c.comp.gpa, .{ .value = operand, .label = c.builder.currentLabel });
+                },
+                .none => {},
+                .implicit => |zeroes| {
+                    if (zeroes) {
+                        const operand = try c.builder.addConstant(.zero, try c.genType(@"return".returnType));
+                        try c.retNodes.append(c.comp.gpa, .{ .value = operand, .label = c.builder.currentLabel });
+                    }
+                    // No need to emit a jump since an implicit return_stmt is always the last statement.
+                    return .none;
+                },
             }
             try c.builder.addJump(c.returnLabel);
-        },
-
-        .implicitReturn => |implicitRet| {
-            if (implicitRet.zero) {
-                const operand = try c.builder.addConstant(.zero, try c.genType(implicitRet.returnType));
-                try c.retNodes.append(c.comp.gpa, .{ .value = operand, .label = c.builder.currentLabel });
-            }
-            // No need to emit a jump since implicit_return is always the last instruction.
         },
 
         .gotoStmt,

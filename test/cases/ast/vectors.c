@@ -38,5 +38,5 @@ fnDef: 'fn () void'
         implicit cast: (IntToFloat) 'float' (value: 2)
           intLiteral: 'int' (value: 2)
 
-    implicitReturn: 'void'
+    implicit returnStmt: 'void'
 

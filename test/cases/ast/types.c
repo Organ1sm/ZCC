@@ -13,7 +13,7 @@ implicit typedef: '[1]struct __va_list_tag'
 variable: 'attributed(int)'
  attr: aligned alignment: zinc.Lexer.Attribute.Alignment{ .node = zinc.AST.AST.Node.OptIndex.null, .requested = 4 }
  attr: aligned alignment: zinc.Lexer.Attribute.Alignment{ .node = zinc.AST.AST.Node.OptIndex.null, .requested = 4 }
- attr: aligned alignment: zinc.Lexer.Attribute.Alignment{ .node = zinc.AST.AST.Node.OptIndex(16), .requested = 16 }
+ attr: aligned alignment: zinc.Lexer.Attribute.Alignment{ .node = zinc.AST.AST.Node.OptIndex(4), .requested = 16 }
  name: a
 
 variable: 'const volatile int'
@@ -73,7 +73,7 @@ fnDef: 'fn (a: *d[2]const int, b: *d[2]const int) void'
       implicit cast: (IntToPointer) 'I': '*d[2]const int'
         intLiteral: 'int' (value: 1)
 
-    implicitReturn: 'void'
+    implicit returnStmt: 'void'
 
 enumDecl: 'enum E: unsigned int'
   enumField: 'int' (value: 2)

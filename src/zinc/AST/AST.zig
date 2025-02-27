@@ -366,15 +366,11 @@ pub const Node = union(enum) {
     returnStmt: struct {
         returnToken: TokenIndex,
         returnType: Type,
-        expr: ?Node.Index,
-    },
-
-    /// Inserted at the end of a function body if no return stmt is found.
-    implicitReturn: struct {
-        rbraceToken: TokenIndex,
-        returnType: Type,
-        /// True if the function is called "main" and return_type is compatible with int
-        zero: bool,
+        operand: union(enum) {
+            expr: Node.Index,
+            implicit: bool,
+            none,
+        },
     },
     gnuAsmSimple: SimpleAsm,
 
@@ -981,14 +977,21 @@ pub const Node = union(enum) {
                     .returnStmt = .{
                         .returnToken = nodeToken,
                         .returnType = tree.typeMap.keys()[nodeData[0]],
-                        .expr = unpackOptIndex(nodeData[1]),
+                        .operand = .{ .expr = @enumFromInt(nodeData[1]) },
+                    },
+                },
+                .ReturnNoneStmt => .{
+                    .returnStmt = .{
+                        .returnToken = nodeToken,
+                        .returnType = tree.typeMap.keys()[nodeData[0]],
+                        .operand = .none,
                     },
                 },
                 .ImplicitReturn => .{
-                    .implicitReturn = .{
-                        .rbraceToken = nodeToken,
+                    .returnStmt = .{
+                        .returnToken = nodeToken,
                         .returnType = tree.typeMap.keys()[nodeData[0]],
-                        .zero = nodeData[1] != 0,
+                        .operand = .{ .implicit = nodeData[1] != 0 },
                     },
                 },
                 .GnuAsmSimple => .{
@@ -1720,6 +1723,7 @@ pub const Node = union(enum) {
             BreakStmt,
             NullStmt,
             ReturnStmt,
+            ReturnNoneStmt,
             ImplicitReturn,
             GnuAsmSimple,
             CommaExpr,
@@ -1836,10 +1840,11 @@ pub const Node = union(enum) {
 
     pub fn isImplicit(node: Node) bool {
         return switch (node) {
-            .implicitReturn, .arrayFillerExpr, .defaultInitExpr, .condDummyExpr => true,
+            .arrayFillerExpr, .defaultInitExpr, .condDummyExpr => true,
             .cast => |cast| cast.implicit,
             .variable => |info| info.implicit,
             .typedef => |info| info.implicit,
+            .returnStmt => |ret| ret.operand == .implicit,
             else => false,
         };
     }
@@ -2083,16 +2088,19 @@ pub fn setNode(tree: *Tree, index: usize, node: Node) !void {
             repr.tok = @"null".semicolonOrRbraceToken;
         },
         .returnStmt => |@"return"| {
-            repr.tag = .ReturnStmt;
             repr.data[0] = try tree.addType(@"return".returnType);
-            repr.data[1] = packOptIndex(@"return".expr);
+            switch (@"return".operand) {
+                .expr => |expr| {
+                    repr.tag = .ReturnStmt;
+                    repr.data[1] = @intFromEnum(expr);
+                },
+                .none => repr.tag = .ReturnNoneStmt,
+                .implicit => |zeroes| {
+                    repr.tag = .ImplicitReturn;
+                    repr.data[1] = @intFromBool(zeroes);
+                },
+            }
             repr.tok = @"return".returnToken;
-        },
-        .implicitReturn => |implicitRet| {
-            repr.tag = .ImplicitReturn;
-            repr.data[0] = try tree.addType(implicitRet.returnType);
-            repr.data[1] = @intFromBool(implicitRet.zero);
-            repr.tok = implicitRet.rbraceToken;
         },
         .gnuAsmSimple => |gnuAsmSimple| {
             repr.tag = .GnuAsmSimple;
@@ -2927,7 +2935,7 @@ fn dumpNode(
         try w.writeByte(')');
     }
 
-    if (node == .implicitReturn and node.implicitReturn.zero) {
+    if (node == .returnStmt and node.returnStmt.operand == .implicit and node.returnStmt.operand.implicit) {
         try config.setColor(w, IMPLICIT);
         try w.writeAll(" (value: 0)");
         try config.setColor(w, .reset);
@@ -3231,13 +3239,17 @@ fn dumpNode(
             try tree.dumpNode(goto.expr, level + delta, mapper, config, w);
         },
 
-        .continueStmt, .breakStmt, .implicitReturn, .nullStmt => {},
+        .continueStmt, .breakStmt, .nullStmt => {},
 
         .returnStmt => |ret| {
-            if (ret.expr) |some| {
-                try w.writeByteNTimes(' ', level + half);
-                try w.writeAll("expr:\n");
-                try tree.dumpNode(some, level + delta, mapper, config, w);
+            switch (ret.operand) {
+                .expr => |expr| {
+                    try w.writeByteNTimes(' ', level + half);
+                    try w.writeAll("expr:\n");
+                    try tree.dumpNode(expr, level + delta, mapper, config, w);
+                },
+                .implicit => {},
+                .none => {},
             }
         },
 

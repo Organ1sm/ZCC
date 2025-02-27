@@ -1,4 +1,4 @@
-//zinc-args -Wno-int-conversion
+//zinc-args -Wno-int-conversion --target=x86_64-linux-gnu
 union U {
     int x;
     float y;

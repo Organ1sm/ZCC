@@ -237,5 +237,5 @@ fnDef: 'fn () void'
           declRefExpr: 'float' lvalue
            name: f
 
-    implicitReturn: 'void'
+    implicit returnStmt: 'void'
 

@@ -66,5 +66,5 @@ fnDef: 'fn () void'
            implicit cast: (FloatCast) 'float'
              floatLiteral: 'double' (value: 2)
 
-    implicitReturn: 'void'
+    implicit returnStmt: 'void'
 
