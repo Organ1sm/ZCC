@@ -13,6 +13,8 @@ const Type = @import("../AST/Type.zig");
 const Value = @import("../AST/Value.zig");
 const StringInterner = @import("../Basic/StringInterner.zig");
 const StringId = StringInterner.StringId;
+const Builtins = @import("../Builtins.zig");
+const Builtin = Builtins.Builtin;
 
 const CodeGen = @This();
 
@@ -89,10 +91,12 @@ pub fn generateIR(tree: *const Tree) Compilation.Error!IR {
             .structDecl,
             .unionDecl,
             .enumDecl,
+            .structForwardDecl,
+            .unionForwardDecl,
+            .enumForwardDecl,
             => {},
 
-            .fnProto,
-            => {},
+            .fnProto => {},
 
             .fnDef => |def| c.genFn(def) catch |err| switch (err) {
                 error.FatalError => return error.FatalError,
@@ -257,8 +261,7 @@ fn genExpr(c: *CodeGen, nodeIdx: Node.Index) Error!IR.Ref {
         .stringLiteralExpr,
         => unreachable, // These should have an entry in value_map.
 
-        .fnDef,
-        => unreachable,
+        .fnDef => unreachable,
 
         .staticAssert,
         .fnProto,
@@ -447,6 +450,15 @@ fn genExpr(c: *CodeGen, nodeIdx: Node.Index) Error!IR.Ref {
                 c.continueLabel = oldContinueLabel;
             }
 
+            switch (@"for".init) {
+                .decls => |decls| {
+                    for (decls) |decl| try c.genStmt(decl);
+                },
+                .expr => |maybeInit| {
+                    if (maybeInit) |init| _ = try c.genExpr(init);
+                },
+            }
+
             const cond = @"for".cond orelse {
                 const thenLabel = try c.builder.makeLabel("for.then");
                 const endLabel = try c.builder.makeLabel("for.end");
@@ -466,10 +478,10 @@ fn genExpr(c: *CodeGen, nodeIdx: Node.Index) Error!IR.Ref {
             };
 
             const thenLabel = try c.builder.makeLabel("for.then");
-            var condLabel = thenLabel;
             const contLabel = try c.builder.makeLabel("for.cont");
             const endLabel = try c.builder.makeLabel("for.end");
 
+            var condLabel = thenLabel;
             c.continueLabel = contLabel;
             c.breakLabel = endLabel;
 
@@ -1111,6 +1123,7 @@ fn genBoolExpr(c: *CodeGen, base: Node.Index, trueLabel: IR.Ref, falseLabel: IR.
 
             try c.builder.startBlock(newTrueLabel);
             try c.genBoolExpr(conditional.thenExpr, trueLabel, falseLabel); // then
+
             try c.builder.startBlock(newFalseLabel);
             if (c.condDummyTy) |ty| c.condDummyRef = try c.builder.addConstant(.one, ty);
             return c.genBoolExpr(conditional.elseExpr, trueLabel, falseLabel); // else
@@ -1139,6 +1152,12 @@ fn genBoolExpr(c: *CodeGen, base: Node.Index, trueLabel: IR.Ref, falseLabel: IR.
     const cmp = try c.builder.addInst(.CmpNE, .{ .bin = .{ .lhs = lhs, .rhs = rhs } }, .i1);
     if (c.condDummyTy != null) c.condDummyRef = cmp;
     try c.addBranch(cmp, trueLabel, falseLabel);
+}
+
+fn genBuiltinCall(c: *CodeGen, builtin: Builtin, arg_nodes: []const Node.Index, ty: Type) Error!IR.Ref {
+    _ = arg_nodes;
+    _ = ty;
+    return c.fail("TODO CodeGen.genBuiltinCall {s}\n", .{Builtin.nameFromTag(builtin.tag).span()});
 }
 
 fn genCall(c: *CodeGen, call: Node.Call) Error!IR.Ref {
