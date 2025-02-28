@@ -26,6 +26,10 @@ pub fn isNone(v: Value) bool {
     return v.optRef == .none;
 }
 
+pub fn isNull(v: Value) bool {
+    return v.optRef == .null;
+}
+
 pub fn isNumeric(v: Value, comp: *Compilation) bool {
     if (v.isNone()) return false;
     return switch (comp.interner.get(v.ref())) {

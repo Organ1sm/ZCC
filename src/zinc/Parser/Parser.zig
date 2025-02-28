@@ -6119,7 +6119,7 @@ fn parseUnaryExpr(p: *Parser) Error!?Result {
             if (operand.value.is(.int, p.comp)) {
                 const res = Value.fromBool(!operand.value.toBool(p.comp));
                 operand.value = res;
-            } else if (operand.value.optRef == .null) {
+            } else if (operand.value.isNull()) {
                 operand.value = Value.one;
             } else {
                 if (operand.ty.isDecayed())

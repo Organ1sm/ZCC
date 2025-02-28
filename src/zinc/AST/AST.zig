@@ -694,7 +694,7 @@ pub const Node = union(enum) {
         rhs: Type,
     };
 
-    pub const Literal = struct {
+pub const Literal = struct {
         literalToken: TokenIndex,
         type: Type,
     };

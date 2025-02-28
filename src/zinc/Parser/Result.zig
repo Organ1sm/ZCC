@@ -81,11 +81,8 @@ pub fn maybeWarnUnused(res: Result, p: *Parser, exprStart: TokenIndex, errStart:
 }
 
 pub fn boolRes(lhs: *Result, p: *Parser, tag: std.meta.Tag(Node), rhs: Result, token: TokenIndex) !void {
-    if (lhs.value.optRef == .null)
-        lhs.value = Value.zero;
-
-    if (!lhs.ty.isInvalid())
-        lhs.ty = Type.Int;
+    if (lhs.value.isNull()) lhs.value = Value.zero;
+    if (!lhs.ty.isInvalid()) lhs.ty = Type.Int;
 
     return lhs.bin(p, tag, rhs, token);
 }
@@ -738,7 +735,7 @@ fn shouldEval(lhs: *Result, rhs: *Result, p: *Parser) Error!bool {
 /// Saves value and replaces it with `.unavailable`.
 pub fn saveValue(res: *Result, p: *Parser) !void {
     assert(!p.inMacro);
-    if (res.value.isNone() or res.value.optRef == .null)
+    if (res.value.isNone() or res.value.isNull())
         return;
 
     if (!p.inMacro)
@@ -748,7 +745,7 @@ pub fn saveValue(res: *Result, p: *Parser) !void {
 }
 /// Saves value without altering the result.
 pub fn putValue(res: *const Result, p: *Parser) !void {
-    if (res.value.isNone() or res.value.optRef == .null) return;
+    if (res.value.isNone() or res.value.isNull()) return;
     if (!p.inMacro) try p.tree.valueMap.put(p.gpa, res.node, res.value);
 }
 
