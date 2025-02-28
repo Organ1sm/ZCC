@@ -91,7 +91,7 @@ pub fn boolRes(lhs: *Result, p: *Parser, tag: std.meta.Tag(Node), rhs: Result, t
 }
 
 pub fn bin(lhs: *Result, p: *Parser, rtTag: std.meta.Tag(Node), rhs: Result, token: TokenIndex) !void {
-    const binData: Node.BinaryExpr = .{
+    const binData: Node.Binary = .{
         .opToken = token,
         .lhs = lhs.node,
         .rhs = rhs.node,
@@ -114,7 +114,7 @@ pub fn bin(lhs: *Result, p: *Parser, rtTag: std.meta.Tag(Node), rhs: Result, tok
 }
 
 pub fn un(operand: *Result, p: *Parser, rtTag: std.meta.Tag(Node), token: TokenIndex) Error!void {
-    const unData: Node.UnaryExpr = .{
+    const unData: Node.Unary = .{
         .opToken = token,
         .operand = operand.node,
         .type = operand.ty,

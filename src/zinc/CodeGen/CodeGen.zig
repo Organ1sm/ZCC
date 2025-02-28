@@ -1218,7 +1218,7 @@ fn genCall(c: *CodeGen, call: Node.Call) Error!IR.Ref {
     return c.builder.addInst(.Call, .{ .call = callInst }, try c.genType(call.type));
 }
 
-fn genCompoundAssign(c: *CodeGen, bin: Node.BinaryExpr, tag: Inst.Tag) Error!IR.Ref {
+fn genCompoundAssign(c: *CodeGen, bin: Node.Binary, tag: Inst.Tag) Error!IR.Ref {
     const rhs = try c.genExpr(bin.rhs);
     const lhs = try c.genLval(bin.lhs);
     const res = try c.addBin(tag, lhs, rhs, bin.type);
@@ -1227,13 +1227,13 @@ fn genCompoundAssign(c: *CodeGen, bin: Node.BinaryExpr, tag: Inst.Tag) Error!IR.
     return res;
 }
 
-fn genBinOp(c: *CodeGen, bin: Node.BinaryExpr, tag: Inst.Tag) Error!IR.Ref {
+fn genBinOp(c: *CodeGen, bin: Node.Binary, tag: Inst.Tag) Error!IR.Ref {
     const lhs = try c.genExpr(bin.lhs);
     const rhs = try c.genExpr(bin.rhs);
     return c.addBin(tag, lhs, rhs, bin.type);
 }
 
-fn genComparison(c: *CodeGen, bin: Node.BinaryExpr, tag: Inst.Tag) Error!IR.Ref {
+fn genComparison(c: *CodeGen, bin: Node.Binary, tag: Inst.Tag) Error!IR.Ref {
     const lhs = try c.genExpr(bin.lhs);
     const rhs = try c.genExpr(bin.rhs);
 

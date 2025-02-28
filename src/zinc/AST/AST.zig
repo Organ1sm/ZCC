@@ -255,28 +255,13 @@ pub const TokenWithExpansionLocs = struct {
 };
 
 pub const Node = union(enum) {
-    emptyDecl: struct { semicolon: TokenIndex },
-    staticAssert: struct {
-        assertToken: TokenIndex,
-        cond: Node.Index,
-        message: ?Node.Index,
-    },
-    fnProto: struct {
-        nameToken: TokenIndex,
-        type: Type,
-        static: bool,
-        @"inline": bool,
-        /// The definition for this prototype if one exists.
-        definition: ?Node.Index,
-    },
+    emptyDecl: EmptyDecl,
+    staticAssert: StaticAssert,
+    fnProto: FnProto,
     fnDef: FnDef,
     param: Param,
     variable: Variable,
-    typedef: struct {
-        nameToken: TokenIndex,
-        type: Type,
-        implicit: bool,
-    },
+    typedef: Typedef,
     globalAsm: SimpleAsm,
 
     structDecl: ContainerDecl,
@@ -286,168 +271,90 @@ pub const Node = union(enum) {
     unionForwardDecl: ContainerForwardDecl,
     enumForwardDecl: ContainerForwardDecl,
 
-    enumField: struct {
-        nameToken: TokenIndex,
-        type: Type,
-        init: ?Node.Index,
-    },
-    recordField: struct {
-        nameOrFirstToken: TokenIndex,
-        type: Type,
-        bitWidth: ?Node.Index,
-    },
+    enumField: EnumField,
+    recordField: RecordField,
 
-    labeledStmt: struct {
-        labelToken: TokenIndex,
-        body: Node.Index,
-        type: Type,
-    },
-    compoundStmt: struct {
-        lbraceToken: TokenIndex,
-        body: []const Node.Index,
-    },
-    ifStmt: struct {
-        ifToken: TokenIndex,
-        cond: Node.Index,
-        thenBody: Node.Index,
-        elseBody: ?Node.Index,
-    },
-    switchStmt: struct {
-        switchToken: TokenIndex,
-        cond: Node.Index,
-        body: Node.Index,
-    },
-    caseStmt: struct {
-        caseToken: TokenIndex,
-        start: Node.Index,
-        end: ?Node.Index,
-        body: Node.Index,
-    },
-    defaultStmt: struct {
-        defaultToken: TokenIndex,
-        body: Node.Index,
-    },
-    whileStmt: struct {
-        whileToken: TokenIndex,
-        cond: Node.Index,
-        body: Node.Index,
-    },
-    doWhileStmt: struct {
-        doToken: TokenIndex,
-        cond: Node.Index,
-        body: Node.Index,
-    },
-    forStmt: struct {
-        forToken: TokenIndex,
-        init: union(enum) {
-            decls: []const Node.Index,
-            expr: ?Node.Index,
-        },
-        cond: ?Node.Index,
-        incr: ?Node.Index,
-        body: Node.Index,
-    },
-    gotoStmt: struct {
-        labelToken: TokenIndex,
-    },
-    computedGotoStmt: struct {
-        gotoToken: TokenIndex,
-        expr: Node.Index,
-    },
-    continueStmt: struct {
-        continueToken: TokenIndex,
-    },
-    breakStmt: struct {
-        breakToken: TokenIndex,
-    },
-    nullStmt: struct {
-        semicolonOrRbraceToken: TokenIndex,
-        type: Type,
-    },
-    returnStmt: struct {
-        returnToken: TokenIndex,
-        returnType: Type,
-        operand: union(enum) {
-            expr: Node.Index,
-            implicit: bool,
-            none,
-        },
-    },
+    labeledStmt: LabeledStmt,
+    compoundStmt: CompoundStmt,
+    ifStmt: IfStmt,
+    switchStmt: SwitchStmt,
+    caseStmt: CaseStmt,
+    defaultStmt: DefaultStmt,
+    whileStmt: WhileStmt,
+    doWhileStmt: DoWhileStmt,
+    forStmt: ForStmt,
+    gotoStmt: GotoStmt,
+    computedGotoStmt: ComputedGotoStmt,
+    continueStmt: ContinueStmt,
+    breakStmt: BreakStmt,
+    nullStmt: NullStmt,
+    returnStmt: ReturnStmt,
+
     gnuAsmSimple: SimpleAsm,
 
-    commaExpr: BinaryExpr,
-    assignExpr: BinaryExpr,
-    mulAssignExpr: BinaryExpr,
-    divAssignExpr: BinaryExpr,
-    modAssignExpr: BinaryExpr,
-    addAssignExpr: BinaryExpr,
-    subAssignExpr: BinaryExpr,
-    shlAssignExpr: BinaryExpr,
-    shrAssignExpr: BinaryExpr,
-    bitAndAssignExpr: BinaryExpr,
-    bitXorAssignExpr: BinaryExpr,
-    bitOrAssignExpr: BinaryExpr,
-    boolOrExpr: BinaryExpr,
-    boolAndExpr: BinaryExpr,
-    bitOrExpr: BinaryExpr,
-    bitXorExpr: BinaryExpr,
-    bitAndExpr: BinaryExpr,
-    equalExpr: BinaryExpr,
-    notEqualExpr: BinaryExpr,
-    lessThanExpr: BinaryExpr,
-    lessThanEqualExpr: BinaryExpr,
-    greaterThanExpr: BinaryExpr,
-    greaterThanEqualExpr: BinaryExpr,
-    shlExpr: BinaryExpr,
-    shrExpr: BinaryExpr,
-    addExpr: BinaryExpr,
-    subExpr: BinaryExpr,
-    mulExpr: BinaryExpr,
-    divExpr: BinaryExpr,
-    modExpr: BinaryExpr,
+    commaExpr: Binary,
+    assignExpr: Binary,
+    mulAssignExpr: Binary,
+    divAssignExpr: Binary,
+    modAssignExpr: Binary,
+    addAssignExpr: Binary,
+    subAssignExpr: Binary,
+    shlAssignExpr: Binary,
+    shrAssignExpr: Binary,
+    bitAndAssignExpr: Binary,
+    bitXorAssignExpr: Binary,
+    bitOrAssignExpr: Binary,
+    boolOrExpr: Binary,
+    boolAndExpr: Binary,
+    bitOrExpr: Binary,
+    bitXorExpr: Binary,
+    bitAndExpr: Binary,
+    equalExpr: Binary,
+    notEqualExpr: Binary,
+    lessThanExpr: Binary,
+    lessThanEqualExpr: Binary,
+    greaterThanExpr: Binary,
+    greaterThanEqualExpr: Binary,
+    shlExpr: Binary,
+    shrExpr: Binary,
+    addExpr: Binary,
+    subExpr: Binary,
+    mulExpr: Binary,
+    divExpr: Binary,
+    modExpr: Binary,
 
     cast: Cast,
 
-    addrOfExpr: UnaryExpr,
-    derefExpr: UnaryExpr,
-    plusExpr: UnaryExpr,
-    negateExpr: UnaryExpr,
-    bitNotExpr: UnaryExpr,
-    boolNotExpr: UnaryExpr,
-    preIncExpr: UnaryExpr,
-    preDecExpr: UnaryExpr,
-    imagExpr: UnaryExpr,
-    realExpr: UnaryExpr,
-    postIncExpr: UnaryExpr,
-    postDecExpr: UnaryExpr,
-    parenExpr: UnaryExpr,
-    stmtExpr: UnaryExpr,
+    addrOfExpr: Unary,
+    derefExpr: Unary,
+    plusExpr: Unary,
+    negateExpr: Unary,
+    bitNotExpr: Unary,
+    boolNotExpr: Unary,
+    preIncExpr: Unary,
+    preDecExpr: Unary,
+    imagExpr: Unary,
+    realExpr: Unary,
+    postIncExpr: Unary,
+    postDecExpr: Unary,
+    parenExpr: Unary,
+    stmtExpr: Unary,
 
-    addrOfLabel: struct {
-        labelToken: TokenIndex,
-        type: Type,
-    },
-
-    arrayAccessExpr: struct {
-        lbracketToken: TokenIndex,
-        type: Type,
-        base: Node.Index,
-        index: Node.Index,
-    },
-
-    callExpr: Call,
-    builtinCallExpr: struct {
-        builtinToken: TokenIndex,
-        type: Type,
-        args: []const Node.Index,
-    },
+    addrOfLabel: AddrOfLabel,
+    arrayAccessExpr: ArrayAccess,
 
     memberAccessExpr: MemberAccess,
     memberAccessPtrExpr: MemberAccess,
 
+    callExpr: Call,
+
     declRefExpr: DeclRef,
     enumerationRef: DeclRef,
-    builtinRef: NoDeclRef,
+
+    builtinCallExpr: BuiltinCall,
+    builtinRef: BuiltinRef,
+    builtinChooseExpr: Conditional,
+    builtinTypesCompatibleP: TypesCompatible,
 
     /// C23 bool literal `true` / `false`
     boolLiteral: Literal,
@@ -461,67 +368,47 @@ pub const Node = union(enum) {
     floatLiteral: Literal,
     stringLiteralExpr: Literal,
     /// wraps a float or double literal: un
-    imaginaryLiteral: UnaryExpr,
+    imaginaryLiteral: Unary,
+    /// A compound literal (type){ init }
+    compoundLiteralExpr: CompoundLiteral,
 
     sizeofExpr: TypeInfo,
     alignofExpr: TypeInfo,
 
-    genericExpr: struct {
-        genericToken: TokenIndex,
-        type: Type,
-        controlling: Node.Index,
-        chosen: Node.Index,
-        rest: []const Node.Index,
-    },
-    genericAssociationExpr: struct {
-        colonToken: TokenIndex,
-        associationType: Type,
-        expr: Node.Index,
-    },
-    genericDefaultExpr: struct {
-        defaultToken: TokenIndex,
-        expr: Node.Index,
-    },
+    genericExpr: GenericExpr,
+    genericAssociationExpr: GenericExpr.Association,
+    genericDefaultExpr: GenericExpr.Default,
 
     binaryCondExpr: Conditional,
     /// Used as the base for casts of the lhs in `binary_cond_expr`.
-    condDummyExpr: UnaryExpr,
+    condDummyExpr: Unary,
     condExpr: Conditional,
-    builtinChooseExpr: Conditional,
-    builtinTypesCompatibleP: struct {
-        builtinToken: TokenIndex,
-        lhs: Type,
-        rhs: Type,
-    },
 
     arrayInitExpr: ContainerInit,
     structInitExpr: ContainerInit,
-    unionInitExpr: struct {
-        lbraceToken: TokenIndex,
-        unionType: Type,
-        fieldIndex: u32,
-        initializer: ?Node.Index,
-    },
+    unionInitExpr: UnionInit,
     /// Inserted in array_init_expr to represent unspecified elements.
     /// data.int contains the amount of elements.
-    arrayFillerExpr: struct {
-        lastToken: TokenIndex,
-        type: Type,
-        count: u64,
-    },
+    arrayFillerExpr: ArrayFiller,
     /// Inserted in record and scalar initializers for unspecified elements.
-    defaultInitExpr: struct {
-        lastToken: TokenIndex,
-        type: Type,
-    },
+    defaultInitExpr: DefaultInit,
 
-    compoundLiteralExpr: struct {
-        lparenToken: TokenIndex,
+    pub const EmptyDecl = struct { semicolon: TokenIndex };
+
+    pub const StaticAssert = struct {
+        assertToken: TokenIndex,
+        cond: Node.Index,
+        message: ?Node.Index,
+    };
+
+    pub const FnProto = struct {
+        nameToken: TokenIndex,
         type: Type,
-        threadLocal: bool,
-        initializer: Node.Index,
-        storageClass: enum { auto, static, register },
-    },
+        static: bool,
+        @"inline": bool,
+        /// The definition for this prototype if one exists.
+        definition: ?Node.Index,
+    };
 
     pub const FnDef = struct {
         nameToken: TokenIndex,
@@ -548,6 +435,12 @@ pub const Node = union(enum) {
         initializer: ?Node.Index,
     };
 
+    pub const Typedef = struct {
+        nameToken: TokenIndex,
+        type: Type,
+        implicit: bool,
+    };
+
     pub const SimpleAsm = struct {
         asmToken: TokenIndex,
         asmString: Node.Index,
@@ -566,7 +459,102 @@ pub const Node = union(enum) {
         definition: ?Node.Index,
     };
 
-    pub const BinaryExpr = struct {
+    pub const EnumField = struct {
+        nameToken: TokenIndex,
+        type: Type,
+        init: ?Node.Index,
+    };
+
+    pub const RecordField = struct {
+        nameOrFirstToken: TokenIndex,
+        type: Type,
+        bitWidth: ?Node.Index,
+    };
+
+    pub const LabeledStmt = struct {
+        labelToken: TokenIndex,
+        body: Node.Index,
+        type: Type,
+    };
+
+    pub const CompoundStmt = struct {
+        lbraceToken: TokenIndex,
+        body: []const Node.Index,
+    };
+
+    pub const IfStmt = struct {
+        ifToken: TokenIndex,
+        cond: Node.Index,
+        thenBody: Node.Index,
+        elseBody: ?Node.Index,
+    };
+
+    pub const SwitchStmt = struct {
+        switchToken: TokenIndex,
+        cond: Node.Index,
+        body: Node.Index,
+    };
+
+    pub const CaseStmt = struct {
+        caseToken: TokenIndex,
+        start: Node.Index,
+        end: ?Node.Index,
+        body: Node.Index,
+    };
+
+    pub const DefaultStmt = struct {
+        defaultToken: TokenIndex,
+        body: Node.Index,
+    };
+
+    pub const WhileStmt = struct {
+        whileToken: TokenIndex,
+        cond: Node.Index,
+        body: Node.Index,
+    };
+
+    pub const DoWhileStmt = struct {
+        doToken: TokenIndex,
+        cond: Node.Index,
+        body: Node.Index,
+    };
+
+    pub const ForStmt = struct {
+        forToken: TokenIndex,
+        init: union(enum) {
+            decls: []const Node.Index,
+            expr: ?Node.Index,
+        },
+        cond: ?Node.Index,
+        incr: ?Node.Index,
+        body: Node.Index,
+    };
+
+    pub const GotoStmt = struct { labelToken: TokenIndex };
+    pub const ComputedGotoStmt = struct {
+        gotoToken: TokenIndex,
+        expr: Node.Index,
+    };
+
+    pub const ContinueStmt = struct { continueToken: TokenIndex };
+    pub const BreakStmt = struct { breakToken: TokenIndex };
+
+    pub const NullStmt = struct {
+        semicolonOrRbraceToken: TokenIndex,
+        type: Type,
+    };
+
+    pub const ReturnStmt = struct {
+        returnToken: TokenIndex,
+        returnType: Type,
+        operand: union(enum) {
+            expr: Node.Index,
+            implicit: bool,
+            none,
+        },
+    };
+
+    pub const Binary = struct {
         type: Type,
         lhs: Node.Index,
         opToken: TokenIndex,
@@ -643,17 +631,22 @@ pub const Node = union(enum) {
         };
     };
 
-    pub const UnaryExpr = struct {
+    pub const Unary = struct {
         type: Type,
         opToken: TokenIndex,
         operand: Node.Index,
     };
 
-    pub const Call = struct {
-        lparenToken: TokenIndex,
+    pub const AddrOfLabel = struct {
+        labelToken: TokenIndex,
         type: Type,
-        callee: Node.Index,
-        args: []const Node.Index,
+    };
+
+    pub const ArrayAccess = struct {
+        lbracketToken: TokenIndex,
+        type: Type,
+        base: Node.Index,
+        index: Node.Index,
     };
 
     pub const MemberAccess = struct {
@@ -671,15 +664,67 @@ pub const Node = union(enum) {
         }
     };
 
+    pub const Call = struct {
+        lparenToken: TokenIndex,
+        type: Type,
+        callee: Node.Index,
+        args: []const Node.Index,
+    };
+
     pub const DeclRef = struct {
         nameToken: TokenIndex,
         type: Type,
         decl: Node.Index,
     };
 
-    pub const NoDeclRef = struct {
+    pub const BuiltinCall = struct {
+        builtinToken: TokenIndex,
+        type: Type,
+        args: []const Node.Index,
+    };
+
+    pub const BuiltinRef = struct {
         nameToken: TokenIndex,
         type: Type,
+    };
+
+    pub const TypesCompatible = struct {
+        builtinToken: TokenIndex,
+        lhs: Type,
+        rhs: Type,
+    };
+
+    pub const Literal = struct {
+        literalToken: TokenIndex,
+        type: Type,
+    };
+
+    pub const CompoundLiteral = struct {
+        lparenToken: TokenIndex,
+        type: Type,
+        threadLocal: bool,
+        initializer: Node.Index,
+        storageClass: enum { auto, static, register },
+    };
+
+    pub const GenericExpr = struct {
+        genericToken: TokenIndex,
+        type: Type,
+
+        controlling: Node.Index,
+        chosen: Node.Index,
+        rest: []const Node.Index,
+
+        pub const Association = struct {
+            colonToken: TokenIndex,
+            associationType: Type,
+            expr: Node.Index,
+        };
+
+        pub const Default = struct {
+            defaultToken: TokenIndex,
+            expr: Node.Index,
+        };
     };
 
     pub const Conditional = struct {
@@ -696,8 +741,21 @@ pub const Node = union(enum) {
         items: []const Node.Index,
     };
 
-    pub const Literal = struct {
-        literalToken: TokenIndex,
+    pub const UnionInit = struct {
+        lbraceToken: TokenIndex,
+        unionType: Type,
+        fieldIndex: u32,
+        initializer: ?Node.Index,
+    };
+
+    pub const ArrayFiller = struct {
+        lastToken: TokenIndex,
+        type: Type,
+        count: u64,
+    };
+
+    pub const DefaultInit = struct {
+        lastToken: TokenIndex,
         type: Type,
     };
 
