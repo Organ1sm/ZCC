@@ -255,6 +255,7 @@ pub const TokenWithExpansionLocs = struct {
 };
 
 pub const Node = union(enum) {
+    emptyDecl: struct { semicolon: TokenIndex },
     staticAssert: struct {
         assertToken: TokenIndex,
         cond: Node.Index,
@@ -714,6 +715,7 @@ pub const Node = union(enum) {
             const nodeData = &tree.nodes.items(.data)[@intFromEnum(index)];
             const nodeTag = tree.nodes.items(.tag)[@intFromEnum(index)];
             return switch (nodeTag) {
+                .EmptyDecl => .{ .emptyDecl = .{ .semicolon = nodeToken } },
                 .StaticAssert => .{
                     .staticAssert = .{
                         .assertToken = nodeToken,
@@ -1688,6 +1690,7 @@ pub const Node = union(enum) {
         };
 
         pub const Tag = enum(u8) {
+            EmptyDecl,
             StaticAssert,
             FnProto,
             FnDef,
@@ -1812,6 +1815,7 @@ pub const Node = union(enum) {
 
             pub fn isTyped(tag: Tag) bool {
                 return switch (tag) {
+                    .EmptyDecl,
                     .StaticAssert,
                     .CompoundStmt,
                     .CompoundStmtThree,
@@ -1859,6 +1863,10 @@ pub fn addNode(tree: *Tree, node: Node) !Node.Index {
 pub fn setNode(tree: *Tree, index: usize, node: Node) !void {
     var repr: Node.Repr = undefined;
     switch (node) {
+        .emptyDecl => |empty| {
+            repr.tag = .EmptyDecl;
+            repr.tok = empty.semicolon;
+        },
         .staticAssert => |assert| {
             repr.tag = .StaticAssert;
             repr.data[0] = @intFromEnum(assert.cond);
@@ -2956,6 +2964,7 @@ fn dumpNode(
     }
 
     switch (node) {
+        .emptyDecl => {},
         .globalAsm, .gnuAsmSimple => |@"asm"| {
             try w.writeByteNTimes(' ', level + 1);
             try tree.dumpNode(@"asm".asmString, level + delta, mapper, config, w);

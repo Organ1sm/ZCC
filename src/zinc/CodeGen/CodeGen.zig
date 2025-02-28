@@ -86,6 +86,7 @@ pub fn generateIR(tree: *const Tree) Compilation.Error!IR {
         c.builder.arena = std.heap.ArenaAllocator.init(gpa);
 
         switch (decl.get(c.tree)) {
+            .emptyDecl,
             .staticAssert,
             .typedef,
             .structDecl,

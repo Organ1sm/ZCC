@@ -777,6 +777,8 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
 
         if (p.eat(.Semicolon)) |tok| {
             try p.errToken(.extra_semi, tok);
+            const empty = try p.addNode(.{ .emptyDecl = .{ .semicolon = tok } });
+            try p.declBuffer.append(empty);
             continue;
         }
 
@@ -940,12 +942,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
         try p.attrBuffer.append(p.gpa, .{ .attr = attr, .tok = token });
     }
 
-    var declNode = try p.tree.addNode(.{
-        .nullStmt = .{
-            .semicolonOrRbraceToken = firstToken,
-            .type = Type.Invalid,
-        },
-    });
+    var declNode = try p.tree.addNode(.{ .emptyDecl = .{ .semicolon = firstToken } });
     var initDeclarator = (try p.parseInitDeclarator(&declSpec, attrBufferTop, declNode)) orelse {
         _ = try p.expectToken(.Semicolon); // eat ';'
         if (declSpec.type.is(.Enum) or
@@ -974,10 +971,6 @@ fn parseDeclaration(p: *Parser) Error!bool {
                 );
             }
             return true;
-        }
-
-        if (p.tree.nodes.len == @intFromEnum(declNode)) {
-            p.tree.nodes.len -= 1;
         }
 
         try p.errToken(.missing_declaration, firstToken);
@@ -1250,7 +1243,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
             }
         }
 
-        declNode = try p.tree.addNode(.{ .nullStmt = .{ .semicolonOrRbraceToken = firstToken, .type = Type.Invalid } });
+        declNode = try p.tree.addNode(.{ .emptyDecl = .{ .semicolon = p.tokenIdx - 1 } });
         initDeclarator = (try p.parseInitDeclarator(&declSpec, attrBufferTop, declNode)) orelse {
             try p.err(.expected_ident_or_l_paren);
             continue;
