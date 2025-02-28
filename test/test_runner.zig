@@ -595,7 +595,8 @@ const StmtTypeDumper = struct {
         node: Node.Index,
         m: *MsgWriter,
     ) AllocatorError!void {
-        if (node.get(tree) == .implicitReturn) return;
+        const maybeRet = node.get(tree);
+        if (maybeRet == .returnStmt and maybeRet.returnStmt.operand == .implicit) return;
 
         const ty = node.type(tree);
         ty.dump(mapper, tree.comp.langOpts, m.buf.writer()) catch {};

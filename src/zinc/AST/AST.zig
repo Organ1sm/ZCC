@@ -102,7 +102,6 @@ pub const TypeHashContext = struct {
 comp: *Compilation,
 
 /// Values from Preprocessor
-generated: []const u8,
 tokens: Token.List.Slice,
 
 // Values owned by this Tree
@@ -256,26 +255,13 @@ pub const TokenWithExpansionLocs = struct {
 };
 
 pub const Node = union(enum) {
-    staticAssert: struct {
-        assertToken: TokenIndex,
-        cond: Node.Index,
-        message: ?Node.Index,
-    },
-    fnProto: struct {
-        nameToken: TokenIndex,
-        type: Type,
-        static: bool,
-        @"inline": bool,
-        /// The definition for this prototype if one exists.
-        definition: ?Node.Index,
-    },
+    emptyDecl: EmptyDecl,
+    staticAssert: StaticAssert,
+    fnProto: FnProto,
     fnDef: FnDef,
     param: Param,
     variable: Variable,
-    typedef: struct {
-        nameToken: TokenIndex,
-        type: Type,
-    },
+    typedef: Typedef,
     globalAsm: SimpleAsm,
 
     structDecl: ContainerDecl,
@@ -285,173 +271,90 @@ pub const Node = union(enum) {
     unionForwardDecl: ContainerForwardDecl,
     enumForwardDecl: ContainerForwardDecl,
 
-    enumField: struct {
-        nameToken: TokenIndex,
-        type: Type,
-        init: ?Node.Index,
-    },
-    recordField: struct {
-        nameOrFirstToken: TokenIndex,
-        type: Type,
-        bitWidth: ?Node.Index,
-    },
+    enumField: EnumField,
+    recordField: RecordField,
 
-    labeledStmt: struct {
-        labelToken: TokenIndex,
-        body: Node.Index,
-        type: Type,
-    },
-    compoundStmt: struct {
-        lbraceToken: TokenIndex,
-        body: []const Node.Index,
-    },
-    ifStmt: struct {
-        ifToken: TokenIndex,
-        cond: Node.Index,
-        thenBody: Node.Index,
-        elseBody: ?Node.Index,
-    },
-    switchStmt: struct {
-        switchToken: TokenIndex,
-        cond: Node.Index,
-        body: Node.Index,
-    },
-    caseStmt: struct {
-        caseToken: TokenIndex,
-        start: Node.Index,
-        end: ?Node.Index,
-        body: Node.Index,
-    },
-    defaultStmt: struct {
-        defaultToken: TokenIndex,
-        body: Node.Index,
-    },
-    whileStmt: struct {
-        whileToken: TokenIndex,
-        cond: Node.Index,
-        body: Node.Index,
-    },
-    doWhileStmt: struct {
-        doToken: TokenIndex,
-        cond: Node.Index,
-        body: Node.Index,
-    },
-    forStmt: struct {
-        forToken: TokenIndex,
-        init: union(enum) {
-            decls: []const Node.Index,
-            expr: ?Node.Index,
-        },
-        cond: ?Node.Index,
-        incr: ?Node.Index,
-        body: Node.Index,
-    },
-    gotoStmt: struct {
-        labelToken: TokenIndex,
-    },
-    computedGotoStmt: struct {
-        gotoToken: TokenIndex,
-        expr: Node.Index,
-    },
-    continueStmt: struct {
-        continueToken: TokenIndex,
-    },
-    breakStmt: struct {
-        breakToken: TokenIndex,
-    },
-    nullStmt: struct {
-        semicolonOrRbraceToken: TokenIndex,
-        type: Type,
-    },
-    returnStmt: struct {
-        returnToken: TokenIndex,
-        returnType: Type,
-        expr: ?Node.Index,
-    },
+    labeledStmt: LabeledStmt,
+    compoundStmt: CompoundStmt,
+    ifStmt: IfStmt,
+    switchStmt: SwitchStmt,
+    caseStmt: CaseStmt,
+    defaultStmt: DefaultStmt,
+    whileStmt: WhileStmt,
+    doWhileStmt: DoWhileStmt,
+    forStmt: ForStmt,
+    gotoStmt: GotoStmt,
+    computedGotoStmt: ComputedGotoStmt,
+    continueStmt: ContinueStmt,
+    breakStmt: BreakStmt,
+    nullStmt: NullStmt,
+    returnStmt: ReturnStmt,
 
-    /// Inserted at the end of a function body if no return stmt is found.
-    implicitReturn: struct {
-        rbraceToken: TokenIndex,
-        returnType: Type,
-        /// True if the function is called "main" and return_type is compatible with int
-        zero: bool,
-    },
     gnuAsmSimple: SimpleAsm,
 
-    commaExpr: BinaryExpr,
-    assignExpr: BinaryExpr,
-    mulAssignExpr: BinaryExpr,
-    divAssignExpr: BinaryExpr,
-    modAssignExpr: BinaryExpr,
-    addAssignExpr: BinaryExpr,
-    subAssignExpr: BinaryExpr,
-    shlAssignExpr: BinaryExpr,
-    shrAssignExpr: BinaryExpr,
-    bitAndAssignExpr: BinaryExpr,
-    bitXorAssignExpr: BinaryExpr,
-    bitOrAssignExpr: BinaryExpr,
-    boolOrExpr: BinaryExpr,
-    boolAndExpr: BinaryExpr,
-    bitOrExpr: BinaryExpr,
-    bitXorExpr: BinaryExpr,
-    bitAndExpr: BinaryExpr,
-    equalExpr: BinaryExpr,
-    notEqualExpr: BinaryExpr,
-    lessThanExpr: BinaryExpr,
-    lessThanEqualExpr: BinaryExpr,
-    greaterThanExpr: BinaryExpr,
-    greaterThanEqualExpr: BinaryExpr,
-    shlExpr: BinaryExpr,
-    shrExpr: BinaryExpr,
-    addExpr: BinaryExpr,
-    subExpr: BinaryExpr,
-    mulExpr: BinaryExpr,
-    divExpr: BinaryExpr,
-    modExpr: BinaryExpr,
+    commaExpr: Binary,
+    assignExpr: Binary,
+    mulAssignExpr: Binary,
+    divAssignExpr: Binary,
+    modAssignExpr: Binary,
+    addAssignExpr: Binary,
+    subAssignExpr: Binary,
+    shlAssignExpr: Binary,
+    shrAssignExpr: Binary,
+    bitAndAssignExpr: Binary,
+    bitXorAssignExpr: Binary,
+    bitOrAssignExpr: Binary,
+    boolOrExpr: Binary,
+    boolAndExpr: Binary,
+    bitOrExpr: Binary,
+    bitXorExpr: Binary,
+    bitAndExpr: Binary,
+    equalExpr: Binary,
+    notEqualExpr: Binary,
+    lessThanExpr: Binary,
+    lessThanEqualExpr: Binary,
+    greaterThanExpr: Binary,
+    greaterThanEqualExpr: Binary,
+    shlExpr: Binary,
+    shrExpr: Binary,
+    addExpr: Binary,
+    subExpr: Binary,
+    mulExpr: Binary,
+    divExpr: Binary,
+    modExpr: Binary,
 
-    explicitCast: Cast,
-    implicitCast: Cast,
+    cast: Cast,
 
-    addrOfExpr: UnaryExpr,
-    derefExpr: UnaryExpr,
-    plusExpr: UnaryExpr,
-    negateExpr: UnaryExpr,
-    bitNotExpr: UnaryExpr,
-    boolNotExpr: UnaryExpr,
-    preIncExpr: UnaryExpr,
-    preDecExpr: UnaryExpr,
-    imagExpr: UnaryExpr,
-    realExpr: UnaryExpr,
-    postIncExpr: UnaryExpr,
-    postDecExpr: UnaryExpr,
-    parenExpr: UnaryExpr,
-    stmtExpr: UnaryExpr,
+    addrOfExpr: Unary,
+    derefExpr: Unary,
+    plusExpr: Unary,
+    negateExpr: Unary,
+    bitNotExpr: Unary,
+    boolNotExpr: Unary,
+    preIncExpr: Unary,
+    preDecExpr: Unary,
+    imagExpr: Unary,
+    realExpr: Unary,
+    postIncExpr: Unary,
+    postDecExpr: Unary,
+    parenExpr: Unary,
+    stmtExpr: Unary,
 
-    addrOfLabel: struct {
-        labelToken: TokenIndex,
-        type: Type,
-    },
-
-    arrayAccessExpr: struct {
-        lbracketToken: TokenIndex,
-        type: Type,
-        base: Node.Index,
-        index: Node.Index,
-    },
-
-    callExpr: Call,
-    builtinCallExpr: struct {
-        builtinToken: TokenIndex,
-        type: Type,
-        args: []const Node.Index,
-    },
+    addrOfLabel: AddrOfLabel,
+    arrayAccessExpr: ArrayAccess,
 
     memberAccessExpr: MemberAccess,
     memberAccessPtrExpr: MemberAccess,
 
+    callExpr: Call,
+
     declRefExpr: DeclRef,
-    enumerationRef: NoDeclRef,
-    builtinRef: NoDeclRef,
+    enumerationRef: DeclRef,
+
+    builtinCallExpr: BuiltinCall,
+    builtinRef: BuiltinRef,
+    builtinChooseExpr: Conditional,
+    builtinTypesCompatibleP: TypesCompatible,
 
     /// C23 bool literal `true` / `false`
     boolLiteral: Literal,
@@ -465,67 +368,47 @@ pub const Node = union(enum) {
     floatLiteral: Literal,
     stringLiteralExpr: Literal,
     /// wraps a float or double literal: un
-    imaginaryLiteral: UnaryExpr,
+    imaginaryLiteral: Unary,
+    /// A compound literal (type){ init }
+    compoundLiteralExpr: CompoundLiteral,
 
     sizeofExpr: TypeInfo,
     alignofExpr: TypeInfo,
 
-    genericExpr: struct {
-        genericToken: TokenIndex,
-        type: Type,
-        controlling: Node.Index,
-        chosen: Node.Index,
-        rest: []const Node.Index,
-    },
-    genericAssociationExpr: struct {
-        colonToken: TokenIndex,
-        associationType: Type,
-        expr: Node.Index,
-    },
-    genericDefaultExpr: struct {
-        defaultToken: TokenIndex,
-        expr: Node.Index,
-    },
+    genericExpr: GenericExpr,
+    genericAssociationExpr: GenericExpr.Association,
+    genericDefaultExpr: GenericExpr.Default,
 
     binaryCondExpr: Conditional,
     /// Used as the base for casts of the lhs in `binary_cond_expr`.
-    condDummyExpr: UnaryExpr,
+    condDummyExpr: Unary,
     condExpr: Conditional,
-    builtinChooseExpr: Conditional,
-    builtinTypesCompatibleP: struct {
-        builtinToken: TokenIndex,
-        lhs: Type,
-        rhs: Type,
-    },
 
     arrayInitExpr: ContainerInit,
     structInitExpr: ContainerInit,
-    unionInitExpr: struct {
-        lbraceToken: TokenIndex,
-        unionType: Type,
-        fieldIndex: u32,
-        initializer: ?Node.Index,
-    },
+    unionInitExpr: UnionInit,
     /// Inserted in array_init_expr to represent unspecified elements.
     /// data.int contains the amount of elements.
-    arrayFillerExpr: struct {
-        lastToken: TokenIndex,
-        type: Type,
-        count: u64,
-    },
+    arrayFillerExpr: ArrayFiller,
     /// Inserted in record and scalar initializers for unspecified elements.
-    defaultInitExpr: struct {
-        lastToken: TokenIndex,
-        type: Type,
-    },
+    defaultInitExpr: DefaultInit,
 
-    compoundLiteralExpr: struct {
-        lparenToken: TokenIndex,
+    pub const EmptyDecl = struct { semicolon: TokenIndex };
+
+    pub const StaticAssert = struct {
+        assertToken: TokenIndex,
+        cond: Node.Index,
+        message: ?Node.Index,
+    };
+
+    pub const FnProto = struct {
+        nameToken: TokenIndex,
         type: Type,
-        threadLocal: bool,
-        initializer: Node.Index,
-        storageClass: enum { auto, static, register },
-    },
+        static: bool,
+        @"inline": bool,
+        /// The definition for this prototype if one exists.
+        definition: ?Node.Index,
+    };
 
     pub const FnDef = struct {
         nameToken: TokenIndex,
@@ -552,6 +435,12 @@ pub const Node = union(enum) {
         initializer: ?Node.Index,
     };
 
+    pub const Typedef = struct {
+        nameToken: TokenIndex,
+        type: Type,
+        implicit: bool,
+    };
+
     pub const SimpleAsm = struct {
         asmToken: TokenIndex,
         asmString: Node.Index,
@@ -570,7 +459,102 @@ pub const Node = union(enum) {
         definition: ?Node.Index,
     };
 
-    pub const BinaryExpr = struct {
+    pub const EnumField = struct {
+        nameToken: TokenIndex,
+        type: Type,
+        init: ?Node.Index,
+    };
+
+    pub const RecordField = struct {
+        nameOrFirstToken: TokenIndex,
+        type: Type,
+        bitWidth: ?Node.Index,
+    };
+
+    pub const LabeledStmt = struct {
+        labelToken: TokenIndex,
+        body: Node.Index,
+        type: Type,
+    };
+
+    pub const CompoundStmt = struct {
+        lbraceToken: TokenIndex,
+        body: []const Node.Index,
+    };
+
+    pub const IfStmt = struct {
+        ifToken: TokenIndex,
+        cond: Node.Index,
+        thenBody: Node.Index,
+        elseBody: ?Node.Index,
+    };
+
+    pub const SwitchStmt = struct {
+        switchToken: TokenIndex,
+        cond: Node.Index,
+        body: Node.Index,
+    };
+
+    pub const CaseStmt = struct {
+        caseToken: TokenIndex,
+        start: Node.Index,
+        end: ?Node.Index,
+        body: Node.Index,
+    };
+
+    pub const DefaultStmt = struct {
+        defaultToken: TokenIndex,
+        body: Node.Index,
+    };
+
+    pub const WhileStmt = struct {
+        whileToken: TokenIndex,
+        cond: Node.Index,
+        body: Node.Index,
+    };
+
+    pub const DoWhileStmt = struct {
+        doToken: TokenIndex,
+        cond: Node.Index,
+        body: Node.Index,
+    };
+
+    pub const ForStmt = struct {
+        forToken: TokenIndex,
+        init: union(enum) {
+            decls: []const Node.Index,
+            expr: ?Node.Index,
+        },
+        cond: ?Node.Index,
+        incr: ?Node.Index,
+        body: Node.Index,
+    };
+
+    pub const GotoStmt = struct { labelToken: TokenIndex };
+    pub const ComputedGotoStmt = struct {
+        gotoToken: TokenIndex,
+        expr: Node.Index,
+    };
+
+    pub const ContinueStmt = struct { continueToken: TokenIndex };
+    pub const BreakStmt = struct { breakToken: TokenIndex };
+
+    pub const NullStmt = struct {
+        semicolonOrRbraceToken: TokenIndex,
+        type: Type,
+    };
+
+    pub const ReturnStmt = struct {
+        returnToken: TokenIndex,
+        returnType: Type,
+        operand: union(enum) {
+            expr: Node.Index,
+            implicit: bool,
+            none,
+        },
+    };
+
+    pub const Binary = struct {
         type: Type,
         lhs: Node.Index,
         opToken: TokenIndex,
@@ -582,6 +566,7 @@ pub const Node = union(enum) {
         lparen: TokenIndex,
         kind: Kind,
         operand: Node.Index,
+        implicit: bool,
 
         pub const Kind = enum(u8) {
             /// Does nothing except possibly add qualifiers
@@ -646,17 +631,22 @@ pub const Node = union(enum) {
         };
     };
 
-    pub const UnaryExpr = struct {
+    pub const Unary = struct {
         type: Type,
         opToken: TokenIndex,
         operand: Node.Index,
     };
 
-    pub const Call = struct {
-        lparenToken: TokenIndex,
+    pub const AddrOfLabel = struct {
+        labelToken: TokenIndex,
         type: Type,
-        callee: Node.Index,
-        args: []const Node.Index,
+    };
+
+    pub const ArrayAccess = struct {
+        lbracketToken: TokenIndex,
+        type: Type,
+        base: Node.Index,
+        index: Node.Index,
     };
 
     pub const MemberAccess = struct {
@@ -674,15 +664,67 @@ pub const Node = union(enum) {
         }
     };
 
+    pub const Call = struct {
+        lparenToken: TokenIndex,
+        type: Type,
+        callee: Node.Index,
+        args: []const Node.Index,
+    };
+
     pub const DeclRef = struct {
         nameToken: TokenIndex,
         type: Type,
         decl: Node.Index,
     };
 
-    pub const NoDeclRef = struct {
+    pub const BuiltinCall = struct {
+        builtinToken: TokenIndex,
+        type: Type,
+        args: []const Node.Index,
+    };
+
+    pub const BuiltinRef = struct {
         nameToken: TokenIndex,
         type: Type,
+    };
+
+    pub const TypesCompatible = struct {
+        builtinToken: TokenIndex,
+        lhs: Type,
+        rhs: Type,
+    };
+
+    pub const Literal = struct {
+        literalToken: TokenIndex,
+        type: Type,
+    };
+
+    pub const CompoundLiteral = struct {
+        lparenToken: TokenIndex,
+        type: Type,
+        threadLocal: bool,
+        initializer: Node.Index,
+        storageClass: enum { auto, static, register },
+    };
+
+    pub const GenericExpr = struct {
+        genericToken: TokenIndex,
+        type: Type,
+
+        controlling: Node.Index,
+        chosen: Node.Index,
+        rest: []const Node.Index,
+
+        pub const Association = struct {
+            colonToken: TokenIndex,
+            associationType: Type,
+            expr: Node.Index,
+        };
+
+        pub const Default = struct {
+            defaultToken: TokenIndex,
+            expr: Node.Index,
+        };
     };
 
     pub const Conditional = struct {
@@ -699,8 +741,21 @@ pub const Node = union(enum) {
         items: []const Node.Index,
     };
 
-    pub const Literal = struct {
-        literalToken: TokenIndex,
+    pub const UnionInit = struct {
+        lbraceToken: TokenIndex,
+        unionType: Type,
+        fieldIndex: u32,
+        initializer: ?Node.Index,
+    };
+
+    pub const ArrayFiller = struct {
+        lastToken: TokenIndex,
+        type: Type,
+        count: u64,
+    };
+
+    pub const DefaultInit = struct {
+        lastToken: TokenIndex,
         type: Type,
     };
 
@@ -718,6 +773,7 @@ pub const Node = union(enum) {
             const nodeData = &tree.nodes.items(.data)[@intFromEnum(index)];
             const nodeTag = tree.nodes.items(.tag)[@intFromEnum(index)];
             return switch (nodeTag) {
+                .EmptyDecl => .{ .emptyDecl = .{ .semicolon = nodeToken } },
                 .StaticAssert => .{
                     .staticAssert = .{
                         .assertToken = nodeToken,
@@ -784,6 +840,7 @@ pub const Node = union(enum) {
                     .typedef = .{
                         .nameToken = nodeToken,
                         .type = tree.typeMap.keys()[nodeData[0]],
+                        .implicit = nodeData[1] != 0,
                     },
                 },
                 .GlobalAsm => .{
@@ -980,14 +1037,21 @@ pub const Node = union(enum) {
                     .returnStmt = .{
                         .returnToken = nodeToken,
                         .returnType = tree.typeMap.keys()[nodeData[0]],
-                        .expr = unpackOptIndex(nodeData[1]),
+                        .operand = .{ .expr = @enumFromInt(nodeData[1]) },
+                    },
+                },
+                .ReturnNoneStmt => .{
+                    .returnStmt = .{
+                        .returnToken = nodeToken,
+                        .returnType = tree.typeMap.keys()[nodeData[0]],
+                        .operand = .none,
                     },
                 },
                 .ImplicitReturn => .{
-                    .implicitReturn = .{
-                        .rbraceToken = nodeToken,
+                    .returnStmt = .{
+                        .returnToken = nodeToken,
                         .returnType = tree.typeMap.keys()[nodeData[0]],
-                        .zero = nodeData[1] != 0,
+                        .operand = .{ .implicit = nodeData[1] != 0 },
                     },
                 },
                 .GnuAsmSimple => .{
@@ -1237,19 +1301,21 @@ pub const Node = union(enum) {
                     },
                 },
                 .ExplicitCast => .{
-                    .explicitCast = .{
+                    .cast = .{
                         .lparen = nodeToken,
                         .type = tree.typeMap.keys()[nodeData[0]],
                         .kind = @enumFromInt(nodeData[1]),
                         .operand = @enumFromInt(nodeData[2]),
+                        .implicit = false,
                     },
                 },
                 .ImplicitCast => .{
-                    .implicitCast = .{
+                    .cast = .{
                         .lparen = nodeToken,
                         .type = tree.typeMap.keys()[nodeData[0]],
                         .kind = @enumFromInt(nodeData[1]),
                         .operand = @enumFromInt(nodeData[2]),
+                        .implicit = true,
                     },
                 },
                 .AddrOfExpr => .{
@@ -1428,6 +1494,7 @@ pub const Node = union(enum) {
                     .enumerationRef = .{
                         .nameToken = nodeToken,
                         .type = tree.typeMap.keys()[nodeData[0]],
+                        .decl = @enumFromInt(nodeData[1]),
                     },
                 },
                 .BuiltinRef => .{
@@ -1681,6 +1748,7 @@ pub const Node = union(enum) {
         };
 
         pub const Tag = enum(u8) {
+            EmptyDecl,
             StaticAssert,
             FnProto,
             FnDef,
@@ -1716,6 +1784,7 @@ pub const Node = union(enum) {
             BreakStmt,
             NullStmt,
             ReturnStmt,
+            ReturnNoneStmt,
             ImplicitReturn,
             GnuAsmSimple,
             CommaExpr,
@@ -1804,6 +1873,7 @@ pub const Node = union(enum) {
 
             pub fn isTyped(tag: Tag) bool {
                 return switch (tag) {
+                    .EmptyDecl,
                     .StaticAssert,
                     .CompoundStmt,
                     .CompoundStmtThree,
@@ -1832,8 +1902,11 @@ pub const Node = union(enum) {
 
     pub fn isImplicit(node: Node) bool {
         return switch (node) {
-            .implicitCast, .implicitReturn, .arrayFillerExpr, .defaultInitExpr, .condDummyExpr => true,
+            .arrayFillerExpr, .defaultInitExpr, .condDummyExpr => true,
+            .cast => |cast| cast.implicit,
             .variable => |info| info.implicit,
+            .typedef => |info| info.implicit,
+            .returnStmt => |ret| ret.operand == .implicit,
             else => false,
         };
     }
@@ -1848,6 +1921,10 @@ pub fn addNode(tree: *Tree, node: Node) !Node.Index {
 pub fn setNode(tree: *Tree, index: usize, node: Node) !void {
     var repr: Node.Repr = undefined;
     switch (node) {
+        .emptyDecl => |empty| {
+            repr.tag = .EmptyDecl;
+            repr.tok = empty.semicolon;
+        },
         .staticAssert => |assert| {
             repr.tag = .StaticAssert;
             repr.data[0] = @intFromEnum(assert.cond);
@@ -1899,6 +1976,7 @@ pub fn setNode(tree: *Tree, index: usize, node: Node) !void {
         .typedef => |typedef| {
             repr.tag = .Typedef;
             repr.data[0] = try tree.addType(typedef.type);
+            repr.data[1] = @intFromBool(typedef.implicit);
             repr.tok = typedef.nameToken;
         },
         .globalAsm => |globalAsm| {
@@ -2076,16 +2154,19 @@ pub fn setNode(tree: *Tree, index: usize, node: Node) !void {
             repr.tok = @"null".semicolonOrRbraceToken;
         },
         .returnStmt => |@"return"| {
-            repr.tag = .ReturnStmt;
             repr.data[0] = try tree.addType(@"return".returnType);
-            repr.data[1] = packOptIndex(@"return".expr);
+            switch (@"return".operand) {
+                .expr => |expr| {
+                    repr.tag = .ReturnStmt;
+                    repr.data[1] = @intFromEnum(expr);
+                },
+                .none => repr.tag = .ReturnNoneStmt,
+                .implicit => |zeroes| {
+                    repr.tag = .ImplicitReturn;
+                    repr.data[1] = @intFromBool(zeroes);
+                },
+            }
             repr.tok = @"return".returnToken;
-        },
-        .implicitReturn => |implicitRet| {
-            repr.tag = .ImplicitReturn;
-            repr.data[0] = try tree.addType(implicitRet.returnType);
-            repr.data[1] = @intFromBool(implicitRet.zero);
-            repr.tok = implicitRet.rbraceToken;
         },
         .gnuAsmSimple => |gnuAsmSimple| {
             repr.tag = .GnuAsmSimple;
@@ -2302,15 +2383,8 @@ pub fn setNode(tree: *Tree, index: usize, node: Node) !void {
             repr.data[2] = @intFromEnum(bin.rhs);
             repr.tok = bin.opToken;
         },
-        .explicitCast => |cast| {
-            repr.tag = .ExplicitCast;
-            repr.data[0] = try tree.addType(cast.type);
-            repr.data[1] = @intFromEnum(cast.kind);
-            repr.data[2] = @intFromEnum(cast.operand);
-            repr.tok = cast.lparen;
-        },
-        .implicitCast => |cast| {
-            repr.tag = .ImplicitCast;
+        .cast => |cast| {
+            repr.tag = if (cast.implicit) .ImplicitCast else .ExplicitCast;
             repr.data[0] = try tree.addType(cast.type);
             repr.data[1] = @intFromEnum(cast.kind);
             repr.data[2] = @intFromEnum(cast.operand);
@@ -2470,6 +2544,7 @@ pub fn setNode(tree: *Tree, index: usize, node: Node) !void {
         .enumerationRef => |enumRef| {
             repr.tag = .EnumerationRef;
             repr.data[0] = try tree.addType(enumRef.type);
+            repr.data[1] = @intFromEnum(enumRef.decl);
             repr.tok = enumRef.nameToken;
         },
         .builtinRef => |builtinRef| {
@@ -2680,7 +2755,7 @@ pub fn isBitField(tree: *const Tree, node: Node.Index) bool {
 pub fn bitfieldWidth(tree: *const Tree, node: Node.Index, inspectLval: bool) ?u32 {
     switch (node.get(tree)) {
         .memberAccessExpr, .memberAccessPtrExpr => |access| return access.isBitFieldWidth(tree),
-        .implicitCast => |cast| {
+        .cast => |cast| {
             if (!inspectLval) return null;
 
             return switch (cast.kind) {
@@ -2774,7 +2849,7 @@ pub fn callableResultUsage(tree: *const Tree, node: Node.Index) ?CallableResultU
         .parenExpr, .addrOfExpr, .derefExpr => |un| curNode = un.operand,
         .commaExpr => |bin| curNode = bin.rhs,
 
-        .explicitCast, .implicitCast => |cast| curNode = cast.operand,
+        .cast => |cast| curNode = cast.operand,
         .callExpr => |call| curNode = call.callee,
 
         .memberAccessExpr, .memberAccessPtrExpr => |access| {
@@ -2885,10 +2960,15 @@ fn dumpNode(
     const ty = nodeIndex.type(tree);
     try w.writeByteNTimes(' ', level);
 
-    try config.setColor(w, if (node.isImplicit()) IMPLICIT else TAG);
+    if (config == .no_color) {
+        if (node.isImplicit()) try w.writeAll("implicit ");
+    } else {
+        try config.setColor(w, if (node.isImplicit()) IMPLICIT else TAG);
+    }
+
     try w.print("{s}: ", .{@tagName(node)});
     switch (node) {
-        .implicitCast, .explicitCast => |cast| {
+        .cast => |cast| {
             try config.setColor(w, .white);
             try w.print("({s}) ", .{@tagName(cast.kind)});
         },
@@ -2921,7 +3001,7 @@ fn dumpNode(
         try w.writeByte(')');
     }
 
-    if (node == .implicitReturn and node.implicitReturn.zero) {
+    if (node == .returnStmt and node.returnStmt.operand == .implicit and node.returnStmt.operand.implicit) {
         try config.setColor(w, IMPLICIT);
         try w.writeAll(" (value: 0)");
         try config.setColor(w, .reset);
@@ -2942,6 +3022,7 @@ fn dumpNode(
     }
 
     switch (node) {
+        .emptyDecl => {},
         .globalAsm, .gnuAsmSimple => |@"asm"| {
             try w.writeByteNTimes(' ', level + 1);
             try tree.dumpNode(@"asm".asmString, level + delta, mapper, config, w);
@@ -3029,7 +3110,6 @@ fn dumpNode(
                 .register => try w.writeAll("register "),
             }
             if (variable.threadLocal) try w.writeAll("thread_local ");
-            if (variable.implicit) try w.writeAll("implicit ");
 
             try config.setColor(w, .reset);
             try w.writeAll("name: ");
@@ -3226,13 +3306,17 @@ fn dumpNode(
             try tree.dumpNode(goto.expr, level + delta, mapper, config, w);
         },
 
-        .continueStmt, .breakStmt, .implicitReturn, .nullStmt => {},
+        .continueStmt, .breakStmt, .nullStmt => {},
 
         .returnStmt => |ret| {
-            if (ret.expr) |some| {
-                try w.writeByteNTimes(' ', level + half);
-                try w.writeAll("expr:\n");
-                try tree.dumpNode(some, level + delta, mapper, config, w);
+            switch (ret.operand) {
+                .expr => |expr| {
+                    try w.writeByteNTimes(' ', level + half);
+                    try w.writeAll("expr:\n");
+                    try tree.dumpNode(expr, level + delta, mapper, config, w);
+                },
+                .implicit => {},
+                .none => {},
             }
         },
 
@@ -3395,9 +3479,7 @@ fn dumpNode(
             try tree.dumpNode(bin.rhs, level + delta, mapper, config, w);
         },
 
-        .explicitCast,
-        .implicitCast,
-        => |cast| try tree.dumpNode(cast.operand, level + delta, mapper, config, w),
+        .cast => |cast| try tree.dumpNode(cast.operand, level + delta, mapper, config, w),
 
         .addrOfExpr,
         .derefExpr,
@@ -3420,7 +3502,7 @@ fn dumpNode(
             try tree.dumpNode(un.operand, level + delta, mapper, config, w);
         },
 
-        .declRefExpr => |dr| {
+        .declRefExpr, .enumerationRef => |dr| {
             try w.writeByteNTimes(' ', level + 1);
             try w.writeAll("name: ");
 
@@ -3429,7 +3511,7 @@ fn dumpNode(
             try config.setColor(w, .reset);
         },
 
-        .builtinRef, .enumerationRef => |ndr| {
+        .builtinRef => |ndr| {
             try w.writeByteNTimes(' ', level + 1);
             try w.writeAll("name: ");
 

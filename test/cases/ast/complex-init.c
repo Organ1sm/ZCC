@@ -1,3 +1,15 @@
+implicit typedef: '__int128'
+ name: __int128_t
+
+implicit typedef: 'unsigned __int128'
+ name: __uint128_t
+
+implicit typedef: '*char'
+ name: __builtin_ms_va_list
+
+implicit typedef: '[1]struct __va_list_tag'
+ name: __builtin_va_list
+
 fnDef: 'fn () void'
  name: foo
  body:
@@ -31,13 +43,13 @@ fnDef: 'fn () void'
       declRefExpr: '_Complex double' lvalue
        name: cd
      rhs:
-      implicitCast: (LValToRVal) '_Complex double'
+      implicit cast: (LValToRVal) '_Complex double'
         compoundLiteralExpr: '_Complex double' lvalue
          arrayInitExpr: '_Complex double'
-           implicitCast: (FloatCast) 'double'
+           implicit cast: (FloatCast) 'double'
              floatLiteral: 'float' (value: 1)
 
-           implicitCast: (FloatCast) 'double'
+           implicit cast: (FloatCast) 'double'
              floatLiteral: 'float' (value: 2)
 
     assignExpr: '_Complex float'
@@ -45,14 +57,14 @@ fnDef: 'fn () void'
       declRefExpr: '_Complex float' lvalue
        name: cf
      rhs:
-      implicitCast: (LValToRVal) '_Complex float'
+      implicit cast: (LValToRVal) '_Complex float'
         compoundLiteralExpr: '_Complex float' lvalue
          arrayInitExpr: '_Complex float'
-           implicitCast: (FloatCast) 'float'
+           implicit cast: (FloatCast) 'float'
              floatLiteral: 'double' (value: 1)
 
-           implicitCast: (FloatCast) 'float'
+           implicit cast: (FloatCast) 'float'
              floatLiteral: 'double' (value: 2)
 
-    implicitReturn: 'void'
+    implicit returnStmt: 'void'
 

@@ -203,7 +203,7 @@ pub fn defineTypedef(
     name: StringId,
     ty: Type,
     token: TokenIndex,
-    node: ?Node.Index,
+    node: Node.Index,
 ) !void {
     if (self.get(name, .vars)) |prev| {
         switch (prev.kind) {
@@ -233,7 +233,7 @@ pub fn defineTypedef(
             .qual = ty.qual,
             .data = ty.data,
         },
-        .node = .packOpt(node),
+        .node = .pack(node),
         .value = .{},
     });
 }
@@ -309,7 +309,7 @@ pub fn declareSymbol(
     name: StringId,
     ty: Type,
     token: TokenIndex,
-    node: ?Node.Index,
+    node: Node.Index,
 ) !void {
     if (self.get(name, .vars)) |prev| {
         switch (prev.kind) {
@@ -343,7 +343,7 @@ pub fn declareSymbol(
         .name = name,
         .token = token,
         .type = ty,
-        .node = .packOpt(node),
+        .node = .pack(node),
         .value = .{},
     });
 }
@@ -414,6 +414,7 @@ pub fn defineEnumeration(
     ty: Type,
     token: TokenIndex,
     value: Value,
+    node: Node.Index,
 ) !void {
     if (self.get(name, .vars)) |prev| {
         switch (prev.kind) {
@@ -441,5 +442,6 @@ pub fn defineEnumeration(
         .token = token,
         .type = ty,
         .value = value,
+        .node = .pack(node),
     });
 }

@@ -13,6 +13,8 @@ const Type = @import("../AST/Type.zig");
 const Value = @import("../AST/Value.zig");
 const StringInterner = @import("../Basic/StringInterner.zig");
 const StringId = StringInterner.StringId;
+const Builtins = @import("../Builtins.zig");
+const Builtin = Builtins.Builtin;
 
 const CodeGen = @This();
 
@@ -84,15 +86,18 @@ pub fn generateIR(tree: *const Tree) Compilation.Error!IR {
         c.builder.arena = std.heap.ArenaAllocator.init(gpa);
 
         switch (decl.get(c.tree)) {
+            .emptyDecl,
             .staticAssert,
             .typedef,
             .structDecl,
             .unionDecl,
             .enumDecl,
+            .structForwardDecl,
+            .unionForwardDecl,
+            .enumForwardDecl,
             => {},
 
-            .fnProto,
-            => {},
+            .fnProto => {},
 
             .fnDef => |def| c.genFn(def) catch |err| switch (err) {
                 error.FatalError => return error.FatalError,
@@ -257,8 +262,7 @@ fn genExpr(c: *CodeGen, nodeIdx: Node.Index) Error!IR.Ref {
         .stringLiteralExpr,
         => unreachable, // These should have an entry in value_map.
 
-        .fnDef,
-        => unreachable,
+        .fnDef => unreachable,
 
         .staticAssert,
         .fnProto,
@@ -447,6 +451,15 @@ fn genExpr(c: *CodeGen, nodeIdx: Node.Index) Error!IR.Ref {
                 c.continueLabel = oldContinueLabel;
             }
 
+            switch (@"for".init) {
+                .decls => |decls| {
+                    for (decls) |decl| try c.genStmt(decl);
+                },
+                .expr => |maybeInit| {
+                    if (maybeInit) |init| _ = try c.genExpr(init);
+                },
+            }
+
             const cond = @"for".cond orelse {
                 const thenLabel = try c.builder.makeLabel("for.then");
                 const endLabel = try c.builder.makeLabel("for.end");
@@ -466,10 +479,10 @@ fn genExpr(c: *CodeGen, nodeIdx: Node.Index) Error!IR.Ref {
             };
 
             const thenLabel = try c.builder.makeLabel("for.then");
-            var condLabel = thenLabel;
             const contLabel = try c.builder.makeLabel("for.cont");
             const endLabel = try c.builder.makeLabel("for.end");
 
+            var condLabel = thenLabel;
             c.continueLabel = contLabel;
             c.breakLabel = endLabel;
 
@@ -490,19 +503,22 @@ fn genExpr(c: *CodeGen, nodeIdx: Node.Index) Error!IR.Ref {
         .breakStmt => try c.builder.addJump(c.breakLabel),
 
         .returnStmt => |@"return"| {
-            if (@"return".expr) |expr| {
-                const operand = try c.genExpr(expr);
-                try c.retNodes.append(c.comp.gpa, .{ .value = operand, .label = c.builder.currentLabel });
+            switch (@"return".operand) {
+                .expr => |expr| {
+                    const operand = try c.genExpr(expr);
+                    try c.retNodes.append(c.comp.gpa, .{ .value = operand, .label = c.builder.currentLabel });
+                },
+                .none => {},
+                .implicit => |zeroes| {
+                    if (zeroes) {
+                        const operand = try c.builder.addConstant(.zero, try c.genType(@"return".returnType));
+                        try c.retNodes.append(c.comp.gpa, .{ .value = operand, .label = c.builder.currentLabel });
+                    }
+                    // No need to emit a jump since an implicit return_stmt is always the last statement.
+                    return .none;
+                },
             }
             try c.builder.addJump(c.returnLabel);
-        },
-
-        .implicitReturn => |implicitRet| {
-            if (implicitRet.zero) {
-                const operand = try c.builder.addConstant(.zero, try c.genType(implicitRet.returnType));
-                try c.retNodes.append(c.comp.gpa, .{ .value = operand, .label = c.builder.currentLabel });
-            }
-            // No need to emit a jump since implicit_return is always the last instruction.
         },
 
         .gotoStmt,
@@ -603,8 +619,7 @@ fn genExpr(c: *CodeGen, nodeIdx: Node.Index) Error!IR.Ref {
         .addrOfExpr => |un| return try c.genLval(un.operand),
         .derefExpr => |un| {
             const operandNode = un.operand.get(c.tree);
-            if (operandNode == .implicitCast and
-                operandNode.implicitCast.kind == .FunctionToPointer)
+            if (operandNode == .cast and operandNode.cast.kind == .FunctionToPointer)
                 return c.genExpr(un.operand);
 
             const operand = try c.genLval(un.operand);
@@ -664,7 +679,7 @@ fn genExpr(c: *CodeGen, nodeIdx: Node.Index) Error!IR.Ref {
 
         .parenExpr => |un| return c.genExpr(un.operand),
         .declRefExpr => unreachable, // Lval expression.
-        .explicitCast, .implicitCast => |cast| switch (cast.kind) {
+        .cast => |cast| switch (cast.kind) {
             .NoOP => return c.genExpr(cast.operand),
             .ToVoid => {
                 _ = try c.genExpr(cast.operand);
@@ -1068,7 +1083,7 @@ fn genBoolExpr(c: *CodeGen, base: Node.Index, trueLabel: IR.Ref, falseLabel: IR.
             return c.addBranch(cmp, trueLabel, falseLabel);
         },
 
-        .explicitCast, .implicitCast => |cast| switch (cast.kind) {
+        .cast => |cast| switch (cast.kind) {
             .BoolToInt => {
                 const operand = try c.genExpr(cast.operand);
                 if (c.condDummyTy != null) c.condDummyRef = operand;
@@ -1109,6 +1124,7 @@ fn genBoolExpr(c: *CodeGen, base: Node.Index, trueLabel: IR.Ref, falseLabel: IR.
 
             try c.builder.startBlock(newTrueLabel);
             try c.genBoolExpr(conditional.thenExpr, trueLabel, falseLabel); // then
+
             try c.builder.startBlock(newFalseLabel);
             if (c.condDummyTy) |ty| c.condDummyRef = try c.builder.addConstant(.one, ty);
             return c.genBoolExpr(conditional.elseExpr, trueLabel, falseLabel); // else
@@ -1139,18 +1155,24 @@ fn genBoolExpr(c: *CodeGen, base: Node.Index, trueLabel: IR.Ref, falseLabel: IR.
     try c.addBranch(cmp, trueLabel, falseLabel);
 }
 
+fn genBuiltinCall(c: *CodeGen, builtin: Builtin, arg_nodes: []const Node.Index, ty: Type) Error!IR.Ref {
+    _ = arg_nodes;
+    _ = ty;
+    return c.fail("TODO CodeGen.genBuiltinCall {s}\n", .{Builtin.nameFromTag(builtin.tag).span()});
+}
+
 fn genCall(c: *CodeGen, call: Node.Call) Error!IR.Ref {
     // Detect direct calls.
     const fnRef = blk: {
         const callee = call.callee.get(c.tree);
-        if (callee != .implicitCast or callee.implicitCast.kind != .FunctionToPointer)
+        if (callee != .cast or callee.cast.kind != .FunctionToPointer)
             break :blk try c.genExpr(call.callee);
 
-        var cur = callee.implicitCast.operand;
+        var cur = callee.cast.operand;
         while (true) switch (cur.get(c.tree)) {
             .parenExpr, .addrOfExpr, .derefExpr => |un| cur = un.operand,
 
-            .implicitCast => |cast| {
+            .cast => |cast| {
                 if (cast.kind != .FunctionToPointer) {
                     break :blk try c.genExpr(call.callee);
                 }
@@ -1196,7 +1218,7 @@ fn genCall(c: *CodeGen, call: Node.Call) Error!IR.Ref {
     return c.builder.addInst(.Call, .{ .call = callInst }, try c.genType(call.type));
 }
 
-fn genCompoundAssign(c: *CodeGen, bin: Node.BinaryExpr, tag: Inst.Tag) Error!IR.Ref {
+fn genCompoundAssign(c: *CodeGen, bin: Node.Binary, tag: Inst.Tag) Error!IR.Ref {
     const rhs = try c.genExpr(bin.rhs);
     const lhs = try c.genLval(bin.lhs);
     const res = try c.addBin(tag, lhs, rhs, bin.type);
@@ -1205,13 +1227,13 @@ fn genCompoundAssign(c: *CodeGen, bin: Node.BinaryExpr, tag: Inst.Tag) Error!IR.
     return res;
 }
 
-fn genBinOp(c: *CodeGen, bin: Node.BinaryExpr, tag: Inst.Tag) Error!IR.Ref {
+fn genBinOp(c: *CodeGen, bin: Node.Binary, tag: Inst.Tag) Error!IR.Ref {
     const lhs = try c.genExpr(bin.lhs);
     const rhs = try c.genExpr(bin.rhs);
     return c.addBin(tag, lhs, rhs, bin.type);
 }
 
-fn genComparison(c: *CodeGen, bin: Node.BinaryExpr, tag: Inst.Tag) Error!IR.Ref {
+fn genComparison(c: *CodeGen, bin: Node.Binary, tag: Inst.Tag) Error!IR.Ref {
     const lhs = try c.genExpr(bin.lhs);
     const rhs = try c.genExpr(bin.rhs);
 

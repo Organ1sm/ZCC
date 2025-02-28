@@ -91,7 +91,7 @@ pub fn boolRes(lhs: *Result, p: *Parser, tag: std.meta.Tag(Node), rhs: Result, t
 }
 
 pub fn bin(lhs: *Result, p: *Parser, rtTag: std.meta.Tag(Node), rhs: Result, token: TokenIndex) !void {
-    const binData: Node.BinaryExpr = .{
+    const binData: Node.Binary = .{
         .opToken = token,
         .lhs = lhs.node,
         .rhs = rhs.node,
@@ -114,7 +114,7 @@ pub fn bin(lhs: *Result, p: *Parser, rtTag: std.meta.Tag(Node), rhs: Result, tok
 }
 
 pub fn un(operand: *Result, p: *Parser, rtTag: std.meta.Tag(Node), token: TokenIndex) Error!void {
-    const unData: Node.UnaryExpr = .{
+    const unData: Node.Unary = .{
         .opToken = token,
         .operand = operand.node,
         .type = operand.ty,
@@ -133,11 +133,12 @@ pub fn un(operand: *Result, p: *Parser, rtTag: std.meta.Tag(Node), token: TokenI
 
 pub fn implicitCast(operand: *Result, p: *Parser, kind: Node.Cast.Kind, token: TokenIndex) Error!void {
     operand.node = try p.addNode(.{
-        .implicitCast = .{
+        .cast = .{
             .lparen = token,
             .kind = kind,
             .operand = operand.node,
             .type = operand.ty,
+            .implicit = true,
         },
     });
 }
@@ -964,11 +965,12 @@ pub fn castType(res: *Result, p: *Parser, to: Type, operandToken: TokenIndex, lp
     res.ty = to;
     res.ty.qual = .{};
     res.node = try p.addNode(.{
-        .explicitCast = .{
+        .cast = .{
             .lparen = lparen,
             .type = res.ty,
             .operand = res.node,
             .kind = explicitCastKind,
+            .implicit = false,
         },
     });
 }

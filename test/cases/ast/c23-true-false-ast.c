@@ -1,3 +1,18 @@
+implicit typedef: 'unsigned char'
+ name: char8_t
+
+implicit typedef: '__int128'
+ name: __int128_t
+
+implicit typedef: 'unsigned __int128'
+ name: __uint128_t
+
+implicit typedef: '*char'
+ name: __builtin_ms_va_list
+
+implicit typedef: '[1]struct __va_list_tag'
+ name: __builtin_va_list
+
 variable: 'bool'
  name: a
  init:
@@ -11,25 +26,25 @@ variable: 'bool'
 variable: 'bool'
  name: c
  init:
-  implicitCast: (IntToBool) 'bool'
+  implicit cast: (IntToBool) 'bool'
     intLiteral: 'int' (value: 0)
 
 variable: 'bool'
  name: d
  init:
-  implicitCast: (IntToBool) 'bool'
+  implicit cast: (IntToBool) 'bool'
     intLiteral: 'int' (value: 1)
 
 variable: 'int'
  name: e
  init:
-  implicitCast: (BoolToInt) 'int'
+  implicit cast: (BoolToInt) 'int'
     boolLiteral: 'bool' (value: true)
 
 variable: 'int'
  name: f
  init:
-  implicitCast: (BoolToInt) 'int'
+  implicit cast: (BoolToInt) 'int'
     boolLiteral: 'bool' (value: false)
 
 variable: 'int'
@@ -37,7 +52,7 @@ variable: 'int'
  init:
   addExpr: 'int'
    lhs:
-    implicitCast: (BoolToInt) 'int'
+    implicit cast: (BoolToInt) 'int'
       boolLiteral: 'bool' (value: true)
    rhs:
     intLiteral: 'int' (value: 1)

@@ -1,3 +1,15 @@
+implicit typedef: '__int128'
+ name: __int128_t
+
+implicit typedef: 'unsigned __int128'
+ name: __uint128_t
+
+implicit typedef: '*char'
+ name: __builtin_ms_va_list
+
+implicit typedef: '[1]struct __va_list_tag'
+ name: __builtin_va_list
+
 variable: 'attributed([1]int)'
  attr: aligned alignment: null
  name: arr
@@ -8,7 +20,7 @@ variable: 'attributed([1]int)'
 variable: '*int'
  name: ptr
  init:
-  implicitCast: (ArrayToPointer) '*d:attributed([1]int)'
+  implicit cast: (ArrayToPointer) '*d:attributed([1]int)'
    attr: aligned alignment: null
     declRefExpr: 'attributed([1]int)' lvalue
      attr: aligned alignment: null
@@ -19,7 +31,7 @@ fnDef: 'fn () void'
  body:
   compoundStmt: 'void'
     variable: 'attributed([64]char)'
-     attr: aligned alignment: zinc.Lexer.Attribute.Alignment{ .node = zinc.AST.AST.Node.OptIndex(8), .requested = 8 }
+     attr: aligned alignment: zinc.Lexer.Attribute.Alignment{ .node = zinc.AST.AST.Node.OptIndex(12), .requested = 8 }
      name: x
 
     variable: '*char'
@@ -29,16 +41,16 @@ fnDef: 'fn () void'
        operand:
         arrayAccessExpr: 'char' lvalue
          lhs:
-          implicitCast: (ArrayToPointer) '*d:attributed([64]char)'
-           attr: aligned alignment: zinc.Lexer.Attribute.Alignment{ .node = zinc.AST.AST.Node.OptIndex(8), .requested = 8 }
+          implicit cast: (ArrayToPointer) '*d:attributed([64]char)'
+           attr: aligned alignment: zinc.Lexer.Attribute.Alignment{ .node = zinc.AST.AST.Node.OptIndex(12), .requested = 8 }
             parenExpr: 'attributed([64]char)' lvalue
-             attr: aligned alignment: zinc.Lexer.Attribute.Alignment{ .node = zinc.AST.AST.Node.OptIndex(8), .requested = 8 }
+             attr: aligned alignment: zinc.Lexer.Attribute.Alignment{ .node = zinc.AST.AST.Node.OptIndex(12), .requested = 8 }
              operand:
               declRefExpr: 'attributed([64]char)' lvalue
-               attr: aligned alignment: zinc.Lexer.Attribute.Alignment{ .node = zinc.AST.AST.Node.OptIndex(8), .requested = 8 }
+               attr: aligned alignment: zinc.Lexer.Attribute.Alignment{ .node = zinc.AST.AST.Node.OptIndex(12), .requested = 8 }
                name: x
          index:
           intLiteral: 'int' (value: 0)
 
-    implicitReturn: 'void'
+    implicit returnStmt: 'void'
 
