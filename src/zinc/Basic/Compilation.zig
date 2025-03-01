@@ -168,6 +168,10 @@ pub fn deinit(comp: *Compilation) void {
     comp.environment.deinit(comp.gpa);
 }
 
+pub fn internString(comp: *Compilation, str: []const u8) !StringInterner.StringId {
+    return comp.stringInterner.intern(comp.gpa, str);
+}
+
 /// Dec 31 9999 23:59:59
 const MaxTimestamp = 253402300799;
 
@@ -467,28 +471,27 @@ pub fn generateBuiltinMacros(comp: *Compilation) !Source {
     // try comp.generateSizeofType(w, "__SIZEOF_WINT_T__", Type.Pointer);
 
     // various int types
-    const mapper = comp.stringInterner.getSlowTypeMapper();
-    try generateTypeMacro(w, mapper, "__INTPTR_TYPE__", comp.types.intptr, comp.langOpts);
-    try generateTypeMacro(w, mapper, "__UINTPTR_TYPE__", comp.types.intptr.makeIntegerUnsigned(), comp.langOpts);
+    try comp.generateTypeMacro(w, "__INTPTR_TYPE__", comp.types.intptr);
+    try comp.generateTypeMacro(w, "__UINTPTR_TYPE__", comp.types.intptr.makeIntegerUnsigned());
 
-    try generateTypeMacro(w, mapper, "__INTMAX_TYPE__", comp.types.intmax, comp.langOpts);
+    try comp.generateTypeMacro(w, "__INTMAX_TYPE__", comp.types.intmax);
     try comp.generateSuffixMacro("__INTMAX", w, comp.types.intptr);
 
-    try generateTypeMacro(w, mapper, "__UINTMAX_TYPE__", comp.types.intmax.makeIntegerUnsigned(), comp.langOpts);
+    try comp.generateTypeMacro(w, "__UINTMAX_TYPE__", comp.types.intmax.makeIntegerUnsigned());
     try comp.generateSuffixMacro("__UINTMAX", w, comp.types.intptr.makeIntegerUnsigned());
 
-    try generateTypeMacro(w, mapper, "__PTRDIFF_TYPE__", comp.types.ptrdiff, comp.langOpts);
-    try generateTypeMacro(w, mapper, "__SIZE_TYPE__", comp.types.size, comp.langOpts);
-    try generateTypeMacro(w, mapper, "__WCHAR_TYPE__", comp.types.wchar, comp.langOpts);
+    try comp.generateTypeMacro(w, "__PTRDIFF_TYPE__", comp.types.ptrdiff);
+    try comp.generateTypeMacro(w, "__SIZE_TYPE__", comp.types.size);
+    try comp.generateTypeMacro(w, "__WCHAR_TYPE__", comp.types.wchar);
 
-    try comp.generateExactWidthTypes(w, mapper);
+    try comp.generateExactWidthTypes(w);
 
     return comp.addSourceFromBuffer("<builtin>", buf.items);
 }
 
-fn generateTypeMacro(w: anytype, mapper: StringInterner.TypeMapper, name: []const u8, ty: Type, langopts: LangOpts) !void {
+fn generateTypeMacro(comp: *const Compilation, w: anytype, name: []const u8, ty: Type) !void {
     try w.print("#define {s} ", .{name});
-    try ty.print(mapper, langopts, w);
+    try ty.print(comp, w);
     try w.writeByte('\n');
 }
 
@@ -547,45 +550,45 @@ fn intSize(comp: *const Compilation, specifier: Type.Specifier) u64 {
     return ty.sizeof(comp).?;
 }
 
-fn generateExactWidthTypes(comp: *const Compilation, w: anytype, mapper: StringInterner.TypeMapper) !void {
-    try comp.generateExactWidthType(w, mapper, .SChar);
+fn generateExactWidthTypes(comp: *const Compilation, w: anytype) !void {
+    try comp.generateExactWidthType(w, .SChar);
 
     if (comp.intSize(.Short) > comp.intSize(.Char))
-        try comp.generateExactWidthType(w, mapper, .Short);
+        try comp.generateExactWidthType(w, .Short);
 
     if (comp.intSize(.Int) > comp.intSize(.Short))
-        try comp.generateExactWidthType(w, mapper, .Int);
+        try comp.generateExactWidthType(w, .Int);
 
     if (comp.intSize(.Long) > comp.intSize(.Int))
-        try comp.generateExactWidthType(w, mapper, .Long);
+        try comp.generateExactWidthType(w, .Long);
 
     if (comp.intSize(.LongLong) > comp.intSize(.Long))
-        try comp.generateExactWidthType(w, mapper, .LongLong);
+        try comp.generateExactWidthType(w, .LongLong);
 
-    try comp.generateExactWidthType(w, mapper, .UChar);
+    try comp.generateExactWidthType(w, .UChar);
     try comp.generateExactWidthIntMax(w, .UChar);
     try comp.generateExactWidthIntMax(w, .SChar);
 
     if (comp.intSize(.Short) > comp.intSize(.Char)) {
-        try comp.generateExactWidthType(w, mapper, .UShort);
+        try comp.generateExactWidthType(w, .UShort);
         try comp.generateExactWidthIntMax(w, .UShort);
         try comp.generateExactWidthIntMax(w, .Short);
     }
 
     if (comp.intSize(.Int) > comp.intSize(.Short)) {
-        try comp.generateExactWidthType(w, mapper, .UInt);
+        try comp.generateExactWidthType(w, .UInt);
         try comp.generateExactWidthIntMax(w, .UInt);
         try comp.generateExactWidthIntMax(w, .Int);
     }
 
     if (comp.intSize(.Long) > comp.intSize(.Int)) {
-        try comp.generateExactWidthType(w, mapper, .ULong);
+        try comp.generateExactWidthType(w, .ULong);
         try comp.generateExactWidthIntMax(w, .ULong);
         try comp.generateExactWidthIntMax(w, .Long);
     }
 
     if (comp.intSize(.Long) > comp.intSize(.Long)) {
-        try comp.generateExactWidthType(w, mapper, .ULongLong);
+        try comp.generateExactWidthType(w, .ULongLong);
         try comp.generateExactWidthIntMax(w, .ULongLong);
         try comp.generateExactWidthIntMax(w, .LongLong);
     }
@@ -607,12 +610,7 @@ fn generateSuffixMacro(comp: *const Compilation, prefix: []const u8, w: anytype,
 ///     Name macro (e.g. #define __UINT32_TYPE__ unsigned int)
 ///     Format strings (e.g. #define __UINT32_FMTu__ "u")
 ///     Suffix macro (e.g. #define __UINT32_C_SUFFIX__ U)
-fn generateExactWidthType(
-    comp: *const Compilation,
-    w: anytype,
-    mapper: StringInterner.TypeMapper,
-    specifier: Type.Specifier,
-) !void {
+fn generateExactWidthType(comp: *const Compilation, w: anytype, specifier: Type.Specifier) !void {
     var ty = Type{ .specifier = specifier };
     const width = 8 * ty.sizeof(comp).?;
     const unsigned = ty.isUnsignedInt(comp);
@@ -630,7 +628,7 @@ fn generateExactWidthType(
         const len = prefix.len;
         defer prefix.resize(len) catch unreachable; // restoring previous size
         prefix.appendSliceAssumeCapacity("_TYPE__");
-        try generateTypeMacro(w, mapper, prefix.constSlice(), ty, comp.langOpts);
+        try comp.generateTypeMacro(w, prefix.constSlice(), ty);
     }
 
     try comp.generateFmt(prefix.constSlice(), w, ty);
@@ -668,7 +666,7 @@ fn generateVaListType(comp: *Compilation) !Type {
         .aarch64_va_list => {
             const recordType = try arena.create(Type.Record);
             recordType.* = .{
-                .name = try StringInterner.intern(comp, "__va_list_tag"),
+                .name = try comp.internString("__va_list_tag"),
                 .fields = try arena.alloc(Type.Record.Field, 5),
                 .fieldAttributes = null,
                 .typeLayout = undefined,
@@ -676,18 +674,18 @@ fn generateVaListType(comp: *Compilation) !Type {
             const voidType = try arena.create(Type);
             voidType.* = Type.Void;
             const voidPtr = Type{ .specifier = .Pointer, .data = .{ .subType = voidType } };
-            recordType.fields[0] = .{ .name = try StringInterner.intern(comp, "__stack"), .ty = voidPtr };
-            recordType.fields[1] = .{ .name = try StringInterner.intern(comp, "__gr_top"), .ty = voidPtr };
-            recordType.fields[2] = .{ .name = try StringInterner.intern(comp, "__vr_top"), .ty = voidPtr };
-            recordType.fields[3] = .{ .name = try StringInterner.intern(comp, "__gr_offs"), .ty = Type.Int };
-            recordType.fields[4] = .{ .name = try StringInterner.intern(comp, "__vr_offs"), .ty = Type.Int };
+            recordType.fields[0] = .{ .name = try comp.internString("__stack"), .ty = voidPtr };
+            recordType.fields[1] = .{ .name = try comp.internString("__gr_top"), .ty = voidPtr };
+            recordType.fields[2] = .{ .name = try comp.internString("__vr_top"), .ty = voidPtr };
+            recordType.fields[3] = .{ .name = try comp.internString("__gr_offs"), .ty = Type.Int };
+            recordType.fields[4] = .{ .name = try comp.internString("__vr_offs"), .ty = Type.Int };
             ty = .{ .specifier = .Struct, .data = .{ .record = recordType } };
             RecordLayout.compute(recordType, ty, comp, null);
         },
         .x86_64_va_list => {
             const recordType = try arena.create(Type.Record);
             recordType.* = .{
-                .name = try StringInterner.intern(comp, "__va_list_tag"),
+                .name = try comp.internString("__va_list_tag"),
                 .fields = try arena.alloc(Type.Record.Field, 4),
                 .fieldAttributes = null,
                 .typeLayout = undefined, // compute below
@@ -695,10 +693,10 @@ fn generateVaListType(comp: *Compilation) !Type {
             const voidType = try arena.create(Type);
             voidType.* = Type.Void;
             const voidPtr = Type{ .specifier = .Pointer, .data = .{ .subType = voidType } };
-            recordType.fields[0] = .{ .name = try StringInterner.intern(comp, "gp_offset"), .ty = Type.UInt };
-            recordType.fields[1] = .{ .name = try StringInterner.intern(comp, "fp_offset"), .ty = Type.UInt };
-            recordType.fields[2] = .{ .name = try StringInterner.intern(comp, "overflow_arg_area"), .ty = voidPtr };
-            recordType.fields[3] = .{ .name = try StringInterner.intern(comp, "reg_save_area"), .ty = voidPtr };
+            recordType.fields[0] = .{ .name = try comp.internString("gp_offset"), .ty = Type.UInt };
+            recordType.fields[1] = .{ .name = try comp.internString("fp_offset"), .ty = Type.UInt };
+            recordType.fields[2] = .{ .name = try comp.internString("overflow_arg_area"), .ty = voidPtr };
+            recordType.fields[3] = .{ .name = try comp.internString("reg_save_area"), .ty = voidPtr };
             ty = .{ .specifier = .Struct, .data = .{ .record = recordType } };
             RecordLayout.compute(recordType, ty, comp, null);
         },

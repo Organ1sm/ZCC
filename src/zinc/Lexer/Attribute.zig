@@ -1106,11 +1106,10 @@ fn applyTransparentUnion(attr: Attribute, p: *Parser, token: TokenIndex, ty: Typ
         if (fieldSize == firstFieldSize)
             continue;
 
-        const mapper = p.comp.stringInterner.getSlowTypeMapper();
         const str = try std.fmt.allocPrint(
             p.comp.diagnostics.arena.allocator(),
             "'{s}' ({d}",
-            .{ mapper.lookup(field.name), fieldSize },
+            .{ field.name.lookup(p.comp), fieldSize },
         );
         try p.errStr(.transparent_union_size, field.nameToken, str);
         return p.errExtra(.transparent_union_size_note, fields[0].nameToken, .{ .unsigned = firstFieldSize });

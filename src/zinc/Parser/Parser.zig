@@ -20,8 +20,7 @@ const Attribute = @import("../Lexer/Attribute.zig");
 const CharInfo = @import("../Basic/CharInfo.zig");
 const TextLiteral = @import("../Parser/TextLiteral.zig");
 const Value = @import("../AST/Value.zig");
-const StringInterner = @import("../Basic/StringInterner.zig");
-const StringId = StringInterner.StringId;
+const StringId = @import("../Basic/StringInterner.zig").StringId;
 const RecordLayout = @import("../Basic/RecordLayout.zig");
 const Builtins = @import("../Builtins.zig");
 const Builtin = Builtins.Builtin;
@@ -405,8 +404,7 @@ pub fn typeStr(p: *Parser, ty: Type) ![]const u8 {
     const stringsTop = p.strings.items.len;
     defer p.strings.items.len = stringsTop;
 
-    const mapper = p.comp.stringInterner.getSlowTypeMapper();
-    try ty.print(mapper, p.comp.langOpts, p.strings.writer());
+    try ty.print(p.comp, p.strings.writer());
     return try p.comp.diagnostics.arena.allocator().dupe(u8, p.strings.items[stringsTop..]);
 }
 
@@ -419,12 +417,11 @@ pub fn typePairStrExtra(p: *Parser, a: Type, msg: []const u8, b: Type) ![]const 
     defer p.strings.items.len = stringsTop;
 
     try p.strings.append('\'');
-    const mapper = p.comp.stringInterner.getSlowTypeMapper();
-    try a.print(mapper, p.comp.langOpts, p.strings.writer());
+    try a.print(p.comp, p.strings.writer());
     try p.strings.append('\'');
     try p.strings.appendSlice(msg);
     try p.strings.append('\'');
-    try b.print(mapper, p.comp.langOpts, p.strings.writer());
+    try b.print(p.comp, p.strings.writer());
     try p.strings.append('\'');
     return try p.comp.diagnostics.arena.allocator().dupe(u8, p.strings.items[stringsTop..]);
 }
@@ -570,9 +567,9 @@ fn getNode(p: *Parser, node: Node.Index, comptime tag: std.meta.Tag(AST.Node)) ?
     }
 }
 
-fn getInternString(p: *Parser, tokenIdx: TokenIndex) !StringId {
-    const name = p.getTokenText(tokenIdx);
-    return StringInterner.intern(p.comp, name);
+fn getInternString(p: *Parser, token: TokenIndex) !StringId {
+    const name = p.getTokenText(token);
+    return p.comp.internString(name);
 }
 
 fn pragma(p: *Parser) Compilation.Error!bool {
@@ -644,7 +641,7 @@ fn addImplicitTypedef(p: *Parser, name: []const u8, ty: Type) !void {
             .implicit = true,
         },
     });
-    try p.symStack.defineTypedef(try StringInterner.intern(p.comp, name), ty, nameToken, node);
+    try p.symStack.defineTypedef(try p.comp.internString(name), ty, nameToken, node);
     try p.declBuffer.append(node);
 }
 
@@ -678,8 +675,8 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
         .recordBuffer = std.ArrayList(Type.Record.Field).init(pp.comp.gpa),
         .fieldAttrBuffer = std.ArrayList([]const Attribute).init(pp.comp.gpa),
         .stringsIds = .{
-            .declSpecId = try StringInterner.intern(pp.comp, "__declspec"),
-            .mainId = try StringInterner.intern(pp.comp, "main"),
+            .declSpecId = try pp.comp.internString("__declspec"),
+            .mainId = try pp.comp.internString("main"),
         },
     };
 
@@ -1064,7 +1061,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
                     // find and correct parameter types
                     // TODO check for missing declaration and redefinition
                     const name = p.getTokenText(d.name);
-                    const internedName = try StringInterner.intern(p.comp, name);
+                    const internedName = try p.comp.internString(name);
                     for (initDeclarator.d.type.getParams()) |*param| {
                         if (param.name == internedName) {
                             param.ty = d.type;
@@ -1260,16 +1257,14 @@ fn staticAssertMessage(p: *Parser, condNode: Node.Index, maybeMessage: ?Result) 
 
     const cond = condNode.get(&p.tree);
     if (cond == .builtinTypesCompatibleP) {
-        const mapper = p.comp.stringInterner.getSlowTypeMapper();
-
         try buf.appendSlice("'__builtin_types_compatible_p(");
 
         const lhsTy = cond.builtinTypesCompatibleP.lhs;
-        try lhsTy.print(mapper, p.comp.langOpts, buf.writer());
+        try lhsTy.print(p.comp, buf.writer());
         try buf.appendSlice(", ");
 
         const rhsTy = cond.builtinTypesCompatibleP.rhs;
-        try rhsTy.print(mapper, p.comp.langOpts, buf.writer());
+        try rhsTy.print(p.comp, buf.writer());
 
         try buf.appendSlice(")'");
     } else if (maybeMessage == null) return null;
@@ -2097,7 +2092,7 @@ fn getAnonymousName(p: *Parser, kindToken: TokenIndex) !StringId {
         "(anonymous {s} at {s}:{d}:{d})",
         .{ kindStr, source.path, lineAndCol.lineNO, lineAndCol.col },
     );
-    return StringInterner.intern(p.comp, str);
+    return p.comp.internString(str);
 }
 
 /// record-specifier
@@ -2167,7 +2162,7 @@ fn parseRecordSpec(p: *Parser) Error!Type {
     var defined = false;
     const recordType: *Type.Record = if (maybeIdent) |ident| recordTy: {
         const identStr = p.getTokenText(ident);
-        const internedName = try StringInterner.intern(p.comp, identStr);
+        const internedName = try p.comp.internString(identStr);
         if (try p.symStack.defineTag(internedName, p.tokenIds[kindToken], ident)) |prev| {
             if (!prev.type.hasIncompleteSize()) {
                 // if the record isn't incomplete, this is a redefinition
@@ -2262,7 +2257,7 @@ fn parseRecordSpec(p: *Parser) Error!Type {
 
     if (ty.specifier == .Attributed and maybeIdent != null) {
         const identStr = p.getTokenText(maybeIdent.?);
-        const internedName = try StringInterner.intern(p.comp, identStr);
+        const internedName = try p.comp.internString(identStr);
         const ptr = p.symStack.getPtr(internedName, .tags);
         ptr.type = ty;
     }
@@ -2573,7 +2568,7 @@ fn parseEnumSpec(p: *Parser) Error!Type {
     var defined = false;
     const enumType: *Type.Enum = if (maybeIdent) |ident| enumTy: {
         const identStr = p.getTokenText(ident);
-        const internedName = try StringInterner.intern(p.comp, identStr);
+        const internedName = try p.comp.internString(identStr);
         if (try p.symStack.defineTag(internedName, .KeywordEnum, ident)) |prev| {
             const enumTy = prev.type.get(.Enum).?.data.@"enum";
             if (!enumTy.fixed and !enumTy.isIncomplete()) {
@@ -3266,7 +3261,7 @@ fn parseParamDecls(p: *Parser, d: *Declarator) Error!?[]Type.Function.Param {
                 d.oldTypeFunc = identifier;
 
             try p.paramBuffer.append(.{
-                .name = try StringInterner.intern(p.comp, p.getTokenText(identifier)),
+                .name = try p.comp.internString(p.getTokenText(identifier)),
                 .nameToken = identifier,
                 .ty = Type.Int,
                 .node = .null,
@@ -3490,7 +3485,7 @@ pub fn initializerItem(p: *Parser, il: *InitList, initType: Type) Error!bool {
             } else if (p.eat(.Period)) |period| {
                 const fieldToken = try p.expectIdentifier();
                 const fieldStr = p.getTokenText(fieldToken);
-                const fieldName = try StringInterner.intern(p.comp, fieldStr);
+                const fieldName = try p.comp.internString(fieldStr);
                 curType = curType.canonicalize(.standard);
                 if (!curType.isRecord()) {
                     try p.errStr(.invalid_field_designator, period, try p.typeStr(curType));
@@ -4871,7 +4866,7 @@ fn parseCompoundStmt(p: *Parser, isFnBody: bool, stmtExprState: ?*StmtExprState)
             var returnZero = false;
             if (lastNoreturn == .no and !retTy.is(.Void) and !retTy.isArray() and !retTy.isFunc()) {
                 const funcName = p.getTokenText(p.func.name);
-                const internerName = try StringInterner.intern(p.comp, funcName);
+                const internerName = try p.comp.internString(funcName);
                 if (internerName == p.stringsIds.mainId and retTy.is(.Int))
                     returnZero = true
                 else
@@ -6526,8 +6521,7 @@ fn validateFieldAccess(
     p.strings.items.len = 0;
 
     try p.strings.writer().print("'{s}' in '", .{p.getTokenText(fieldNameToken)});
-    const mapper = p.comp.stringInterner.getSlowTypeMapper();
-    try exprType.print(mapper, p.comp.langOpts, p.strings.writer());
+    try exprType.print(p.comp, p.strings.writer());
     try p.strings.append('\'');
 
     const duped = try p.comp.diagnostics.arena.allocator().dupe(u8, p.strings.items);
@@ -6614,7 +6608,7 @@ fn checkVaStartArg(
     }
     const lastParamName = funcParams[funcParams.len - 1].name;
     const declRef = p.getNode(arg.node, .declRefExpr);
-    if (declRef == null or lastParamName != try StringInterner.intern(p.comp, p.getTokenText(declRef.?.nameToken))) {
+    if (declRef == null or lastParamName != try p.getInternString(declRef.?.nameToken)) {
         try p.errToken(.va_start_not_last_param, paramToken);
     }
 }
@@ -6877,7 +6871,7 @@ fn parsePrimaryExpr(p: *Parser) Error!?Result {
         .Identifier, .ExtendedIdentifier => {
             const nameToken = try p.expectIdentifier();
             const name = p.getTokenText(nameToken);
-            const internedName = try StringInterner.intern(p.comp, name);
+            const internedName = try p.comp.internString(name);
 
             // check if this is a builtin call
             if (try p.comp.builtins.getOrCreate(p.comp, name, p.arena)) |some| {
@@ -7069,8 +7063,7 @@ fn parsePrimaryExpr(p: *Parser) Error!?Result {
                 const stringsTop = p.strings.items.len;
                 defer p.strings.items.len = stringsTop;
 
-                const mapper = p.comp.stringInterner.getSlowTypeMapper();
-                try Type.printNamed(funcType, p.getTokenText(p.func.name), mapper, p.comp.langOpts, p.strings.writer());
+                try funcType.printNamed(p.getTokenText(p.func.name), p.comp, p.strings.writer());
                 try p.strings.append(0);
 
                 const predef = try p.makePredefinedIdentifier(stringsTop);

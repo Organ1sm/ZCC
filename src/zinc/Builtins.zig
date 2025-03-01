@@ -3,7 +3,6 @@ const std = @import("std");
 const Compilation = @import("Basic/Compilation.zig");
 const LangOpts = @import("Basic/LangOpts.zig");
 const Parser = @import("Parser/Parser.zig");
-const StringId = @import("Basic/StringInterner.zig").StringId;
 const target_util = @import("Basic/Target.zig");
 const Type = @import("AST/Type.zig");
 const TypeBuilder = @import("AST/TypeBuilder.zig");
