@@ -3570,8 +3570,8 @@ pub fn initializerItem(p: *Parser, il: *InitList, initType: Type) Error!bool {
 
             excess: {
                 if (indexHint) |*hint| {
-                    if (try p.findScalarInitializerAt(&curIL, &curType, res.ty, firstToken, hint)) break :excess;
-                } else if (try p.findScalarInitializer(&curIL, &curType, res.ty, firstToken)) break :excess;
+                    if (try p.findScalarInitializerAt(&curIL, &curType, &res, firstToken, hint)) break :excess;
+                } else if (try p.findScalarInitializer(&curIL, &curType, &res, firstToken)) break :excess;
 
                 if (designation) break :excess;
                 if (!warnedExcess) try p.errToken(if (initType.isArray()) .excess_array_init else .excess_struct_init, firstToken);
@@ -3627,7 +3627,7 @@ fn findScalarInitializerAt(
     p: *Parser,
     il: **InitList,
     ty: *Type,
-    actualTy: Type,
+    res: *Result,
     firstToken: TokenIndex,
     startIdx: *u64,
 ) Error!bool {
@@ -3647,7 +3647,7 @@ fn findScalarInitializerAt(
         if (startIdx.* < elemCount) {
             ty.* = elemType;
             il.* = try arrIL.find(p.gpa, startIdx.*);
-            _ = try p.findScalarInitializer(il, ty, actualTy, firstToken);
+            _ = try p.findScalarInitializer(il, ty, res, firstToken);
             return true;
         }
         return false;
@@ -3665,7 +3665,7 @@ fn findScalarInitializerAt(
             const field = fields[@intCast(startIdx.*)];
             ty.* = field.ty;
             il.* = try structIL.find(p.gpa, startIdx.*);
-            _ = try p.findScalarInitializer(il, ty, actualTy, firstToken);
+            _ = try p.findScalarInitializer(il, ty, res, firstToken);
             return true;
         }
         return false;
@@ -3680,9 +3680,10 @@ fn findScalarInitializer(
     p: *Parser,
     il: **InitList,
     ty: *Type,
-    actualTy: Type,
+    res: *Result,
     firstToken: TokenIndex,
 ) Error!bool {
+    const actualTy = res.ty;
     if (ty.isArray() or ty.isComplex()) {
         if (il.*.node != .null) return false;
         const startIdx = il.*.list.items.len;
@@ -3702,7 +3703,7 @@ fn findScalarInitializer(
             il.* = try arrayIL.find(p.gpa, index);
             if (il.*.node == .null and actualTy.eql(elemTy, p.comp, false))
                 return true;
-            if (try p.findScalarInitializer(il, ty, actualTy, firstToken))
+            if (try p.findScalarInitializer(il, ty, res, firstToken))
                 return true;
         }
         return false;
@@ -3723,10 +3724,9 @@ fn findScalarInitializer(
             const field = fields[@intCast(index)];
             ty.* = field.ty;
             il.* = try structIL.find(p.gpa, index);
-            if (il.*.node == .null and actualTy.eql(field.ty, p.comp, false))
-                return true;
-            if (try p.findScalarInitializer(il, ty, actualTy, firstToken))
-                return true;
+            if (il.*.node == .null and actualTy.eql(field.ty, p.comp, false)) return true;
+            if (il.*.node == .null and try p.coerceArrayInit(res, firstToken, ty.*)) return true;
+            if (try p.findScalarInitializer(il, ty, res, firstToken)) return true;
         }
         return false;
     } else if (ty.get(.Union)) |unionType| {
@@ -3740,8 +3740,8 @@ fn findScalarInitializer(
         }
         ty.* = unionType.data.record.fields[0].ty;
         il.* = try il.*.find(p.gpa, 0);
-        if (try p.findScalarInitializer(il, ty, actualTy, firstToken))
-            return true;
+        if (try p.coerceArrayInit(res, firstToken, ty.*)) return true;
+        if (try p.findScalarInitializer(il, ty, res, firstToken)) return true;
         return false;
     }
     return il.*.node == .null;
