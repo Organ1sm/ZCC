@@ -651,14 +651,17 @@ pub fn next(self: *Lexer) Token {
             },
 
             .pp_num_exponent => switch (c) {
-                'a'...'z',
-                'A'...'Z',
+                'a'...'o',
+                'q'...'z',
+                'A'...'O',
+                'Q'...'Z',
                 '0'...'9',
                 '_',
                 '.',
                 '+',
                 '-',
                 => state = .pp_num,
+                'p', 'P' => {},
                 else => {
                     id = .PPNumber;
                     break;
