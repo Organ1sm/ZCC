@@ -204,6 +204,7 @@ pub const Token = struct {
         .{ "__imag__", .KeywordImag2 },
         .{ "__real", .KeywordReal1 },
         .{ "__real__", .KeywordReal2 },
+        .{ "_Float16", .KeywordFloat16 },
 
         // clang keywords
         .{ "__fp16", .KeywordFp16 },

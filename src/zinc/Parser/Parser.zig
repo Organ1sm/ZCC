@@ -1912,6 +1912,7 @@ fn parseTypeSpec(p: *Parser, ty: *TypeBuilder) Error!bool {
             .KeywordSigned => try ty.combine(p, .Signed, p.tokenIdx),
             .KeywordUnsigned => try ty.combine(p, .Unsigned, p.tokenIdx),
             .KeywordFp16 => try ty.combine(p, .FP16, p.tokenIdx),
+            .KeywordFloat16 => try ty.combine(p, .Float16, p.tokenIdx),
             .KeywordFloat => try ty.combine(p, .Float, p.tokenIdx),
             .KeywordDouble => try ty.combine(p, .Double, p.tokenIdx),
             .KeywordComplex => try ty.combine(p, .Complex, p.tokenIdx),

@@ -657,13 +657,14 @@ fn usualArithmeticConversion(lhs: *Result, rhs: *Result, p: *Parser, token: Toke
 
     // if either is a float cast to that type
     if (lhs.ty.isFloat() or rhs.ty.isFloat()) {
-        const floatTypes = [6][2]Type.Specifier{
+        const floatTypes = [7][2]Type.Specifier{
             .{ .ComplexLongDouble, .LongDouble },
             .{ .ComplexFloat128, .Float128 },
             .{ .ComplexFloat80, .Float80 },
             .{ .ComplexDouble, .Double },
             .{ .ComplexFloat, .Float },
             .{ .ComplexFP16, .FP16 },
+            .{ .ComplexFloat16, .Float16 },
         };
 
         const lhsSpec = lhs.ty.canonicalize(.standard).specifier;

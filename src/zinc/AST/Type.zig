@@ -413,12 +413,14 @@ pub const Specifier = enum {
 
     // floating point numbers
     FP16,
+    Float16,
     Float,
     Double,
     LongDouble,
     Float80,
     Float128,
     ComplexFP16,
+    ComplexFloat16,
     ComplexFloat,
     ComplexDouble,
     ComplexLongDouble,
@@ -463,9 +465,6 @@ pub const Specifier = enum {
 
     /// data.attributed
     Attributed,
-
-    /// special type used to implement __builtin_va_start
-    SpecialVaStart,
 
     /// C23 nullptr_t
     NullPtrTy,
@@ -644,9 +643,11 @@ pub fn isFloat(ty: Type) bool {
         .ComplexDouble,
         .ComplexLongDouble,
         .FP16,
+        .Float16,
         .Float80,
         .Float128,
         .ComplexFP16,
+        .ComplexFloat16,
         .ComplexFloat80,
         .ComplexFloat128,
         => true,
@@ -665,6 +666,7 @@ pub fn isReal(ty: Type) bool {
         .ComplexDouble,
         .ComplexLongDouble,
         .ComplexFP16,
+        .ComplexFloat16,
         .ComplexFloat80,
         .ComplexFloat128,
         .ComplexChar,
@@ -1135,7 +1137,7 @@ pub fn sizeof(ty: Type, comp: *const Compilation) ?u64 {
 
         .Int128, .UInt128 => 16,
 
-        .FP16 => 2,
+        .FP16, .Float16 => 2,
         .Float => comp.target.cTypeByteSize(.float),
         .Double => comp.target.cTypeByteSize(.double),
         .Float80 => 16,
@@ -1157,6 +1159,7 @@ pub fn sizeof(ty: Type, comp: *const Compilation) ?u64 {
         .ComplexInt128,
         .ComplexUInt128,
         .ComplexFP16,
+        .ComplexFloat16,
         .ComplexFloat,
         .ComplexDouble,
         .ComplexLongDouble,
@@ -1190,7 +1193,6 @@ pub fn sizeof(ty: Type, comp: *const Compilation) ?u64 {
         .Attributed => ty.data.attributed.base.sizeof(comp),
 
         .Invalid => null,
-        else => unreachable,
     };
 }
 
@@ -1262,6 +1264,7 @@ pub fn alignof(ty: Type, comp: *const Compilation) u29 {
         .ComplexInt128,
         .ComplexUInt128,
         .ComplexFP16,
+        .ComplexFloat16,
         .ComplexFloat,
         .ComplexDouble,
         .ComplexLongDouble,
@@ -1295,7 +1298,7 @@ pub fn alignof(ty: Type, comp: *const Compilation) u29 {
             comp.target.os.tag == .linux and
             comp.target.isGnu()) 8 else 16,
 
-        .FP16 => 2,
+        .FP16, .Float16 => 2,
         .Float => comp.target.cTypeAlignment(.float),
         .Double => comp.target.cTypeAlignment(.double),
         .LongDouble => comp.target.cTypeAlignment(.longdouble),
@@ -1316,8 +1319,6 @@ pub fn alignof(ty: Type, comp: *const Compilation) u29 {
         .TypeofType => ty.data.subType.alignof(comp),
         .TypeofExpr => ty.data.expr.ty.alignof(comp),
         .Attributed => ty.data.attributed.base.alignof(comp),
-
-        else => unreachable,
     };
 }
 
@@ -1495,13 +1496,14 @@ pub fn makeReal(ty: Type) Type {
     var base = ty.canonicalize(.standard);
     switch (base.specifier) {
         .ComplexFP16,
+        .ComplexFloat16,
         .ComplexFloat,
         .ComplexDouble,
         .ComplexLongDouble,
         .ComplexFloat80,
         .ComplexFloat128,
         => {
-            base.specifier = @enumFromInt(@intFromEnum(base.specifier) - 6);
+            base.specifier = @enumFromInt(@intFromEnum(base.specifier) - 7);
             return base;
         },
 
@@ -1537,6 +1539,7 @@ pub fn makeComplex(ty: Type) Type {
     var base = ty.canonicalize(.standard);
     switch (base.specifier) {
         .FP16,
+        .Float16,
         .Float,
         .Double,
         .LongDouble,
@@ -2141,8 +2144,6 @@ pub fn dump(ty: Type, si: StringInterner, langOpts: LangOpts, w: anytype) @TypeO
             try ty.data.attributed.base.dump(si, langOpts, w);
             try w.writeAll(")");
         },
-
-        .SpecialVaStart => try w.writeAll("(var start param)"),
 
         .BitInt => try w.print("{s} _BitInt({d})", .{ @tagName(ty.data.int.signedness), ty.data.int.bits }),
         .ComplexBitInt => try w.print("_Complex {s} _BitInt({d})", .{ @tagName(ty.data.int.signedness), ty.data.int.bits }),
