@@ -764,6 +764,7 @@ pub fn signedness(ty: Type, comp: *const Compilation) std.builtin.Signedness {
         .UInt,
         .ULong,
         .ULongLong,
+        .UInt128,
         .Bool,
         .ComplexUChar,
         .ComplexUShort,
