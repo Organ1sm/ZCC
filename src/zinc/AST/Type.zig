@@ -57,6 +57,7 @@ pub const Int128 = create(.Int128);
 pub const UInt128 = create(.UInt128);
 
 pub const Float = create(.Float);
+pub const Float16 = create(.Float16);
 pub const Double = create(.Double);
 pub const LongDouble = create(.LongDouble);
 pub const ComplexFloat = create(.ComplexFloat);

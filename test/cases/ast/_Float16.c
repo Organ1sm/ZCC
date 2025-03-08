@@ -63,6 +63,8 @@ fnDef: 'fn () void'
   compoundStmt: 'void'
     variable: '_Float16'
      name: f
+     init:
+      floatLiteral: '_Float16' (value: 1)
 
     callExpr: 'void'
      callee:

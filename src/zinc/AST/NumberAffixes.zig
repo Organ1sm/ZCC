@@ -77,6 +77,9 @@ pub const Suffix = enum {
     // float and imaginary float
     F, IF,
 
+    // _Float16
+    F16,
+
     // Imaginary _BitInt
     IWB, IUWB,
 
@@ -109,6 +112,7 @@ pub const Suffix = enum {
 
     const FloatSuffixes = &[_]Tuple{
         .{ .F, &.{"F"} },
+        .{ .F16, &.{"F16"} },
         .{ .L, &.{"L"} },
 
         .{ .I, &.{"I"} },
@@ -123,7 +127,7 @@ pub const Suffix = enum {
             .float => FloatSuffixes,
             .int => IntSuffixes,
         };
-        var scratch: [2]u8 = undefined;
+        var scratch: [3]u8 = undefined;
         top: for (suffixes) |candidate| {
             const tag = candidate[0];
             const parts = candidate[1];
@@ -144,7 +148,7 @@ pub const Suffix = enum {
     pub fn isImaginary(suffix: Suffix) bool {
         return switch (suffix) {
             .I, .IL, .IF, .IU, .IUL, .ILL, .IULL, .IWB, .IUWB => true,
-            .None, .L, .F, .U, .UL, .LL, .ULL, .WB, .UWB => false,
+            .None, .L, .F16, .F, .U, .UL, .LL, .ULL, .WB, .UWB => false,
         };
     }
 
@@ -152,7 +156,7 @@ pub const Suffix = enum {
         return switch (suffix) {
             .None, .L, .LL, .I, .IL, .ILL, .WB, .IWB => true,
             .U, .UL, .ULL, .IU, .IUL, .IULL, .UWB, .IUWB => false,
-            .F, .IF => unreachable,
+            .F, .IF, .F16 => unreachable,
         };
     }
 

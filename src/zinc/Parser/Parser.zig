@@ -7217,6 +7217,7 @@ fn parseFloat(p: *Parser, buf: []const u8, suffix: NumberSuffix, tokenIdx: Token
     const ty = switch (suffix) {
         .None, .I => Type.Double,
         .F, .IF => Type.Float,
+        .F16 => Type.Float16,
         .L, .IL => Type.LongDouble,
         else => unreachable,
     };
