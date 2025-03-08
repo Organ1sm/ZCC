@@ -16,4 +16,10 @@ void quux(void) {
     bar(1, f);  // _Float16 does not promote to double when used as vararg
 }
 
-
+void conversions(void) {
+    double d = 1.0;
+    _Float16 f16 = 2.0f16;
+    __fp16 fp16 = 0;
+    d = d + f16;
+    (void)(f16 + fp16);  // _Float16 + __fp16 promotes both to float
+}

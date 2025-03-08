@@ -108,7 +108,6 @@ pub const Specifier = union(enum) {
     Float80,
     Float128,
     Complex,
-    ComplexFP16,
     ComplexFloat16,
     ComplexFloat,
     ComplexDouble,
@@ -228,7 +227,7 @@ pub const Specifier = union(enum) {
             .Float80 => "__float80",
             .Float128 => "__float128",
             .Complex => "_Complex",
-            .ComplexFP16 => "__Complex __fp16",
+
             .ComplexFloat16 => "_Complex _Float16",
             .ComplexFloat => "_Complex float",
             .ComplexDouble => "_Complex double",
@@ -408,10 +407,9 @@ pub fn finish(b: @This(), p: *Parser) Parser.Error!Type {
         Specifier.Float => ty.specifier = .Float,
         Specifier.Double => ty.specifier = .Double,
         Specifier.LongDouble => ty.specifier = .LongDouble,
-        Specifier.ComplexFP16 => ty.specifier = .ComplexFP16,
-        Specifier.ComplexFloat16 => ty.specifier = .ComplexFloat16,
         Specifier.Float80 => ty.specifier = .Float80,
         Specifier.Float128 => ty.specifier = .Float128,
+        Specifier.ComplexFloat16 => ty.specifier = .ComplexFloat16,
         Specifier.ComplexFloat => ty.specifier = .ComplexFloat,
         Specifier.ComplexDouble => ty.specifier = .ComplexDouble,
         Specifier.ComplexLongDouble => ty.specifier = .ComplexLongDouble,
@@ -797,7 +795,6 @@ fn combineExtra(b: *@This(), p: *Parser, new: Specifier, sourceToken: TokenIndex
 
         .FP16 => b.specifier = switch (b.specifier) {
             .None => .FP16,
-            .Complex => .ComplexFP16,
             else => return b.cannotCombine(p, sourceToken),
         },
 
@@ -836,7 +833,6 @@ fn combineExtra(b: *@This(), p: *Parser, new: Specifier, sourceToken: TokenIndex
 
         .Complex => b.specifier = switch (b.specifier) {
             .None => .Complex,
-            .FP16 => .ComplexFP16,
             .Float16 => .ComplexFloat16,
             .Float => .ComplexFloat,
             .Double => .ComplexDouble,
@@ -879,8 +875,6 @@ fn combineExtra(b: *@This(), p: *Parser, new: Specifier, sourceToken: TokenIndex
             .UBitInt => |bits| .{ .ComplexUBitInt = bits },
 
             .Complex,
-            .ComplexFP16,
-            .ComplexFloat16,
             .ComplexFloat,
             .ComplexDouble,
             .ComplexLongDouble,
@@ -982,7 +976,6 @@ pub fn fromType(ty: Type) Specifier {
         .Float80 => Specifier.Float80,
         .Float128 => Specifier.Float128,
 
-        .ComplexFP16 => Specifier.ComplexFP16,
         .ComplexFloat16 => Specifier.ComplexFloat16,
         .ComplexFloat => Specifier.ComplexFloat,
         .ComplexDouble => Specifier.ComplexDouble,

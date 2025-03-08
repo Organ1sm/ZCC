@@ -79,3 +79,55 @@ fnDef: 'fn () void'
 
     implicit returnStmt: 'void'
 
+fnDef: 'fn () void'
+ name: conversions
+ body:
+  compoundStmt: 'void'
+    variable: 'double'
+     name: d
+     init:
+      floatLiteral: 'double' (value: 1)
+
+    variable: '_Float16'
+     name: f16
+     init:
+      floatLiteral: '_Float16' (value: 2)
+
+    variable: '__fp16'
+     name: fp16
+     init:
+      implicit cast: (IntToFloat) '__fp16'
+        intLiteral: 'int' (value: 0)
+
+    assignExpr: 'double'
+     lhs:
+      declRefExpr: 'double' lvalue
+       name: d
+     rhs:
+      addExpr: 'double'
+       lhs:
+        implicit cast: (LValToRVal) 'double'
+          declRefExpr: 'double' lvalue
+           name: d
+       rhs:
+        implicit cast: (FloatCast) 'double'
+          implicit cast: (LValToRVal) '_Float16'
+            declRefExpr: '_Float16' lvalue
+             name: f16
+
+    cast: (ToVoid) 'void'
+      parenExpr: '__fp16'
+       operand:
+        addExpr: '__fp16'
+         lhs:
+          implicit cast: (FloatCast) '__fp16'
+            implicit cast: (LValToRVal) '_Float16'
+              declRefExpr: '_Float16' lvalue
+               name: f16
+         rhs:
+          implicit cast: (LValToRVal) '__fp16'
+            declRefExpr: '__fp16' lvalue
+             name: fp16
+
+    implicit returnStmt: 'void'
+

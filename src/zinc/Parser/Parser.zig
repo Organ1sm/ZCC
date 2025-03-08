@@ -7217,7 +7217,7 @@ fn parseFloat(p: *Parser, buf: []const u8, suffix: NumberSuffix, tokenIdx: Token
     const ty = switch (suffix) {
         .None, .I => Type.Double,
         .F, .IF => Type.Float,
-        .F16 => Type.Float16,
+        .F16, .IF16 => Type.Float16,
         .L, .IL => Type.LongDouble,
         else => unreachable,
     };
@@ -7252,6 +7252,7 @@ fn parseFloat(p: *Parser, buf: []const u8, suffix: NumberSuffix, tokenIdx: Token
         try p.err(.gnu_imaginary_constant);
         res.ty = switch (suffix) {
             .I => Type.ComplexDouble,
+            .IF16 => Type.ComplexFloat16,
             .IF => Type.ComplexFloat,
             .IL => Type.ComplexLongDouble,
             else => unreachable,
