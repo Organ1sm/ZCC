@@ -419,14 +419,12 @@ pub const Specifier = enum {
     Float,
     Double,
     LongDouble,
-    Float80,
     Float128,
 
     ComplexFloat16,
     ComplexFloat,
     ComplexDouble,
     ComplexLongDouble,
-    ComplexFloat80,
     ComplexFloat128,
 
     // data.SubType
@@ -646,11 +644,8 @@ pub fn isFloat(ty: Type) bool {
         .ComplexLongDouble,
         .FP16,
         .Float16,
-        .Float80,
         .Float128,
-
         .ComplexFloat16,
-        .ComplexFloat80,
         .ComplexFloat128,
         => true,
 
@@ -669,7 +664,6 @@ pub fn isReal(ty: Type) bool {
         .ComplexLongDouble,
 
         .ComplexFloat16,
-        .ComplexFloat80,
         .ComplexFloat128,
         .ComplexChar,
         .ComplexSChar,
@@ -701,7 +695,6 @@ pub fn isComplex(ty: Type) bool {
         .ComplexDouble,
         .ComplexLongDouble,
         .ComplexFloat16,
-        .ComplexFloat80,
         .ComplexFloat128,
         .ComplexChar,
         .ComplexSChar,
@@ -899,7 +892,6 @@ pub fn getElemType(ty: Type) Type {
         .ComplexDouble,
         .ComplexLongDouble,
         .ComplexFloat16,
-        .ComplexFloat80,
         .ComplexFloat128,
         .ComplexChar,
         .ComplexSChar,
@@ -1142,7 +1134,6 @@ pub fn sizeof(ty: Type, comp: *const Compilation) ?u64 {
         .FP16, .Float16 => 2,
         .Float => comp.target.cTypeByteSize(.float),
         .Double => comp.target.cTypeByteSize(.double),
-        .Float80 => 16,
         .Float128 => 16,
 
         .BitInt => return std.mem.alignForward(u64, (ty.data.int.bits + 7) / 8, ty.alignof(comp)),
@@ -1164,7 +1155,6 @@ pub fn sizeof(ty: Type, comp: *const Compilation) ?u64 {
         .ComplexFloat,
         .ComplexDouble,
         .ComplexLongDouble,
-        .ComplexFloat80,
         .ComplexFloat128,
         .ComplexBitInt,
         => return 2 * ty.makeReal().sizeof(comp).?,
@@ -1205,7 +1195,6 @@ pub fn bitSizeof(ty: Type, comp: *const Compilation) ?u64 {
         .Attributed => ty.data.attributed.base.bitSizeof(comp),
         .BitInt => return ty.data.int.bits,
         .LongDouble => comp.target.cTypeBitSize(.longdouble),
-        .Float80 => return 80,
         else => 8 * (ty.sizeof(comp) orelse return null),
     };
 }
@@ -1268,7 +1257,6 @@ pub fn alignof(ty: Type, comp: *const Compilation) u29 {
         .ComplexFloat,
         .ComplexDouble,
         .ComplexLongDouble,
-        .ComplexFloat80,
         .ComplexFloat128,
         .ComplexBitInt,
         => return ty.makeReal().alignof(comp),
@@ -1303,7 +1291,7 @@ pub fn alignof(ty: Type, comp: *const Compilation) u29 {
         .Double => comp.target.cTypeAlignment(.double),
         .LongDouble => comp.target.cTypeAlignment(.longdouble),
 
-        .Float80, .Float128 => 16,
+        .Float128 => 16,
 
         .Pointer,
         .StaticArray,
@@ -1499,10 +1487,9 @@ pub fn makeReal(ty: Type) Type {
         .ComplexFloat,
         .ComplexDouble,
         .ComplexLongDouble,
-        .ComplexFloat80,
         .ComplexFloat128,
         => {
-            base.specifier = @enumFromInt(@intFromEnum(base.specifier) - 6);
+            base.specifier = @enumFromInt(@intFromEnum(base.specifier) - 5);
             return base;
         },
 
@@ -1537,13 +1524,8 @@ pub fn makeComplex(ty: Type) Type {
     // TODO discards attributed/typeof
     var base = ty.canonicalize(.standard);
     switch (base.specifier) {
-        .Float,
-        .Double,
-        .LongDouble,
-        .Float80,
-        .Float128,
-        => {
-            base.specifier = @enumFromInt(@intFromEnum(base.specifier) + 5);
+        .Float, .Double, .LongDouble, .Float128 => {
+            base.specifier = @enumFromInt(@intFromEnum(base.specifier) + 4);
             return base;
         },
 

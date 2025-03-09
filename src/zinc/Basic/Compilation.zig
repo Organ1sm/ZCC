@@ -545,6 +545,11 @@ fn generateBuiltinTypes(comp: *Compilation) !void {
     };
 }
 
+pub fn float80Type(comp: *const Compilation) ?Type {
+    if (comp.langOpts.emulate != .gcc) return null;
+    return Target.float80Type(comp.target);
+}
+
 fn intSize(comp: *const Compilation, specifier: Type.Specifier) u64 {
     const ty = Type{ .specifier = specifier };
     return ty.sizeof(comp).?;

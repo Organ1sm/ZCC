@@ -721,8 +721,12 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
 
         const ty = &pp.comp.types.vaList;
         try p.addImplicitTypedef("__builtin_va_list", ty.*);
-        if (ty.isArray())
-            ty.decayArray();
+
+        if (ty.isArray()) ty.decayArray();
+
+        if (p.comp.float80Type()) |float80Ty| {
+            try p.addImplicitTypedef("__float80", float80Ty);
+        }
     }
 
     const implicitTypedefCount = p.declBuffer.items.len;
@@ -1916,7 +1920,6 @@ fn parseTypeSpec(p: *Parser, ty: *TypeBuilder) Error!bool {
             .KeywordFloat => try ty.combine(p, .Float, p.tokenIdx),
             .KeywordDouble => try ty.combine(p, .Double, p.tokenIdx),
             .KeywordComplex => try ty.combine(p, .Complex, p.tokenIdx),
-            .KeywordFloat80 => try ty.combine(p, .Float80, p.tokenIdx),
             .KeywordFloat128 => try ty.combine(p, .Float128, p.tokenIdx),
 
             .KeywordAtomic => {
@@ -6650,6 +6653,7 @@ const CallExpr = union(enum) {
             .standard => true,
             .builtin => |builtin| switch (builtin.tag) {
                 .__builtin_va_start, .__va_start, .va_start => arg_idx != 1,
+                .__builtin_complex => false,
                 else => true,
             },
         };

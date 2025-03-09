@@ -13,6 +13,9 @@ implicit typedef: '*char'
 implicit typedef: '[1]struct __va_list_tag'
  name: __builtin_va_list
 
+implicit typedef: 'long double'
+ name: __float80
+
 variable: 'bool'
  name: a
  init:

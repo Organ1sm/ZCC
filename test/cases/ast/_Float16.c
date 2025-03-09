@@ -10,6 +10,9 @@ implicit typedef: '*char'
 implicit typedef: '[1]struct __va_list_tag'
  name: __builtin_va_list
 
+implicit typedef: 'long double'
+ name: __float80
+
 typedef: '__builtin_va_list': '[1]struct __va_list_tag'
  name: va_list
 

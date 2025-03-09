@@ -197,7 +197,6 @@ pub const Token = struct {
         .{ "__asm__", .KeywordGccAsm2 },
         .{ "__attribute", .KeywordAttribute1 },
         .{ "__attribute__", .KeywordAttribute2 },
-        .{ "__float80", .KeywordFloat80 },
         .{ "__float128", .KeywordFloat128 },
         .{ "__int128", .KeywordInt128 },
         .{ "__imag", .KeywordImag1 },
