@@ -7223,6 +7223,7 @@ fn parseFloat(p: *Parser, buf: []const u8, suffix: NumberSuffix, tokenIdx: Token
         .F, .IF => Type.Float,
         .F16, .IF16 => Type.Float16,
         .L, .IL => Type.LongDouble,
+        .W, .IW => p.comp.float80Type().?,
         else => unreachable,
     };
 
@@ -7259,6 +7260,7 @@ fn parseFloat(p: *Parser, buf: []const u8, suffix: NumberSuffix, tokenIdx: Token
             .IF16 => Type.ComplexFloat16,
             .IF => Type.ComplexFloat,
             .IL => Type.ComplexLongDouble,
+            .IW => p.comp.float80Type().?.makeComplex(),
             else => unreachable,
         };
         res.value = .{}; // TOOD: add complex values
@@ -7520,6 +7522,11 @@ pub fn parseNumberToken(p: *Parser, tokenIdx: TokenIndex) !Result {
             try p.errStr(.invalid_int_suffix, tokenIdx, suffixStr);
         return error.ParsingFailed;
     };
+
+    if (suffix.isFloat80() and p.comp.float80Type() == null) {
+        try p.errStr(.invalid_float_suffix, tokenIdx, suffixStr);
+        return error.ParsingFailed;
+    }
 
     if (isFloat) {
         assert(prefix == .hex or prefix == .decimal);

@@ -80,6 +80,12 @@ pub const Suffix = enum {
     // _Float16 and imaginary _Float16
     F16, IF16,
 
+     // __float80
+    W,
+
+    // Imaginary __float80
+    IW,
+
     // Imaginary _BitInt
     IWB, IUWB,
 
@@ -114,11 +120,13 @@ pub const Suffix = enum {
         .{ .F, &.{"F"} },
         .{ .F16, &.{"F16"} },
         .{ .L, &.{"L"} },
+        .{ .W, &.{"W"} },
 
         .{ .I, &.{"I"} },
         .{ .IL, &.{ "I", "L" } },
         .{ .IF16, &.{ "I", "F16" } },
         .{ .IF, &.{ "I", "F" } },
+        .{ .IW, &.{ "I", "W" } },
     };
 
     pub fn fromString(buf: []const u8, suffixKind: enum { int, float }) ?Suffix {
@@ -148,8 +156,8 @@ pub const Suffix = enum {
 
     pub fn isImaginary(suffix: Suffix) bool {
         return switch (suffix) {
-            .I, .IL, .IF, .IF16, .IU, .IUL, .ILL, .IULL, .IWB, .IUWB => true,
-            .None, .L, .F16, .F, .U, .UL, .LL, .ULL, .WB, .UWB => false,
+            .I, .IL, .IF, .IF16, .IU, .IUL, .ILL, .IULL, .IWB, .IUWB, .IW => true,
+            .None, .L, .F16, .F, .U, .UL, .LL, .ULL, .WB, .UWB, .W => false,
         };
     }
 
@@ -157,7 +165,7 @@ pub const Suffix = enum {
         return switch (suffix) {
             .None, .L, .LL, .I, .IL, .ILL, .WB, .IWB => true,
             .U, .UL, .ULL, .IU, .IUL, .IULL, .UWB, .IUWB => false,
-            .F, .IF, .F16, .IF16 => unreachable,
+            .F, .IF, .F16, .IF16, .W, .IW => unreachable,
         };
     }
 
@@ -170,5 +178,9 @@ pub const Suffix = enum {
             .WB, .UWB, .IWB, .IUWB => true,
             else => false,
         };
+    }
+
+    pub fn isFloat80(suffix: Suffix) bool {
+        return suffix == .W or suffix == .IW;
     }
 };
