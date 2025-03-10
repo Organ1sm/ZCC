@@ -27,7 +27,7 @@ pub fn discover(self: *Linux, tc: *Toolchain) !void {
 fn buildExtraOpts(self: *Linux, tc: *const Toolchain) !void {
     const gpa = tc.driver.comp.gpa;
     const target = tc.getTarget();
-    const isAndroid = target.isAndroid();
+    const isAndroid = target.abi.isAndroid();
 
     if (self.distro.isAlpine() or isAndroid) {
         try self.extraOpts.ensureUnusedCapacity(gpa, 2);
@@ -110,7 +110,7 @@ fn findPaths(self: *Linux, tc: *Toolchain) !void {
     try tc.addPathIfExists(&.{ sysroot, "/lib", multiarchTriple }, .file);
     try tc.addPathIfExists(&.{ sysroot, "/lib", "..", osLibDir }, .file);
 
-    if (target.isAndroid()) {
+    if (target.abi.isAndroid()) {
         // TODO
     }
 
@@ -149,7 +149,7 @@ fn getStatic(self: *const Linux, d: *const Driver) bool {
 
 pub fn getDefaultLinker(self: *const Linux, target: std.Target) []const u8 {
     _ = self;
-    if (target.isAndroid())
+    if (target.abi.isAndroid())
         return "ld.lld";
     return "ld";
 }
@@ -161,7 +161,7 @@ pub fn buildLinkerArgs(self: *const Linux, tc: *const Toolchain, argv: *std.Arra
     const isPie = self.getPIE(d);
     const isStaticPie = try self.getStaticPIE(d);
     const isStatic = self.getStatic(d);
-    const isAndroid = target.isAndroid();
+    const isAndroid = target.abi.isAndroid();
     const isIamcu = target.os.tag == .elfiamcu;
     const isVe = target.cpu.arch == .ve;
     const hasCrtBeginEndFiles = target.abi != .none; // TODO: clang checks for MIPS vendor
@@ -314,7 +314,7 @@ pub fn buildLinkerArgs(self: *const Linux, tc: *const Toolchain, argv: *std.Arra
 }
 
 fn getMultiarchTriple(target: std.Target) ?[]const u8 {
-    const isAndroid = target.isAndroid();
+    const isAndroid = target.abi.isAndroid();
     const isMipsR6 = std.Target.mips.featureSetHas(target.cpu.features, .mips32r6);
 
     return switch (target.cpu.arch) {

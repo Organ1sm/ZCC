@@ -107,11 +107,11 @@ pub fn int64Type(target: std.Target) Type {
 
         .sparc64 => return intMaxType(target),
 
-        .x86, .x86_64 => if (!target.isDarwin()) return intMaxType(target),
+        .x86, .x86_64 => if (!target.os.tag.isDarwin()) return intMaxType(target),
 
         .aarch64,
         .aarch64_be,
-        => if (!target.isDarwin() and target.os.tag != .openbsd and target.os.tag != .windows)
+        => if (!target.os.tag.isDarwin() and target.os.tag != .openbsd and target.os.tag != .windows)
             return Type.Long,
 
         else => {},
@@ -146,7 +146,7 @@ pub fn defaultFunctionAlignment(target: std.Target) u8 {
 ///
 /// Returns true if the target supports TLS, false otherwise.
 pub fn isTlsSupported(target: std.Target) bool {
-    if (target.isDarwin()) {
+    if (target.os.tag.isDarwin()) {
         var supported = false;
         switch (target.os.tag) {
             .macos => supported = !(target.os.isAtLeast(.macos, .{ .major = 10, .minor = 7, .patch = 0 }) orelse false),
@@ -221,12 +221,12 @@ pub fn minZeroWidthBitfieldAlignment(target: std.Target) ?u29 {
 pub fn unnamedFieldAffectsAlignment(target: std.Target) bool {
     switch (target.cpu.arch) {
         .aarch64 => {
-            if (target.isDarwin() or target.os.tag == .windows) return false;
+            if (target.os.tag.isDarwin() or target.os.tag == .windows) return false;
             return true;
         },
         .armeb => {
             if (std.Target.arm.featureSetHas(target.cpu.features, .has_v7)) {
-                if (std.Target.Abi.default(target.cpu.arch, target.os) == .eabi) return true;
+                if (std.Target.Abi.default(target.cpu.arch, target.os.tag) == .eabi) return true;
             }
         },
         .arm => return true,
@@ -251,7 +251,7 @@ pub fn packAllEnums(target: std.Target) bool {
 pub fn defaultAlignment(target: std.Target) u29 {
     switch (target.cpu.arch) {
         .avr => return 1,
-        .arm => if (target.isAndroid() or target.os.tag == .ios) return 16 else return 8,
+        .arm => if (target.abi.isAndroid() or target.os.tag == .ios) return 16 else return 8,
         .sparc => if (std.Target.sparc.featureSetHas(target.cpu.features, .v9)) return 16 else return 8,
         .mips, .mipsel => switch (target.abi) {
             .none, .gnuabi64 => return 16,
@@ -263,9 +263,8 @@ pub fn defaultAlignment(target: std.Target) u29 {
 }
 
 pub fn systemCompiler(target: std.Target) LangOpts.Compiler {
-    if (target.isDarwin() or
-        target.isAndroid() or
-        target.isBSD() or
+    if (target.abi.isAndroid() or
+        target.os.tag.isBSD() or
         target.os.tag == .fuchsia or
         target.os.tag == .solaris or
         target.os.tag == .haiku or
@@ -297,7 +296,7 @@ pub fn hasInt128(target: std.Target) bool {
 
 pub fn hasFloat128(target: std.Target) bool {
     if (target.cpu.arch.isWasm()) return true;
-    if (target.isDarwin()) return false;
+    if (target.os.tag.isDarwin()) return false;
     if (target.cpu.arch.isPowerPC()) return std.Target.powerpc.featureSetHas(target.cpu.features, .float128);
     return switch (target.os.tag) {
         .dragonfly,
@@ -421,7 +420,6 @@ pub fn get32BitArchVariant(target: std.Target) ?std.Target {
         .amdgcn,
         .avr,
         .msp430,
-        .spu_2,
         .ve,
         .bpfel,
         .bpfeb,
@@ -452,8 +450,7 @@ pub fn get32BitArchVariant(target: std.Target) ?std.Target {
         .spirv32,
         .loongarch32,
         .xtensa,
-        .propeller1,
-        .propeller2,
+        .propeller,
         => {}, // Already 32 bit
 
         .aarch64 => copy.cpu.arch = .arm,
@@ -484,11 +481,9 @@ pub fn get64BitArchVariant(target: std.Target) ?std.Target {
         .lanai,
         .m68k,
         .msp430,
-        .spu_2,
         .xcore,
         .xtensa,
-        .propeller1,
-        .propeller2,
+        .propeller,
         => return null,
 
         .aarch64,
@@ -584,11 +579,7 @@ pub fn toLLVMTriple(target: std.Target, buf: []u8) []const u8 {
         .wasm32 => "wasm32",
         .wasm64 => "wasm64",
         .ve => "ve",
-        // Note: spu_2 is not supported in LLVM; this is the Zig arch name
-        .spu_2 => "spu_2",
-        // Note: propeller1 and propeller2 are not supported in LLVM; this is the Zig arch name
-        .propeller1 => "propeller1",
-        .propeller2 => "propeller2",
+        .propeller => "propeller",
     };
 
     writer.writeAll(llvm_arch) catch unreachable;

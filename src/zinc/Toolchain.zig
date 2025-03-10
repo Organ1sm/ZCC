@@ -153,7 +153,7 @@ pub fn getLinkerPath(tc: *const Toolchain, buf: []u8) ![]const u8 {
         var linkerName = try std.ArrayList(u8).initCapacity(tc.driver.comp.gpa, 5 + useLinker.len); // "ld64." ++ use_linker
         defer linkerName.deinit();
 
-        if (tc.getTarget().isDarwin())
+        if (tc.getTarget().os.tag.isDarwin())
             linkerName.appendSliceAssumeCapacity("ld64.")
         else
             linkerName.appendSliceAssumeCapacity("ld.");
@@ -338,7 +338,7 @@ pub fn buildLinkerArgs(tc: *Toolchain, argv: *std.ArrayList([]const u8)) !void {
 }
 
 fn getDefaultRuntimeLibKind(tc: *const Toolchain) RuntimeLibKind {
-    if (tc.getTarget().isAndroid())
+    if (tc.getTarget().abi.isAndroid())
         return .compiler_rt;
     return .libgcc;
 }
@@ -365,7 +365,7 @@ pub fn getCompilerRt(tc: *const Toolchain, component: []const u8, fileKind: File
 fn getLibGCCKind(tc: *const Toolchain) LibGCCKind {
     const target = tc.getTarget();
 
-    if (tc.driver.staticLibgcc or tc.driver.static or tc.driver.staticPie or target.isAndroid())
+    if (tc.driver.staticLibgcc or tc.driver.static or tc.driver.staticPie or target.abi.isAndroid())
         return .static;
 
     if (tc.driver.sharedLibgcc)
@@ -380,7 +380,7 @@ fn getUnwindLibKind(tc: *const Toolchain) !UnwindLibKind {
         switch (tc.getRuntimeLibKind()) {
             .compiler_rt => {
                 const target = tc.getTarget();
-                if (target.isAndroid() or target.os.tag == .aix)
+                if (target.abi.isAndroid() or target.os.tag == .aix)
                     return .compiler_rt
                 else
                     return .none;
@@ -423,14 +423,15 @@ fn addLibGCC(tc: *const Toolchain, argv: *std.ArrayList([]const u8)) !void {
 fn addUnwindLibrary(tc: *const Toolchain, argv: *std.ArrayList([]const u8)) !void {
     const unw = try tc.getUnwindLibKind();
     const target = tc.getTarget();
-    if ((target.isAndroid() and unw == .libgcc) or
+    const isAndroid = target.abi.isAndroid();
+    if ((isAndroid and unw == .libgcc) or
         target.os.tag == .elfiamcu or
         target.ofmt == .wasm or
         TargetUtil.isWindowsMSVCEnvironment(target) or
         unw == .none) return;
 
     const lgk = tc.getLibGCCKind();
-    const asNeeded = (lgk == .unspecified) and !target.isAndroid() and !TargetUtil.isCygwinMinGW(target) and target.os.tag != .aix;
+    const asNeeded = (lgk == .unspecified) and !isAndroid and !TargetUtil.isCygwinMinGW(target) and target.os.tag != .aix;
     if (asNeeded)
         try argv.append(getAsNeededOption(target.os.tag == .solaris, true));
 
@@ -477,6 +478,6 @@ pub fn addRuntimeLibs(tc: *const Toolchain, argv: *std.ArrayList([]const u8)) !v
         },
     }
 
-    if (target.isAndroid() and !tc.driver.static and !tc.driver.staticPie)
+    if (target.abi.isAndroid() and !tc.driver.static and !tc.driver.staticPie)
         try argv.append("-ldl");
 }

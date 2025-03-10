@@ -1286,7 +1286,7 @@ pub fn alignof(ty: Type, comp: *const Compilation) u29 {
         .UInt128,
         => if (comp.target.cpu.arch == .s390x and
             comp.target.os.tag == .linux and
-            comp.target.isGnu()) 8 else 16,
+            comp.target.abi.isGnu()) 8 else 16,
 
         .FP16, .Float16 => 2,
         .Float => comp.target.cTypeAlignment(.float),

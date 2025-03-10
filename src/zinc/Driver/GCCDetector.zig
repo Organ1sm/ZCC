@@ -118,7 +118,7 @@ fn collectLibDirsAndTriples(
         return;
     }
 
-    if (target.isAndroid()) {
+    if (target.abi.isAndroid()) {
         const AArch64AndroidTriples: [1][]const u8 = .{"aarch64-linux-android"};
         const ARMAndroidTriples: [1][]const u8 = .{"arm-linux-androideabi"};
         const X86AndroidTriples: [1][]const u8 = .{"i686-linux-android"};

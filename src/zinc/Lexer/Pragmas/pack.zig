@@ -152,7 +152,7 @@ fn pop(pack: *Pack, p: *Parser, maybeLabel: ?[]const u8) void {
             }
         }
     } else {
-        const prev = pack.stack.popOrNull() orelse {
+        const prev = pack.stack.pop() orelse {
             p.pragmaPack = 2;
             return;
         };

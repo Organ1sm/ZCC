@@ -2402,7 +2402,7 @@ pub fn expandedSliceExtra(
 
 /// Concat two tokens and add the result to pp.generated
 fn pasteTokens(pp: *Preprocessor, lhsTokens: *ExpandBuffer, rhsTokens: []const TokenWithExpansionLocs) Error!void {
-    const lhs = while (lhsTokens.popOrNull()) |lhs| {
+    const lhs = while (lhsTokens.pop()) |lhs| {
         if ((pp.comp.langOpts.preserveCommentsInMacros and lhs.is(.Comment)) or !lhs.isOneOf(.{ .MacroWS, .Comment }))
             break lhs;
         TokenWithExpansionLocs.free(lhs.expansionLocs, pp.gpa);
@@ -2821,7 +2821,7 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: RawToken, lParen: Raw
         token = lexer.nextNoWhiteSpace();
         if (token.is(.Ellipsis)) {
             try pp.addError(token, .gnu_va_macro);
-            gnuVarArgs = params.pop();
+            gnuVarArgs = params.pop().?;
             const rParen = lexer.nextNoWhiteSpace();
             if (rParen.id != .RParen) {
                 try pp.addError(lParen, .missing_paren_param_list);

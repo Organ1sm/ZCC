@@ -103,7 +103,7 @@ fn diagnosticHandler(self: *GCC, pp: *Preprocessor, startIdx: TokenIndex) Pragma
             try pp.comp.diagnostics.set(str[2..], newKind);
         },
         .push => try self.optionsStack.append(pp.comp.gpa, pp.comp.diagnostics.options),
-        .pop => pp.comp.diagnostics.options = self.optionsStack.popOrNull() orelse self.originalOptions,
+        .pop => pp.comp.diagnostics.options = self.optionsStack.pop() orelse self.originalOptions,
     }
 }
 

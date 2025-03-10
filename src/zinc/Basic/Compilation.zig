@@ -305,7 +305,7 @@ pub fn generateBuiltinMacros(comp: *Compilation) !Source {
         else => {},
     }
 
-    if (comp.target.isAndroid()) {
+    if (comp.target.abi.isAndroid()) {
         try w.writeAll("#define __ANDROID__ 1\n");
     }
 
@@ -877,12 +877,13 @@ pub fn nextLargestIntSameSign(comp: *const Compilation, ty: Type) ?Type {
 
 /// Smallest integer type with at least N bits
 pub fn intLeastN(comp: *const Compilation, bits: usize, signedness: std.builtin.Signedness) Type {
+    const target = comp.target;
     // WebAssembly and Darwin use `long long` for `int_least64_t` and `int_fast64_t`.
-    if (bits == 64 and (comp.target.isDarwin() or comp.target.isWasm()))
+    if (bits == 64 and (target.os.tag.isDarwin() or target.cpu.arch.isWasm()))
         return if (signedness == .signed) Type.LongLong else Type.ULongLong;
 
     // AVR uses int for int_least16_t and int_fast16_t.
-    if (bits == 16 and comp.target.cpu.arch == .avr)
+    if (bits == 16 and target.cpu.arch == .avr)
         return if (signedness == .signed) Type.Int else Type.UInt;
 
     const candidates = switch (signedness) {
