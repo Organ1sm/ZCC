@@ -1,4 +1,4 @@
-//zinc-args -E --target=aarch64-linux-gnu -std=c11 -P
+//zinc-args -E --target=aarch64-linux-gnu -std=c11 -P -ffp-eval-method=extended
 #include <float.h>
 DBL_DIG
 DBL_EPSILON
@@ -29,3 +29,4 @@ LDBL_MAX
 LDBL_MIN_10_EXP
 LDBL_MIN_EXP
 LDBL_MIN
+FLT_EVAL_METHOD
