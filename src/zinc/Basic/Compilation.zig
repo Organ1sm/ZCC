@@ -545,6 +545,10 @@ fn generateBuiltinTypes(comp: *Compilation) !void {
     };
 }
 
+pub fn hasFloat128(comp: *const Compilation) bool {
+    return Target.hasFloat128(comp.target);
+}
+
 pub fn float80Type(comp: *const Compilation) ?Type {
     if (comp.langOpts.emulate != .gcc) return null;
     return Target.float80Type(comp.target);

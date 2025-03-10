@@ -37,7 +37,7 @@ fnDef: 'fn () void'
       declRefExpr: '_Complex long double' lvalue
        name: z
      rhs:
-      cast: (ComplexFloatCast) '_Complex long double'
+      implicit cast: (ComplexFloatCast) '_Complex long double'
         imaginaryLiteral: '_Complex double'
          operand:
           floatLiteral: 'long double'
@@ -47,9 +47,10 @@ fnDef: 'fn () void'
       declRefExpr: '_Complex long double' lvalue
        name: z
      rhs:
-      cast: (ComplexFloatCast) '_Complex long double'
+      implicit cast: (ComplexFloatCast) '_Complex long double'
         imaginaryLiteral: '_Complex double'
          operand:
           floatLiteral: 'long double'
 
-    returnStmt: 'void'
+    implicit returnStmt: 'void'
+

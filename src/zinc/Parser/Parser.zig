@@ -1920,7 +1920,11 @@ fn parseTypeSpec(p: *Parser, ty: *TypeBuilder) Error!bool {
             .KeywordFloat => try ty.combine(p, .Float, p.tokenIdx),
             .KeywordDouble => try ty.combine(p, .Double, p.tokenIdx),
             .KeywordComplex => try ty.combine(p, .Complex, p.tokenIdx),
-            .KeywordFloat128 => try ty.combine(p, .Float128, p.tokenIdx),
+            .KeywordFloat128_, .KeywordFloat128__ => {
+                if (!p.comp.hasFloat128())
+                    try p.errStr(.type_not_supported_on_target, p.tokenIdx, p.currToken().lexeme().?);
+                try ty.combine(p, .Float128, p.tokenIdx);
+            },
 
             .KeywordAtomic => {
                 const atomicToken = p.tokenIdx;
