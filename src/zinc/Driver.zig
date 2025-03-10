@@ -101,6 +101,8 @@ const usage =
     \\  -fno-color-diagnostics  Disable colors in diagnostics
     \\  -fdeclspec              Enable support for __declspec attributes
     \\  -fno-declspec           Disable support for __declspec attributes
+    \\  -ffp-eval-method=[source|double|extended]
+    \\                          Evaluation method to use for floating-point arithmetic
     \\  -fgnu-inline-asm        Enable GNU style inline asm (default: enabled)
     \\  -fno-gnu-inline-asm     Disable GNU style inline asm
     \\  -fms-extensions         Enable support for Microsoft extensions
@@ -308,6 +310,13 @@ pub fn parseArgs(
                     continue;
                 };
                 d.comp.langOpts.setEmulatedCompiler(compiler);
+            } else if (option(arg, "-ffp-eval-method=")) |fpMethodStr| {
+                const fpEvalMethod = std.meta.stringToEnum(LangOpts.FPEvalMethod, fpMethodStr) orelse .indeterminate;
+                if (fpEvalMethod == .indeterminate) {
+                    try d.comp.addDiagnostic(.{ .tag = .cli_invalid_fp_eval_method, .extra = .{ .str = fpMethodStr } }, &.{});
+                    continue;
+                }
+                d.comp.langOpts.setFpEvalMethod(fpEvalMethod);
             } else if (std.mem.startsWith(u8, arg, "-o")) {
                 var filename = arg["-o".len..];
                 if (filename.len == 0) {

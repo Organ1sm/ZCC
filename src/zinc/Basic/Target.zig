@@ -744,3 +744,19 @@ pub fn builtinEnabled(target: std.Target, enabled_for: TargetSet) bool {
     }
     return false;
 }
+
+pub fn defaultFpEvalMethod(target: std.Target) LangOpts.FPEvalMethod {
+    if (target.os.tag == .aix) return .double;
+    if (target.cpu.arch == .x86 and target.os.tag == .netbsd) {
+        if (target.os.version_range.semver.isAtLeast(.{ .major = 6, .minor = 99, .patch = 27 }) orelse true) {
+            if (std.Target.x86.featureSetHas(target.cpu.features, .sse)) {
+                return .source;
+            } else {
+                return .extended;
+            }
+        } else {
+            return .double;
+        }
+    }
+    return .source;
+}
