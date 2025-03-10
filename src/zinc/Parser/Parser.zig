@@ -7228,6 +7228,7 @@ fn parseFloat(p: *Parser, buf: []const u8, suffix: NumberSuffix, tokenIdx: Token
         .F16, .IF16 => Type.Float16,
         .L, .IL => Type.LongDouble,
         .W, .IW => p.comp.float80Type().?,
+        .Q, .IQ, .F128, .IF128 => Type.Float128,
         else => unreachable,
     };
 
@@ -7265,6 +7266,7 @@ fn parseFloat(p: *Parser, buf: []const u8, suffix: NumberSuffix, tokenIdx: Token
             .IF => Type.ComplexFloat,
             .IL => Type.ComplexLongDouble,
             .IW => p.comp.float80Type().?.makeComplex(),
+            .IQ, .IF128 => Type.ComplexFloat128,
             else => unreachable,
         };
         res.value = .{}; // TOOD: add complex values
