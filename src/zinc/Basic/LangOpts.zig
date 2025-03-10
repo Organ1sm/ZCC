@@ -10,6 +10,18 @@ pub const Compiler = enum {
     msvc,
 };
 
+/// The floating-point evaluation method for intermediate results within a single expression
+pub const FPEvalMethod = enum(i8) {
+    /// The evaluation method cannot be determined or is inconsistent for this target.
+    indeterminate = -1,
+    /// Use the type declared in the source
+    source = 0,
+    /// Use double as the floating-point evaluation method for all float expressions narrower than double.
+    double = 1,
+    /// Use long double as the floating-point evaluation method for all float expressions narrower than long double.
+    extended = 2,
+};
+
 pub const Standard = enum {
     /// ISO C 1990
     c89,
@@ -116,6 +128,9 @@ preserveCommentsInMacros: bool = false,
 /// Whether to allow GNU-style inline assembly
 gnuAsm: bool = true,
 
+/// null indicates that the user did not select a value, use target to determine default
+fpEvalMethod: ?FPEvalMethod = null,
+
 pub fn setStandard(self: *LangOpts, name: []const u8) error{InvalidStandard}!void {
     self.standard = Standard.NameMap.get(name) orelse return error.InvalidStandard;
 }
@@ -145,4 +160,8 @@ pub fn setCharSignedness(self: *LangOpts, signedness: std.builtin.Signedness) vo
 
 pub fn allowedGnuAsm(self: *LangOpts) bool {
     return self.gnuAsm == true;
+}
+
+pub fn setFpEvalMethod(self: *LangOpts, fpEvalMethod: FPEvalMethod) void {
+    self.fpEvalMethod = fpEvalMethod;
 }
