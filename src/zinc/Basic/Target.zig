@@ -290,6 +290,11 @@ pub fn systemCompiler(target: std.Target) LangOpts.Compiler {
     return .clang;
 }
 
+pub fn hasInt128(target: std.Target) bool {
+    if (target.cpu.arch == .wasm32) return true;
+    return target.ptrBitWidth() >= 64;
+}
+
 pub fn hasFloat128(target: std.Target) bool {
     if (target.cpu.arch.isWasm()) return true;
     if (target.isDarwin()) return false;
@@ -305,10 +310,65 @@ pub fn hasFloat128(target: std.Target) bool {
     };
 }
 
-pub fn hasInt128(target: std.Target) bool {
-    if (target.cpu.arch == .wasm32) return true;
-    return target.ptrBitWidth() >= 64;
-}
+pub const FPSemantics = enum {
+    None,
+    IEEEHalf,
+    BFloat,
+    IEEESingle,
+    IEEEDouble,
+    IEEEQuad,
+    /// Minifloat 5-bit exponent 2-bit mantissa
+    E5M2,
+    /// Minifloat 4-bit exponent 3-bit mantissa
+    E4M3,
+    x87ExtendedDouble,
+    IBMExtendedDouble,
+
+    /// Only intended for generating float.h macros for the preprocessor
+    pub fn forType(ty: std.Target.CType, target: std.Target) FPSemantics {
+        std.debug.assert(ty == .float or ty == .double or ty == .longdouble);
+        return switch (target.cTypeBitSize(ty)) {
+            32 => .IEEESingle,
+            64 => .IEEEDouble,
+            80 => .x87ExtendedDouble,
+            128 => switch (target.cpu.arch) {
+                .powerpc, .powerpcle, .powerpc64, .powerpc64le => .IBMExtendedDouble,
+                else => .IEEEQuad,
+            },
+            else => unreachable,
+        };
+    }
+
+    pub fn halfPrecisionType(target: std.Target) ?FPSemantics {
+        switch (target.cpu.arch) {
+            .aarch64,
+            .aarch64_be,
+            .arm,
+            .armeb,
+            .hexagon,
+            .riscv32,
+            .riscv64,
+            .spirv32,
+            .spirv64,
+            => return .IEEEHalf,
+            .x86, .x86_64 => if (std.Target.x86.featureSetHas(target.cpu.features, .sse2)) return .IEEEHalf,
+            else => {},
+        }
+        return null;
+    }
+
+    pub fn chooseValue(self: FPSemantics, comptime T: type, values: [6]T) T {
+        return switch (self) {
+            .IEEEHalf => values[0],
+            .IEEESingle => values[1],
+            .IEEEDouble => values[2],
+            .x87ExtendedDouble => values[3],
+            .IBMExtendedDouble => values[4],
+            .IEEEQuad => values[5],
+            else => unreachable,
+        };
+    }
+};
 
 /// Value of the `-m` flag for `ld` for this target
 pub fn ldEmulationOption(target: std.Target, armEndianness: ?std.builtin.Endian) ?[]const u8 {
