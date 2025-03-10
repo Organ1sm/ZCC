@@ -101,17 +101,16 @@ pub const Specifier = union(enum) {
     ComplexUBitInt: u64,
 
     FP16,
+    Float16,
     Float,
     Double,
     LongDouble,
-    Float80,
     Float128,
     Complex,
-    ComplexFP16,
+    ComplexFloat16,
     ComplexFloat,
     ComplexDouble,
     ComplexLongDouble,
-    ComplexFloat80,
     ComplexFloat128,
 
     Pointer: *Type,
@@ -219,17 +218,17 @@ pub const Specifier = union(enum) {
             .ComplexUInt128 => "_Complex unsigned __int128",
 
             .FP16 => "__fp16",
+            .Float16 => "_Float16",
             .Float => "float",
             .Double => "double",
             .LongDouble => "long double",
-            .Float80 => "__float80",
             .Float128 => "__float128",
             .Complex => "_Complex",
-            .ComplexFP16 => "__Complex __fp16",
+
+            .ComplexFloat16 => "_Complex _Float16",
             .ComplexFloat => "_Complex float",
             .ComplexDouble => "_Complex double",
             .ComplexLongDouble => "_Complex long double",
-            .ComplexFloat80 => "_Complex __float80",
             .ComplexFloat128 => "_Complex __float128",
 
             .Attributed => |attr| TypeBuilder.fromType(attr.base).toString(langOpts),
@@ -400,16 +399,15 @@ pub fn finish(b: @This(), p: *Parser) Parser.Error!Type {
         },
 
         Specifier.FP16 => ty.specifier = .FP16,
+        Specifier.Float16 => ty.specifier = .Float16,
         Specifier.Float => ty.specifier = .Float,
         Specifier.Double => ty.specifier = .Double,
         Specifier.LongDouble => ty.specifier = .LongDouble,
-        Specifier.ComplexFP16 => ty.specifier = .ComplexFP16,
-        Specifier.Float80 => ty.specifier = .Float80,
         Specifier.Float128 => ty.specifier = .Float128,
+        Specifier.ComplexFloat16 => ty.specifier = .ComplexFloat16,
         Specifier.ComplexFloat => ty.specifier = .ComplexFloat,
         Specifier.ComplexDouble => ty.specifier = .ComplexDouble,
         Specifier.ComplexLongDouble => ty.specifier = .ComplexLongDouble,
-        Specifier.ComplexFloat80 => ty.specifier = .ComplexFloat80,
         Specifier.ComplexFloat128 => ty.specifier = .ComplexFloat128,
         Specifier.Complex => {
             try p.errToken(.plain_complex, p.tokenIdx - 1);
@@ -791,7 +789,12 @@ fn combineExtra(b: *@This(), p: *Parser, new: Specifier, sourceToken: TokenIndex
 
         .FP16 => b.specifier = switch (b.specifier) {
             .None => .FP16,
-            .Complex => .ComplexFP16,
+            else => return b.cannotCombine(p, sourceToken),
+        },
+
+        .Float16 => b.specifier = switch (b.specifier) {
+            .None => .Float16,
+            .Complex => .ComplexFloat16,
             else => return b.cannotCombine(p, sourceToken),
         },
 
@@ -810,12 +813,6 @@ fn combineExtra(b: *@This(), p: *Parser, new: Specifier, sourceToken: TokenIndex
             else => return b.cannotCombine(p, sourceToken),
         },
 
-        .Float80 => b.specifier = switch (b.specifier) {
-            .None => .Float80,
-            .Complex => .ComplexFloat80,
-            else => return b.cannotCombine(p, sourceToken),
-        },
-
         .Float128 => b.specifier = switch (b.specifier) {
             .None => .Float128,
             .Complex => .ComplexFloat128,
@@ -824,11 +821,10 @@ fn combineExtra(b: *@This(), p: *Parser, new: Specifier, sourceToken: TokenIndex
 
         .Complex => b.specifier = switch (b.specifier) {
             .None => .Complex,
-            .FP16 => .ComplexFP16,
+            .Float16 => .ComplexFloat16,
             .Float => .ComplexFloat,
             .Double => .ComplexDouble,
             .LongDouble => .ComplexLongDouble,
-            .Float80 => .ComplexFloat80,
             .Float128 => .ComplexFloat128,
 
             .Char => .ComplexChar,
@@ -866,11 +862,9 @@ fn combineExtra(b: *@This(), p: *Parser, new: Specifier, sourceToken: TokenIndex
             .UBitInt => |bits| .{ .ComplexUBitInt = bits },
 
             .Complex,
-            .ComplexFP16,
             .ComplexFloat,
             .ComplexDouble,
             .ComplexLongDouble,
-            .ComplexFloat80,
             .ComplexFloat128,
             .ComplexChar,
             .ComplexSChar,
@@ -961,17 +955,16 @@ pub fn fromType(ty: Type) Specifier {
             return .{ .ComplexBitInt = ty.data.int.bits },
 
         .FP16 => Specifier.FP16,
+        .Float16 => Specifier.Float16,
         .Float => Specifier.Float,
         .Double => Specifier.Double,
         .LongDouble => Specifier.LongDouble,
-        .Float80 => Specifier.Float80,
         .Float128 => Specifier.Float128,
 
-        .ComplexFP16 => Specifier.ComplexFP16,
+        .ComplexFloat16 => Specifier.ComplexFloat16,
         .ComplexFloat => Specifier.ComplexFloat,
         .ComplexDouble => Specifier.ComplexDouble,
         .ComplexLongDouble => Specifier.ComplexLongDouble,
-        .ComplexFloat80 => Specifier.ComplexFloat80,
         .ComplexFloat128 => Specifier.ComplexFloat128,
 
         .Pointer => .{ .Pointer = ty.data.subType },

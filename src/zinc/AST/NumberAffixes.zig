@@ -77,6 +77,18 @@ pub const Suffix = enum {
     // float and imaginary float
     F, IF,
 
+    // _Float16 and imaginary _Float16
+    F16, IF16,
+
+     // __float80 and Imaginary __float80
+    W, IW,
+
+    // _Float128
+    Q, F128,
+
+    // Imaginary _Float128
+    IQ, IF128,
+
     // Imaginary _BitInt
     IWB, IUWB,
 
@@ -109,11 +121,19 @@ pub const Suffix = enum {
 
     const FloatSuffixes = &[_]Tuple{
         .{ .F, &.{"F"} },
+        .{ .F16, &.{"F16"} },
         .{ .L, &.{"L"} },
+        .{ .W, &.{"W"} },
+        .{ .F128, &.{"F128"} },
+        .{ .Q, &.{"Q"} },
 
         .{ .I, &.{"I"} },
         .{ .IL, &.{ "I", "L" } },
+        .{ .IF16, &.{ "I", "F16" } },
         .{ .IF, &.{ "I", "F" } },
+        .{ .IW, &.{ "I", "W" } },
+        .{ .IF128, &.{ "I", "F128" } },
+        .{ .IQ, &.{ "I", "Q" } },
     };
 
     pub fn fromString(buf: []const u8, suffixKind: enum { int, float }) ?Suffix {
@@ -123,7 +143,7 @@ pub const Suffix = enum {
             .float => FloatSuffixes,
             .int => IntSuffixes,
         };
-        var scratch: [2]u8 = undefined;
+        var scratch: [4]u8 = undefined;
         top: for (suffixes) |candidate| {
             const tag = candidate[0];
             const parts = candidate[1];
@@ -143,8 +163,8 @@ pub const Suffix = enum {
 
     pub fn isImaginary(suffix: Suffix) bool {
         return switch (suffix) {
-            .I, .IL, .IF, .IU, .IUL, .ILL, .IULL, .IWB, .IUWB => true,
-            .None, .L, .F, .U, .UL, .LL, .ULL, .WB, .UWB => false,
+            .I, .IL, .IF, .IF16, .IU, .IUL, .ILL, .IULL, .IWB, .IUWB, .IW, .IF128, .IQ => true,
+            .None, .L, .F16, .F, .U, .UL, .LL, .ULL, .WB, .UWB, .W, .F128, .Q => false,
         };
     }
 
@@ -152,7 +172,7 @@ pub const Suffix = enum {
         return switch (suffix) {
             .None, .L, .LL, .I, .IL, .ILL, .WB, .IWB => true,
             .U, .UL, .ULL, .IU, .IUL, .IULL, .UWB, .IUWB => false,
-            .F, .IF => unreachable,
+            .F, .IF, .F16, .IF16, .W, .IW, .F128, .IF128, .Q, .IQ => unreachable,
         };
     }
 
@@ -165,5 +185,9 @@ pub const Suffix = enum {
             .WB, .UWB, .IWB, .IUWB => true,
             else => false,
         };
+    }
+
+    pub fn isFloat80(suffix: Suffix) bool {
+        return suffix == .W or suffix == .IW;
     }
 };

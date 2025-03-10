@@ -296,8 +296,8 @@ pub const Tag = enum(u8) {
         piece1: u32,
 
         pub fn get(self: F64) f64 {
-            const int_bits = @as(u64, self.piece0) | (@as(u64, self.piece1) << 32);
-            return @bitCast(int_bits);
+            const intBits = @as(u64, self.piece0) | (@as(u64, self.piece1) << 32);
+            return @bitCast(intBits);
         }
 
         fn pack(val: f64) F64 {
@@ -479,11 +479,11 @@ pub fn put(self: *Interner, gpa: Allocator, key: Key) !Ref {
                 .data = try self.addExtra(gpa, Tag.F64.pack(data)),
             }),
             .f80 => |data| self.items.appendAssumeCapacity(.{
-                .tag = .f64,
+                .tag = .f80,
                 .data = try self.addExtra(gpa, Tag.F80.pack(data)),
             }),
             .f128 => |data| self.items.appendAssumeCapacity(.{
-                .tag = .f64,
+                .tag = .f128,
                 .data = try self.addExtra(gpa, Tag.F128.pack(data)),
             }),
         },

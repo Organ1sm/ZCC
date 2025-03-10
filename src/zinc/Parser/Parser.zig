@@ -721,8 +721,12 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
 
         const ty = &pp.comp.types.vaList;
         try p.addImplicitTypedef("__builtin_va_list", ty.*);
-        if (ty.isArray())
-            ty.decayArray();
+
+        if (ty.isArray()) ty.decayArray();
+
+        if (p.comp.float80Type()) |float80Ty| {
+            try p.addImplicitTypedef("__float80", float80Ty);
+        }
     }
 
     const implicitTypedefCount = p.declBuffer.items.len;
@@ -1912,11 +1916,15 @@ fn parseTypeSpec(p: *Parser, ty: *TypeBuilder) Error!bool {
             .KeywordSigned => try ty.combine(p, .Signed, p.tokenIdx),
             .KeywordUnsigned => try ty.combine(p, .Unsigned, p.tokenIdx),
             .KeywordFp16 => try ty.combine(p, .FP16, p.tokenIdx),
+            .KeywordFloat16 => try ty.combine(p, .Float16, p.tokenIdx),
             .KeywordFloat => try ty.combine(p, .Float, p.tokenIdx),
             .KeywordDouble => try ty.combine(p, .Double, p.tokenIdx),
             .KeywordComplex => try ty.combine(p, .Complex, p.tokenIdx),
-            .KeywordFloat80 => try ty.combine(p, .Float80, p.tokenIdx),
-            .KeywordFloat128 => try ty.combine(p, .Float128, p.tokenIdx),
+            .KeywordFloat128_, .KeywordFloat128__ => {
+                if (!p.comp.hasFloat128())
+                    try p.errStr(.type_not_supported_on_target, p.tokenIdx, p.currToken().lexeme().?);
+                try ty.combine(p, .Float128, p.tokenIdx);
+            },
 
             .KeywordAtomic => {
                 const atomicToken = p.tokenIdx;
@@ -6649,6 +6657,7 @@ const CallExpr = union(enum) {
             .standard => true,
             .builtin => |builtin| switch (builtin.tag) {
                 .__builtin_va_start, .__va_start, .va_start => arg_idx != 1,
+                .__builtin_complex => false,
                 else => true,
             },
         };
@@ -7216,7 +7225,10 @@ fn parseFloat(p: *Parser, buf: []const u8, suffix: NumberSuffix, tokenIdx: Token
     const ty = switch (suffix) {
         .None, .I => Type.Double,
         .F, .IF => Type.Float,
+        .F16, .IF16 => Type.Float16,
         .L, .IL => Type.LongDouble,
+        .W, .IW => p.comp.float80Type().?,
+        .Q, .IQ, .F128, .IF128 => Type.Float128,
         else => unreachable,
     };
 
@@ -7250,8 +7262,11 @@ fn parseFloat(p: *Parser, buf: []const u8, suffix: NumberSuffix, tokenIdx: Token
         try p.err(.gnu_imaginary_constant);
         res.ty = switch (suffix) {
             .I => Type.ComplexDouble,
+            .IF16 => Type.ComplexFloat16,
             .IF => Type.ComplexFloat,
             .IL => Type.ComplexLongDouble,
+            .IW => p.comp.float80Type().?.makeComplex(),
+            .IQ, .IF128 => Type.ComplexFloat128,
             else => unreachable,
         };
         res.value = .{}; // TOOD: add complex values
@@ -7513,6 +7528,11 @@ pub fn parseNumberToken(p: *Parser, tokenIdx: TokenIndex) !Result {
             try p.errStr(.invalid_int_suffix, tokenIdx, suffixStr);
         return error.ParsingFailed;
     };
+
+    if (suffix.isFloat80() and p.comp.float80Type() == null) {
+        try p.errStr(.invalid_float_suffix, tokenIdx, suffixStr);
+        return error.ParsingFailed;
+    }
 
     if (isFloat) {
         assert(prefix == .hex or prefix == .decimal);
