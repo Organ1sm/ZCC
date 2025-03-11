@@ -724,6 +724,8 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
 
         if (ty.isArray()) ty.decayArray();
 
+        try p.addImplicitTypedef("__NSConstantString", pp.comp.types.nsConstantString.ty);
+
         if (p.comp.float80Type()) |float80Ty| {
             try p.addImplicitTypedef("__float80", float80Ty);
         }

@@ -111,6 +111,13 @@ types: struct {
     ptrdiff: Type = undefined,
     size: Type = undefined,
     vaList: Type = undefined,
+    nsConstantString: struct {
+        ty: Type = undefined,
+        record: Type.Record = undefined,
+        fields: [4]Type.Record.Field = undefined,
+        intTy_: Type = .{ .specifier = .Int, .qual = .{ .@"const" = true } },
+        charTy_: Type = .{ .specifier = .Char, .qual = .{ .@"const" = true } },
+    } = .{},
     intmax: Type = Type.Invalid,
     intptr: Type = Type.Invalid,
     int16: Type = Type.Invalid,
@@ -643,6 +650,26 @@ fn generateBuiltinTypes(comp: *Compilation) !void {
         .uintLeast16Ty = comp.intLeastN(16, .unsigned),
         .uintLeast32Ty = comp.intLeastN(32, .unsigned),
     };
+
+    try comp.generateNsConstantStringType();
+}
+
+fn generateNsConstantStringType(comp: *Compilation) !void {
+    comp.types.nsConstantString.record = .{
+        .name = try comp.internString("__NSConstantString_tag"),
+        .fields = &comp.types.nsConstantString.fields,
+        .fieldAttributes = null,
+        .typeLayout = undefined,
+    };
+    const constIntPtr = Type{ .specifier = .Pointer, .data = .{ .subType = &comp.types.nsConstantString.intTy_ } };
+    const constCharPtr = Type{ .specifier = .Pointer, .data = .{ .subType = &comp.types.nsConstantString.charTy_ } };
+
+    comp.types.nsConstantString.fields[0] = .{ .name = try comp.internString("isa"), .ty = constIntPtr };
+    comp.types.nsConstantString.fields[1] = .{ .name = try comp.internString("flags"), .ty = Type.Int };
+    comp.types.nsConstantString.fields[2] = .{ .name = try comp.internString("str"), .ty = constCharPtr };
+    comp.types.nsConstantString.fields[3] = .{ .name = try comp.internString("length"), .ty = Type.Long };
+    comp.types.nsConstantString.ty = .{ .specifier = .Struct, .data = .{ .record = &comp.types.nsConstantString.record } };
+    RecordLayout.compute(&comp.types.nsConstantString.record, comp.types.nsConstantString.ty, comp, null);
 }
 
 pub fn hasFloat128(comp: *const Compilation) bool {

@@ -10,10 +10,13 @@ implicit typedef: '*char'
 implicit typedef: '[1]struct __va_list_tag'
  name: __builtin_va_list
 
+implicit typedef: 'struct __NSConstantString_tag'
+ name: __NSConstantString
+
 variable: 'attributed(int)'
  attr: aligned alignment: zinc.Lexer.Attribute.Alignment{ .node = zinc.AST.AST.Node.OptIndex.null, .requested = 4 }
  attr: aligned alignment: zinc.Lexer.Attribute.Alignment{ .node = zinc.AST.AST.Node.OptIndex.null, .requested = 4 }
- attr: aligned alignment: zinc.Lexer.Attribute.Alignment{ .node = zinc.AST.AST.Node.OptIndex(4), .requested = 16 }
+ attr: aligned alignment: zinc.Lexer.Attribute.Alignment{ .node = zinc.AST.AST.Node.OptIndex(5), .requested = 16 }
  name: a
 
 variable: 'const volatile int'

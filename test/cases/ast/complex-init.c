@@ -10,6 +10,9 @@ implicit typedef: '*char'
 implicit typedef: '[1]struct __va_list_tag'
  name: __builtin_va_list
 
+implicit typedef: 'struct __NSConstantString_tag'
+ name: __NSConstantString
+
 fnDef: 'fn () void'
  name: foo
  body:
