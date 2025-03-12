@@ -363,6 +363,13 @@ implicit_builtin
     .kind = .@"error"
     .all = true
 
+implicit_builtin_header_note
+    .msg = "include the header <{s}.h> or explicitly provide a declaration for '{s}'"
+    .extra = .builtinWithHeader
+    .opt = W("implicit-function-declaration")
+    .kind = .note
+    .all = true
+
 expected_param_decl
     .msg = "expected parameter declaration"
     .kind = .@"error"

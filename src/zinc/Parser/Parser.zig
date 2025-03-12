@@ -6889,27 +6889,6 @@ fn parsePrimaryExpr(p: *Parser) Error!?Result {
             const name = p.getTokenText(nameToken);
             const internedName = try p.comp.internString(name);
 
-            // check if this is a builtin call
-            if (try p.comp.builtins.getOrCreate(p.comp, name, p.arena)) |some| {
-                for (p.tokenIds[p.tokenIdx..]) |id| switch (id) {
-                    .RParen => {}, // closing grouped expr
-                    .LParen => break, // beginning of a call
-                    else => {
-                        try p.errToken(.builtin_must_be_called, nameToken);
-                        return error.ParsingFailed;
-                    },
-                };
-                return .{
-                    .ty = some.ty,
-                    .node = try p.addNode(.{
-                        .builtinRef = .{
-                            .nameToken = nameToken,
-                            .type = some.ty,
-                        },
-                    }),
-                };
-            }
-
             if (p.symStack.findSymbol(internedName)) |sym| {
                 try p.checkDeprecatedUnavailable(sym.type, nameToken, sym.token);
                 if (sym.kind == .constexpr) {
@@ -6948,6 +6927,38 @@ fn parsePrimaryExpr(p: *Parser) Error!?Result {
                     .value = if (p.constDeclFolding == .NoConstDeclFolding and sym.kind != .enumeration) Value{} else sym.value,
                     .ty = sym.type,
                     .node = node,
+                };
+            }
+
+            // check if this is a builtin call
+            if (try p.comp.builtins.getOrCreate(p.comp, name, p.arena)) |some| {
+                for (p.tokenIds[p.tokenIdx..]) |id| switch (id) {
+                    .RParen => {}, // closing grouped expr
+                    .LParen => break, // beginning of a call
+                    else => {
+                        try p.errToken(.builtin_must_be_called, nameToken);
+                        return error.ParsingFailed;
+                    },
+                };
+
+                if (some.builtin.properties.header != .none) {
+                    try p.errStr(.implicit_builtin, nameToken, name);
+                    try p.errExtra(.implicit_builtin_header_note, nameToken, .{
+                        .builtinWithHeader = .{
+                            .builtin = some.builtin.tag,
+                            .header = some.builtin.properties.header,
+                        },
+                    });
+                }
+
+                return .{
+                    .ty = some.ty,
+                    .node = try p.addNode(.{
+                        .builtinRef = .{
+                            .nameToken = nameToken,
+                            .type = some.ty,
+                        },
+                    }),
                 };
             }
 

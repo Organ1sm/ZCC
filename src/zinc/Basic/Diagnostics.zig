@@ -5,6 +5,9 @@ const TokenType = @import("TokenType.zig").TokenType;
 const Tree = @import("../AST/AST.zig");
 const Compilation = @import("Compilation.zig");
 const Attribute = @import("../Lexer/Attribute.zig");
+const Builtins = @import("../Builtins.zig");
+const Builtin = Builtins.Builtin;
+const Header = @import("../Builtins/Properties.zig").Header;
 const LangOpts = @import("../Basic/LangOpts.zig");
 const IsWindows = @import("builtin").os.tag == .windows;
 
@@ -48,6 +51,10 @@ pub const Message = struct {
         ignoredRecordAttr: struct {
             tag: Attribute.Tag,
             specifier: enum { @"struct", @"union", @"enum" },
+        },
+        builtinWithHeader: struct {
+            builtin: Builtin.Tag,
+            header: Header,
         },
         invalidEscape: struct {
             offset: u32,
@@ -430,6 +437,10 @@ pub fn renderMessage(comp: *Compilation, m: anytype, msg: Message) void {
         .ignoredRecordAttr => printRt(m, prop.msg, .{ "{s}", "{s}" }, .{
             @tagName(msg.extra.ignoredRecordAttr.tag),
             @tagName(msg.extra.ignoredRecordAttr.specifier),
+        }),
+        .builtinWithHeader => printRt(m, prop.msg, .{ "{s}", "{s}" }, .{
+            @tagName(msg.extra.builtinWithHeader.header),
+            Builtin.nameFromTag(msg.extra.builtinWithHeader.builtin).span(),
         }),
         .invalidEscape => {
             if (std.ascii.isPrint(msg.extra.invalidEscape.char)) {
