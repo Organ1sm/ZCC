@@ -111,6 +111,7 @@ types: struct {
     ptrdiff: Type = undefined,
     size: Type = undefined,
     vaList: Type = undefined,
+    pidTy: Type = undefined,
     nsConstantString: struct {
         ty: Type = undefined,
         record: Type.Record = undefined,
@@ -633,6 +634,11 @@ fn generateBuiltinTypes(comp: *Compilation) !void {
 
     const vaList = try comp.generateVaListType();
 
+    const pidTy: Type = switch (os) {
+        .haiku => Type.Long,
+        else => Type.Int,
+    };
+
     const intmax = Target.intMaxType(comp.target);
     const intptr = Target.intPtrType(comp.target);
     const int16 = Target.int16Type(comp.target);
@@ -643,6 +649,7 @@ fn generateBuiltinTypes(comp: *Compilation) !void {
         .ptrdiff = ptrdiff,
         .size = size,
         .vaList = vaList,
+        .pidTy = pidTy,
         .intmax = intmax,
         .intptr = intptr,
         .int16 = int16,
