@@ -147,6 +147,10 @@ pragmaPack: ?u8 = null,
 stringsIds: struct {
     declSpecId: StringId,
     mainId: StringId,
+    file: StringId,
+    jmpBuf: StringId,
+    sigJmpBuf: StringId,
+    ucontextTy: StringId,
 },
 
 const Label = union(enum) {
@@ -677,6 +681,10 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
         .stringsIds = .{
             .declSpecId = try pp.comp.internString("__declspec"),
             .mainId = try pp.comp.internString("main"),
+            .file = try pp.comp.internString("FILE"),
+            .jmpBuf = try pp.comp.internString("jmp_buf"),
+            .sigJmpBuf = try pp.comp.internString("sigjmp_buf"),
+            .ucontextTy = try pp.comp.internString("ucontext_t"),
         },
     };
 
@@ -898,6 +906,19 @@ fn skipTo(p: *Parser, id: TokenType) void {
             .Eof => return,
             else => {},
         }
+    }
+}
+
+/// Called after a typedef is defined
+fn typedefDefined(p: *Parser, name: StringId, ty: Type) void {
+    if (name == p.stringsIds.file) {
+        p.comp.types.file = ty;
+    } else if (name == p.stringsIds.jmpBuf) {
+        p.comp.types.jmpBuffer = ty;
+    } else if (name == p.stringsIds.sigJmpBuf) {
+        p.comp.types.sigjmpBuffer = ty;
+    } else if (name == p.stringsIds.ucontextTy) {
+        p.comp.types.ucontextTy = ty;
     }
 }
 
@@ -1216,6 +1237,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
         const internedName = try p.getInternString(initDeclarator.d.name);
         if (declSpec.storageClass == .typedef) {
             try p.symStack.defineTypedef(internedName, initDeclarator.d.type, initDeclarator.d.name, declNode);
+            p.typedefDefined(internedName, initDeclarator.d.type);
         } else if (initDeclarator.initializer) |init| {
             // TODO validate global variable/constexpr initializer comptime known
             try p.symStack.defineSymbol(
