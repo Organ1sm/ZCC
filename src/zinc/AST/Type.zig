@@ -1494,6 +1494,21 @@ pub fn sameRankDifferentSign(lhs: Type, rhs: Type, comp: *const Compilation) boo
     return lhs.isUnsignedInt(comp) != rhs.isUnsignedInt(comp);
 }
 
+/// Rank for floating point conversions, ignoring domain (complex vs real)
+/// Asserts that ty is a floating point type
+pub fn floatRank(ty: Type) usize {
+    const real = ty.makeReal();
+    return switch (real.specifier) {
+        .Float16 => 1,
+        .FP16 => 2,
+        .Float => 3,
+        .Double => 4,
+        .LongDouble => 5,
+        .Float128 => 6,
+        else => unreachable,
+    };
+}
+
 pub fn makeReal(ty: Type) Type {
     // TODO discards attributed/typeof
     var base = ty.canonicalize(.standard);

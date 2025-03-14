@@ -588,15 +588,19 @@ pub fn floatCast(res: *Result, p: *Parser, floatType: Type, token: TokenIndex) E
             res.ty = floatType;
             try res.implicitCast(p, .FloatCast, token);
         } else if (oldReal) {
-            res.ty = floatType.makeReal();
-            try res.implicitCast(p, .FloatCast, token);
+            if (res.ty.floatRank() != floatType.floatRank()) {
+                res.ty = floatType.makeReal();
+                try res.implicitCast(p, .FloatCast, token);
+            }
             res.ty = floatType;
             try res.implicitCast(p, .RealToComplexFloat, token);
         } else if (newReal) {
             res.ty = res.ty.makeReal();
             try res.implicitCast(p, .ComplexFloatToReal, token);
-            res.ty = floatType;
-            try res.implicitCast(p, .FloatCast, token);
+            if (res.ty.floatRank() != floatType.floatRank()) {
+                res.ty = floatType;
+                try res.implicitCast(p, .FloatCast, token);
+            }
         } else {
             res.ty = floatType;
             try res.implicitCast(p, .ComplexFloatCast, token);
