@@ -647,6 +647,10 @@ pub fn nullCast(res: *Result, p: *Parser, ptrType: Type, token: TokenIndex) Erro
 /// Returns:
 ///   - The cast value if the cast was successful. Otherwise, an error.
 pub fn usualUnaryConversion(res: *Result, p: *Parser, token: TokenIndex) Error!void {
+    if (res.ty.is(.FP16) and !p.comp.langOpts.useNativeHalfType) {
+        return res.floatCast(p, Type.Float, token);
+    }
+
     if (res.ty.isInt() and !p.inMacro) {
         if (p.tree.bitfieldWidth(res.node, true)) |width| {
             if (res.ty.bitfieldPromotion(p.comp, width)) |promotedTy|

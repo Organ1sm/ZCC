@@ -123,6 +123,7 @@ const usage =
     \\                          Use `# <num>` linemarkers in preprocessed output
     \\  -fmacro-backtrace-limit=<limit>
     \\                          Set limit on how many macro expansion traces are shown in errors (default 6)
+    \\  -fnative-half-type      Use the native half type for __fp16 instead of promoting to float
     \\  -I <dir>                Add directory to include search path
     \\  -isystem                Add directory to system include search path
     \\  --emulate=[clang|gcc|msvc]
@@ -278,6 +279,8 @@ pub fn parseArgs(
                 };
                 if (limit == 0) limit = std.math.maxInt(u32);
                 d.comp.diagnostics.macroBacktraceLimit = limit;
+            } else if (std.mem.eql(u8, arg, "-fnative-half-type")) {
+                d.comp.langOpts.useNativeHalfType = true;
             } else if (std.mem.startsWith(u8, arg, "-I")) {
                 var path = arg["-I".len..];
                 if (path.len == 0) {

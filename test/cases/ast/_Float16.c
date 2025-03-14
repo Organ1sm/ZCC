@@ -122,18 +122,19 @@ fnDef: 'fn () void'
              name: f16
 
     cast: (ToVoid) 'void'
-      parenExpr: '__fp16'
+      parenExpr: 'float'
        operand:
-        addExpr: '__fp16'
+        addExpr: 'float'
          lhs:
-          implicit cast: (FloatCast) '__fp16'
+          implicit cast: (FloatCast) 'float'
             implicit cast: (LValToRVal) '_Float16'
               declRefExpr: '_Float16' lvalue
                name: f16
          rhs:
-          implicit cast: (LValToRVal) '__fp16'
-            declRefExpr: '__fp16' lvalue
-             name: fp16
+          implicit cast: (FloatCast) 'float'
+            implicit cast: (LValToRVal) '__fp16'
+              declRefExpr: '__fp16' lvalue
+               name: fp16
 
     implicit returnStmt: 'void'
 

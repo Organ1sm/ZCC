@@ -127,9 +127,10 @@ preserveCommentsInMacros: bool = false,
 
 /// Whether to allow GNU-style inline assembly
 gnuAsm: bool = true,
-
 /// null indicates that the user did not select a value, use target to determine default
 fpEvalMethod: ?FPEvalMethod = null,
+/// If set, use the native half type instead of promoting to float
+useNativeHalfType: bool = false,
 
 pub fn setStandard(self: *LangOpts, name: []const u8) error{InvalidStandard}!void {
     self.standard = Standard.NameMap.get(name) orelse return error.InvalidStandard;
