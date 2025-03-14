@@ -368,6 +368,10 @@ pub fn defineParam(
             else => unreachable,
         }
     }
+
+    if (ty.is(.FP16))
+        try self.p.errStr(.suggest_pointer_for_invalid_fp16, token, "parameters");
+
     try self.define(.{
         .kind = .definition,
         .name = name,
