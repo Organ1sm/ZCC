@@ -294,6 +294,13 @@ pub fn hasInt128(target: std.Target) bool {
     return target.ptrBitWidth() >= 64;
 }
 
+pub fn hasHalfPrecisionFloatABI(target: std.Target) bool {
+    return switch (target.cpu.arch) {
+        .thumb, .thumbeb, .arm, .aarch64 => true,
+        else => false,
+    };
+}
+
 pub fn hasFloat128(target: std.Target) bool {
     if (target.cpu.arch.isWasm()) return true;
     if (target.os.tag.isDarwin()) return false;

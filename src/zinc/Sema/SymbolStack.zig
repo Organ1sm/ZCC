@@ -369,7 +369,7 @@ pub fn defineParam(
         }
     }
 
-    if (ty.is(.FP16))
+    if (ty.is(.FP16) and !self.p.comp.hasHalfPrecisionFloatABI())
         try self.p.errStr(.suggest_pointer_for_invalid_fp16, token, "parameters");
 
     try self.define(.{

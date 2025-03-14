@@ -683,6 +683,10 @@ fn generateNsConstantStringType(comp: *Compilation) !void {
     RecordLayout.compute(&comp.types.nsConstantString.record, comp.types.nsConstantString.ty, comp, null);
 }
 
+pub fn hasHalfPrecisionFloatABI(comp: *const Compilation) bool {
+    return Target.hasHalfPrecisionFloatABI(comp.target);
+}
+
 pub fn hasFloat128(comp: *const Compilation) bool {
     return Target.hasFloat128(comp.target);
 }
