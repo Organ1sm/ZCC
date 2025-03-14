@@ -6666,30 +6666,30 @@ const CallExpr = union(enum) {
         return .{ .standard = funcNode };
     }
 
-    fn shouldPerformLvalConversion(self: CallExpr, arg_idx: u32) bool {
+    fn shouldPerformLvalConversion(self: CallExpr, argIdx: u32) bool {
         return switch (self) {
             .standard => true,
             .builtin => |builtin| switch (builtin.tag) {
-                .__builtin_va_start, .__va_start, .va_start => arg_idx != 1,
+                .__builtin_va_start, .__va_start, .va_start => argIdx != 1,
                 else => true,
             },
         };
     }
 
-    fn shouldPromoteVarArg(self: CallExpr, arg_idx: u32) bool {
+    fn shouldPromoteVarArg(self: CallExpr, argIdx: u32) bool {
         return switch (self) {
             .standard => true,
             .builtin => |builtin| switch (builtin.tag) {
-                .__builtin_va_start, .__va_start, .va_start => arg_idx != 1,
+                .__builtin_va_start, .__va_start, .va_start => argIdx != 1,
                 .__builtin_complex => false,
                 else => true,
             },
         };
     }
 
-    fn shouldCoerceArg(self: CallExpr, arg_idx: u32) bool {
+    fn shouldCoerceArg(self: CallExpr, argIdx: u32) bool {
         _ = self;
-        _ = arg_idx;
+        _ = argIdx;
         return true;
     }
 

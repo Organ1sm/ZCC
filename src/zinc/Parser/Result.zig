@@ -647,8 +647,13 @@ pub fn nullCast(res: *Result, p: *Parser, ptrType: Type, token: TokenIndex) Erro
 /// Returns:
 ///   - The cast value if the cast was successful. Otherwise, an error.
 pub fn usualUnaryConversion(res: *Result, p: *Parser, token: TokenIndex) Error!void {
-    if (res.ty.isInt())
-        try res.intCast(p, res.ty.integerPromotion(p.comp), token);
+    if (res.ty.isInt() and !p.inMacro) {
+        if (p.tree.bitfieldWidth(res.node, true)) |width| {
+            if (res.ty.bitfieldPromotion(p.comp, width)) |promotedTy|
+                return res.intCast(p, promotedTy, token);
+        }
+        return res.intCast(p, res.ty.integerPromotion(p.comp), token);
+    }
 }
 
 fn usualArithmeticConversion(lhs: *Result, rhs: *Result, p: *Parser, token: TokenIndex) Error!void {

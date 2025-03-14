@@ -1020,6 +1020,19 @@ pub fn integerPromotion(ty: Type, comp: *Compilation) Type {
     };
 }
 
+pub fn bitfieldPromotion(ty: Type, comp: *Compilation, width: usize) ?Type {
+    const typeSizeBits = ty.sizeof(comp).?;
+
+    // Note: GCC and clang will promote `long: 3` to int even though the C standard does not allow this
+    if (width < typeSizeBits) return Int;
+
+    if (width == typeSizeBits) {
+        return if (ty.isUnsignedInt(comp)) UInt else Int;
+    }
+
+    return null;
+}
+
 pub fn hasIncompleteSize(ty: Type) bool {
     if (ty.isDecayed())
         return false;
