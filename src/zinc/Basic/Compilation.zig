@@ -684,7 +684,7 @@ fn generateNsConstantStringType(comp: *Compilation) !void {
 }
 
 pub fn hasHalfPrecisionFloatABI(comp: *const Compilation) bool {
-    return Target.hasHalfPrecisionFloatABI(comp.target);
+    return comp.langOpts.allowHalfArgsAndReturns or Target.hasHalfPrecisionFloatABI(comp.target);
 }
 
 pub fn hasFloat128(comp: *const Compilation) bool {
