@@ -1668,6 +1668,10 @@ pub fn validateCombinedType(ty: Type, p: *Parser, sourceToken: TokenIndex) Parse
                 try p.errStr(.qual_on_ret_type, sourceToken, "atomic");
                 returnType.qual.atomic = false;
             }
+
+            if (returnType.is(.FP16) and !p.comp.hasHalfPrecisionFloatABI()) {
+                try p.errStr(.suggest_pointer_for_invalid_fp16, sourceToken, "function return value");
+            }
         },
 
         .TypeofType => return ty.data.subType.validateCombinedType(p, sourceToken),
