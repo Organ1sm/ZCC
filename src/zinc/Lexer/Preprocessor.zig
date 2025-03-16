@@ -475,6 +475,85 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!TokenWithExpans
                         }
                     },
 
+                    .KeywordElifdef => {
+                        if (ifContext.level == 0) {
+                            try pp.addError(directive, .elifdef_without_if);
+                            _ = ifContext.increment();
+                            ifContext.set(.untilElse);
+                        } else if (ifContext.level == 1) {
+                            guardName = null;
+                        }
+
+                        switch (ifContext.get()) {
+                            .untilElse => {
+                                const macroName = try pp.expectMacroName(&lexer);
+                                if (macroName == null) {
+                                    ifContext.set(.untilElse);
+                                    try pp.skip(&lexer, .untilElse);
+                                    if (pp.verbose)
+                                        pp.verboseLog(directive, "entering then branch of #elifdef", .{});
+                                } else {
+                                    try pp.expectNewLine(&lexer);
+                                    if (pp.defines.get(macroName.?) != null) {
+                                        ifContext.set(.untilEndIf);
+                                        if (pp.verbose)
+                                            pp.verboseLog(directive, "entering else branch of #elifdef", .{});
+                                    } else {
+                                        ifContext.set(.untilElse);
+                                        try pp.skip(&lexer, .untilElse);
+                                        if (pp.verbose)
+                                            pp.verboseLog(directive, "entering then branch of #elifdef", .{});
+                                    }
+                                }
+                            },
+
+                            .untilEndIf => try pp.skip(&lexer, .untilEndIf),
+                            .untilEndIfSeenElse => {
+                                try pp.addError(directive, .elifdef_after_else);
+                                skipToNewLine(&lexer);
+                            },
+                        }
+                    },
+
+                    .KeywordElifndef => {
+                        if (ifContext.level == 0) {
+                            try pp.addError(directive, .elifndef_without_if);
+                            _ = ifContext.increment();
+                            ifContext.set(.untilElse);
+                        } else if (ifContext.level == 1) {
+                            guardName = null;
+                        }
+
+                        switch (ifContext.get()) {
+                            .untilElse => {
+                                const macroName = try pp.expectMacroName(&lexer);
+                                if (macroName == null) {
+                                    ifContext.set(.untilElse);
+                                    try pp.skip(&lexer, .untilElse);
+                                    if (pp.verbose)
+                                        pp.verboseLog(directive, "entering then branch of #elifndef", .{});
+                                } else {
+                                    try pp.expectNewLine(&lexer);
+                                    if (pp.defines.get(macroName.?) == null) {
+                                        ifContext.set(.untilEndIf);
+                                        if (pp.verbose)
+                                            pp.verboseLog(directive, "entering else branch of #elifndef", .{});
+                                    } else {
+                                        ifContext.set(.untilElse);
+                                        try pp.skip(&lexer, .untilElse);
+                                        if (pp.verbose)
+                                            pp.verboseLog(directive, "entering then branch of #elifndef", .{});
+                                    }
+                                }
+                            },
+                            .untilEndIf => try pp.skip(&lexer, .untilEndIf),
+                            .untilEndIfSeenElse => {
+                                try pp.addError(directive, .elifndef_after_else);
+                                skipToNewLine(&lexer);
+                            },
+                        }
+                    },
+
                     .KeywordElse => {
                         try pp.expectNewLine(&lexer);
 
@@ -1004,27 +1083,41 @@ fn skip(
             const directive = lexer.nextNoWhiteSpace();
             switch (directive.id) {
                 .KeywordElse => {
-                    if (ifsSeen != 0)
-                        continue;
-
+                    if (ifsSeen != 0) continue;
                     if (cont == .untilEndIfSeenElse) {
                         try pp.addError(directive, .else_after_else);
                         continue;
                     }
-
                     lexer.* = savedLexer;
                     return;
                 },
 
                 .KeywordElIf => {
-                    if (ifsSeen != 0 or cont == .untilEndIf)
-                        continue;
-
+                    if (ifsSeen != 0 or cont == .untilEndIf) continue;
                     if (cont == .untilEndIfSeenElse) {
                         try pp.addError(directive, .elif_after_else);
                         continue;
                     }
+                    lexer.* = savedLexer;
+                    return;
+                },
 
+                .KeywordElifdef => {
+                    if (ifsSeen != 0 or cont == .untilEndIf) continue;
+                    if (cont == .untilEndIfSeenElse) {
+                        try pp.addError(directive, .elifdef_after_else);
+                        continue;
+                    }
+                    lexer.* = savedLexer;
+                    return;
+                },
+
+                .KeywordElifndef => {
+                    if (ifsSeen != 0 or cont == .untilEndIf) continue;
+                    if (cont == .untilEndIfSeenElse) {
+                        try pp.addError(directive, .elifndef_after_else);
+                        continue;
+                    }
                     lexer.* = savedLexer;
                     return;
                 },
