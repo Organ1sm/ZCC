@@ -66,6 +66,8 @@ pub const Token = struct {
             .KeywordTrue,
             .KeywordFalse,
             .KeywordNullptr,
+            .KeywordElifdef,
+            .KeywordElifndef,
             .KeywordTypeofUnqual,
             => if (standard.atLeast(.c23)) kw else .Identifier,
 
@@ -167,6 +169,8 @@ pub const Token = struct {
         .{ "ifdef", .KeywordIfdef },
         .{ "ifndef", .KeywordIfndef },
         .{ "elif", .KeywordElIf },
+        .{ "elifdef", .KeywordElifdef },
+        .{ "elifndef", .KeywordElifndef },
         .{ "endif", .KeywordEndIf },
         .{ "error", .KeywordError },
         .{ "warning", .KeywordWarning },
