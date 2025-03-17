@@ -19,8 +19,8 @@
 - [x] `#include_next`
 - [x] `#pragma`
 - [x] `#embed`
-- [ ] `#elifdef`
-- [ ] `#elifndef`
+- [x] `#elifdef`
+- [x] `#elifndef`
 
 ### Builtin Macros
 
