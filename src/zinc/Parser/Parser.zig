@@ -6650,6 +6650,27 @@ fn checkVaStartArg(
     }
 }
 
+fn checkComplexArg(
+    p: *Parser,
+    builtinTok: TokenIndex,
+    firstAfter: TokenIndex,
+    paramTok: TokenIndex,
+    arg: *Result,
+    idx: u32,
+) !void {
+    _ = builtinTok;
+    _ = firstAfter;
+    if (idx <= 1 and !arg.ty.isFloat()) {
+        try p.errStr(.not_floating_type, paramTok, try p.typeStr(arg.ty));
+    } else if (idx == 1) {
+        const prevIdx = p.listBuffer.items[p.listBuffer.items.len - 1];
+        const prevTy = prevIdx.type(&p.tree);
+        if (!prevTy.eql(arg.ty, p.comp, false)) {
+            try p.errStr(.argument_types_differ, paramTok, try p.typePairStrExtra(prevTy, " vs ", arg.ty));
+        }
+    }
+}
+
 const CallExpr = union(enum) {
     standard: Node.Index,
     builtin: struct {
@@ -6699,6 +6720,7 @@ const CallExpr = union(enum) {
         const builtinToken = self.builtin.builtinToken;
         switch (self.builtin.tag) {
             .__builtin_va_start, .__va_start, .va_start => return p.checkVaStartArg(builtinToken, firstAfter, paramToken, arg, argIdx),
+            .__builtin_complex => return p.checkComplexArg(builtinToken, firstAfter, paramToken, arg, argIdx),
             else => {},
         }
     }
@@ -6825,23 +6847,25 @@ fn parseCallExpr(p: *Parser, lhs: Result) Error!?Result {
         };
     }
 
+    const actual: u32 = @intCast(argCount);
     const extra = Diagnostics.Message.Extra{
         .arguments = .{
             .expected = @intCast(params.len),
-            .actual = @intCast(argCount),
+            .actual = actual,
         },
     };
-    if (ty.is(.Func) and params.len != argCount)
-        try p.errExtra(.expected_arguments, firstAfter, extra);
 
-    if (ty.is(.OldStyleFunc) and params.len != argCount) {
+    if (callExpr.paramCountOverride()) |expected| {
+        if (expected != actual)
+            try p.errExtra(.expected_arguments, firstAfter, extra);
+    } else if (ty.is(.Func) and params.len != argCount) {
+        try p.errExtra(.expected_arguments, firstAfter, extra);
+    } else if (ty.is(.OldStyleFunc) and params.len != argCount) {
         if (params.len == 0)
             try p.errToken(.passing_args_to_kr, firstAfter)
         else
             try p.errExtra(.expected_arguments_old, firstAfter, extra);
-    }
-
-    if (ty.is(.VarArgsFunc) and argCount < params.len)
+    } else if (ty.is(.VarArgsFunc) and argCount < params.len)
         try p.errExtra(.expected_at_least_arguments, firstAfter, extra);
 
     return callExpr.finish(p, ty, listBufferTop, lParen);
