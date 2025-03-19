@@ -30,6 +30,7 @@ inputs: std.ArrayListUnmanaged(Source) = .{},
 linkObjects: std.ArrayListUnmanaged([]const u8) = .{},
 outputName: ?[]const u8 = null,
 sysroot: ?[]const u8 = null,
+systemDefines: Compilation.SystemDefinesMode = .IncludeSystemDefines,
 tempFileCount: u32 = 0,
 /// If false, do not emit line directives in -E mode
 lineCommands: bool = true,
@@ -138,6 +139,7 @@ const usage =
     \\  -S, --assemble          Only run preprocess and compilation step
     \\ --target=<value>         Generate code for the given target
     \\  -U <macro>              Undefine <macro>
+    \\  -undef                  Do not predefine any system-specific macros. Standard predefined macros remain defined.
     \\  -Wall                   Enable all warnings
     \\  -Werror                 Treat all warnings as errors
     \\  -Werror=<warning>       Treat warning as error
@@ -228,6 +230,8 @@ pub fn parseArgs(
                     macro = args[i];
                 }
                 try macroBuffer.print("#undef {s} \n", .{macro});
+            } else if (mem.eql(u8, arg, "-undef")) {
+                d.systemDefines = .NoSystemDefines;
             } else if (std.mem.eql(u8, arg, "-c") or std.mem.eql(u8, arg, "--compile")) {
                 d.onlyCompile = true;
             } else if (std.mem.eql(u8, arg, "-E")) {
@@ -555,7 +559,7 @@ pub fn main(d: *Driver, tc: *Toolchain, args: []const []const u8, comptime fastE
         error.ZincIncludeNotFound => return d.fatal("unable to find Zinc builtin headers", .{}),
     };
 
-    const builtinMacros = try d.comp.generateBuiltinMacros();
+    const builtinMacros = try d.comp.generateBuiltinMacros(d.systemDefines);
     const userDefinedMacros = try d.comp.addSourceFromBuffer("<command line>", macroBuffer.items);
 
     if (fastExit and d.inputs.items.len == 1) {

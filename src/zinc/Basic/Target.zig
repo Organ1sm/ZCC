@@ -685,7 +685,7 @@ pub fn toLLVMTriple(target: std.Target, buf: []u8) []const u8 {
 test "alignment functions - smoke test" {
     const linux: std.Target.Os = .{ .tag = .linux, .version_range = .{ .none = {} } };
     const x86_64_target: std.Target = .{
-        .abi = std.Target.Abi.default(.x86_64, linux),
+        .abi = std.Target.Abi.default(.x86_64, linux.tag),
         .cpu = std.Target.Cpu.Model.generic(.x86_64).toCpu(.x86_64),
         .os = linux,
         .ofmt = .elf,
@@ -705,7 +705,7 @@ test "target size/align tests" {
 
     const linux: std.Target.Os = .{ .tag = .linux, .version_range = .{ .none = {} } };
     const x86_target: std.Target = .{
-        .abi = std.Target.Abi.default(.x86, linux),
+        .abi = std.Target.Abi.default(.x86, linux.tag),
         .cpu = std.Target.Cpu.Model.generic(.x86).toCpu(.x86),
         .os = linux,
         .ofmt = .elf,

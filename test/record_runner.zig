@@ -277,7 +277,7 @@ fn singleRun(alloc: std.mem.Allocator, testDir: []const u8, testCase: TestCase, 
     }
 
     const userMacros = try comp.addSourceFromBuffer("<command line>", macroBuffer.items);
-    const builtinMacros = try comp.generateBuiltinMacros();
+    const builtinMacros = try comp.generateBuiltinMacros(.IncludeSystemDefines);
 
     var pp = zinc.Preprocessor.init(&comp);
     defer pp.deinit();

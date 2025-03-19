@@ -16,9 +16,10 @@ fn addCommandLineArgs(
     comp: *zinc.Compilation,
     file: zinc.Source,
     macroBuffer: anytype,
-) !struct { bool, zinc.Preprocessor.LineMarkers } {
+) !struct { bool, zinc.Preprocessor.LineMarkers, zinc.Compilation.SystemDefinesMode } {
     var onlyPreprocess = false;
     var lineMarkers: zinc.Preprocessor.LineMarkers = .None;
+    var systemDefines: zinc.Compilation.SystemDefinesMode = .IncludeSystemDefines;
     if (std.mem.startsWith(u8, file.buffer, "//zinc-args")) {
         var testArgs = std.ArrayList([]const u8).init(comp.gpa);
         defer testArgs.deinit();
@@ -31,7 +32,10 @@ fn addCommandLineArgs(
         defer driver.deinit();
 
         _ = try driver.parseArgs(std.io.null_writer, macroBuffer, testArgs.items);
+
         onlyPreprocess = driver.onlyPreprocess;
+        systemDefines = driver.systemDefines;
+
         if (onlyPreprocess) {
             if (driver.lineCommands)
                 lineMarkers = if (driver.useLineDirectives) .LineDirectives else .NumericDirectives;
@@ -41,6 +45,7 @@ fn addCommandLineArgs(
     if (std.mem.indexOf(u8, file.buffer, "//zinc-env")) |idx| {
         const buf = file.buffer[idx..];
         const nl = std.mem.indexOfAny(u8, buf, "\n\r") orelse buf.len;
+
         var it = std.mem.tokenizeScalar(u8, buf[0..nl], ' ');
         while (it.next()) |some| {
             var parts = std.mem.splitScalar(u8, some, '=');
@@ -55,7 +60,7 @@ fn addCommandLineArgs(
         }
     }
 
-    return .{ onlyPreprocess, lineMarkers };
+    return .{ onlyPreprocess, lineMarkers, systemDefines };
 }
 
 fn testOne(allocator: std.mem.Allocator, path: []const u8, testDir: []const u8) !void {
@@ -69,10 +74,10 @@ fn testOne(allocator: std.mem.Allocator, path: []const u8, testDir: []const u8) 
     var macroBuffer = std.ArrayList(u8).init(comp.gpa);
     defer macroBuffer.deinit();
 
-    _ = try addCommandLineArgs(&comp, file, macroBuffer.writer());
+    _, _, const systemDefines = try addCommandLineArgs(&comp, file, macroBuffer.writer());
     const userMacros = try comp.addSourceFromBuffer("<command line>", macroBuffer.items);
 
-    const bulitinMacros = try comp.generateBuiltinMacros();
+    const bulitinMacros = try comp.generateBuiltinMacros(systemDefines);
 
     var pp = zinc.Preprocessor.init(&comp);
     defer pp.deinit();
@@ -224,10 +229,10 @@ pub fn main() !void {
         var macroBuffer = std.ArrayList(u8).init(comp.gpa);
         defer macroBuffer.deinit();
 
-        const onlyPreprocess, const lineMarkers = try addCommandLineArgs(&comp, file, macroBuffer.writer());
+        const onlyPreprocess, const lineMarkers, const systemDefines = try addCommandLineArgs(&comp, file, macroBuffer.writer());
         const userMacros = try comp.addSourceFromBuffer("<command line>", macroBuffer.items);
 
-        const builtinMacros = try comp.generateBuiltinMacros();
+        const builtinMacros = try comp.generateBuiltinMacros(systemDefines);
 
         comp.diagnostics.errors = 0;
         var pp = zinc.Preprocessor.init(&comp);

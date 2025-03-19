@@ -243,38 +243,20 @@ fn generateDateAndTime(w: anytype, timestamp: u47) !void {
     });
 }
 
+/// Which set of system defines to generate via generateBuiltinMacros
+pub const SystemDefinesMode = enum {
+    /// Only define macros required by the C standard (date/time macros and those beginning with `__STDC`)
+    NoSystemDefines,
+    /// Define the standard set of system macros
+    IncludeSystemDefines,
+};
+
 /// Generate builtin macros that will be available to each source file.
-pub fn generateBuiltinMacros(comp: *Compilation) !Source {
-    try comp.generateBuiltinTypes();
-
-    var buf = std.ArrayList(u8).init(comp.gpa);
-    defer buf.deinit();
-
+pub fn generateSystemDefines(comp: *Compilation, w: anytype) !void {
     const ptrWidth = comp.target.ptrBitWidth();
 
-    const w = buf.writer();
-
-    // Standard macros
-    try w.writeAll(
-        \\#define __VERSION__ "Zinc 
-    ++ @import("backend").VersionStr ++ "\"\n" ++
-        \\#define __Zinc__
-        \\#define __STDC__ 1
-        \\#define __STDC_HOSTED__ 1
-        \\#define __STDC_NO_ATOMICS__ 1
-        \\#define __STDC_NO_COMPLEX__ 1
-        \\#define __STDC_NO_THREADS__ 1
-        \\#define __STDC_NO_VLA__ 1
-        \\#define __STDC_UTF_16__ 1
-        \\#define __STDC_UTF_32__ 1
-        \\
-    );
-
-    if (comp.langOpts.standard.StdCVersionMacro()) |stdcVersion|
-        try w.print("#define __STDC_VERSION__ {s}\n", .{stdcVersion});
-
     switch (comp.target.os.tag) {
-        .linux => try buf.appendSlice(
+        .linux => try w.writeAll(
             \\#define linux 1
             \\#define __linux 1
             \\#define __linux__ 1
@@ -440,13 +422,8 @@ pub fn generateBuiltinMacros(comp: *Compilation) !Source {
             \\
         );
 
-    // timestamps
-    const timestamp = try comp.getTimeStamp();
-    try generateDateAndTime(w, timestamp);
-
     //types
-    if (comp.getCharSignedness() == .unsigned)
-        try w.writeAll("#define __CHAR_UNSIGNED__ 1\n");
+    if (comp.getCharSignedness() == .unsigned) try w.writeAll("#define __CHAR_UNSIGNED__ 1\n");
     try w.writeAll("#define __CHAR_BIT__ 8\n");
 
     // int maxs
@@ -515,6 +492,50 @@ pub fn generateBuiltinMacros(comp: *Compilation) !Source {
         \\#define __DECIMAL_DIG__ __LDBL_DECIMAL_DIG__
         \\
     );
+}
+
+/// Generate builtin macros that will be available to each source file.
+pub fn generateBuiltinMacros(comp: *Compilation, systemDefinesMode: SystemDefinesMode) !Source {
+    try comp.generateBuiltinTypes();
+
+    var buf = std.ArrayList(u8).init(comp.gpa);
+    defer buf.deinit();
+
+    if (systemDefinesMode == .IncludeSystemDefines) {
+        try buf.appendSlice(
+            \\#define __VERSION__ "Zinc 
+        ++ @import("backend").VersionStr ++ "\"\n" ++
+            \\#define __Zinc__
+            \\  
+        );
+    }
+
+    // Standard macros
+    try buf.appendSlice(
+        \\#define __STDC__ 1
+        \\#define __STDC_HOSTED__ 1
+        \\#define __STDC_NO_ATOMICS__ 1
+        \\#define __STDC_NO_COMPLEX__ 1
+        \\#define __STDC_NO_THREADS__ 1
+        \\#define __STDC_NO_VLA__ 1
+        \\#define __STDC_UTF_16__ 1
+        \\#define __STDC_UTF_32__ 1
+        \\
+    );
+
+    if (comp.langOpts.standard.StdCVersionMacro()) |stdcVersion| {
+        try buf.appendSlice("#define __STDC_VERSION__ ");
+        try buf.appendSlice(stdcVersion);
+        try buf.append('\n');
+    }
+
+    // timestamps
+    const timestamp = try comp.getTimeStamp();
+    try generateDateAndTime(buf.writer(), timestamp);
+
+    if (systemDefinesMode == .IncludeSystemDefines) {
+        try comp.generateSystemDefines(buf.writer());
+    }
 
     return comp.addSourceFromBuffer("<builtin>", buf.items);
 }
