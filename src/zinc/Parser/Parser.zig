@@ -6735,6 +6735,19 @@ const CallExpr = union(enum) {
             .standard => null,
             .builtin => |builtin| switch (builtin.tag) {
                 .__builtin_complex => 2,
+
+                .__atomic_fetch_add,
+                .__atomic_fetch_sub,
+                .__atomic_fetch_and,
+                .__atomic_fetch_xor,
+                .__atomic_fetch_or,
+                .__atomic_fetch_nand,
+                => 3,
+
+                .__atomic_compare_exchange,
+                .__atomic_compare_exchange_n,
+                => 6,
+
                 else => null,
             },
         };
@@ -6749,6 +6762,23 @@ const CallExpr = union(enum) {
                     const lastParam = p.listBuffer.items[p.listBuffer.items.len - 1];
                     return lastParam.type(&p.tree).makeComplex();
                 },
+
+                .__atomic_fetch_add,
+                .__atomic_fetch_sub,
+                .__atomic_fetch_and,
+                .__atomic_fetch_xor,
+                .__atomic_fetch_or,
+                .__atomic_fetch_nand,
+                => {
+                    if (p.listBuffer.items.len != 3) return Type.Invalid;
+                    const secondParam = p.listBuffer.items[2];
+                    return secondParam.type(&p.tree);
+                },
+
+                .__atomic_compare_exchange,
+                .__atomic_compare_exchange_n,
+                => Type.Bool,
+
                 else => callableTy.getReturnType(),
             },
         };
@@ -6857,7 +6887,7 @@ fn parseCallExpr(p: *Parser, lhs: Result) Error!?Result {
 
     if (callExpr.paramCountOverride()) |expected| {
         if (expected != actual)
-            try p.errExtra(.expected_arguments, firstAfter, extra);
+            try p.errExtra(.expected_arguments, firstAfter, .{ .arguments = .{ .actual = actual, .expected = expected } });
     } else if (ty.is(.Func) and params.len != argCount) {
         try p.errExtra(.expected_arguments, firstAfter, extra);
     } else if (ty.is(.OldStyleFunc) and params.len != argCount) {
