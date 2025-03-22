@@ -485,6 +485,7 @@ pub fn generateSystemDefines(comp: *Compilation, w: anytype) !void {
     try comp.generateTypeMacro(w, "__WCHAR_TYPE__", comp.types.wchar);
 
     try comp.generateExactWidthTypes(w);
+    try comp.generateFastAndLeastWidthTypes(w);
 
     if (Target.FPSemantics.halfPrecisionType(comp.target)) |half| {
         try generateFloatMacros(w, "FLT16", half, "F16");
@@ -731,6 +732,51 @@ pub fn float80Type(comp: *const Compilation) ?Type {
 fn intSize(comp: *const Compilation, specifier: Type.Specifier) u64 {
     const ty = Type{ .specifier = specifier };
     return ty.sizeof(comp).?;
+}
+
+fn generateFastOrLeastType(
+    comp: *Compilation,
+    bits: usize,
+    kind: enum { least, fast },
+    signedness: std.builtin.Signedness,
+    w: anytype,
+) !void {
+    const ty = comp.intLeastN(bits, signedness); // defining the fast types as the least types is permitted
+
+    var prefix: std.BoundedArray(u8, 32) = .{};
+    const baseName = switch (signedness) {
+        .signed => "__INT_",
+        .unsigned => "__UINT_",
+    };
+    const kindStr = switch (kind) {
+        .fast => "FAST",
+        .least => "LEAST",
+    };
+
+    prefix.writer().print("{s}{s}{d}", .{ baseName, kindStr, bits }) catch return error.OutOfMemory;
+
+    {
+        const len = prefix.len;
+        defer prefix.resize(len) catch unreachable; // restoring previous size
+        prefix.appendSliceAssumeCapacity("_TYPE__");
+        try comp.generateTypeMacro(w, prefix.constSlice(), ty);
+    }
+
+    switch (signedness) {
+        .signed => try comp.generateIntMaxAndWidth(w, prefix.constSlice()[2..], ty),
+        .unsigned => try comp.generateIntMax(w, prefix.constSlice()[2..], ty),
+    }
+    try comp.generateFmt(prefix.constSlice(), w, ty);
+}
+
+fn generateFastAndLeastWidthTypes(comp: *Compilation, w: anytype) !void {
+    const sizes = [_]usize{ 8, 16, 32, 64 };
+    for (sizes) |size| {
+        try comp.generateFastOrLeastType(size, .least, .signed, w);
+        try comp.generateFastOrLeastType(size, .least, .unsigned, w);
+        try comp.generateFastOrLeastType(size, .fast, .signed, w);
+        try comp.generateFastOrLeastType(size, .fast, .unsigned, w);
+    }
 }
 
 fn generateExactWidthTypes(comp: *const Compilation, w: anytype) !void {
