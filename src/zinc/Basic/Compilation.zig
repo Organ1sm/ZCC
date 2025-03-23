@@ -522,10 +522,11 @@ pub fn generateBuiltinMacros(comp: *Compilation, systemDefinesMode: SystemDefine
         );
     }
 
+    try buf.appendSlice("#define __STDC__ 1\n");
+    try buf.writer().print("#define __STDC_HOSTED__ {d}\n", .{@intFromBool(comp.langOpts.hosted)});
+
     // Standard macros
     try buf.appendSlice(
-        \\#define __STDC__ 1
-        \\#define __STDC_HOSTED__ 1
         \\#define __STDC_NO_ATOMICS__ 1
         \\#define __STDC_NO_COMPLEX__ 1
         \\#define __STDC_NO_THREADS__ 1
