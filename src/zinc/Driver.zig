@@ -107,6 +107,7 @@ const usage =
     \\  -ffreestanding          Compilation in a freestanding environment
     \\  -fgnu-inline-asm        Enable GNU style inline asm (default: enabled)
     \\  -fno-gnu-inline-asm     Disable GNU style inline asm
+    \\  -fhosted                Compilation in a hosted environment
     \\  -fms-extensions         Enable support for Microsoft extensions
     \\  -fno-ms-extensions      Disable support for Microsoft extensions
     \\  -fdollars-in-identifiers        
@@ -189,6 +190,7 @@ pub fn parseArgs(
     args: []const []const u8,
 ) !bool {
     var commentArg: []const u8 = "";
+    var hosted: ?bool = null;
     var i: usize = 1;
     while (i < args.len) : (i += 1) {
         const arg = args[i];
@@ -272,7 +274,9 @@ pub fn parseArgs(
             } else if (mem.eql(u8, arg, "-fno-gnu-inline-asm")) {
                 d.comp.langOpts.gnuAsm = false;
             } else if (mem.eql(u8, arg, "-ffreestanding")) {
-                d.comp.langOpts.hosted = false;
+                hosted = false;
+            } else if (mem.eql(u8, arg, "-fhosted")) {
+                hosted = true;
             } else if (std.mem.eql(u8, arg, "-fms-extensions")) {
                 d.comp.langOpts.enableMSExtensions();
             } else if (std.mem.eql(u8, arg, "-fno-ms-extensions")) {
@@ -462,6 +466,16 @@ pub fn parseArgs(
 
     if (d.comp.langOpts.preserveComments and !d.onlyPreprocess)
         return d.fatal("invalid argument '{s}' only allowed with '-E'", .{commentArg});
+
+    if (hosted) |isHosted| {
+        if (isHosted and d.shared) {
+            if (d.comp.target.os.tag == .freestanding) {
+                return d.fatal("Cannot use freestanding target with `-fhosted`", .{});
+            }
+        } else {
+            d.comp.target.os.tag = .freestanding;
+        }
+    }
 
     return false;
 }

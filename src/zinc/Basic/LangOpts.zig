@@ -133,8 +133,6 @@ fpEvalMethod: ?FPEvalMethod = null,
 useNativeHalfType: bool = false,
 /// If set, function arguments and return values may be of type __fp16 even if there is no standard ABI for it
 allowHalfArgsAndReturns: bool = false,
-/// compile in a hosted environment if true; freestanding otherwise
-hosted: bool = true,
 
 pub fn setStandard(self: *LangOpts, name: []const u8) error{InvalidStandard}!void {
     self.standard = Standard.NameMap.get(name) orelse return error.InvalidStandard;
