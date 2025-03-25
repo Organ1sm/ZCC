@@ -668,7 +668,7 @@ fn processSource(
         const locs = pp.tokens.items(.loc);
         var lexer = Lexer{
             .buffer = d.comp.getSource(locs[0].id).buffer,
-            .comp = d.comp,
+            .langOpts = d.comp.langOpts,
             .index = locs[0].byteOffset,
             .source = .generated,
         };

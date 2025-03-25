@@ -264,7 +264,7 @@ pub fn expansionSlice(pp: *Preprocessor, tok: Tree.TokenIndex) []Source.Location
 fn findIncludeGuard(pp: *Preprocessor, source: Source) ?[]const u8 {
     var lexer = Lexer{
         .buffer = source.buffer,
-        .comp = pp.comp,
+        .langOpts = pp.comp.langOpts,
         .source = source.id,
     };
 
@@ -348,7 +348,7 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!TokenWithExpans
     var lexer = Lexer{
         .buffer = source.buffer,
         .source = source.id,
-        .comp = pp.comp,
+        .langOpts = pp.comp.langOpts,
     };
 
     // Estimate how many new tokens this source will contain.
@@ -730,7 +730,7 @@ pub fn tokenize(pp: *Preprocessor, source: Source) Error!TokenWithExpansionLocs 
     assert(pp.preserveWhitespace == false);
     var tokenizer = Lexer{
         .buffer = source.buffer,
-        .comp = pp.comp,
+        .langOpts = pp.comp.langOpts,
         .source = source.id,
     };
 
@@ -1282,7 +1282,7 @@ fn pragmaOperator(pp: *Preprocessor, argToken: TokenWithExpansionLocs, operatorL
     try pp.comp.generatedBuffer.appendSlice(pp.gpa, pp.charBuffer.items);
     var tempLexer = Lexer{
         .buffer = pp.comp.generatedBuffer.items,
-        .comp = pp.comp,
+        .langOpts = pp.comp.langOpts,
         .index = @intCast(start),
         .source = .generated,
         .line = pp.generatedLine,
@@ -2016,7 +2016,7 @@ fn expandVaOpt(
         .buffer = source.buffer,
         .index = raw.start,
         .source = raw.source,
-        .comp = pp.comp,
+        .langOpts = pp.comp.langOpts,
         .line = raw.line,
     };
     while (lexer.index < raw.end) {
@@ -2477,7 +2477,7 @@ pub fn expandedSliceExtra(
 
     var lexer = Lexer{
         .buffer = pp.comp.getSource(token.loc.id).buffer,
-        .comp = pp.comp,
+        .langOpts = pp.comp.langOpts,
         .index = token.loc.byteOffset,
         .source = .generated,
     };
@@ -2525,7 +2525,7 @@ fn pasteTokens(pp: *Preprocessor, lhsTokens: *ExpandBuffer, rhsTokens: []const T
     // Try to tokenize the result.
     var lexer = Lexer{
         .buffer = pp.comp.generatedBuffer.items,
-        .comp = pp.comp,
+        .langOpts = pp.comp.langOpts,
         .index = @intCast(start),
         .source = .generated,
     };

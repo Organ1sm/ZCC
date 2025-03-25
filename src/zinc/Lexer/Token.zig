@@ -46,11 +46,11 @@ pub const Token = struct {
     /// mapping.
     ///
     /// Returns final TokenType for further processing.
-    pub fn getTokenId(comp: *const Compilation, str: []const u8) TokenType {
+    pub fn getTokenId(langOpts: LangOpts, str: []const u8) TokenType {
         const kw = AllKeywords.get(str) orelse return .Identifier;
 
         // Retrieve the language standard from the Compilation context
-        const standard = comp.langOpts.standard;
+        const standard = langOpts.standard;
         return switch (kw) {
             .KeywordInline => if (standard.isGNU() or standard.atLeast(.c99)) kw else .Identifier,
             .KeywordRestrict => if (standard.atLeast(.c99)) kw else .Identifier,
@@ -71,7 +71,7 @@ pub const Token = struct {
             .KeywordTypeofUnqual,
             => if (standard.atLeast(.c23)) kw else .Identifier,
 
-            .KeywordDeclSpec => if (comp.langOpts.declSpecAttrs) kw else .Identifier,
+            .KeywordDeclSpec => if (langOpts.declSpecAttrs) kw else .Identifier,
 
             .KeywordMSInt64_,
             .KeywordMSInt64__,
@@ -84,7 +84,7 @@ pub const Token = struct {
             .KeywordStdCall2,
             .KeywordThisCall2,
             .KeywordVectorCall2,
-            => if (comp.langOpts.msExtensions) kw else .Identifier,
+            => if (langOpts.msExtensions) kw else .Identifier,
             else => kw,
         };
     }

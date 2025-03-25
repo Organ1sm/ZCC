@@ -4,6 +4,7 @@ const Token = @import("Token.zig").Token;
 const Source = @import("../Basic/Source.zig");
 const LangOpts = @import("../Basic/LangOpts.zig");
 const Compilation = @import("../Basic/Compilation.zig");
+
 const Lexer = @This();
 
 /// Input buffer containing source code
@@ -12,8 +13,7 @@ buffer: []const u8 = undefined,
 index: u32 = 0,
 /// Source file ID
 source: Source.ID,
-/// Compilation context
-comp: *const Compilation,
+langOpts: LangOpts,
 /// current line number
 line: u32 = 1,
 
@@ -139,7 +139,7 @@ pub fn next(self: *Lexer) Token {
                     self.index += 1;
                     break;
                 },
-                ':' => if (self.comp.langOpts.standard.atLeast(.c23)) {
+                ':' => if (self.langOpts.standard.atLeast(.c23)) {
                     state = .colon;
                 } else {
                     id = .Colon;
@@ -165,14 +165,14 @@ pub fn next(self: *Lexer) Token {
                 '#' => state = .hash,
                 '0'...'9' => state = .pp_num,
                 '\t', '\x0B', '\x0C', ' ' => state = .whitespace,
-                '$' => if (self.comp.langOpts.dollarsInIdentifiers) {
+                '$' => if (self.langOpts.dollarsInIdentifiers) {
                     state = .extended_identifier;
                 } else {
                     id = .Invalid;
                     self.index += 1;
                     break;
                 },
-                0x1A => if (self.comp.langOpts.msExtensions) { // ctrl-z
+                0x1A => if (self.langOpts.msExtensions) { // ctrl-z
                     id = .Eof;
                     break;
                 } else {
@@ -320,15 +320,15 @@ pub fn next(self: *Lexer) Token {
 
             .identifier, .extended_identifier => switch (c) {
                 'a'...'z', 'A'...'Z', '_', '0'...'9' => {},
-                '$' => if (self.comp.langOpts.dollarsInIdentifiers) {
+                '$' => if (self.langOpts.dollarsInIdentifiers) {
                     state = .extended_identifier;
                 } else {
-                    id = if (state == .identifier) Token.getTokenId(self.comp, self.buffer[start..self.index]) else .ExtendedIdentifier;
+                    id = if (state == .identifier) Token.getTokenId(self.langOpts, self.buffer[start..self.index]) else .ExtendedIdentifier;
                     break;
                 },
                 0x80...0xFF => state = .extended_identifier,
                 else => {
-                    id = if (state == .identifier) Token.getTokenId(self.comp, self.buffer[start..self.index]) else .ExtendedIdentifier;
+                    id = if (state == .identifier) Token.getTokenId(self.langOpts, self.buffer[start..self.index]) else .ExtendedIdentifier;
                     break;
                 },
             },
@@ -577,7 +577,7 @@ pub fn next(self: *Lexer) Token {
 
             .line_comment => switch (c) {
                 '\n' => {
-                    if (self.comp.langOpts.preserveComments) {
+                    if (self.langOpts.preserveComments) {
                         id = .Comment;
                         break;
                     }
@@ -593,7 +593,7 @@ pub fn next(self: *Lexer) Token {
             },
             .multi_line_comment_asterisk => switch (c) {
                 '/' => {
-                    if (self.comp.langOpts.preserveComments) {
+                    if (self.langOpts.preserveComments) {
                         self.index += 1;
                         id = .Comment;
                         break;
@@ -638,7 +638,7 @@ pub fn next(self: *Lexer) Token {
                 '.',
                 => {},
                 'e', 'E', 'p', 'P' => state = .pp_num_exponent,
-                '\'' => if (self.comp.langOpts.standard.atLeast(.c23)) {
+                '\'' => if (self.langOpts.standard.atLeast(.c23)) {
                     state = .pp_num_digit_separator;
                 } else {
                     id = .PPNumber;
@@ -688,7 +688,7 @@ pub fn next(self: *Lexer) Token {
     } else if (self.index == self.buffer.len) {
         switch (state) {
             .start, .line_comment => {},
-            .u, .u8, .U, .L, .identifier => id = Token.getTokenId(self.comp, self.buffer[start..self.index]),
+            .u, .u8, .U, .L, .identifier => id = Token.getTokenId(self.langOpts, self.buffer[start..self.index]),
             .extended_identifier => id = TokenType.ExtendedIdentifier,
 
             .whitespace,
@@ -782,7 +782,7 @@ fn expectTokensExtra(contents: []const u8, expected: []const TokenType, standard
     var lexer = Lexer{
         .buffer = source.buffer,
         .source = source.id,
-        .comp = &comp,
+        .langOpts = comp.langOpts,
     };
 
     var i: usize = 0;

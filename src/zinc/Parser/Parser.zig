@@ -333,7 +333,7 @@ pub fn getTokenText(p: *Parser, index: TokenIndex) []const u8 {
     const loc = p.pp.tokens.items(.loc)[index];
     var lexer = Lexer{
         .buffer = p.comp.getSource(loc.id).buffer,
-        .comp = p.comp,
+        .langOpts = p.comp.langOpts,
         .index = loc.byteOffset,
         .source = .generated,
     };

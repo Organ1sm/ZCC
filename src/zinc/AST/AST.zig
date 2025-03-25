@@ -2879,7 +2879,7 @@ pub fn tokenSlice(tree: Tree, tokenIdx: TokenIndex) []const u8 {
     const loc = tree.tokens.items(.loc)[tokenIdx];
     var lexer = Lexer{
         .buffer = tree.comp.getSource(loc.id).buffer,
-        .comp = tree.comp,
+        .langOpts = tree.comp.langOpts,
         .index = loc.byteOffset,
         .source = .generated,
     };
