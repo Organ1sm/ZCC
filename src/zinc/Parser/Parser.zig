@@ -7741,7 +7741,7 @@ fn parseCharLiteral(p: *Parser) Error!?Result {
         if (multicharOverflow)
             CharLiteralParser.err(.char_lit_too_wide, .{ .none = {} });
 
-        for (CharLiteralParser.errors.constSlice()) |item|
+        for (CharLiteralParser.errors()) |item|
             try p.errExtra(item.tag, p.tokenIdx, item.extra);
     }
 
@@ -7853,7 +7853,7 @@ fn parseStringLiteral(p: *Parser) Error!Result {
             },
         };
 
-        for (charLiteralParser.errors.constSlice()) |item|
+        for (charLiteralParser.errors()) |item|
             try p.errExtra(item.tag, p.tokenIdx, item.extra);
     }
 
