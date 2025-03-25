@@ -744,7 +744,8 @@ fn generateFastOrLeastType(
 ) !void {
     const ty = comp.intLeastN(bits, signedness); // defining the fast types as the least types is permitted
 
-    var prefix: std.BoundedArray(u8, 32) = .{};
+    var buffer: [32]u8 = undefined;
+    const suffix = "_TYPE__";
     const baseName = switch (signedness) {
         .signed => "__INT_",
         .unsigned => "__UINT_",
@@ -754,20 +755,19 @@ fn generateFastOrLeastType(
         .least => "LEAST",
     };
 
-    prefix.writer().print("{s}{s}{d}", .{ baseName, kindStr, bits }) catch return error.OutOfMemory;
+    const full = std.fmt.bufPrint(&buffer, "{s}{s}{d}{s}", .{
+        baseName, kindStr, bits, suffix,
+    }) catch return error.OutOfMemory;
 
-    {
-        const len = prefix.len;
-        defer prefix.resize(len) catch unreachable; // restoring previous size
-        prefix.appendSliceAssumeCapacity("_TYPE__");
-        try comp.generateTypeMacro(w, prefix.constSlice(), ty);
-    }
+    try comp.generateTypeMacro(w, full, ty);
 
+    // remove "__" and "_TYPE__"
+    const prefix = full[2 .. full.len - suffix.len];
     switch (signedness) {
-        .signed => try comp.generateIntMaxAndWidth(w, prefix.constSlice()[2..], ty),
-        .unsigned => try comp.generateIntMax(w, prefix.constSlice()[2..], ty),
+        .signed => try comp.generateIntMaxAndWidth(w, prefix, ty),
+        .unsigned => try comp.generateIntMax(w, prefix, ty),
     }
-    try comp.generateFmt(prefix.constSlice(), w, ty);
+    try comp.generateFmt(prefix, w, ty);
 }
 
 fn generateFastAndLeastWidthTypes(comp: *Compilation, w: anytype) !void {
@@ -851,18 +851,18 @@ fn generateExactWidthType(comp: *const Compilation, w: anytype, specifier: Type.
         ty = if (unsigned) comp.types.int64.makeIntegerUnsigned() else comp.types.int64;
     }
 
-    var prefix = std.BoundedArray(u8, 16).init(0) catch unreachable;
-    prefix.writer().print("{s}{d}", .{ if (unsigned) "__UINT" else "__INT", width }) catch unreachable;
+    var buffer: [16]u8 = undefined;
+    const suffix = "_TYPE__";
+    const full = std.fmt.bufPrint(&buffer, "{s}{d}{s}", .{
+        if (unsigned) "__UINT" else "__INT", width, suffix,
+    }) catch return error.OutOfMemory;
 
-    {
-        const len = prefix.len;
-        defer prefix.resize(len) catch unreachable; // restoring previous size
-        prefix.appendSliceAssumeCapacity("_TYPE__");
-        try comp.generateTypeMacro(w, prefix.constSlice(), ty);
-    }
+    try comp.generateTypeMacro(w, full, ty);
 
-    try comp.generateFmt(prefix.constSlice(), w, ty);
-    try comp.generateSuffixMacro(prefix.constSlice(), w, ty);
+    // remove "_TYPE__"
+    const prefix = full[0 .. full.len - suffix.len];
+    try comp.generateFmt(prefix, w, ty);
+    try comp.generateSuffixMacro(prefix, w, ty);
 }
 
 fn generateVaListType(comp: *Compilation) !Type {
@@ -963,10 +963,12 @@ fn generateExactWidthIntMax(comp: *const Compilation, w: anytype, specifier: Typ
     if (bitCount == 64)
         ty = if (unsigned) comp.types.int64.makeIntegerUnsigned() else comp.types.int64;
 
-    var name = std.BoundedArray(u8, 6).init(0) catch unreachable;
-    name.writer().print("{s}{d}", .{ if (unsigned) "UINT" else "INT", bitCount }) catch return error.OutOfMemory;
+    var nameBuffer: [6]u8 = undefined;
+    const name = std.fmt.bufPrint(&nameBuffer, "{s}{d}", .{
+        if (unsigned) "UINT" else "INT", bitCount,
+    }) catch return error.OutOfMemory;
 
-    return comp.generateIntMax(w, name.constSlice(), ty);
+    return comp.generateIntMax(w, name, ty);
 }
 
 fn generateIntWidth(comp: *Compilation, w: anytype, name: []const u8, ty: Type) !void {
