@@ -34,6 +34,7 @@ test "simple test" {
     _ = @import("zinc/Lexer/Lexer.zig");
     _ = @import("zinc/Lexer/Preprocessor.zig");
     _ = @import("zinc/Parser/InitList.zig");
+    _ = @import("zinc/Toolchains/Linux.zig");
     _ = @import("zinc/AST/AST.zig");
     _ = @import("zinc/AST/Value.zig");
 }
