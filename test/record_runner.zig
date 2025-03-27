@@ -221,7 +221,7 @@ fn runTestCases(
 fn singleRun(alloc: std.mem.Allocator, testDir: []const u8, testCase: TestCase, stats: *Stats) !void {
     const path = testCase.path;
 
-    var comp = zinc.Compilation.init(alloc);
+    var comp = zinc.Compilation.init(alloc, std.fs.cwd());
     defer comp.deinit();
 
     try comp.addDefaultPragmaHandlers();

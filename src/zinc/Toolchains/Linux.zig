@@ -368,24 +368,26 @@ test Linux {
 
     const arena = arenaInstance.allocator();
 
-    var comp = Compilation.init(std.testing.allocator);
+    var comp = Compilation.init(std.testing.allocator, std.fs.cwd());
     defer comp.deinit();
+
     comp.environment = .{
         .path = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
     };
+    defer comp.environment = .{};
 
     const rawTriple = "x86_64-linux-gnu";
-    const cross = std.Target.Query.parse(.{ .arch_os_abi = rawTriple }) catch unreachable;
-    comp.target = cross.toTarget(); // TODO deprecated
+    const targetQuery = try std.Target.Query.parse(.{ .arch_os_abi = rawTriple });
+    comp.target = try std.zig.system.resolveTargetQuery(targetQuery);
     comp.langOpts.setEmulatedCompiler(.gcc);
 
     var driver: Driver = .{ .comp = &comp };
     defer driver.deinit();
     driver.rawTargetTriple = rawTriple;
 
-    const link_obj = try driver.comp.gpa.dupe(u8, "/tmp/foo.o");
-    try driver.link_objects.append(driver.comp.gpa, link_obj);
-    driver.temp_file_count += 1;
+    const linkObj = try driver.comp.gpa.dupe(u8, "/tmp/foo.o");
+    try driver.linkObjects.append(driver.comp.gpa, linkObj);
+    driver.tempFileCount += 1;
 
     var toolchain: Toolchain = .{ .driver = &driver, .arena = arena, .filesystem = .{ .fake = &.{
         .{ .path = "/tmp" },
@@ -414,7 +416,7 @@ test Linux {
     var argv = std.ArrayList([]const u8).init(driver.comp.gpa);
     defer argv.deinit();
 
-    var linkerPathBuffer: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+    var linkerPathBuffer: [std.fs.max_name_bytes]u8 = undefined;
     const linkerPath = try toolchain.getLinkerPath(&linkerPathBuffer);
     try argv.append(linkerPath);
 
@@ -443,7 +445,7 @@ test Linux {
         "-L/usr/lib/../lib64",
         "-L/lib",
         "-L/usr/lib",
-        link_obj,
+        linkObj,
         "-lgcc",
         "--as-needed",
         "-lgcc_s",
@@ -456,8 +458,9 @@ test Linux {
         "/usr/lib/gcc/x86_64-linux-gnu/9/crtend.o",
         "/lib/x86_64-linux-gnu/crtn.o",
     };
+
     try std.testing.expectEqual(expected.len, argv.items.len);
-    for (expected, argv.items) |expected_item, actual_item| {
-        try std.testing.expectEqualStrings(expected_item, actual_item);
+    for (expected, argv.items) |expectedItem, actualItem| {
+        try std.testing.expectEqualStrings(expectedItem, actualItem);
     }
 }

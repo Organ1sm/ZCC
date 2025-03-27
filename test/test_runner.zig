@@ -64,7 +64,7 @@ fn addCommandLineArgs(
 }
 
 fn testOne(allocator: std.mem.Allocator, path: []const u8, testDir: []const u8) !void {
-    var comp = zinc.Compilation.init(allocator);
+    var comp = zinc.Compilation.init(allocator, std.fs.cwd());
     defer comp.deinit();
 
     try comp.addDefaultPragmaHandlers();
@@ -176,7 +176,7 @@ pub fn main() !void {
     });
 
     // prepare compiler
-    var initialComp = zinc.Compilation.init(gpa);
+    var initialComp = zinc.Compilation.init(gpa, std.fs.cwd());
     defer initialComp.deinit();
 
     const casesIncludeDir = try std.fs.path.join(gpa, &.{ args[1], "include" });

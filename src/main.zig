@@ -33,7 +33,7 @@ pub fn main() u8 {
     };
     defer gpa.free(zincName);
 
-    var comp = Compilation.initDefault(gpa) catch |er| switch (er) {
+    var comp = Compilation.initDefault(gpa, std.fs.cwd()) catch |er| switch (er) {
         error.OutOfMemory => {
             std.debug.print("Out of Memory\n", .{});
             if (fastExit) process.exit(1);

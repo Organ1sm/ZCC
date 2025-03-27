@@ -116,8 +116,8 @@ pub fn getLinkerPath(tc: *const Toolchain, buf: []u8) ![]const u8 {
     // that --ld-path= points to is lld.
     const useLinker = tc.driver.useLinker orelse SystemDefaults.linker;
 
-    if (tc.driver.linkerPath) |ld_path| {
-        var path = ld_path;
+    if (tc.driver.linkerPath) |ldPath| {
+        var path = ldPath;
         if (path.len > 0) {
             if (std.fs.path.dirname(path) == null)
                 path = tc.getProgramPath(path, buf);
