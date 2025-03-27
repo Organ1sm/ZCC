@@ -45,7 +45,7 @@ pub fn main() u8 {
     var driver = Driver{ .comp = &comp, .zincName = zincName };
     defer driver.deinit();
 
-    var toolChain: Toolchain = .{ .driver = &driver, .arena = arena };
+    var toolChain: Toolchain = .{ .driver = &driver, .arena = arena, .filesystem = .{ .real = comp.cwd } };
     defer toolChain.deinit();
 
     driver.main(&toolChain, args, fastExit) catch |er| switch (er) {

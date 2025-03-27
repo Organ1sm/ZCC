@@ -47,7 +47,7 @@ const Inner = union(enum) {
     }
 };
 
-filesystem: Filesystem = .{ .real = {} },
+filesystem: Filesystem,
 driver: *Driver,
 arena: mem.Allocator,
 
