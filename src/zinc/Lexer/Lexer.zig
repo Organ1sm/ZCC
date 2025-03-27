@@ -772,7 +772,7 @@ fn expectTokens(contents: []const u8, expectedTokens: []const TokenType) !void {
 }
 
 fn expectTokensExtra(contents: []const u8, expected: []const TokenType, standard: ?LangOpts.Standard) !void {
-    var comp = Compilation.init(std.testing.allocator);
+    var comp = Compilation.init(std.testing.allocator, std.fs.cwd());
     defer comp.deinit();
 
     if (standard) |provided|

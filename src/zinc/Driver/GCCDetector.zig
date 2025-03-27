@@ -75,6 +75,12 @@ fn collectLibDirsAndTriples(
     const ARMTriples: [1][]const u8 = .{"arm-linux-gnueabi"};
     const ARMHFTriples: [4][]const u8 = .{ "arm-linux-gnueabihf", "armv7hl-redhat-linux-gnueabi", "armv6hl-suse-linux-gnueabi", "armv7hl-suse-linux-gnueabi" };
 
+    const AVRLibDirs: [1][]const u8 = .{"/lib"};
+    const AVRTriples: [1][]const u8 = .{"avr"};
+
+    const CSKYLibDirs: [1][]const u8 = .{"/lib"};
+    const CSKYTriples: [3][]const u8 = .{ "csky-linux-gnuabiv2", "csky-linux-uclibcabiv2", "csky-elf-noneabiv2" };
+
     const ARMebLibDirs: [1][]const u8 = .{"/lib"};
     const ARMebTriples: [1][]const u8 = .{"armeb-linux-gnueabi"};
     const ARMebHFTriples: [2][]const u8 = .{ "armeb-linux-gnueabihf", "armebv7hl-redhat-linux-gnueabi" };
@@ -97,6 +103,64 @@ fn collectLibDirsAndTriples(
         "i586-suse-linux",     "i686-montavista-linux", "i686-gnu",
     };
 
+    const LoongArch64LibDirs: [2][]const u8 = .{ "/lib64", "/lib" };
+    const LoongArch64Triples: [2][]const u8 = .{ "loongarch64-linux-gnu", "loongarch64-unknown-linux-gnu" };
+
+    const M68kLibDirs: [1][]const u8 = .{"/lib"};
+    const M68kTriples: [3][]const u8 = .{ "m68k-linux-gnu", "m68k-unknown-linux-gnu", "m68k-suse-linux" };
+
+    const MIPSLibDirs: [2][]const u8 = .{ "/libo32", "/lib" };
+    const MIPSTriples: [5][]const u8 = .{
+        "mips-linux-gnu",        "mips-mti-linux",
+        "mips-mti-linux-gnu",    "mips-img-linux-gnu",
+        "mipsisa32r6-linux-gnu",
+    };
+    const MIPSELLibDirs: [2][]const u8 = .{ "/libo32", "/lib" };
+    const MIPSELTriples: [3][]const u8 = .{ "mipsel-linux-gnu", "mips-img-linux-gnu", "mipsisa32r6el-linux-gnu" };
+
+    const MIPS64LibDirs: [2][]const u8 = .{ "/lib64", "/lib" };
+    const MIPS64Triples: [6][]const u8 = .{
+        "mips64-linux-gnu",      "mips-mti-linux-gnu",
+        "mips-img-linux-gnu",    "mips64-linux-gnuabi64",
+        "mipsisa64r6-linux-gnu", "mipsisa64r6-linux-gnuabi64",
+    };
+    const MIPS64ELLibDirs: [2][]const u8 = .{ "/lib64", "/lib" };
+    const MIPS64ELTriples: [6][]const u8 = .{
+        "mips64el-linux-gnu",      "mips-mti-linux-gnu",
+        "mips-img-linux-gnu",      "mips64el-linux-gnuabi64",
+        "mipsisa64r6el-linux-gnu", "mipsisa64r6el-linux-gnuabi64",
+    };
+
+    const MIPSN32LibDirs: [1][]const u8 = .{"/lib32"};
+    const MIPSN32Triples: [2][]const u8 = .{ "mips64-linux-gnuabin32", "mipsisa64r6-linux-gnuabin32" };
+    const MIPSN32ELLibDirs: [1][]const u8 = .{"/lib32"};
+    const MIPSN32ELTriples: [2][]const u8 = .{ "mips64el-linux-gnuabin32", "mipsisa64r6el-linux-gnuabin32" };
+
+    const MSP430LibDirs: [1][]const u8 = .{"/lib"};
+    const MSP430Triples: [1][]const u8 = .{"msp430-elf"};
+
+    const PPCLibDirs: [2][]const u8 = .{ "/lib32", "/lib" };
+    const PPCTriples: [5][]const u8 = .{
+        "powerpc-linux-gnu",    "powerpc-unknown-linux-gnu",   "powerpc-linux-gnuspe",
+        // On 32-bit PowerPC systems running SUSE Linux, gcc is configured as a
+        // 64-bit compiler which defaults to "-m32", hence "powerpc64-suse-linux".
+        "powerpc64-suse-linux", "powerpc-montavista-linuxspe",
+    };
+    const PPCLELibDirs: [2][]const u8 = .{ "/lib32", "/lib" };
+    const PPCLETriples: [3][]const u8 = .{ "powerpcle-linux-gnu", "powerpcle-unknown-linux-gnu", "powerpcle-linux-musl" };
+
+    const PPC64LibDirs: [2][]const u8 = .{ "/lib64", "/lib" };
+    const PPC64Triples: [4][]const u8 = .{
+        "powerpc64-linux-gnu",  "powerpc64-unknown-linux-gnu",
+        "powerpc64-suse-linux", "ppc64-redhat-linux",
+    };
+    const PPC64LELibDirs: [2][]const u8 = .{ "/lib64", "/lib" };
+    const PPC64LETriples: [5][]const u8 = .{
+        "powerpc64le-linux-gnu",      "powerpc64le-unknown-linux-gnu",
+        "powerpc64le-none-linux-gnu", "powerpc64le-suse-linux",
+        "ppc64le-redhat-linux",
+    };
+
     const RISCV32LibDirs: [2][]const u8 = .{ "/lib32", "/lib" };
     const RISCV32Triples: [3][]const u8 = .{ "riscv32-unknown-linux-gnu", "riscv32-linux-gnu", "riscv32-unknown-elf" };
     const RISCV64LibDirs: [2][]const u8 = .{ "/lib64", "/lib" };
@@ -105,6 +169,11 @@ fn collectLibDirsAndTriples(
         "riscv64-linux-gnu",
         "riscv64-unknown-elf",
     };
+
+    const SPARCv8LibDirs: [2][]const u8 = .{ "/lib32", "/lib" };
+    const SPARCv8Triples: [2][]const u8 = .{ "sparc-linux-gnu", "sparcv8-linux-gnu" };
+    const SPARCv9LibDirs: [2][]const u8 = .{ "/lib64", "/lib" };
+    const SPARCv9Triples: [2][]const u8 = .{ "sparc64-linux-gnu", "sparcv9-linux-gnu" };
 
     const SystemZLibDirs: [2][]const u8 = .{ "/lib64", "/lib" };
     const SystemZTriples: [5][]const u8 = .{
@@ -153,6 +222,7 @@ fn collectLibDirsAndTriples(
         }
         return;
     }
+
     switch (target.cpu.arch) {
         .aarch64 => {
             libDirs.appendSliceAssumeCapacity(&AArch64LibDirs);
@@ -180,8 +250,14 @@ fn collectLibDirsAndTriples(
             else
                 tripleAliases.appendSliceAssumeCapacity(&ARMebTriples);
         },
-        .avr => @panic("TODO"),
-        .csky => @panic("TODO"),
+        .avr => {
+            libDirs.appendSliceAssumeCapacity(&AVRLibDirs);
+            tripleAliases.appendSliceAssumeCapacity(&AVRTriples);
+        },
+        .csky => {
+            libDirs.appendSliceAssumeCapacity(&CSKYLibDirs);
+            tripleAliases.appendSliceAssumeCapacity(&CSKYTriples);
+        },
         .x86_64 => {
             if (target.abi == .gnux32 or target.abi == .muslx32) {
                 libDirs.appendSliceAssumeCapacity(&X32LibDirs);
@@ -203,23 +279,86 @@ fn collectLibDirsAndTriples(
             // itself, which will be appended below.
             if (target.os.tag != .elfiamcu) {
                 tripleAliases.appendSliceAssumeCapacity(&X86Triples);
-                biarchLibDirs.appendSliceAssumeCapacity(&X86_64LibDirs);
-                biarchTripleAliases.appendSliceAssumeCapacity(&X86_64Triples);
                 biarchLibDirs.appendSliceAssumeCapacity(&X32LibDirs);
+                biarchLibDirs.appendSliceAssumeCapacity(&X86_64LibDirs);
                 biarchTripleAliases.appendSliceAssumeCapacity(&X32Triples);
+                biarchTripleAliases.appendSliceAssumeCapacity(&X86_64Triples);
             }
         },
-        .loongarch64 => @panic("TODO"),
-        .m68k => @panic("TODO"),
-        .mips => @panic("TODO"),
-        .mipsel => @panic("TODO"),
-        .mips64 => @panic("TODO"),
-        .mips64el => @panic("TODO"),
-        .msp430 => @panic("TODO"),
-        .powerpc => @panic("TODO"),
-        .powerpcle => @panic("TODO"),
-        .powerpc64 => @panic("TODO"),
-        .powerpc64le => @panic("TODO"),
+        .loongarch64 => {
+            libDirs.appendSliceAssumeCapacity(&LoongArch64LibDirs);
+            tripleAliases.appendSliceAssumeCapacity(&LoongArch64Triples);
+        },
+        .m68k => {
+            libDirs.appendSliceAssumeCapacity(&M68kLibDirs);
+            tripleAliases.appendSliceAssumeCapacity(&M68kTriples);
+        },
+        .mips => {
+            libDirs.appendSliceAssumeCapacity(&MIPSLibDirs);
+            tripleAliases.appendSliceAssumeCapacity(&MIPSTriples);
+
+            biarchLibDirs.appendSliceAssumeCapacity(&MIPS64LibDirs);
+            biarchLibDirs.appendSliceAssumeCapacity(&MIPSN32ELLibDirs);
+            biarchTripleAliases.appendSliceAssumeCapacity(&MIPS64Triples);
+            biarchTripleAliases.appendSliceAssumeCapacity(&MIPSN32ELTriples);
+        },
+        .mipsel => {
+            libDirs.appendSliceAssumeCapacity(&MIPSELLibDirs);
+            tripleAliases.appendSliceAssumeCapacity(&MIPSELTriples);
+            tripleAliases.appendSliceAssumeCapacity(&MIPSTriples);
+
+            biarchLibDirs.appendSliceAssumeCapacity(&MIPS64ELLibDirs);
+            biarchLibDirs.appendSliceAssumeCapacity(&MIPSN32ELLibDirs);
+            biarchTripleAliases.appendSliceAssumeCapacity(&MIPS64ELTriples);
+            biarchTripleAliases.appendSliceAssumeCapacity(&MIPSN32ELTriples);
+        },
+        .mips64 => {
+            libDirs.appendSliceAssumeCapacity(&MIPS64LibDirs);
+            tripleAliases.appendSliceAssumeCapacity(&MIPS64Triples);
+
+            biarchLibDirs.appendSliceAssumeCapacity(&MIPSLibDirs);
+            biarchLibDirs.appendSliceAssumeCapacity(&MIPSN32LibDirs);
+            biarchTripleAliases.appendSliceAssumeCapacity(&MIPSTriples);
+            biarchTripleAliases.appendSliceAssumeCapacity(&MIPSN32Triples);
+        },
+        .mips64el => {
+            libDirs.appendSliceAssumeCapacity(&MIPS64ELLibDirs);
+            tripleAliases.appendSliceAssumeCapacity(&MIPS64ELTriples);
+
+            biarchLibDirs.appendSliceAssumeCapacity(&MIPSELLibDirs);
+            biarchLibDirs.appendSliceAssumeCapacity(&MIPSN32ELLibDirs);
+            biarchTripleAliases.appendSliceAssumeCapacity(&MIPSELTriples);
+            biarchTripleAliases.appendSliceAssumeCapacity(&MIPSN32ELTriples);
+            biarchTripleAliases.appendSliceAssumeCapacity(&MIPSTriples);
+        },
+        .msp430 => {
+            libDirs.appendSliceAssumeCapacity(&MSP430LibDirs);
+            tripleAliases.appendSliceAssumeCapacity(&MSP430Triples);
+        },
+        .powerpc => {
+            libDirs.appendSliceAssumeCapacity(&PPCLibDirs);
+            tripleAliases.appendSliceAssumeCapacity(&PPCTriples);
+            biarchLibDirs.appendSliceAssumeCapacity(&PPC64LibDirs);
+            biarchTripleAliases.appendSliceAssumeCapacity(&PPC64Triples);
+        },
+        .powerpcle => {
+            libDirs.appendSliceAssumeCapacity(&PPCLELibDirs);
+            tripleAliases.appendSliceAssumeCapacity(&PPCLETriples);
+            biarchLibDirs.appendSliceAssumeCapacity(&PPC64LELibDirs);
+            biarchTripleAliases.appendSliceAssumeCapacity(&PPC64LETriples);
+        },
+        .powerpc64 => {
+            libDirs.appendSliceAssumeCapacity(&PPC64LibDirs);
+            tripleAliases.appendSliceAssumeCapacity(&PPC64Triples);
+            biarchLibDirs.appendSliceAssumeCapacity(&PPCLibDirs);
+            biarchTripleAliases.appendSliceAssumeCapacity(&PPCTriples);
+        },
+        .powerpc64le => {
+            libDirs.appendSliceAssumeCapacity(&PPC64LELibDirs);
+            tripleAliases.appendSliceAssumeCapacity(&PPC64LETriples);
+            biarchLibDirs.appendSliceAssumeCapacity(&PPCLELibDirs);
+            biarchTripleAliases.appendSliceAssumeCapacity(&PPCLETriples);
+        },
         .riscv32 => {
             libDirs.appendSliceAssumeCapacity(&RISCV32LibDirs);
             tripleAliases.appendSliceAssumeCapacity(&RISCV32Triples);
@@ -232,8 +371,18 @@ fn collectLibDirsAndTriples(
             biarchLibDirs.appendSliceAssumeCapacity(&RISCV32LibDirs);
             biarchTripleAliases.appendSliceAssumeCapacity(&RISCV32Triples);
         },
-        .sparc => @panic("TODO"),
-        .sparc64 => @panic("TODO"),
+        .sparc => {
+            libDirs.appendSliceAssumeCapacity(&SPARCv8LibDirs);
+            tripleAliases.appendSliceAssumeCapacity(&SPARCv8Triples);
+            biarchLibDirs.appendSliceAssumeCapacity(&SPARCv9LibDirs);
+            biarchTripleAliases.appendSliceAssumeCapacity(&SPARCv9Triples);
+        },
+        .sparc64 => {
+            libDirs.appendSliceAssumeCapacity(&SPARCv9LibDirs);
+            tripleAliases.appendSliceAssumeCapacity(&SPARCv9Triples);
+            biarchLibDirs.appendSliceAssumeCapacity(&SPARCv8LibDirs);
+            biarchTripleAliases.appendSliceAssumeCapacity(&SPARCv8Triples);
+        },
         .s390x => {
             libDirs.appendSliceAssumeCapacity(&SystemZLibDirs);
             tripleAliases.appendSliceAssumeCapacity(&SystemZTriples);
@@ -449,7 +598,7 @@ fn scanLibDirForGCCTriple(
         const libSuffix = std.fs.path.join(suffixBufferLib.allocator(), &.{ base, candidateTriple }) catch continue;
         const dirname = std.fs.path.join(fib.allocator(), &.{ libDir, libSuffix }) catch continue;
 
-        var parentDir = std.fs.cwd().openDir(dirname, .{ .access_sub_paths = false, .iterate = true }) catch continue;
+        var parentDir = tc.filesystem.openDir(dirname) catch continue;
         defer parentDir.close();
 
         var it = parentDir.iterate();

@@ -3528,11 +3528,11 @@ fn debugTokenBuf(pp: *Preprocessor, buf: []const Token) !void {
 test "Preserve pragma tokens sometimes" {
     const allocator = std.testing.allocator;
     const Test = struct {
-        fn runPreprocessor(source_text: []const u8) ![]const u8 {
+        fn runPreprocessor(sourceText: []const u8) ![]const u8 {
             var buf = std.ArrayList(u8).init(allocator);
             defer buf.deinit();
 
-            var comp = Compilation.init(allocator);
+            var comp = Compilation.init(allocator, std.fs.cwd());
             defer comp.deinit();
 
             try comp.addDefaultPragmaHandlers();
@@ -3543,30 +3543,30 @@ test "Preserve pragma tokens sometimes" {
             pp.preserveWhitespace = true;
             assert(pp.linemarkers == .None);
 
-            const test_runner_macros = try comp.addSourceFromBuffer("<test_runner>", source_text);
-            const eof = try pp.preprocess(test_runner_macros);
+            const testRunnerMacros = try comp.addSourceFromBuffer("<test_runner>", sourceText);
+            const eof = try pp.preprocess(testRunnerMacros);
             try pp.addToken(eof);
 
             try pp.prettyPrintTokens(buf.writer());
             return allocator.dupe(u8, buf.items);
         }
 
-        fn check(source_text: []const u8, expected: []const u8) !void {
-            const output = try runPreprocessor(source_text);
+        fn check(sourceText: []const u8, expected: []const u8) !void {
+            const output = try runPreprocessor(sourceText);
             defer allocator.free(output);
 
             try std.testing.expectEqualStrings(expected, output);
         }
     };
 
-    const preserve_gcc_diagnostic =
+    const preserceGccDiag =
         \\#pragma GCC diagnostic error "-Wnewline-eof"
         \\#pragma GCC warning error "-Wnewline-eof"
         \\int x;
         \\#pragma GCC ignored error "-Wnewline-eof"
         \\
     ;
-    try Test.check(preserve_gcc_diagnostic, preserve_gcc_diagnostic);
+    try Test.check(preserceGccDiag, preserceGccDiag);
 
     const omit_once =
         \\#pragma once
@@ -3593,8 +3593,10 @@ test "destringify" {
             try std.testing.expectEqualStrings(destringified, pp.charBuffer.items);
         }
     };
-    var comp = Compilation.init(allocator);
+
+    var comp = Compilation.init(allocator, std.fs.cwd());
     defer comp.deinit();
+
     var pp = Preprocessor.init(&comp);
     defer pp.deinit();
 
@@ -3620,6 +3622,8 @@ test "Include guards" {
         fn pairsWithIfndef(tokenID: TokenType) bool {
             return switch (tokenID) {
                 .KeywordElIf,
+                .KeywordElifdef,
+                .KeywordElifndef,
                 .KeywordElse,
                 => true,
 
@@ -3654,8 +3658,9 @@ test "Include guards" {
             tokenID: TokenType,
             expectedGuards: u32,
         ) !void {
-            var comp = Compilation.init(allocator);
+            var comp = Compilation.init(allocator, std.fs.cwd());
             defer comp.deinit();
+
             var pp = Preprocessor.init(&comp);
             defer pp.deinit();
 
@@ -3671,7 +3676,11 @@ test "Include guards" {
             switch (tokenID) {
                 .KeywordInclude, .KeywordIncludeNext => try writer.print(template, .{ tokenID.lexeme().?, " \"bar.h\"" }),
                 .KeywordDefine, .KeywordUndef => try writer.print(template, .{ tokenID.lexeme().?, " BAR" }),
-                .KeywordIfndef, .KeywordIfdef => try writer.print(template, .{ tokenID.lexeme().?, " BAR\n#endif" }),
+                .KeywordIfndef,
+                .KeywordIfdef,
+                .KeywordElifdef,
+                .KeywordElifndef,
+                => try writer.print(template, .{ tokenID.lexeme().?, " BAR\n#endif" }),
                 else => try writer.print(template, .{ tokenID.lexeme().?, "" }),
             }
 
