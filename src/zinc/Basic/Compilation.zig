@@ -475,6 +475,10 @@ pub fn generateSystemDefines(comp: *Compilation, w: anytype) !void {
     try comp.generateSizeofType(w, "__SIZEOF_WCHAR_T__", comp.types.wchar);
     // try comp.generateSizeofType(w, "__SIZEOF_WINT_T__", Type.Pointer);
 
+    if (Target.hasInt128(comp.target)) {
+        try comp.generateSizeofType(w, "__SIZEOF_INT128__", Type.Int128);
+    }
+
     // various int types
     try comp.generateTypeMacro(w, "__INTPTR_TYPE__", comp.types.intptr);
     try comp.generateTypeMacro(w, "__UINTPTR_TYPE__", comp.types.intptr.makeIntegerUnsigned());
