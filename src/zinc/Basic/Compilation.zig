@@ -438,6 +438,25 @@ pub fn generateSystemDefines(comp: *Compilation, w: anytype) !void {
         \\
     );
 
+    // TODO: Set these to target-specific constants depending on backend capabilities
+    // For now they are just set to the "may be lock-free" value
+    try w.writeAll(
+        \\#define __ATOMIC_BOOL_LOCK_FREE 1
+        \\#define __ATOMIC_CHAR_LOCK_FREE 1
+        \\#define __ATOMIC_CHAR16_T_LOCK_FREE 1
+        \\#define __ATOMIC_CHAR32_T_LOCK_FREE 1
+        \\#define __ATOMIC_WCHAR_T_LOCK_FREE 1
+        \\#define __ATOMIC_SHORT_LOCK_FREE 1
+        \\#define __ATOMIC_INT_LOCK_FREE 1
+        \\#define __ATOMIC_LONG_LOCK_FREE 1
+        \\#define __ATOMIC_LLONG_LOCK_FREE 1
+        \\#define __ATOMIC_POINTER_LOCK_FREE 1
+        \\
+    );
+    if (comp.langOpts.hasChar8_t()) {
+        try w.writeAll("#define __ATOMIC_CHAR8_T_LOCK_FREE 1\n");
+    }
+
     //types
     if (comp.getCharSignedness() == .unsigned) try w.writeAll("#define __CHAR_UNSIGNED__ 1\n");
     try w.writeAll("#define __CHAR_BIT__ 8\n");
@@ -536,7 +555,6 @@ pub fn generateBuiltinMacros(comp: *Compilation, systemDefinesMode: SystemDefine
 
     // Standard macros
     try buf.appendSlice(
-        \\#define __STDC_NO_ATOMICS__ 1
         \\#define __STDC_NO_COMPLEX__ 1
         \\#define __STDC_NO_THREADS__ 1
         \\#define __STDC_NO_VLA__ 1

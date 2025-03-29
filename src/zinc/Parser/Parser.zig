@@ -6734,15 +6734,40 @@ const CallExpr = union(enum) {
         return switch (self) {
             .standard => null,
             .builtin => |builtin| switch (builtin.tag) {
-                .__builtin_complex => 2,
+                .__c11_atomic_thread_fence,
+                .__c11_atomic_signal_fence,
+                .__c11_atomic_is_lock_free,
+                => 1,
 
+                .__builtin_complex,
+                .__c11_atomic_load,
+                .__c11_atomic_init,
+                => 2,
+
+                .__c11_atomic_store,
+                .__c11_atomic_exchange,
+                .__c11_atomic_fetch_add,
+                .__c11_atomic_fetch_sub,
+                .__c11_atomic_fetch_or,
+                .__c11_atomic_fetch_xor,
+                .__c11_atomic_fetch_and,
                 .__atomic_fetch_add,
                 .__atomic_fetch_sub,
                 .__atomic_fetch_and,
                 .__atomic_fetch_xor,
                 .__atomic_fetch_or,
                 .__atomic_fetch_nand,
+                .__atomic_add_fetch,
+                .__atomic_sub_fetch,
+                .__atomic_and_fetch,
+                .__atomic_xor_fetch,
+                .__atomic_or_fetch,
+                .__atomic_nand_fetch,
                 => 3,
+
+                .__c11_atomic_compare_exchange_strong,
+                .__c11_atomic_compare_exchange_weak,
+                => 5,
 
                 .__atomic_compare_exchange,
                 .__atomic_compare_exchange_n,
@@ -6763,20 +6788,60 @@ const CallExpr = union(enum) {
                     return lastParam.type(&p.tree).makeComplex();
                 },
 
+                .__c11_atomic_load => {
+                    if (p.listBuffer.items.len != 3) return Type.Invalid;
+                    const secondParam = p.listBuffer.items[1];
+                    const ty = secondParam.type(&p.tree);
+                    if (!ty.isPointer()) return Type.Invalid;
+                    return ty.getElemType();
+                },
+
+                .__c11_atomic_exchange => {
+                    if (p.listBuffer.items.len != 4) return Type.Invalid;
+                    const secondParam = p.listBuffer.items[2];
+                    return secondParam.type(&p.tree);
+                },
+
                 .__atomic_fetch_add,
+                .__atomic_add_fetch,
+                .__c11_atomic_fetch_add,
+
                 .__atomic_fetch_sub,
+                .__atomic_sub_fetch,
+                .__c11_atomic_fetch_sub,
+
                 .__atomic_fetch_and,
+                .__atomic_and_fetch,
+                .__c11_atomic_fetch_and,
+
                 .__atomic_fetch_xor,
+                .__atomic_xor_fetch,
+                .__c11_atomic_fetch_xor,
+
                 .__atomic_fetch_or,
+                .__atomic_or_fetch,
+                .__c11_atomic_fetch_or,
+
                 .__atomic_fetch_nand,
+                .__atomic_nand_fetch,
+                .__c11_atomic_fetch_nand,
                 => {
                     if (p.listBuffer.items.len != 3) return Type.Invalid;
                     const secondParam = p.listBuffer.items[2];
                     return secondParam.type(&p.tree);
                 },
 
+                .__c11_atomic_compare_exchange_strong,
+                .__c11_atomic_compare_exchange_weak,
+                => {
+                    if (p.listBuffer.items.len != 6) return Type.Invalid;
+                    const thirdParam = p.listBuffer.items[3];
+                    return thirdParam.type(&p.tree);
+                },
+
                 .__atomic_compare_exchange,
                 .__atomic_compare_exchange_n,
+                .__c11_atomic_is_lock_free,
                 => Type.Bool,
 
                 else => callableTy.getReturnType(),
