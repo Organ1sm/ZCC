@@ -260,7 +260,7 @@ pub fn intCast(v: *Value, destTy: Type, comp: *Compilation) !void {
 
     const limbs = try comp.gpa.alloc(
         std.math.big.Limb,
-        std.math.big.int.calcTwosCompLimbCount(bits),
+        std.math.big.int.calcTwosCompLimbCount(@max(big.bitCountTwosComp(), bits)),
     );
     defer comp.gpa.free(limbs);
 
