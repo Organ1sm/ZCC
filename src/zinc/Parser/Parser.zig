@@ -5505,8 +5505,8 @@ fn parseShiftExpr(p: *Parser) Error!?Result {
 
         if (try lhs.adjustTypes(tok, &rhs, p, .integer)) {
             if (tag == .shlExpr) {
-                if (try lhs.value.shl(lhs.value, rhs.value, lhs.ty, p.comp))
-                    try p.errOverflow(tok, lhs);
+                if (try lhs.value.shl(lhs.value, rhs.value, lhs.ty, p.comp) and
+                    lhs.ty.signedness(p.comp) != .unsigned) try p.errOverflow(tok, lhs);
             } else {
                 lhs.value = try lhs.value.shr(rhs.value, lhs.ty, p.comp);
             }
@@ -5530,11 +5530,11 @@ fn parseAddExpr(p: *Parser) Error!?Result {
         const lhsTy = lhs.ty;
         if (try lhs.adjustTypes(tok, &rhs, p, if (tag == .addExpr) .add else .sub)) {
             if (tag == .addExpr) {
-                if (try lhs.value.add(lhs.value, rhs.value, lhs.ty, p.comp))
-                    try p.errOverflow(tok, lhs);
+                if (try lhs.value.add(lhs.value, rhs.value, lhs.ty, p.comp) and
+                    lhs.ty.signedness(p.comp) != .unsigned) try p.errOverflow(tok, lhs);
             } else {
-                if (try lhs.value.sub(lhs.value, rhs.value, lhs.ty, p.comp))
-                    try p.errOverflow(tok, lhs);
+                if (try lhs.value.sub(lhs.value, rhs.value, lhs.ty, p.comp) and
+                    lhs.ty.signedness(p.comp) != .unsigned) try p.errOverflow(tok, lhs);
             }
         }
 
@@ -5574,10 +5574,10 @@ fn parseMulExpr(p: *Parser) Error!?Result {
 
         if (try lhs.adjustTypes(tok, &rhs, p, if (tag == .modExpr) .integer else .arithmetic)) {
             switch (tag) {
-                .mulExpr => if (try lhs.value.mul(lhs.value, rhs.value, lhs.ty, p.comp))
-                    try p.errOverflow(tok, lhs),
-                .divExpr => if (try lhs.value.div(lhs.value, rhs.value, lhs.ty, p.comp))
-                    try p.errOverflow(tok, lhs),
+                .mulExpr => if (try lhs.value.mul(lhs.value, rhs.value, lhs.ty, p.comp) and
+                    lhs.ty.signedness(p.comp) != .unsigned) try p.errOverflow(tok, lhs),
+                .divExpr => if (try lhs.value.div(lhs.value, rhs.value, lhs.ty, p.comp) and
+                    lhs.ty.signedness(p.comp) != .unsigned) try p.errOverflow(tok, lhs),
 
                 .modExpr => {
                     var res = try Value.rem(lhs.value, rhs.value, lhs.ty, p.comp);
