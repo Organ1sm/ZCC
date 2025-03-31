@@ -1390,6 +1390,7 @@ fn reconstructIncludeString(
     const params = paramTokens[begin..end];
 
     if (params.len == 0) {
+        if (paramTokens.len == 0) return null;
         try pp.comp.addDiagnostic(.{
             .tag = .expected_filename,
             .loc = paramTokens[0].loc,
