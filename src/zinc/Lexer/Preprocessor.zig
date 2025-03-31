@@ -1482,6 +1482,7 @@ fn handleBuiltinMacro(
 
                 if (identifier) |_| invalid = tok else identifier = tok;
             }
+
             if (identifier == null and invalid == null) invalid = .{ .id = .Eof, .loc = srcLoc };
             if (invalid) |some| {
                 try pp.comp.addDiagnostic(
@@ -1575,6 +1576,17 @@ fn handleBuiltinMacro(
     }
 }
 
+/// Treat whitespace-only paste arguments as empty
+fn getPasteArgs(args: []const TokenWithExpansionLocs) []const TokenWithExpansionLocs {
+    for (args) |tok| {
+        if (tok.id != .MacroWS) return args;
+    }
+    return &[1]TokenWithExpansionLocs{.{
+        .id = .PlaceMarker,
+        .loc = .{ .id = .generated, .byteOffset = 0, .line = 0 },
+    }};
+}
+
 fn expandFuncMacro(
     pp: *Preprocessor,
     loc: Source.Location,
@@ -1630,10 +1642,7 @@ fn expandFuncMacro(
                             continue
                         else
                             &[1]TokenWithExpansionLocs{tokenFromRaw(rawNext)},
-                        .MacroParam, .MacroParamNoExpand => if (args.items[rawNext.end].len > 0)
-                            args.items[rawNext.end]
-                        else
-                            &[1]TokenWithExpansionLocs{tokenFromRaw(.{ .id = .PlaceMarker, .source = .generated })},
+                        .MacroParam, .MacroParamNoExpand => getPasteArgs(args.items[rawNext.end]),
                         .KeywordVarArgs => varArguments.items,
                         .KeywordVarOpt => blk: {
                             try pp.expandVaOpt(&vaoptBuffer, rawNext, varArguments.items.len != 0);
@@ -1648,10 +1657,7 @@ fn expandFuncMacro(
             },
 
             .MacroParamNoExpand => {
-                const slice = if (args.items[raw.end].len > 0)
-                    args.items[raw.end]
-                else
-                    &[1]TokenWithExpansionLocs{tokenFromRaw(.{ .id = .PlaceMarker, .source = .generated })};
+                const slice = getPasteArgs(args.items[raw.end]);
                 const rawLoc = Source.Location{ .id = raw.source, .byteOffset = raw.start, .line = raw.line };
                 try bufCopyTokens(&buf, slice, &.{rawLoc});
             },
