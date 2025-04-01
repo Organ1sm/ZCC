@@ -176,7 +176,7 @@ pub const TokenWithExpansionLocs = struct {
     }
 
     pub fn addExpansionLocation(tok: *TokenWithExpansionLocs, gpa: std.mem.Allocator, new: []const Source.Location) !void {
-        if (new.len == 0 or tok.id == .WhiteSpace) return;
+        if (new.len == 0 or tok.id == .WhiteSpace or tok.id == .MacroWS or tok.id == .PlaceMarker) return;
         var list = std.ArrayList(Source.Location).init(gpa);
         defer {
             @memset(list.items.ptr[list.items.len..list.capacity], .{});

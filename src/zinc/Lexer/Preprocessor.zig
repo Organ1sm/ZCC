@@ -1187,6 +1187,11 @@ fn deinitMacroArguments(allocator: Allocator, args: *const MacroArguments) void 
 fn expandObjMacro(pp: *Preprocessor, simpleMacro: *const Macro) Error!ExpandBuffer {
     var buff = ExpandBuffer.init(pp.gpa);
     errdefer buff.deinit();
+
+    if (simpleMacro.tokens.len == 0) {
+        try buff.append(.{ .id = .PlaceMarker, .loc = .{ .id = .generated } });
+        return buff;
+    }
     try buff.ensureTotalCapacity(simpleMacro.tokens.len);
 
     var i: usize = 0;
@@ -1378,7 +1383,10 @@ fn reconstructIncludeString(
     pp: *Preprocessor,
     paramTokens: []const TokenWithExpansionLocs,
     embedArgs: ?*[]const TokenWithExpansionLocs,
+    first: TokenWithExpansionLocs,
 ) !?[]const u8 {
+    assert(paramTokens.len != 0);
+
     const charTop = pp.charBuffer.items.len;
     defer pp.charBuffer.items.len = charTop;
 
@@ -1390,11 +1398,10 @@ fn reconstructIncludeString(
     const params = paramTokens[begin..end];
 
     if (params.len == 0) {
-        if (paramTokens.len == 0) return null;
         try pp.comp.addDiagnostic(.{
             .tag = .expected_filename,
-            .loc = paramTokens[0].loc,
-        }, paramTokens[0].expansionSlice());
+            .loc = first.loc,
+        }, first.expansionSlice());
         return null;
     }
 
@@ -1420,6 +1427,13 @@ fn reconstructIncludeString(
 
     const includeStr = pp.charBuffer.items[charTop..];
     if (includeStr.len < 3) {
+        if (includeStr.len == 0) {
+            try pp.comp.addDiagnostic(.{
+                .tag = .expected_filename,
+                .loc = first.loc,
+            }, first.expansionSlice());
+            return null;
+        }
         try pp.comp.addDiagnostic(.{
             .tag = .empty_filename,
             .loc = params[0].loc,
@@ -1552,7 +1566,7 @@ fn handleBuiltinMacro(
         },
 
         .MacroParamHasInclude, .MacroParamHasIncludeNext => {
-            const includeStr = (try pp.reconstructIncludeString(paramTokens, null)) orelse return false;
+            const includeStr = (try pp.reconstructIncludeString(paramTokens, null, paramTokens[0])) orelse return false;
             const includeType: Compilation.IncludeType = switch (includeStr[0]) {
                 '"' => .Quotes,
                 '<' => .AngleBrackets,
@@ -1806,7 +1820,7 @@ fn expandFuncMacro(
                     break :blk notFound;
                 } else res: {
                     var embedArgs: []const TokenWithExpansionLocs = &.{};
-                    const includeStr = (try pp.reconstructIncludeString(arg, &embedArgs)) orelse
+                    const includeStr = (try pp.reconstructIncludeString(arg, &embedArgs, arg[0])) orelse
                         break :res notFound;
 
                     var prev = tokenFromRaw(raw);
@@ -2464,6 +2478,10 @@ fn expandMacro(pp: *Preprocessor, lexer: *Lexer, raw: RawToken) MacroError!void 
             continue;
         }
         if (tok.is(.Comment) and !pp.comp.langOpts.preserveCommentsInMacros) {
+            TokenWithExpansionLocs.free(tok.expansionLocs, pp.gpa);
+            continue;
+        }
+        if (tok.id == .PlaceMarker) {
             TokenWithExpansionLocs.free(tok.expansionLocs, pp.gpa);
             continue;
         }
@@ -3294,8 +3312,7 @@ fn findIncludeFilenameToken(
 
             try pp.expandMacroExhaustive(lexer, &pp.topExpansionBuffer, 0, 1, true, .NonExpr);
             var trailingTokens: []const TokenWithExpansionLocs = &.{};
-            const includeStr = (try pp.reconstructIncludeString(pp.topExpansionBuffer.items, &trailingTokens)) orelse {
-                try pp.addError(first, .expected_filename);
+            const includeStr = (try pp.reconstructIncludeString(pp.topExpansionBuffer.items, &trailingTokens, tokenFromRaw(first))) orelse {
                 try pp.expectNewLine(lexer);
                 return error.InvalidInclude;
             };
