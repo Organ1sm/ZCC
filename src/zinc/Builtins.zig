@@ -105,7 +105,7 @@ fn createType(
             }
         },
         .h => builder.combine(undefined, .FP16, 0) catch unreachable,
-        .x => return Type.Invalid, // _Float16
+        .x => builder.combine(undefined, .Float16, 0) catch unreachable,
         .y => {
             // Todo: __bf16
             return Type.Invalid;
