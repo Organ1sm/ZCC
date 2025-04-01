@@ -1424,6 +1424,7 @@ pub fn hasInclude(
     includeType: IncludeType, // angle bracket or quotes
     which: WhichInclude, // __has_include or __has_include_next
 ) !bool {
+    if (std.mem.indexOfScalar(u8, filename, 0) != null) return false;
     if (std.fs.path.isAbsolute(filename)) {
         if (which == .Next) return false;
         return !std.meta.isError(comp.cwd.access(filename, .{}));

@@ -11,6 +11,7 @@ const Token = Tree.Token;
 const TokenWithExpansionLocs = Tree.TokenWithExpansionLocs;
 const Attribute = @import("Attribute.zig");
 const Features = @import("Features.zig");
+const HideSet = @import("HideSet.zig");
 
 const Allocator = std.mem.Allocator;
 const Error = Compilation.Error;
@@ -78,8 +79,6 @@ const Macro = struct {
     isBuiltin: bool = false,
     /// Location of macro in the source
     loc: Source.Location,
-    start: u32,
-    end: u32,
 
     fn eql(a: Macro, b: Macro, pp: *Preprocessor) bool {
         if (a.tokens.len != b.tokens.len)
@@ -138,6 +137,8 @@ preserveWhitespace: bool = false,
 /// linemarker tokens. Must be .none unless in -E mode (parser does not handle linemarkers)
 linemarkers: LineMarkers = .None,
 
+hideSet: HideSet,
+
 pub const parse = Parser.parse;
 
 pub const LineMarkers = enum {
@@ -179,8 +180,6 @@ pub fn addBuiltinMacro(pp: *Preprocessor, name: []const u8, isFunc: bool, tokens
         .varArgs = false,
         .isFunc = isFunc,
         .loc = .{ .id = .generated },
-        .start = 0,
-        .end = 0,
         .isBuiltin = true,
     });
 }
@@ -213,6 +212,7 @@ pub fn init(comp: *Compilation) Preprocessor {
         .poisonedIdentifiers = std.StringHashMap(void).init(comp.gpa),
         .topExpansionBuffer = ExpandBuffer.init(comp.gpa),
         .expansionLocs = .{},
+        .hideSet = .{ .comp = comp },
     };
 
     comp.pragmaEvent(.BeforePreprocess);
@@ -237,6 +237,7 @@ pub fn deinit(pp: *Preprocessor) void {
     pp.poisonedIdentifiers.deinit();
     pp.topExpansionBuffer.deinit();
     pp.includeGuards.deinit(pp.gpa);
+    pp.hideSet.deinit();
 
     for (pp.expansionLocs.items(.locs)) |locs| {
         TokenWithExpansionLocs.free(locs, pp.gpa);
@@ -880,6 +881,7 @@ fn expr(pp: *Preprocessor, lexer: *Lexer) MacroError!bool {
 
     if (pp.topExpansionBuffer.items.len != 0) {
         pp.expansionSourceLoc = pp.topExpansionBuffer.items[0].loc;
+        pp.hideSet.clearRetainingCapacity();
         try pp.expandMacroExhaustive(lexer, &pp.topExpansionBuffer, 0, pp.topExpansionBuffer.items.len, false, .Expr);
     }
 
@@ -1185,6 +1187,11 @@ fn deinitMacroArguments(allocator: Allocator, args: *const MacroArguments) void 
 fn expandObjMacro(pp: *Preprocessor, simpleMacro: *const Macro) Error!ExpandBuffer {
     var buff = ExpandBuffer.init(pp.gpa);
     errdefer buff.deinit();
+
+    if (simpleMacro.tokens.len == 0) {
+        try buff.append(.{ .id = .PlaceMarker, .loc = .{ .id = .generated } });
+        return buff;
+    }
     try buff.ensureTotalCapacity(simpleMacro.tokens.len);
 
     var i: usize = 0;
@@ -1376,7 +1383,10 @@ fn reconstructIncludeString(
     pp: *Preprocessor,
     paramTokens: []const TokenWithExpansionLocs,
     embedArgs: ?*[]const TokenWithExpansionLocs,
+    first: TokenWithExpansionLocs,
 ) !?[]const u8 {
+    assert(paramTokens.len != 0);
+
     const charTop = pp.charBuffer.items.len;
     defer pp.charBuffer.items.len = charTop;
 
@@ -1390,8 +1400,8 @@ fn reconstructIncludeString(
     if (params.len == 0) {
         try pp.comp.addDiagnostic(.{
             .tag = .expected_filename,
-            .loc = paramTokens[0].loc,
-        }, paramTokens[0].expansionSlice());
+            .loc = first.loc,
+        }, first.expansionSlice());
         return null;
     }
 
@@ -1417,6 +1427,13 @@ fn reconstructIncludeString(
 
     const includeStr = pp.charBuffer.items[charTop..];
     if (includeStr.len < 3) {
+        if (includeStr.len == 0) {
+            try pp.comp.addDiagnostic(.{
+                .tag = .expected_filename,
+                .loc = first.loc,
+            }, first.expansionSlice());
+            return null;
+        }
         try pp.comp.addDiagnostic(.{
             .tag = .empty_filename,
             .loc = params[0].loc,
@@ -1479,6 +1496,7 @@ fn handleBuiltinMacro(
 
                 if (identifier) |_| invalid = tok else identifier = tok;
             }
+
             if (identifier == null and invalid == null) invalid = .{ .id = .Eof, .loc = srcLoc };
             if (invalid) |some| {
                 try pp.comp.addDiagnostic(
@@ -1548,7 +1566,7 @@ fn handleBuiltinMacro(
         },
 
         .MacroParamHasInclude, .MacroParamHasIncludeNext => {
-            const includeStr = (try pp.reconstructIncludeString(paramTokens, null)) orelse return false;
+            const includeStr = (try pp.reconstructIncludeString(paramTokens, null, paramTokens[0])) orelse return false;
             const includeType: Compilation.IncludeType = switch (includeStr[0]) {
                 '"' => .Quotes,
                 '<' => .AngleBrackets,
@@ -1570,6 +1588,17 @@ fn handleBuiltinMacro(
 
         else => unreachable,
     }
+}
+
+/// Treat whitespace-only paste arguments as empty
+fn getPasteArgs(args: []const TokenWithExpansionLocs) []const TokenWithExpansionLocs {
+    for (args) |tok| {
+        if (tok.id != .MacroWS) return args;
+    }
+    return &[1]TokenWithExpansionLocs{.{
+        .id = .PlaceMarker,
+        .loc = .{ .id = .generated, .byteOffset = 0, .line = 0 },
+    }};
 }
 
 fn expandFuncMacro(
@@ -1627,10 +1656,7 @@ fn expandFuncMacro(
                             continue
                         else
                             &[1]TokenWithExpansionLocs{tokenFromRaw(rawNext)},
-                        .MacroParam, .MacroParamNoExpand => if (args.items[rawNext.end].len > 0)
-                            args.items[rawNext.end]
-                        else
-                            &[1]TokenWithExpansionLocs{tokenFromRaw(.{ .id = .PlaceMarker, .source = .generated })},
+                        .MacroParam, .MacroParamNoExpand => getPasteArgs(args.items[rawNext.end]),
                         .KeywordVarArgs => varArguments.items,
                         .KeywordVarOpt => blk: {
                             try pp.expandVaOpt(&vaoptBuffer, rawNext, varArguments.items.len != 0);
@@ -1645,10 +1671,7 @@ fn expandFuncMacro(
             },
 
             .MacroParamNoExpand => {
-                const slice = if (args.items[raw.end].len > 0)
-                    args.items[raw.end]
-                else
-                    &[1]TokenWithExpansionLocs{tokenFromRaw(.{ .id = .PlaceMarker, .source = .generated })};
+                const slice = getPasteArgs(args.items[raw.end]);
                 const rawLoc = Source.Location{ .id = raw.source, .byteOffset = raw.start, .line = raw.line };
                 try bufCopyTokens(&buf, slice, &.{rawLoc});
             },
@@ -1797,7 +1820,7 @@ fn expandFuncMacro(
                     break :blk notFound;
                 } else res: {
                     var embedArgs: []const TokenWithExpansionLocs = &.{};
-                    const includeStr = (try pp.reconstructIncludeString(arg, &embedArgs)) orelse
+                    const includeStr = (try pp.reconstructIncludeString(arg, &embedArgs, arg[0])) orelse
                         break :res notFound;
 
                     var prev = tokenFromRaw(raw);
@@ -2025,24 +2048,6 @@ fn expandVaOpt(
     }
 }
 
-fn shouldExpand(tok: TokenWithExpansionLocs, macro: *Macro) bool {
-    if (tok.loc.id == macro.loc.id and
-        tok.loc.byteOffset >= macro.start and
-        tok.loc.byteOffset <= macro.end)
-        return false;
-
-    for (tok.expansionSlice()) |loc| {
-        if (loc.id == macro.loc.id and
-            loc.byteOffset >= macro.start and
-            loc.byteOffset <= macro.end)
-            return false;
-    }
-
-    if (tok.flags.expansionDisabled)
-        return false;
-    return true;
-}
-
 fn bufCopyTokens(buf: *ExpandBuffer, tokens: []const TokenWithExpansionLocs, src: []const Source.Location) !void {
     try buf.ensureUnusedCapacity(tokens.len);
     for (tokens) |tok| {
@@ -2091,6 +2096,7 @@ fn collectMacroFuncArguments(
     endIdx: *usize,
     extendBuffer: bool,
     isBuiltin: bool,
+    rparen: *TokenWithExpansionLocs,
 ) !MacroArguments {
     const nameToken = buf.items[startIdx.*];
     const savedLexer = lexer.*;
@@ -2149,6 +2155,7 @@ fn collectMacroFuncArguments(
                     const owned = try curArgument.toOwnedSlice();
                     errdefer pp.gpa.free(owned);
                     try args.append(owned);
+                    rparen.* = tok;
                     break;
                 } else {
                     const duped = try tok.dupe(pp.gpa);
@@ -2270,13 +2277,25 @@ fn expandMacroExhaustive(
                 continue;
             }
 
-            const macroEntry = pp.defines.getPtr(pp.expandedSlice(macroToken));
-            if (macroEntry == null or !shouldExpand(macroToken, macroEntry.?)) {
+            if (!macroToken.id.isMacroIdentifier() or macroToken.flags.expansionDisabled) {
                 idx += 1;
                 continue;
             }
-            if (macroEntry) |macro| macroHandler: {
+
+            const expanded = pp.expandedSlice(macroToken);
+            const macro = pp.defines.getPtr(expanded) orelse {
+                idx += 1;
+                continue;
+            };
+            const macroHideList = pp.hideSet.get(macroToken.loc);
+            if (pp.hideSet.contains(macroHideList, expanded)) {
+                idx += 1;
+                continue;
+            }
+
+            macroHandler: {
                 if (macro.isFunc) {
+                    var rparen: TokenWithExpansionLocs = undefined;
                     var macroScanIdx = idx;
                     // to be saved in case this doesn't turn out to be a call
                     const args = pp.collectMacroFuncArguments(
@@ -2286,6 +2305,7 @@ fn expandMacroExhaustive(
                         &movingEndIdx,
                         extendBuffer,
                         macro.isBuiltin,
+                        &rparen,
                     ) catch |err| switch (err) {
                         error.MissLParen => {
                             if (!buf.items[idx].flags.isMacroArg)
@@ -2302,11 +2322,16 @@ fn expandMacroExhaustive(
                         else => |e| return e,
                     };
 
+                    assert(rparen.id == .RParen);
                     defer {
                         for (args.items) |item|
                             pp.gpa.free(item);
                         args.deinit();
                     }
+
+                    const rparenHideList = pp.hideSet.get(rparen.loc);
+                    var hs = try pp.hideSet.intersection(macroHideList, rparenHideList);
+                    hs = try pp.hideSet.prepend(macroToken.loc, hs);
 
                     var argsCount = @as(u32, @intCast(args.items.len));
                     // if the macro has zero arguments g() args_count is still 1
@@ -2368,6 +2393,9 @@ fn expandMacroExhaustive(
                     for (res.items) |*tok| {
                         try tok.addExpansionLocation(pp.gpa, &.{macroToken.loc});
                         try tok.addExpansionLocation(pp.gpa, macroExpansionLocs);
+                        const tokenHideList = pp.hideSet.get(tok.loc);
+                        const newHideList = try pp.hideSet.@"union"(tokenHideList, hs);
+                        try pp.hideSet.put(tok.loc, newHideList);
                     }
 
                     const tokensRemoved = macroScanIdx - idx + 1;
@@ -2384,12 +2412,18 @@ fn expandMacroExhaustive(
                     const res = try pp.expandObjMacro(macro);
                     defer res.deinit();
 
+                    const hs = try pp.hideSet.prepend(macroToken.loc, macroHideList);
                     const macroExpansionLocs = macroToken.expansionSlice();
                     var incrementIdxBy = res.items.len;
                     for (res.items, 0..) |*tok, i| {
                         tok.flags.isMacroArg = macroToken.flags.isMacroArg;
                         try tok.addExpansionLocation(pp.gpa, &.{macroToken.loc});
                         try tok.addExpansionLocation(pp.gpa, macroExpansionLocs);
+
+                        const tokenHideList = pp.hideSet.get(tok.loc);
+                        const newHideList = try pp.hideSet.@"union"(tokenHideList, hs);
+                        try pp.hideSet.put(tok.loc, newHideList);
+
                         if (tok.is(.KeywordDefined) and evalCtx == .Expr) {
                             try pp.comp.addDiagnostic(.{
                                 .tag = .expansion_to_defined,
@@ -2435,6 +2469,7 @@ fn expandMacro(pp: *Preprocessor, lexer: *Lexer, raw: RawToken) MacroError!void 
     try pp.topExpansionBuffer.append(sourceToken);
     pp.expansionSourceLoc = sourceToken.loc;
 
+    pp.hideSet.clearRetainingCapacity();
     try pp.expandMacroExhaustive(lexer, &pp.topExpansionBuffer, 0, 1, true, .NonExpr);
     try pp.ensureUnusedTokenCapacity(pp.topExpansionBuffer.items.len);
     for (pp.topExpansionBuffer.items) |*tok| {
@@ -2443,6 +2478,10 @@ fn expandMacro(pp: *Preprocessor, lexer: *Lexer, raw: RawToken) MacroError!void 
             continue;
         }
         if (tok.is(.Comment) and !pp.comp.langOpts.preserveCommentsInMacros) {
+            TokenWithExpansionLocs.free(tok.expansionLocs, pp.gpa);
+            continue;
+        }
+        if (tok.id == .PlaceMarker) {
             TokenWithExpansionLocs.free(tok.expansionLocs, pp.gpa);
             continue;
         }
@@ -2462,12 +2501,12 @@ fn expandMacro(pp: *Preprocessor, lexer: *Lexer, raw: RawToken) MacroError!void 
 }
 
 /// Get expanded token source string.
-pub fn expandedSlice(pp: *Preprocessor, tok: anytype) []const u8 {
+pub fn expandedSlice(pp: *const Preprocessor, tok: anytype) []const u8 {
     return pp.expandedSliceExtra(tok, .SingleMacroWS);
 }
 
 pub fn expandedSliceExtra(
-    pp: *Preprocessor,
+    pp: *const Preprocessor,
     token: anytype,
     macroWSHandling: enum { SingleMacroWS, PreserveMacroWS },
 ) []const u8 {
@@ -2621,8 +2660,6 @@ fn define(pp: *Preprocessor, lexer: *Lexer) Error!void {
             .varArgs = false,
             .isFunc = false,
             .loc = tokenFromRaw(macroName).loc,
-            .start = 0,
-            .end = 0,
         }),
         .WhiteSpace => first = lexer.next(),
         .LParen => return pp.defineFunc(lexer, macroName, first),
@@ -2642,7 +2679,7 @@ fn define(pp: *Preprocessor, lexer: *Lexer) Error!void {
     var needWS = false;
     // Collect the token body and validate any ## found.
     var token = first;
-    const endIdx = while (true) {
+    while (true) {
         token.id.simplifyMacroKeyword();
         switch (token.id) {
             .HashHash => {
@@ -2661,7 +2698,7 @@ fn define(pp: *Preprocessor, lexer: *Lexer) Error!void {
                 try pp.tokenBuffer.append(token);
                 try pp.tokenBuffer.append(next);
             },
-            .NewLine, .Eof => break token.start,
+            .NewLine, .Eof => break,
             .Comment => if (pp.comp.langOpts.preserveCommentsInMacros) {
                 if (needWS) {
                     needWS = false;
@@ -2685,13 +2722,11 @@ fn define(pp: *Preprocessor, lexer: *Lexer) Error!void {
             },
         }
         token = lexer.next();
-    } else unreachable;
+    }
 
     const list = try pp.arena.allocator().dupe(RawToken, pp.tokenBuffer.items);
     try pp.defineMacro(macroName, .{
         .loc = tokenFromRaw(macroName).loc,
-        .start = first.start,
-        .end = endIdx,
         .tokens = list,
         .params = undefined,
         .isFunc = false,
@@ -2885,9 +2920,9 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: RawToken, lParen: Raw
     // parse the parameter list
     var gnuVarArgs: []const u8 = ""; // gnu-named varargs
     var varArgs = false;
-    const startIdx = while (true) {
+    while (true) {
         var token = lexer.nextNoWhiteSpace();
-        if (token.is(.RParen)) break token.end;
+        if (token.is(.RParen)) break;
 
         if (token.is(.Eof))
             return pp.addError(token, .unterminated_macro_param_list);
@@ -2901,7 +2936,7 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: RawToken, lParen: Raw
                 return skipToNewLine(lexer);
             }
 
-            break rParen.end;
+            break;
         }
 
         if (!token.id.isMacroIdentifier()) {
@@ -2921,9 +2956,9 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: RawToken, lParen: Raw
                 try pp.addError(lParen, .to_match_paren);
                 return skipToNewLine(lexer);
             }
-            break rParen.end;
+            break;
         } else if (token.is(.RParen)) {
-            break token.end;
+            break;
         } else if (token.isNot(.Comma)) {
             try pp.addError(token, .expected_comma_param_list);
             return skipToNewLine(lexer);
@@ -2935,10 +2970,10 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: RawToken, lParen: Raw
     // Clear the token buffer
     // Safe to use since we can only be in one directive at a time.
     pp.tokenBuffer.items.len = 0;
-    const endIdx = tokenLoop: while (true) {
+    tokenLoop: while (true) {
         var token = lexer.next();
         switch (token.id) {
-            .NewLine, .Eof => break token.start,
+            .NewLine, .Eof => break,
             .WhiteSpace => needWS = pp.tokenBuffer.items.len != 0,
             .Comment => if (!pp.comp.langOpts.preserveCommentsInMacros) continue else {
                 if (needWS) {
@@ -3072,7 +3107,7 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: RawToken, lParen: Raw
                 try pp.tokenBuffer.append(token);
             },
         }
-    } else unreachable;
+    }
 
     const paramList = try pp.arena.allocator().dupe([]const u8, params.items);
     const tokenList = try pp.arena.allocator().dupe(RawToken, pp.tokenBuffer.items);
@@ -3082,8 +3117,6 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: RawToken, lParen: Raw
         .varArgs = varArgs or gnuVarArgs.len != 0,
         .tokens = tokenList,
         .loc = tokenFromRaw(macroName).loc,
-        .start = startIdx,
-        .end = endIdx,
     });
 }
 
@@ -3279,8 +3312,7 @@ fn findIncludeFilenameToken(
 
             try pp.expandMacroExhaustive(lexer, &pp.topExpansionBuffer, 0, 1, true, .NonExpr);
             var trailingTokens: []const TokenWithExpansionLocs = &.{};
-            const includeStr = (try pp.reconstructIncludeString(pp.topExpansionBuffer.items, &trailingTokens)) orelse {
-                try pp.addError(first, .expected_filename);
+            const includeStr = (try pp.reconstructIncludeString(pp.topExpansionBuffer.items, &trailingTokens, tokenFromRaw(first))) orelse {
                 try pp.expectNewLine(lexer);
                 return error.InvalidInclude;
             };
