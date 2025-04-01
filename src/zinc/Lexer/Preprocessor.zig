@@ -290,7 +290,7 @@ pub fn addIncludeStart(pp: *Preprocessor, source: Source) !void {
         .loc = .{
             .id = source.id,
             .byteOffset = std.math.maxInt(u32),
-            .line = 0,
+            .line = 1,
         },
     });
 }
@@ -326,7 +326,7 @@ pub fn preprocessSources(pp: *Preprocessor, sources: []const Source) Error!void 
         try pp.addIncludeStart(header);
         _ = try pp.preprocess(header);
     }
-    try pp.addIncludeResume(first.id, 0, 0);
+    try pp.addIncludeResume(first.id, 0, 1);
     const eof = try pp.preprocess(first);
     try pp.addToken(eof);
 }
@@ -846,7 +846,7 @@ fn expectNewLine(pp: *Preprocessor, lexer: *Lexer) Error!void {
         const token = lexer.next();
         if (token.isOneOf(.{ .Eof, .NewLine }))
             return;
-        if (token.is(.WhiteSpace))
+        if (token.isOneOf(.{ .WhiteSpace, .Comment }))
             continue;
 
         if (!sentErr) {
@@ -3386,8 +3386,7 @@ fn printLinemarker(
 ) !void {
     try w.writeByte('#');
     if (pp.linemarkers == .LineDirectives) try w.writeAll("line");
-    // lineNo is 0 indexed.
-    try w.print(" {d} \"", .{lineNO + 1});
+    try w.print(" {d} \"", .{lineNO});
     for (source.path) |byte| switch (byte) {
         '\n' => try w.writeAll("\\n"),
         '\r' => try w.writeAll("\\r"),
@@ -3468,6 +3467,7 @@ pub fn prettyPrintTokens(pp: *Preprocessor, w: anytype) !void {
                 lastNewline = true;
                 try w.writeAll("\n");
             },
+
             .KeywordPragma => {
                 const pragmaName = pp.expandedSlice(pp.tokens.get(i + 1));
                 const endIdx = std.mem.indexOfScalarPos(TokenType, tokenIds, i, .NewLine) orelse i + 1;
@@ -3509,7 +3509,7 @@ pub fn prettyPrintTokens(pp: *Preprocessor, w: anytype) !void {
 
             .IncludeStart => {
                 const source = pp.comp.getSource(cur.loc.id);
-                try pp.printLinemarker(w, 0, source, .start);
+                try pp.printLinemarker(w, 1, source, .start);
                 lastNewline = true;
             },
 
