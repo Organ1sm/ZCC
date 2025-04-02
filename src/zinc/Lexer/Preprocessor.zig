@@ -27,6 +27,11 @@ const ExpansionEntry = struct {
     locs: [*]Source.Location,
 };
 
+const TokenState = struct {
+    tokensLen: usize,
+    expansionLocsLen: usize,
+};
+
 /// Errors that can be returned when expanding a macro.
 /// error.UnknownPragma can occur within Preprocessor.pragma() but
 /// it is handled there and doesn't escape that function
@@ -111,7 +116,7 @@ comp: *Compilation,
 gpa: std.mem.Allocator,
 arena: std.heap.ArenaAllocator,
 defines: DefineMap = .{},
-expansionLocs: std.MultiArrayList(ExpansionEntry),
+expansionLocs: std.MultiArrayList(ExpansionEntry) = .empty,
 tokens: Token.List = .{},
 tokenBuffer: RawTokenList,
 charBuffer: std.ArrayList(u8),
@@ -211,7 +216,6 @@ pub fn init(comp: *Compilation) Preprocessor {
         .charBuffer = std.ArrayList(u8).init(comp.gpa),
         .poisonedIdentifiers = std.StringHashMap(void).init(comp.gpa),
         .topExpansionBuffer = ExpandBuffer.init(comp.gpa),
-        .expansionLocs = .{},
         .hideSet = .{ .comp = comp },
     };
 
@@ -856,15 +860,25 @@ fn expectNewLine(pp: *Preprocessor, lexer: *Lexer) Error!void {
     }
 }
 
+fn getTokenState(pp: *const Preprocessor) TokenState {
+    return .{
+        .tokensLen = pp.tokens.len,
+        .expansionLocsLen = pp.expansionLocs.len,
+    };
+}
+
+fn restoreTokenState(pp: *Preprocessor, state: TokenState) void {
+    pp.tokens.len = state.tokensLen;
+    pp.expansionLocs.len = state.expansionLocsLen;
+}
+
 /// Consume all tokens until a newline and parse the result into a boolean.
 fn expr(pp: *Preprocessor, lexer: *Lexer) MacroError!bool {
-    const start = pp.tokens.len;
-    const locsStart = pp.expansionLocs.len;
+    const tokenState = pp.getTokenState();
     defer {
         for (pp.topExpansionBuffer.items) |token|
             TokenWithExpansionLocs.free(token.expansionLocs, pp.gpa);
-        pp.tokens.len = start;
-        pp.expansionLocs.len = locsStart;
+        pp.restoreTokenState(tokenState);
     }
 
     pp.topExpansionBuffer.items.len = 0;
@@ -988,7 +1002,7 @@ fn expr(pp: *Preprocessor, lexer: *Lexer) MacroError!bool {
         .comp = pp.comp,
         .gpa = pp.gpa,
         .tokenIds = pp.tokens.items(.id),
-        .tokenIdx = @intCast(start),
+        .tokenIdx = @intCast(tokenState.tokensLen),
         .inMacro = true,
         .strings = std.ArrayList(u8).init(pp.comp.gpa),
 
@@ -3145,14 +3159,13 @@ fn include(pp: *Preprocessor, lexer: *Lexer, which: Compilation.WhichInclude) Ma
     if (pp.verbose)
         pp.verboseLog(first, "include file {s}", .{newSource.path});
 
-    const tokenStart = pp.tokens.len;
-    const locsStart = pp.expansionLocs.len;
+    const tokenState = pp.getTokenState();
     try pp.addIncludeStart(newSource);
     const eof = pp.preprocessExtra(newSource) catch |err| switch (err) {
         error.StopPreprocessing => {
-            for (pp.expansionLocs.items(.locs)[locsStart..]) |loc| TokenWithExpansionLocs.free(loc, pp.gpa);
-            pp.tokens.len = tokenStart;
-            pp.expansionLocs.len = locsStart;
+            for (pp.expansionLocs.items(.locs)[tokenState.expansionLocsLen..]) |loc|
+                TokenWithExpansionLocs.free(loc, pp.gpa);
+            pp.restoreTokenState(tokenState);
             return;
         },
         else => |e| return e,
