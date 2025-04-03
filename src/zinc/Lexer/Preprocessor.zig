@@ -3209,19 +3209,17 @@ fn makePragmaToken(
 }
 
 pub fn addToken(pp: *Preprocessor, tok: TokenWithExpansionLocs) !void {
-    const idx: u32 = @intCast(pp.tokens.len);
-    try pp.tokens.append(pp.gpa, .{ .id = tok.id, .loc = tok.loc });
     if (tok.expansionLocs) |expansionLocs| {
-        try pp.expansionLocs.append(pp.gpa, .{ .idx = idx, .locs = expansionLocs });
+        try pp.expansionLocs.append(pp.gpa, .{ .idx = @intCast(pp.tokens.len), .locs = expansionLocs });
     }
+    try pp.tokens.append(pp.gpa, .{ .id = tok.id, .loc = tok.loc });
 }
 
 pub fn addTokenAssumeCapacity(pp: *Preprocessor, tok: TokenWithExpansionLocs) void {
-    const idx: u32 = @intCast(pp.tokens.len);
-    pp.tokens.appendAssumeCapacity(.{ .id = tok.id, .loc = tok.loc });
     if (tok.expansionLocs) |expansionLocs| {
-        pp.expansionLocs.appendAssumeCapacity(.{ .idx = idx, .locs = expansionLocs });
+        pp.expansionLocs.appendAssumeCapacity(.{ .idx = @intCast(pp.tokens.len), .locs = expansionLocs });
     }
+    pp.tokens.appendAssumeCapacity(.{ .id = tok.id, .loc = tok.loc });
 }
 
 pub fn ensureTotalTokenCapacity(pp: *Preprocessor, capacity: usize) !void {
