@@ -23,7 +23,7 @@ const RawTokenList = std.ArrayList(RawToken);
 const MaxIncludeDepth = 200;
 
 const ExpansionEntry = struct {
-    idx: u32,
+    idx: Tree.TokenIndex,
     locs: [*]Source.Location,
 };
 
