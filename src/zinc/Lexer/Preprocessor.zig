@@ -252,6 +252,14 @@ pub fn deinit(pp: *Preprocessor) void {
     pp.expansionEntries.deinit(pp.gpa);
 }
 
+/// Free buffers that are not needed after preprocessing
+fn clearBuffers(pp: *Preprocessor) void {
+    pp.tokenBuffer.clearAndFree();
+    pp.charBuffer.clearAndFree();
+    pp.topExpansionBuffer.clearAndFree();
+    pp.hideSet.clearAndFree();
+}
+
 pub fn expansionSlice(pp: *Preprocessor, tok: Tree.TokenIndex) []Source.Location {
     const S = struct {
         fn orderTokenIndex(lhs: Tree.TokenIndex, rhs: Tree.TokenIndex) std.math.Order {
@@ -335,6 +343,7 @@ pub fn preprocessSources(pp: *Preprocessor, sources: []const Source) Error!void 
     try pp.addIncludeResume(first.id, 0, 1);
     const eof = try pp.preprocess(first);
     try pp.addToken(eof);
+    pp.clearBuffers();
 }
 
 /// Preprocess a source file, returns eof token.
