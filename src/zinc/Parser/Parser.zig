@@ -404,6 +404,12 @@ pub fn removeNull(p: *Parser, str: Value) !Value {
 }
 
 pub fn typeStr(p: *Parser, ty: Type) ![]const u8 {
+    if (@import("builtin").mode != .Debug) {
+        if (ty.is(.Invalid)) {
+            return "Tried to render invalid type - this is an zinc bug.";
+        }
+    }
+
     if (TypeBuilder.fromType(ty).toString(p.comp.langOpts)) |str| return str;
     const stringsTop = p.strings.items.len;
     defer p.strings.items.len = stringsTop;
@@ -417,6 +423,12 @@ pub fn typePairStr(p: *Parser, a: Type, b: Type) ![]const u8 {
 }
 
 pub fn typePairStrExtra(p: *Parser, a: Type, msg: []const u8, b: Type) ![]const u8 {
+    if (@import("builtin").mode != .Debug) {
+        if (a.is(.Invalid) or b.is(.Invalid)) {
+            return "Tried to render invalid type - this is an zinc bug.";
+        }
+    }
+
     const stringsTop = p.strings.items.len;
     defer p.strings.items.len = stringsTop;
 
