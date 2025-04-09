@@ -1215,7 +1215,8 @@ pub fn bitSizeof(ty: Type, comp: *const Compilation) ?u64 {
 }
 
 pub fn alignable(ty: Type) bool {
-    return ty.isArray() or !ty.hasIncompleteSize() or ty.is(.Void);
+    const isAlignable = ty.isArray() or !ty.hasIncompleteSize() or ty.is(.Void);
+    return isAlignable and !ty.isInvalid();
 }
 
 /// Get the alignment of a type
