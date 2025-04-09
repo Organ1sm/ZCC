@@ -41,6 +41,8 @@ void incomplete_enum_float(void) {
     e = 1.0f;
 }
 
+void incomplete_unspecified_variable_len_array(struct S b[1][*]);
+
 void f1(struct Foo *a) { } /* should produce `warning: declaration of 'struct Foo' will not be visible outside of this function [-Wvisibility]` instead of tentative definition error */
 
 struct Foo f;

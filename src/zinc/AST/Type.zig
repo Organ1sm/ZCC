@@ -1043,7 +1043,8 @@ pub fn hasIncompleteSize(ty: Type) bool {
         .Struct, .Union => ty.data.record.isIncomplete(),
         .Array, .StaticArray => ty.data.array.elem.hasIncompleteSize(),
         .TypeofType => ty.data.subType.hasIncompleteSize(),
-        .TypeofExpr => ty.data.expr.ty.hasIncompleteSize(),
+        .TypeofExpr, .VariableLenArray => ty.data.expr.ty.hasIncompleteSize(),
+        .UnspecifiedVariableLenArray => ty.data.subType.hasIncompleteSize(),
         .Attributed => ty.data.attributed.base.hasIncompleteSize(),
         else => false,
     };
