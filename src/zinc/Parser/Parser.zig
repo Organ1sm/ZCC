@@ -609,7 +609,6 @@ fn pragma(p: *Parser) Compilation.Error!bool {
 fn diagnoseIncompleteDefinitions(p: *Parser) !void {
     @branchHint(.cold);
 
-    const errStart = p.comp.diagnostics.list.items.len;
     for (p.declBuffer.items) |declIndex| {
         const node = declIndex.get(&p.tree);
         const forward = switch (node) {
@@ -629,9 +628,6 @@ fn diagnoseIncompleteDefinitions(p: *Parser) !void {
         try p.errStr(.tentative_definition_incomplete, tentativeDefToken, tyStr);
         try p.errStr(.forward_declaration_here, forward.nameOrKindToken, tyStr);
     }
-
-    const errorsAdded = p.comp.diagnostics.list.items.len - errStart;
-    assert(errorsAdded == 2 * p.tentativeDefs.count()); // Each tentative def should add an error + note
 }
 
 fn addImplicitTypedef(p: *Parser, name: []const u8, ty: Type) !void {
