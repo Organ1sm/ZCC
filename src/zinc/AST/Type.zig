@@ -1043,7 +1043,8 @@ pub fn hasIncompleteSize(ty: Type) bool {
         .Struct, .Union => ty.data.record.isIncomplete(),
         .Array, .StaticArray => ty.data.array.elem.hasIncompleteSize(),
         .TypeofType => ty.data.subType.hasIncompleteSize(),
-        .TypeofExpr => ty.data.expr.ty.hasIncompleteSize(),
+        .TypeofExpr, .VariableLenArray => ty.data.expr.ty.hasIncompleteSize(),
+        .UnspecifiedVariableLenArray => ty.data.subType.hasIncompleteSize(),
         .Attributed => ty.data.attributed.base.hasIncompleteSize(),
         else => false,
     };
@@ -1215,7 +1216,8 @@ pub fn bitSizeof(ty: Type, comp: *const Compilation) ?u64 {
 }
 
 pub fn alignable(ty: Type) bool {
-    return ty.isArray() or !ty.hasIncompleteSize() or ty.is(.Void);
+    const isAlignable = ty.isArray() or !ty.hasIncompleteSize() or ty.is(.Void);
+    return isAlignable and !ty.isInvalid();
 }
 
 /// Get the alignment of a type
