@@ -360,6 +360,55 @@ fn getOSLibDir(target: std.Target) []const u8 {
     return "lib64";
 }
 
+pub fn defineSystemIncludes(self: *const Linux, tc: *const Toolchain) !void {
+    if (tc.driver.nostdinc) return;
+
+    const comp = tc.driver.comp;
+    const target = tc.getTarget();
+
+    // musl prefers /usr/include before builtin includes, so musl targets will add builtins
+    // at the end of this function (unless disabled with nostdlibinc)
+    if (!tc.driver.nobuiltininc and (!target.abi.isMusl() or tc.driver.nostdlibinc)) {
+        try comp.addBuiltinIncludeDir(tc.driver.zincName);
+    }
+
+    if (tc.driver.nostdlibinc) return;
+
+    const sysroot = tc.getSysroot();
+    const localInclude = try std.fmt.allocPrint(comp.gpa, "{s}{s}", .{ sysroot, "/usr/local/include" });
+    defer comp.gpa.free(localInclude);
+    try comp.addSystemIncludeDir(localInclude);
+
+    if (self.gccDetector.isValid) {
+        const gccIncludePath = try std.fs.path.join(comp.gpa, &.{
+            self.gccDetector.parentLibPath,
+            "..",
+            self.gccDetector.gccTriple,
+            "include",
+        });
+        defer comp.gpa.free(gccIncludePath);
+        try comp.addSystemIncludeDir(gccIncludePath);
+    }
+
+    if (getMultiarchTriple(target)) |triple| {
+        const joined = try std.fs.path.join(comp.gpa, &.{ sysroot, "usr", "include", triple });
+        defer comp.gpa.free(joined);
+        if (tc.filesystem.exists(joined)) {
+            try comp.addSystemIncludeDir(joined);
+        }
+    }
+
+    if (target.os.tag == .rtems) return;
+
+    try comp.addSystemIncludeDir("/include");
+    try comp.addSystemIncludeDir("/usr/include");
+
+    std.debug.assert(!tc.driver.nostdlibinc);
+    if (!tc.driver.nobuiltininc and target.abi.isMusl()) {
+        try comp.addBuiltinIncludeDir(tc.driver.zincName);
+    }
+}
+
 test Linux {
     if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
 

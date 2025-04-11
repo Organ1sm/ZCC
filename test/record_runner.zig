@@ -225,7 +225,7 @@ fn singleRun(alloc: std.mem.Allocator, testDir: []const u8, testCase: TestCase, 
     defer comp.deinit();
 
     try comp.addDefaultPragmaHandlers();
-    try comp.defineSystemIncludes(testDir);
+    try comp.addBuiltinIncludeDir(testDir);
 
     try setTarget(&comp, testCase.target);
     switch (comp.target.os.tag) {

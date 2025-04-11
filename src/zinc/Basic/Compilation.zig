@@ -1064,25 +1064,8 @@ pub fn getCharSignedness(comp: *const Compilation) std.builtin.Signedness {
     return comp.langOpts.charSignednessOverride orelse comp.target.charSignedness();
 }
 
-/// Define the system header file include directories for Zinc
-///
-/// This function will search the directory containing the executable,
-/// and recursively go upwards to find a directory containing stddef.h
-/// in an `include` directory. This will be set as the builtin header
-/// include path.
-///
-/// The default '/usr/include' path will also be added in Linux. All found system
-/// header include directories will be appended to `comp.systemIncludeDirs`.
-///
-/// Params:
-/// - comp: The compilation global state
-///
-/// Errors:
-/// - SelfExeNotFound: Failed to obtain self executable path
-/// - ZincIncludeNotFound: Did not find system include directory
-pub fn defineSystemIncludes(comp: *Compilation, zincDir: []const u8) !void {
-    var stackFallback = std.heap.stackFallback(PathBufferStackLimit, comp.gpa);
-    const allocator = stackFallback.get();
+/// Add built-in zinc headers directory to system include paths
+pub fn addBuiltinIncludeDir(comp: *Compilation, zincDir: []const u8) !void {
     var searchPath = zincDir;
 
     while (std.fs.path.dirname(searchPath)) |dirname| : (searchPath = dirname) {
@@ -1097,24 +1080,12 @@ pub fn defineSystemIncludes(comp: *Compilation, zincDir: []const u8) !void {
 
         break;
     } else return error.ZincIncludeNotFound;
+}
 
-    if (comp.target.os.tag == .linux) {
-        const tripleStr = try comp.target.linuxTriple(allocator);
-        defer allocator.free(tripleStr);
-
-        const multiarchPath = try std.fs.path.join(allocator, &.{ "/usr/include", tripleStr });
-        defer allocator.free(multiarchPath);
-
-        if (!std.meta.isError(std.fs.accessAbsolute(multiarchPath, .{}))) {
-            const duped = try comp.gpa.dupe(u8, multiarchPath);
-            errdefer comp.gpa.free(duped);
-            try comp.systemIncludeDirs.append(comp.gpa, duped);
-        }
-    }
-
-    const usrInclude = try comp.gpa.dupe(u8, "/usr/include");
-    errdefer comp.gpa.free(usrInclude);
-    try comp.systemIncludeDirs.append(comp.gpa, usrInclude);
+pub fn addSystemIncludeDir(comp: *Compilation, path: []const u8) !void {
+    const duped = try comp.gpa.dupe(u8, path);
+    errdefer comp.gpa.free(duped);
+    try comp.systemIncludeDirs.append(comp.gpa, duped);
 }
 
 pub fn getSource(comp: *const Compilation, id: Source.ID) Source {
