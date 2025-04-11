@@ -260,6 +260,12 @@ pub const SystemDefinesMode = enum {
 pub fn generateSystemDefines(comp: *Compilation, w: anytype) !void {
     const ptrWidth = comp.target.ptrBitWidth();
 
+    if (comp.langOpts.gnucVersion > 0) {
+        try w.print("#define __GNUC__ {d}\n", .{comp.langOpts.gnucVersion / 10_000});
+        try w.print("#define __GNUC_MINOR__ {d}\n", .{comp.langOpts.gnucVersion / 100 % 100});
+        try w.print("#define __GNUC_PATCHLEVEL__ {d}\n", .{comp.langOpts.gnucVersion % 100});
+    }
+
     switch (comp.target.os.tag) {
         .linux => try w.writeAll(
             \\#define linux 1

@@ -20,6 +20,9 @@ fn addCommandLineArgs(
     var onlyPreprocess = false;
     var lineMarkers: zinc.Preprocessor.LineMarkers = .None;
     var systemDefines: zinc.Compilation.SystemDefinesMode = .IncludeSystemDefines;
+
+    comp.langOpts.gnucVersion = 40201;
+
     if (std.mem.startsWith(u8, file.buffer, "//zinc-args")) {
         var testArgs = std.ArrayList([]const u8).init(comp.gpa);
         defer testArgs.deinit();

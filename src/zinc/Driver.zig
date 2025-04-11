@@ -14,6 +14,7 @@ const Preprocessor = @import("Lexer/Preprocessor.zig");
 const Source = @import("Basic/Source.zig");
 const Toolchain = @import("Toolchain.zig");
 const Target = @import("Basic/Target.zig");
+const GCCVersion = @import("Driver/GCCVersion.zig");
 
 const Driver = @This();
 
@@ -108,6 +109,7 @@ const usage =
     \\  -ffp-eval-method=[source|double|extended]
     \\                          Evaluation method to use for floating-point arithmetic
     \\  -ffreestanding          Compilation in a freestanding environment
+    \\  -fgnuc-version=<value>  Controls value of __GNUC__ and related macros. Set to 0 or empty to disable them.
     \\  -fgnu-inline-asm        Enable GNU style inline asm (default: enabled)
     \\  -fno-gnu-inline-asm     Disable GNU style inline asm
     \\  -fhosted                Compilation in a hosted environment
@@ -198,6 +200,7 @@ pub fn parseArgs(
 ) !bool {
     var commentArg: []const u8 = "";
     var hosted: ?bool = null;
+    var gnucVersion: []const u8 = "4.2.1"; // default value set by clang
     var i: usize = 1;
     while (i < args.len) : (i += 1) {
         const arg = args[i];
@@ -318,6 +321,10 @@ pub fn parseArgs(
                 d.onlySyntax = true;
             } else if (std.mem.eql(u8, arg, "-fno-syntax-only")) {
                 d.onlySyntax = false;
+            } else if (std.mem.eql(u8, arg, "-fgnuc-version=")) {
+                gnucVersion = "0";
+            } else if (option(arg, "-fgnuc-version=")) |version| {
+                gnucVersion = version;
             } else if (std.mem.startsWith(u8, arg, "-isystem")) {
                 var path = arg["-isystem".len..];
                 if (path.len == 0) {
@@ -489,6 +496,12 @@ pub fn parseArgs(
             d.comp.target.os.tag = .freestanding;
         }
     }
+
+    const version = GCCVersion.parse(gnucVersion);
+    if (version.major == -1) {
+        return d.fatal("invalid value '{0s}' in '-fgnuc-version={0s}'", .{gnucVersion});
+    }
+    d.comp.langOpts.gnucVersion = version.toUnsigned();
 
     return false;
 }

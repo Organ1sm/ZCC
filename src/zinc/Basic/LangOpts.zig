@@ -134,6 +134,11 @@ useNativeHalfType: bool = false,
 /// If set, function arguments and return values may be of type __fp16 even if there is no standard ABI for it
 allowHalfArgsAndReturns: bool = false,
 
+/// Used ONLY for generating __GNUC__ and related macros. Does not control the presence/absence of any features
+/// Encoded as major * 10,000 + minor * 100 + patch
+/// e.g. 4.2.1 == 40201
+gnucVersion: u32 = 0,
+
 pub fn setStandard(self: *LangOpts, name: []const u8) error{InvalidStandard}!void {
     self.standard = Standard.NameMap.get(name) orelse return error.InvalidStandard;
 }
