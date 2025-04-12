@@ -36,13 +36,14 @@ pub const UnwindLibKind = enum {
 };
 
 const Inner = union(enum) {
+    uninitialized,
     linux: Linux,
     unknown: void,
 
     fn deinit(self: *Inner, allocator: mem.Allocator) void {
         switch (self.*) {
             .linux => |*linux| linux.deinit(allocator),
-            .unknown => {},
+            .uninitialized, .unknown => {},
         }
     }
 };
@@ -62,7 +63,7 @@ programPaths: PathList = .{},
 
 selectedMultilib: Multilib = .{},
 
-inner: Inner = .{ .unknown = {} },
+inner: Inner = .{ .uninitialized = {} },
 
 pub fn getTarget(tc: *const Toolchain) std.Target {
     return tc.driver.comp.target;
@@ -70,6 +71,7 @@ pub fn getTarget(tc: *const Toolchain) std.Target {
 
 fn getDefaultLinker(tc: *const Toolchain) []const u8 {
     return switch (tc.inner) {
+        .uninitialized => unreachable,
         .linux => |linux| linux.getDefaultLinker(tc.getTarget()),
         .unknown => "ld",
     };
@@ -77,6 +79,8 @@ fn getDefaultLinker(tc: *const Toolchain) []const u8 {
 
 /// Call this after driver has finished parsing command line arguments to find the toolchain
 pub fn discover(tc: *Toolchain) !void {
+    if (tc.inner != .uninitialized) return;
+
     const target = tc.getTarget();
     tc.inner = switch (target.os.tag) {
         .elfiamcu,
@@ -94,6 +98,7 @@ pub fn discover(tc: *Toolchain) !void {
         else => .{ .unknown = {} }, // TODO
     };
     return switch (tc.inner) {
+        .uninitialized => unreachable,
         .linux => |*linux| linux.discover(tc),
         .unknown => {},
     };
@@ -332,6 +337,7 @@ pub fn addPathFromComponents(tc: *Toolchain, components: []const []const u8, des
 /// so they must not be individually freed
 pub fn buildLinkerArgs(tc: *Toolchain, argv: *std.ArrayList([]const u8)) !void {
     return switch (tc.inner) {
+        .uninitialized => unreachable,
         .linux => |*linux| linux.buildLinkerArgs(tc, argv),
         .unknown => @panic("This toolchain does not support linking yet"),
     };
@@ -480,4 +486,23 @@ pub fn addRuntimeLibs(tc: *const Toolchain, argv: *std.ArrayList([]const u8)) !v
 
     if (target.abi.isAndroid() and !tc.driver.static and !tc.driver.staticPie)
         try argv.append("-ldl");
+}
+
+pub fn defineSystemIncludes(tc: *Toolchain) !void {
+    return switch (tc.inner) {
+        .uninitialized => unreachable,
+        .linux => |*linux| linux.defineSystemIncludes(tc),
+        .unknown => {
+            if (tc.driver.nostdinc) return;
+
+            const comp = tc.driver.comp;
+            if (!tc.driver.nobuiltininc) {
+                try comp.addBuiltinIncludeDir(tc.driver.zincName);
+            }
+
+            if (!tc.driver.nostdlibinc) {
+                try comp.addSystemIncludeDir("/usr/include");
+            }
+        },
+    };
 }

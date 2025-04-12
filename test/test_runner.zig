@@ -20,6 +20,9 @@ fn addCommandLineArgs(
     var onlyPreprocess = false;
     var lineMarkers: zinc.Preprocessor.LineMarkers = .None;
     var systemDefines: zinc.Compilation.SystemDefinesMode = .IncludeSystemDefines;
+
+    comp.langOpts.gnucVersion = 40201;
+
     if (std.mem.startsWith(u8, file.buffer, "//zinc-args")) {
         var testArgs = std.ArrayList([]const u8).init(comp.gpa);
         defer testArgs.deinit();
@@ -190,7 +193,7 @@ pub fn main() !void {
     try initialComp.includeDirs.append(gpa, caseNextIncludeDir);
 
     try initialComp.addDefaultPragmaHandlers();
-    try initialComp.defineSystemIncludes(testDir);
+    try initialComp.addBuiltinIncludeDir(testDir);
 
     // apparently we can't use setAstCwd without libc on windows yet
     const win = @import("builtin").os.tag == .windows;
@@ -478,10 +481,11 @@ pub fn main() !void {
 // returns true if passed
 fn checkExpectedErrors(pp: *zinc.Preprocessor, buf: *std.ArrayList(u8)) !?bool {
     const macro = pp.defines.get("EXPECTED_ERRORS") orelse return null;
-
     const expectedCount = pp.comp.diagnostics.list.items.len;
+
     var m = MsgWriter.init(pp.comp.gpa);
     defer m.deinit();
+
     zinc.Diagnostics.renderMessages(pp.comp, &m);
 
     if (macro.isFunc) {

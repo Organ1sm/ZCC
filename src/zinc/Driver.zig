@@ -14,6 +14,7 @@ const Preprocessor = @import("Lexer/Preprocessor.zig");
 const Source = @import("Basic/Source.zig");
 const Toolchain = @import("Toolchain.zig");
 const Target = @import("Basic/Target.zig");
+const GCCVersion = @import("Driver/GCCVersion.zig");
 
 const Driver = @This();
 
@@ -49,6 +50,9 @@ dumpTokens: bool = false,
 dumpRawTokens: bool = false,
 dumpLinkerArgs: bool = false,
 color: ?bool = true,
+nobuiltininc: bool = false,
+nostdinc: bool = false,
+nostdlibinc: bool = false,
 
 /// name of the zinc executable
 zincName: []const u8 = "",
@@ -105,6 +109,7 @@ const usage =
     \\  -ffp-eval-method=[source|double|extended]
     \\                          Evaluation method to use for floating-point arithmetic
     \\  -ffreestanding          Compilation in a freestanding environment
+    \\  -fgnuc-version=<value>  Controls value of __GNUC__ and related macros. Set to 0 or empty to disable them.
     \\  -fgnu-inline-asm        Enable GNU style inline asm (default: enabled)
     \\  -fno-gnu-inline-asm     Disable GNU style inline asm
     \\  -fhosted                Compilation in a hosted environment
@@ -133,6 +138,10 @@ const usage =
     \\  -isystem                Add directory to system include search path
     \\  --emulate=[clang|gcc|msvc]
     \\                          Select which C compiler to emulate (default clang)
+    \\  -nobuiltininc           Do not search the compiler's builtin directory for include files
+    \\  -nostdinc, --no-standard-includes
+    \\                          Do not search the standard system directories or compiler builtin directories for include files.
+    \\  -nostdlibinc            Do not search the standard system directories for include files, but do search compiler builtin include directories
     \\  -o <file>               Write output to <file>
     \\  -P, --no-line-commands  Disable linemarker output in -E mode
     \\  -pedantic               Warn on language extensions
@@ -191,6 +200,7 @@ pub fn parseArgs(
 ) !bool {
     var commentArg: []const u8 = "";
     var hosted: ?bool = null;
+    var gnucVersion: []const u8 = "4.2.1"; // default value set by clang
     var i: usize = 1;
     while (i < args.len) : (i += 1) {
         const arg = args[i];
@@ -311,6 +321,10 @@ pub fn parseArgs(
                 d.onlySyntax = true;
             } else if (std.mem.eql(u8, arg, "-fno-syntax-only")) {
                 d.onlySyntax = false;
+            } else if (std.mem.eql(u8, arg, "-fgnuc-version=")) {
+                gnucVersion = "0";
+            } else if (option(arg, "-fgnuc-version=")) |version| {
+                gnucVersion = version;
             } else if (std.mem.startsWith(u8, arg, "-isystem")) {
                 var path = arg["-isystem".len..];
                 if (path.len == 0) {
@@ -437,6 +451,12 @@ pub fn parseArgs(
                 d.nodefaultlibs = true;
             } else if (mem.eql(u8, arg, "-nolibc")) {
                 d.nolibc = true;
+            } else if (mem.eql(u8, arg, "-nobuiltininc")) {
+                d.nobuiltininc = true;
+            } else if (mem.eql(u8, arg, "-nostdinc") or mem.eql(u8, arg, "--no-standard-includes")) {
+                d.nostdinc = true;
+            } else if (mem.eql(u8, arg, "-nostdlibinc")) {
+                d.nostdlibinc = true;
             } else if (mem.eql(u8, arg, "-nostdlib")) {
                 d.nostdlib = true;
             } else if (mem.eql(u8, arg, "-nostartfiles")) {
@@ -476,6 +496,12 @@ pub fn parseArgs(
             d.comp.target.os.tag = .freestanding;
         }
     }
+
+    const version = GCCVersion.parse(gnucVersion);
+    if (version.major == -1) {
+        return d.fatal("invalid value '{0s}' in '-fgnuc-version={0s}'", .{gnucVersion});
+    }
+    d.comp.langOpts.gnucVersion = version.toUnsigned();
 
     return false;
 }
@@ -571,7 +597,8 @@ pub fn main(d: *Driver, tc: *Toolchain, args: []const []const u8, comptime fastE
         for (d.linkObjects.items) |obj|
             try d.comp.addDiagnostic(.{ .tag = .cli_unused_link_object, .extra = .{ .str = obj } }, &.{});
 
-    d.comp.defineSystemIncludes(d.zincName) catch |er| switch (er) {
+    try tc.discover();
+    tc.defineSystemIncludes() catch |er| switch (er) {
         error.OutOfMemory => return error.OutOfMemory,
         error.ZincIncludeNotFound => return d.fatal("unable to find Zinc builtin headers", .{}),
     };
@@ -811,8 +838,6 @@ fn printLinkerArgs(items: []const []const u8) !void {
 }
 
 fn invokeLinker(d: *Driver, tc: *Toolchain, comptime fastExit: bool) !void {
-    try tc.discover();
-
     var argv = std.ArrayList([]const u8).init(d.comp.gpa);
     defer argv.deinit();
 
