@@ -270,6 +270,7 @@ pub fn intCast(v: *Value, destTy: Type, comp: *Compilation) !void {
     v.* = try intern(comp, .{ .int = .{ .bigInt = result.toConst() } });
 }
 
+/// Converts the stored value to a float of the specified type
 /// `.none` value remains unchanged.
 pub fn floatCast(v: *Value, destTy: Type, comp: *Compilation) !void {
     if (v.optRef == .none) return;

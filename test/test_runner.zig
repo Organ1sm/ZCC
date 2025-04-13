@@ -393,6 +393,8 @@ pub fn main() !void {
             continue;
         }
 
+        if (pp.defines.contains("NO_ERROR_VALIDATION")) continue;
+
         zinc.Diagnostics.render(&comp, std.io.tty.detectConfig(std.io.getStdErr()));
 
         if (pp.defines.get("EXPECTED_OUTPUT")) |macro| blk: {
