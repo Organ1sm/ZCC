@@ -85,6 +85,11 @@ int f4(int);
 int f5(int (*)(), double (*)[3]);
 int f5(int (*)(char), double (*)[]); // not compatible since char undergoes default argument promotion
 
+int X;
+enum E {
+    X = 4294967295,
+};
+
 #define EXPECTED_ERRORS "redefinitions.c:4:5: error: redefinition of 'foo' as different kind of symbol" \
     "redefinitions.c:1:5: note: previous definition is here" \
     "redefinitions.c:5:5: error: redefinition of 'foo' as different kind of symbol" \
@@ -124,3 +129,5 @@ int f5(int (*)(char), double (*)[]); // not compatible since char undergoes defa
     "redefinitions.c:82:5: note: previous definition is here" \
     "redefinitions.c:86:5: error: redefinition of 'f5' with a different type" \
     "redefinitions.c:85:5: note: previous definition is here" \
+    "redefinitions.c:90:5: error: redefinition of 'X' as different kind of symbol" \
+    "redefinitions.c:88:5: note: previous definition is here" \

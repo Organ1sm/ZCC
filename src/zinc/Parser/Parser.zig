@@ -2667,6 +2667,8 @@ fn parseEnumSpec(p: *Parser) Error!Type {
             if (field.ty.eql(Type.Int, p.comp, false)) continue;
 
             const sym = p.symStack.get(field.name, .vars) orelse continue;
+            if (sym.kind != .enumeration) continue; // already an error
+
             var res: Result = .{ .node = undefined, .ty = field.ty, .value = sym.value };
             const destTy = if (p.comp.fixedEnumTagSpecifier()) |some|
                 Type{ .specifier = some }
