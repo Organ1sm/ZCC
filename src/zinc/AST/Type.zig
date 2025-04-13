@@ -164,8 +164,8 @@ pub const Function = struct {
         rhsSpec: Specifier,
         comp: *const Compilation,
     ) bool {
-        if (!lhs.returnType.eql(rhs.returnType, comp, false))
-            return false;
+        if (!lhs.returnType.eql(rhs.returnType, comp, false)) return false;
+        if (lhs.params.len == 0 and rhs.params.len == 0) return true;
 
         if (lhs.params.len != rhs.params.len) {
             if (lhsSpec == .OldStyleFunc or rhsSpec == .OldStyleFunc) {
