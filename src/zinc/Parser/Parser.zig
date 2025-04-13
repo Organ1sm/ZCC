@@ -2273,8 +2273,15 @@ fn parseRecordSpec(p: *Parser) Error!Type {
         recordType.fields = try p.arena.dupe(Type.Record.Field, p.recordBuffer.items[recordBufferTop..]);
     }
 
+    const attrCount = p.fieldAttrBuffer.items.len - oldFieldAttrStart;
     const recordDecls = p.declBuffer.items[declBufferTop..];
-    if (oldFieldAttrStart < p.fieldAttrBuffer.items.len) {
+    if (attrCount > 0) {
+        if (attrCount != recordDecls.len) {
+            // A mismatch here means that non-field decls were parsed. This can happen if there were
+            // parse errors during attribute parsing. Bail here because if there are any field attributes,
+            // there must be exactly one per field.
+            return error.ParsingFailed;
+        }
         const fieldAttrSlice = p.fieldAttrBuffer.items[oldFieldAttrStart..];
         const duped = try p.arena.dupe([]const Attribute, fieldAttrSlice);
         recordType.fieldAttributes = duped.ptr;
