@@ -1485,6 +1485,10 @@ pub fn integerRank(ty: Type, comp: *const Compilation) usize {
         .LongLong, .ULongLong => 6 + (ty.bitSizeof(comp).? << 3),
         .Int128, .UInt128 => 7 + (ty.bitSizeof(comp).? << 3),
 
+        .TypeofType => ty.data.subType.integerRank(comp),
+        .TypeofExpr => ty.data.expr.ty.integerRank(comp),
+        .Attributed => ty.data.attributed.base.integerRank(comp),
+
         else => unreachable,
     });
 }
