@@ -309,12 +309,16 @@ pub fn next(self: *Lexer) Token {
             },
 
             .char_escape_sequence => switch (c) {
-                '\r', '\n' => unreachable, // removed by line splicing
+                '\r', '\n' => {
+                    id = .UnterminatedCharLiteral;
+                },
                 else => state = .char_literal,
             },
 
             .string_escape_sequence => switch (c) {
-                '\n', '\r' => unreachable, // removed by line splicing
+                '\n', '\r' => {
+                    id = .UnterminatedStringLiteral;
+                },
                 else => state = .string_literal,
             },
 
