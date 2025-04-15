@@ -6095,7 +6095,7 @@ fn parseUnaryExpr(p: *Parser) Error!?Result {
 
             try operand.usualUnaryConversion(p, token);
 
-            if (operand.value.isNumeric(p.comp)) {
+            if (operand.value.isArithmetic(p.comp)) {
                 if (try operand.value.add(operand.value, Value.one, operand.ty, p.comp))
                     try p.errOverflow(token, operand);
             } else {
@@ -7440,7 +7440,13 @@ fn parseFloat(p: *Parser, buf: []const u8, suffix: NumberSuffix, tokenIdx: Token
             .IQ, .IF128 => Type.ComplexFloat128,
             else => unreachable,
         };
-        res.value = .{}; // TOOD: add complex values
+        res.value = try Value.intern(p.comp, switch (res.ty.bitSizeof(p.comp).?) {
+            64 => .{ .complex = .{ .cf32 = .{ 0.0, val.toFloat(f32, p.comp) } } },
+            128 => .{ .complex = .{ .cf64 = .{ 0.0, val.toFloat(f64, p.comp) } } },
+            160 => .{ .complex = .{ .cf80 = .{ 0.0, val.toFloat(f80, p.comp) } } },
+            256 => .{ .complex = .{ .cf128 = .{ 0.0, val.toFloat(f128, p.comp) } } },
+            else => unreachable,
+        });
         try res.un(p, .imaginaryLiteral, tokenIdx);
     }
     return res;

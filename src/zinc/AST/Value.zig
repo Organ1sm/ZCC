@@ -56,9 +56,25 @@ pub fn isZero(v: Value, comp: *const Compilation) bool {
             inline .i64, .u64 => |data| return data == 0,
             .bigInt => |data| return data.eqlZero(),
         },
+        .complex => |repr| switch (repr) {
+            inline else => |data| return data[0] == 0.0 and data[1] == 0.0,
+        },
         .bytes => return false,
         else => unreachable,
     }
+}
+
+pub fn is(v: Value, tag: std.meta.Tag(Interner.Key), comp: *const Compilation) bool {
+    if (v.optRef == .none) return false;
+    return comp.interner.get(v.ref()) == tag;
+}
+
+pub fn isArithmetic(v: Value, comp: *const Compilation) bool {
+    if (v.optRef == .none) return false;
+    return switch (comp.interner.get(v.ref())) {
+        .int, .float, .complex => true,
+        else => false,
+    };
 }
 
 pub fn int(i: anytype, comp: *Compilation) !Value {
@@ -73,11 +89,6 @@ pub fn int(i: anytype, comp: *Compilation) !Value {
 pub fn ref(v: Value) Interner.Ref {
     std.debug.assert(v.optRef != .none);
     return @enumFromInt(@intFromEnum(v.optRef));
-}
-
-pub fn is(v: Value, tag: std.meta.Tag(Interner.Key), comp: *const Compilation) bool {
-    if (v.optRef == .none) return false;
-    return comp.interner.get(v.ref()) == tag;
 }
 
 /// Number of bits needed to hold `v`.
@@ -270,20 +281,43 @@ pub fn intCast(v: *Value, destTy: Type, comp: *Compilation) !void {
     v.* = try intern(comp, .{ .int = .{ .bigInt = result.toConst() } });
 }
 
+pub fn imag(v: Value, comptime T: type, comp: *const Compilation) T {
+    return switch (comp.interner.get(v.ref())) {
+        .int => 0.0,
+        .float => 0.0,
+        .complex => |repr| switch (repr) {
+            inline else => |components| return @floatCast(components[1]),
+        },
+        else => unreachable,
+    };
+}
+
 /// Converts the stored value to a float of the specified type
 /// `.none` value remains unchanged.
 pub fn floatCast(v: *Value, destTy: Type, comp: *Compilation) !void {
     if (v.optRef == .none) return;
-    const bits = destTy.makeReal().bitSizeof(comp).?;
-    const f: Interner.Key.Float = switch (bits) {
-        16 => .{ .f16 = v.toFloat(f16, comp) },
-        32 => .{ .f32 = v.toFloat(f32, comp) },
-        64 => .{ .f64 = v.toFloat(f64, comp) },
-        80 => .{ .f80 = v.toFloat(f80, comp) },
-        128 => .{ .f128 = v.toFloat(f128, comp) },
-        else => unreachable,
-    };
-    v.* = try intern(comp, .{ .float = f });
+    const bits = destTy.bitSizeof(comp).?;
+
+    if (destTy.isComplex()) {
+        const cf: Interner.Key.Complex = switch (bits) {
+            64 => .{ .cf32 = .{ v.toFloat(f32, comp), v.imag(f32, comp) } },
+            128 => .{ .cf64 = .{ v.toFloat(f64, comp), v.imag(f64, comp) } },
+            160 => .{ .cf80 = .{ v.toFloat(f80, comp), v.imag(f80, comp) } },
+            256 => .{ .cf128 = .{ v.toFloat(f128, comp), v.imag(f128, comp) } },
+            else => unreachable,
+        };
+        v.* = try intern(comp, .{ .complex = cf });
+    } else {
+        const f: Interner.Key.Float = switch (bits) {
+            16 => .{ .f16 = v.toFloat(f16, comp) },
+            32 => .{ .f32 = v.toFloat(f32, comp) },
+            64 => .{ .f64 = v.toFloat(f64, comp) },
+            80 => .{ .f80 = v.toFloat(f80, comp) },
+            128 => .{ .f128 = v.toFloat(f128, comp) },
+            else => unreachable,
+        };
+        v.* = try intern(comp, .{ .float = f });
+    }
 }
 
 pub fn toBigInt(val: Value, space: *BigIntSpace, comp: *const Compilation) BigIntConst {
@@ -299,9 +333,11 @@ pub fn toFloat(v: Value, comptime T: type, comp: *const Compilation) T {
             inline .u64, .i64 => |data| @floatFromInt(data),
             .bigInt => |data| @floatCast(bigIntToFloat(data.limbs, data.positive)),
         },
-
         .float => |repr| switch (repr) {
             inline else => |data| @floatCast(data),
+        },
+        .complex => |repr| switch (repr) {
+            inline else => |components| @floatCast(components[0]),
         },
 
         else => unreachable,
@@ -347,19 +383,64 @@ pub fn toInt(v: Value, comptime T: type, comp: *const Compilation) ?T {
     return bigInt.to(T) catch null;
 }
 
+const ComplexOp = enum {
+    add,
+    sub,
+};
+
+fn makeComplex(comptime T: type, re: T, im: T, comp: *Compilation) !Value {
+    return switch (T) {
+        f32 => intern(comp, .{ .complex = .{ .cf32 = .{ re, im } } }),
+        f64 => intern(comp, .{ .complex = .{ .cf64 = .{ re, im } } }),
+        f80 => intern(comp, .{ .complex = .{ .cf80 = .{ re, im } } }),
+        f128 => intern(comp, .{ .complex = .{ .cf128 = .{ re, im } } }),
+        else => @compileError("cannot make complex"),
+    };
+}
+
+fn complexAddSub(lhs: Value, rhs: Value, comptime T: type, op: ComplexOp, comp: *Compilation) !Value {
+    const resRe = switch (op) {
+        .add => lhs.toFloat(T, comp) + rhs.toFloat(T, comp),
+        .sub => lhs.toFloat(T, comp) - rhs.toFloat(T, comp),
+    };
+    const resIm = switch (op) {
+        .add => lhs.imag(T, comp) + rhs.imag(T, comp),
+        .sub => lhs.imag(T, comp) - rhs.imag(T, comp),
+    };
+
+    return switch (T) {
+        f32 => intern(comp, .{ .complex = .{ .cf32 = .{ resRe, resIm } } }),
+        f64 => intern(comp, .{ .complex = .{ .cf64 = .{ resRe, resIm } } }),
+        f80 => intern(comp, .{ .complex = .{ .cf80 = .{ resRe, resIm } } }),
+        f128 => intern(comp, .{ .complex = .{ .cf128 = .{ resRe, resIm } } }),
+        else => unreachable,
+    };
+}
+
 pub fn add(res: *Value, lhs: Value, rhs: Value, ty: Type, comp: *Compilation) !bool {
     const bits: usize = @intCast(ty.bitSizeof(comp).?);
     if (ty.isFloat()) {
-        const f: Interner.Key.Float = switch (bits) {
-            16 => .{ .f16 = lhs.toFloat(f16, comp) + rhs.toFloat(f16, comp) },
-            32 => .{ .f32 = lhs.toFloat(f32, comp) + rhs.toFloat(f32, comp) },
-            64 => .{ .f64 = lhs.toFloat(f64, comp) + rhs.toFloat(f64, comp) },
-            80 => .{ .f80 = lhs.toFloat(f80, comp) + rhs.toFloat(f80, comp) },
-            128 => .{ .f128 = lhs.toFloat(f128, comp) + rhs.toFloat(f128, comp) },
-            else => unreachable,
-        };
-        res.* = try intern(comp, .{ .float = f });
-        return false;
+        if (ty.isComplex()) {
+            res.* = switch (bits) {
+                64 => try complexAddSub(lhs, rhs, f32, .add, comp),
+                128 => try complexAddSub(lhs, rhs, f64, .add, comp),
+                160 => try complexAddSub(lhs, rhs, f80, .add, comp),
+                256 => try complexAddSub(lhs, rhs, f128, .add, comp),
+                else => unreachable,
+            };
+            return false;
+        } else {
+            const f: Interner.Key.Float = switch (bits) {
+                16 => .{ .f16 = lhs.toFloat(f16, comp) + rhs.toFloat(f16, comp) },
+                32 => .{ .f32 = lhs.toFloat(f32, comp) + rhs.toFloat(f32, comp) },
+                64 => .{ .f64 = lhs.toFloat(f64, comp) + rhs.toFloat(f64, comp) },
+                80 => .{ .f80 = lhs.toFloat(f80, comp) + rhs.toFloat(f80, comp) },
+                128 => .{ .f128 = lhs.toFloat(f128, comp) + rhs.toFloat(f128, comp) },
+                else => unreachable,
+            };
+            res.* = try intern(comp, .{ .float = f });
+            return false;
+        }
     } else {
         var lhsSpace: BigIntSpace = undefined;
         var rhsSpace: BigIntSpace = undefined;
@@ -382,15 +463,25 @@ pub fn add(res: *Value, lhs: Value, rhs: Value, ty: Type, comp: *Compilation) !b
 pub fn sub(res: *Value, lhs: Value, rhs: Value, ty: Type, comp: *Compilation) !bool {
     const bits: usize = @intCast(ty.bitSizeof(comp).?);
     if (ty.isFloat()) {
-        const f: Interner.Key.Float = switch (bits) {
-            16 => .{ .f16 = lhs.toFloat(f16, comp) - rhs.toFloat(f16, comp) },
-            32 => .{ .f32 = lhs.toFloat(f32, comp) - rhs.toFloat(f32, comp) },
-            64 => .{ .f64 = lhs.toFloat(f64, comp) - rhs.toFloat(f64, comp) },
-            80 => .{ .f80 = lhs.toFloat(f80, comp) - rhs.toFloat(f80, comp) },
-            128 => .{ .f128 = lhs.toFloat(f128, comp) - rhs.toFloat(f128, comp) },
-            else => unreachable,
-        };
-        res.* = try intern(comp, .{ .float = f });
+        if (ty.isComplex()) {
+            res.* = switch (bits) {
+                64 => try complexAddSub(lhs, rhs, f32, .sub, comp),
+                128 => try complexAddSub(lhs, rhs, f64, .sub, comp),
+                160 => try complexAddSub(lhs, rhs, f80, .sub, comp),
+                256 => try complexAddSub(lhs, rhs, f128, .sub, comp),
+                else => unreachable,
+            };
+        } else {
+            const f: Interner.Key.Float = switch (bits) {
+                16 => .{ .f16 = lhs.toFloat(f16, comp) - rhs.toFloat(f16, comp) },
+                32 => .{ .f32 = lhs.toFloat(f32, comp) - rhs.toFloat(f32, comp) },
+                64 => .{ .f64 = lhs.toFloat(f64, comp) - rhs.toFloat(f64, comp) },
+                80 => .{ .f80 = lhs.toFloat(f80, comp) - rhs.toFloat(f80, comp) },
+                128 => .{ .f128 = lhs.toFloat(f128, comp) - rhs.toFloat(f128, comp) },
+                else => unreachable,
+            };
+            res.* = try intern(comp, .{ .float = f });
+        }
         return false;
     } else {
         var lhsSpace: BigIntSpace = undefined;
@@ -411,18 +502,77 @@ pub fn sub(res: *Value, lhs: Value, rhs: Value, ty: Type, comp: *Compilation) !b
     }
 }
 
+/// c99 Annex G complex multiplication algorithm
+pub fn complexMul(lhs: Value, rhs: Value, comptime T: type, comp: *Compilation) !Value {
+    var a = lhs.toFloat(T, comp);
+    var b = lhs.imag(T, comp);
+    var c = rhs.toFloat(T, comp);
+    var d = rhs.imag(T, comp);
+
+    const ac = a * c;
+    const bd = b * d;
+    const ad = a * d;
+    const bc = b * c;
+
+    var x = ac - bd;
+    var y = ad + bc;
+    if (std.math.isNan(x) and std.math.isNan(y)) {
+        var recalc = false;
+        if (std.math.isInf(a) or std.math.isInf(b)) {
+            // lhs infinite
+            // Box the infinity and change NaNs in the other factor to 0
+            a = std.math.copysign(if (std.math.isInf(a)) @as(T, 1.0) else @as(T, 0.0), a);
+            b = std.math.copysign(if (std.math.isInf(b)) @as(T, 1.0) else @as(T, 0.0), b);
+            if (std.math.isNan(c)) c = std.math.copysign(@as(T, 0.0), c);
+            if (std.math.isNan(d)) d = std.math.copysign(@as(T, 0.0), d);
+            recalc = true;
+        }
+        if (std.math.isInf(c) or std.math.isInf(d)) {
+            // rhs infinite
+            // Box the infinity and change NaNs in the other factor to 0
+            c = std.math.copysign(if (std.math.isInf(c)) @as(T, 1.0) else @as(T, 0.0), c);
+            d = std.math.copysign(if (std.math.isInf(d)) @as(T, 1.0) else @as(T, 0.0), d);
+            if (std.math.isNan(a)) a = std.math.copysign(@as(T, 0.0), a);
+            if (std.math.isNan(b)) b = std.math.copysign(@as(T, 0.0), b);
+            recalc = true;
+        }
+        if (!recalc and (std.math.isInf(ac) or std.math.isInf(bd) or std.math.isInf(ad) or std.math.isInf(bc))) {
+            // Recover infinities from overflow by changing NaN's to 0
+            if (std.math.isNan(a)) a = std.math.copysign(@as(T, 0.0), a);
+            if (std.math.isNan(b)) b = std.math.copysign(@as(T, 0.0), b);
+            if (std.math.isNan(c)) c = std.math.copysign(@as(T, 0.0), c);
+            if (std.math.isNan(d)) d = std.math.copysign(@as(T, 0.0), d);
+        }
+        if (recalc) {
+            x = std.math.inf(T) * (a * c - b * d);
+            y = std.math.inf(T) * (a * d + b * c);
+        }
+    }
+    return makeComplex(T, x, y, comp);
+}
+
 pub fn mul(res: *Value, lhs: Value, rhs: Value, ty: Type, comp: *Compilation) !bool {
     const bits: usize = @intCast(ty.bitSizeof(comp).?);
     if (ty.isFloat()) {
-        const f: Interner.Key.Float = switch (bits) {
-            16 => .{ .f16 = lhs.toFloat(f16, comp) * rhs.toFloat(f16, comp) },
-            32 => .{ .f32 = lhs.toFloat(f32, comp) * rhs.toFloat(f32, comp) },
-            64 => .{ .f64 = lhs.toFloat(f64, comp) * rhs.toFloat(f64, comp) },
-            80 => .{ .f80 = lhs.toFloat(f80, comp) * rhs.toFloat(f80, comp) },
-            128 => .{ .f128 = lhs.toFloat(f128, comp) * rhs.toFloat(f128, comp) },
-            else => unreachable,
-        };
-        res.* = try intern(comp, .{ .float = f });
+        if (ty.isComplex()) {
+            res.* = switch (bits) {
+                64 => try lhs.complexMul(rhs, f32, comp),
+                128 => try lhs.complexMul(rhs, f64, comp),
+                160 => try lhs.complexMul(rhs, f80, comp),
+                256 => try lhs.complexMul(rhs, f128, comp),
+                else => unreachable,
+            };
+        } else if (ty.isFloat()) {
+            const f: Interner.Key.Float = switch (bits) {
+                16 => .{ .f16 = lhs.toFloat(f16, comp) * rhs.toFloat(f16, comp) },
+                32 => .{ .f32 = lhs.toFloat(f32, comp) * rhs.toFloat(f32, comp) },
+                64 => .{ .f64 = lhs.toFloat(f64, comp) * rhs.toFloat(f64, comp) },
+                80 => .{ .f80 = lhs.toFloat(f80, comp) * rhs.toFloat(f80, comp) },
+                128 => .{ .f128 = lhs.toFloat(f128, comp) * rhs.toFloat(f128, comp) },
+                else => unreachable,
+            };
+            res.* = try intern(comp, .{ .float = f });
+        }
         return false;
     } else {
         var lhsSpace: BigIntSpace = undefined;
@@ -708,6 +858,16 @@ pub fn print(v: Value, ty: Type, comp: *const Compilation, w: anytype) @TypeOf(w
             inline else => |x| return w.print("{d}", .{@as(f64, @floatCast(x))}),
         },
         .bytes => |b| return printString(b, ty, comp, w),
+        .complex => |repr| switch (repr) {
+            .cf32 => |components| return w.print("{d} + {d}i", .{
+                @round(@as(f64, @floatCast(components[0])) * 1000000) / 1000000,
+                @round(@as(f64, @floatCast(components[1])) * 1000000) / 1000000,
+            }),
+            inline else => |components| return w.print("{d} + {d}i", .{
+                @as(f64, @floatCast(components[0])),
+                @as(f64, @floatCast(components[1])),
+            }),
+        },
         else => unreachable, // not a value
     }
 }
