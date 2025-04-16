@@ -25,6 +25,7 @@ pub const VersionStr = backend.version_str;
 pub const version = backend.version;
 
 test "simple test" {
+    _ = @import("zinc/AnnexG.zig");
     _ = @import("zinc/Basic/CharInfo.zig");
     _ = @import("zinc/Basic/Compilation.zig");
     _ = @import("zinc/Basic/Target.zig");
