@@ -6070,7 +6070,7 @@ fn parseUnaryExpr(p: *Parser) Error!?Result {
                 try p.errStr(.invalid_argument_un, token, try p.typeStr(operand.ty));
 
             try operand.usualUnaryConversion(p, token);
-            if (operand.value.isNumeric(p.comp))
+            if (operand.value.isArithmetic(p.comp))
                 _ = try operand.value.sub(Value.zero, operand.value, operand.ty, p.comp)
             else
                 operand.value = .{};
@@ -6095,7 +6095,7 @@ fn parseUnaryExpr(p: *Parser) Error!?Result {
 
             try operand.usualUnaryConversion(p, token);
 
-            if (operand.value.isArithmetic(p.comp)) {
+            if (operand.value.isNumeric(p.comp)) {
                 if (try operand.value.add(operand.value, Value.one, operand.ty, p.comp))
                     try p.errOverflow(token, operand);
             } else {
