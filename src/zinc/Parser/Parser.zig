@@ -6145,6 +6145,10 @@ fn parseUnaryExpr(p: *Parser) Error!?Result {
                 if (operand.value.is(.int, p.comp)) {
                     operand.value = try operand.value.bitNot(operand.ty, p.comp);
                 }
+            } else if (operand.ty.isComplex()) {
+                try p.errStr(.complex_conj, token, try p.typeStr(operand.ty));
+                if (operand.value.is(.complex, p.comp))
+                    operand.value = try operand.value.complexConj(operand.ty, p.comp);
             } else {
                 try p.errStr(.invalid_argument_un, token, try p.typeStr(operand.ty));
                 operand.value = .{};
