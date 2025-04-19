@@ -24,6 +24,7 @@ const StringId = @import("../Basic/StringInterner.zig").StringId;
 const RecordLayout = @import("../Basic/RecordLayout.zig");
 const Builtins = @import("../Builtins.zig");
 const Builtin = Builtins.Builtin;
+const evalBuiltin = @import("../Builtins/eval.zig").eval;
 
 const Token = AST.Token;
 const NumberPrefix = Token.NumberPrefix;
@@ -6723,7 +6724,11 @@ const CallExpr = union(enum) {
             .standard => true,
             .builtin => |builtin| switch (builtin.tag) {
                 .__builtin_va_start, .__va_start, .va_start => argIdx != 1,
-                .__builtin_complex => false,
+
+                .__builtin_complex,
+                .__builtin_isinf,
+                .__builtin_isinf_sign,
+                => false,
                 else => true,
             },
         };
@@ -6758,6 +6763,8 @@ const CallExpr = union(enum) {
                 .__c11_atomic_thread_fence,
                 .__c11_atomic_signal_fence,
                 .__c11_atomic_is_lock_free,
+                .__builtin_isinf,
+                .__builtin_isinf_sign,
                 => 1,
 
                 .__builtin_complex,
@@ -6886,6 +6893,7 @@ const CallExpr = union(enum) {
                 }),
             },
             .builtin => |builtin| return .{
+                .value = try evalBuiltin(builtin.tag, p, args),
                 .ty = retTy,
                 .node = try p.addNode(.{
                     .builtinCallExpr = .{

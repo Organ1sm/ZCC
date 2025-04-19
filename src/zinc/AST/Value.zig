@@ -360,6 +360,19 @@ fn bigIntToFloat(limbs: []const std.math.big.Limb, positive: bool) f128 {
     return if (positive) result else -result;
 }
 
+pub fn isInf(v: Value, comp: *const Compilation) bool {
+    if (v.optRef == .none) return false;
+    return switch (comp.interner.get(v.ref())) {
+        .float => |repr| switch (repr) {
+            inline else => |data| std.math.isInf(data),
+        },
+        .complex => |repr| switch (repr) {
+            inline else => |components| std.math.isInf(components[0]) or std.math.isInf(components[1]),
+        },
+        else => false,
+    };
+}
+
 /// Converts value to zero or one;
 /// `.none` value remains unchanged.
 pub fn boolCast(v: *Value, comp: *const Compilation) void {
@@ -388,16 +401,6 @@ const ComplexOp = enum {
     add,
     sub,
 };
-
-fn makeComplex(comptime T: type, re: T, im: T, comp: *Compilation) !Value {
-    return switch (T) {
-        f32 => intern(comp, .{ .complex = .{ .cf32 = .{ re, im } } }),
-        f64 => intern(comp, .{ .complex = .{ .cf64 = .{ re, im } } }),
-        f80 => intern(comp, .{ .complex = .{ .cf80 = .{ re, im } } }),
-        f128 => intern(comp, .{ .complex = .{ .cf128 = .{ re, im } } }),
-        else => @compileError("cannot make complex"),
-    };
-}
 
 fn complexAddSub(lhs: Value, rhs: Value, comptime T: type, op: ComplexOp, comp: *Compilation) !Value {
     const resRe = switch (op) {

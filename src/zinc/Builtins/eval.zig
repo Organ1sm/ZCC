@@ -31,9 +31,9 @@ pub fn eval(tag: Builtin.Tag, p: *Parser, args: []const Tree.Node.Index) !Value 
         Builtin.tagFromName("__builtin_infl").?,
         => {
             const ty: Type = switch (tag) {
-                Builtin.tagFromName("__builtin_inff").? => .{ .specifier = .float },
-                Builtin.tagFromName("__builtin_inf").? => .{ .specifier = .double },
-                Builtin.tagFromName("__builtin_infl").? => .{ .specifier = .long_double },
+                Builtin.tagFromName("__builtin_inff").? => .{ .specifier = .Float },
+                Builtin.tagFromName("__builtin_inf").? => .{ .specifier = .Double },
+                Builtin.tagFromName("__builtin_infl").? => .{ .specifier = .LongDouble },
                 else => unreachable,
             };
             const f: Interner.Key.Float = switch (ty.bitSizeof(p.comp).?) {
@@ -50,35 +50,35 @@ pub fn eval(tag: Builtin.Tag, p: *Parser, args: []const Tree.Node.Index) !Value 
             const val = p.tree.valueMap.get(args[0]) orelse break :blk;
             return Value.fromBool(val.isInf(p.comp));
         },
-        Builtin.tagFromName("__builtin_isinf_sign").? => blk: {
-            if (args.len == 0) break :blk;
-            const val = p.tree.valueMap.get(args[0]) orelse break :blk;
-            switch (val.isInfSign(p.comp)) {
-                .unknown => {},
-                .finite => return Value.zero,
-                .positive => return Value.one,
-                .negative => return Value.int(@as(i64, -1), p.comp),
-            }
-        },
-        Builtin.tagFromName("__builtin_isnan").? => blk: {
-            if (args.len == 0) break :blk;
-            const val = p.tree.valueMap.get(args[0]) orelse break :blk;
-            return Value.fromBool(val.isNan(p.comp));
-        },
-        Builtin.tagFromName("__builtin_nan").? => blk: {
-            if (args.len == 0) break :blk;
-            const val = p.getDecayedStringLiteral(args[0]) orelse break :blk;
-            const bytes = p.comp.interner.get(val.ref()).bytes;
+        // Builtin.tagFromName("__builtin_isinf_sign").? => blk: {
+        //     if (args.len == 0) break :blk;
+        //     const val = p.tree.valueMap.get(args[0]) orelse break :blk;
+        //     switch (val.isInfSign(p.comp)) {
+        //         .unknown => {},
+        //         .finite => return Value.zero,
+        //         .positive => return Value.one,
+        //         .negative => return Value.int(@as(i64, -1), p.comp),
+        //     }
+        // },
+        // Builtin.tagFromName("__builtin_isnan").? => blk: {
+        //     if (args.len == 0) break :blk;
+        //     const val = p.tree.valueMap.get(args[0]) orelse break :blk;
+        //     return Value.fromBool(val.isNan(p.comp));
+        // },
+        // Builtin.tagFromName("__builtin_nan").? => blk: {
+        //     if (args.len == 0) break :blk;
+        //     const val = p.getDecayedStringLiteral(args[0]) orelse break :blk;
+        //     const bytes = p.comp.interner.get(val.ref()).bytes;
 
-            const f: Interner.Key.Float = switch ((Type{ .specifier = .double }).bitSizeof(p.comp).?) {
-                32 => .{ .f32 = makeNan(f32, bytes) },
-                64 => .{ .f64 = makeNan(f64, bytes) },
-                80 => .{ .f80 = makeNan(f80, bytes) },
-                128 => .{ .f128 = makeNan(f128, bytes) },
-                else => unreachable,
-            };
-            return Value.intern(p.comp, .{ .float = f });
-        },
+        //     const f: Interner.Key.Float = switch ((Type{ .specifier = .double }).bitSizeof(p.comp).?) {
+        //         32 => .{ .f32 = makeNan(f32, bytes) },
+        //         64 => .{ .f64 = makeNan(f64, bytes) },
+        //         80 => .{ .f80 = makeNan(f80, bytes) },
+        //         128 => .{ .f128 = makeNan(f128, bytes) },
+        //         else => unreachable,
+        //     };
+        //     return Value.intern(p.comp, .{ .float = f });
+        // },
         else => {},
     }
     return .{};
