@@ -66,12 +66,12 @@ pub fn isZero(v: Value, comp: *const Compilation) bool {
 }
 
 pub fn is(v: Value, tag: std.meta.Tag(Interner.Key), comp: *const Compilation) bool {
-    if (v.optRef == .none) return false;
+    if (v.isNone()) return false;
     return comp.interner.get(v.ref()) == tag;
 }
 
 pub fn isArithmetic(v: Value, comp: *const Compilation) bool {
-    if (v.optRef == .none) return false;
+    if (v.isNone()) return false;
     return switch (comp.interner.get(v.ref())) {
         .int, .float, .complex => true,
         else => false,
@@ -177,7 +177,7 @@ pub const FloatToIntChangeKind = enum {
 /// Converts the stored value from a float to an integer.
 /// `.unavailable` value remains unchanged.
 pub fn floatToInt(v: *Value, destTy: Type, comp: *Compilation) !FloatToIntChangeKind {
-    if (v.optRef == .none) return .none;
+    if (v.isNone()) return .none;
 
     const floatVal = v.toFloat(f128, comp);
     const wasZero = floatVal == 0;
@@ -232,7 +232,7 @@ pub fn floatToInt(v: *Value, destTy: Type, comp: *Compilation) !FloatToIntChange
 /// Converts the stored value from an integer to a float.
 /// `.none` value remains unchanged.
 pub fn intToFloat(v: *Value, destTy: Type, comp: *Compilation) !void {
-    if (v.optRef == .none) return;
+    if (v.isNone()) return;
     const bits = destTy.bitSizeof(comp).?;
     return switch (comp.interner.get(v.ref()).int) {
         inline .u64, .i64 => |data| {
@@ -264,7 +264,7 @@ pub fn intToFloat(v: *Value, destTy: Type, comp: *Compilation) !void {
 
 /// `.none` value remains unchanged.
 pub fn intCast(v: *Value, destTy: Type, comp: *Compilation) !void {
-    if (v.optRef == .none) return;
+    if (v.isNone()) return;
 
     const bits: usize = @intCast(destTy.bitSizeof(comp).?);
     var space: BigIntSpace = undefined;
@@ -296,7 +296,7 @@ pub fn imag(v: Value, comptime T: type, comp: *const Compilation) T {
 /// Converts the stored value to a float of the specified type
 /// `.none` value remains unchanged.
 pub fn floatCast(v: *Value, destTy: Type, comp: *Compilation) !void {
-    if (v.optRef == .none) return;
+    if (v.isNone()) return;
     const bits = destTy.bitSizeof(comp).?;
 
     if (destTy.isComplex()) {
@@ -360,8 +360,36 @@ fn bigIntToFloat(limbs: []const std.math.big.Limb, positive: bool) f128 {
     return if (positive) result else -result;
 }
 
+pub fn realPart(v: Value, comp: *Compilation) !Value {
+    if (v.isNone()) return v;
+    return switch (comp.interner.get(v.ref())) {
+        .int, .float => v,
+        .complex => |repr| Value.intern(comp, switch (repr) {
+            .cf32 => |components| .{ .float = .{ .f32 = components[0] } },
+            .cf64 => |components| .{ .float = .{ .f64 = components[0] } },
+            .cf80 => |components| .{ .float = .{ .f80 = components[0] } },
+            .cf128 => |components| .{ .float = .{ .f128 = components[0] } },
+        }),
+        else => unreachable,
+    };
+}
+
+pub fn imaginaryPart(v: Value, comp: *Compilation) !Value {
+    if (v.isNone()) return v;
+    return switch (comp.interner.get(v.ref())) {
+        .int, .float => Value.zero,
+        .complex => |repr| Value.intern(comp, switch (repr) {
+            .cf32 => |components| .{ .float = .{ .f32 = components[1] } },
+            .cf64 => |components| .{ .float = .{ .f64 = components[1] } },
+            .cf80 => |components| .{ .float = .{ .f80 = components[1] } },
+            .cf128 => |components| .{ .float = .{ .f128 = components[1] } },
+        }),
+        else => unreachable,
+    };
+}
+
 pub fn isInf(v: Value, comp: *const Compilation) bool {
-    if (v.optRef == .none) return false;
+    if (v.isNone()) return false;
     return switch (comp.interner.get(v.ref())) {
         .float => |repr| switch (repr) {
             inline else => |data| std.math.isInf(data),
@@ -374,7 +402,7 @@ pub fn isInf(v: Value, comp: *const Compilation) bool {
 }
 
 pub fn isNan(v: Value, comp: *const Compilation) bool {
-    if (v.optRef == .none) return false;
+    if (v.isNone()) return false;
     return switch (comp.interner.get(v.ref())) {
         .float => |repr| switch (repr) {
             inline else => |data| std.math.isNan(data),
@@ -402,7 +430,7 @@ pub fn toBool(v: Value, comp: *const Compilation) bool {
 }
 
 pub fn toInt(v: Value, comptime T: type, comp: *const Compilation) ?T {
-    if (v.optRef == .none) return null;
+    if (v.isNone()) return null;
     if (comp.interner.get(v.ref()) != .int) return null;
 
     var space: BigIntSpace = undefined;

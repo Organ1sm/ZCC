@@ -6322,6 +6322,8 @@ fn parseUnaryExpr(p: *Parser) Error!?Result {
                             operand.value = Value.zero;
                     },
                 }
+            } else if (operand.ty.isComplex()) {
+                operand.value = try operand.value.imaginaryPart(p.comp);
             }
 
             // convert _Complex F to F
@@ -6342,6 +6344,7 @@ fn parseUnaryExpr(p: *Parser) Error!?Result {
             }
 
             operand.ty = operand.ty.makeReal();
+            operand.value = try operand.value.realPart(p.comp);
 
             try operand.un(p, .realExpr, token);
             return operand;
