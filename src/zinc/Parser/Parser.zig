@@ -6728,6 +6728,7 @@ const CallExpr = union(enum) {
                 .__builtin_complex,
                 .__builtin_isinf,
                 .__builtin_isinf_sign,
+                .__builtin_isnan,
                 => false,
                 else => true,
             },
@@ -6765,6 +6766,7 @@ const CallExpr = union(enum) {
                 .__c11_atomic_is_lock_free,
                 .__builtin_isinf,
                 .__builtin_isinf_sign,
+                .__builtin_isnan,
                 => 1,
 
                 .__builtin_complex,
