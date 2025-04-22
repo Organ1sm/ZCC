@@ -102,7 +102,7 @@ fnDef: 'fn () void'
     variable: '__fp16'
      name: fp16
      init:
-      implicit cast: (IntToFloat) '__fp16'
+      implicit cast: (IntToFloat) '__fp16' (value: 0)
         intLiteral: 'int' (value: 0)
 
     assignExpr: 'double'

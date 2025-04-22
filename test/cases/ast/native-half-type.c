@@ -23,13 +23,13 @@ fnDef: 'fn () void'
     variable: '__fp16'
      name: x
      init:
-      implicit cast: (FloatCast) '__fp16'
+      implicit cast: (FloatCast) '__fp16' (value: 1)
         floatLiteral: 'float' (value: 1)
 
     variable: '__fp16'
      name: y
      init:
-      implicit cast: (FloatCast) '__fp16'
+      implicit cast: (FloatCast) '__fp16' (value: 2)
         floatLiteral: 'float' (value: 2)
 
     assignExpr: '__fp16'

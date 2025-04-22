@@ -73,3 +73,9 @@ pub fn validate(d: DeclSpec, p: *Parser, ty: *Type) Error!void {
         }
     }
 }
+
+pub fn initContext(d: DeclSpec, p: *Parser) Parser.InitContext {
+    if (d.constexpr != null) return .constexpr;
+    if (p.func.type == null or d.storageClass == .static) return .static;
+    return .runtime;
+}

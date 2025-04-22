@@ -34,7 +34,7 @@ fnDef: 'fn () void'
     variable: 'char'
      name: c
      init:
-      implicit cast: (IntCast) 'char'
+      implicit cast: (IntCast) 'char' (value: 0)
         intLiteral: 'int' (value: 0)
 
     variable: 'double'
@@ -100,7 +100,7 @@ fnDef: 'fn () void'
     variable: '__fp16'
      name: fp16
      init:
-      implicit cast: (FloatCast) '__fp16'
+      implicit cast: (FloatCast) '__fp16' (value: 0)
         floatLiteral: 'float' (value: 0)
 
     assignExpr: '__fp16'

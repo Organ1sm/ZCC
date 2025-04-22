@@ -20,7 +20,7 @@ fnDef: 'fn () void'
     variable: '_Complex double'
      name: cd
      init:
-      arrayInitExpr: '_Complex double'
+      arrayInitExpr: '_Complex double' (value: 1 + 2i)
         floatLiteral: 'double' (value: 1)
 
         floatLiteral: 'double' (value: 2)
@@ -28,7 +28,7 @@ fnDef: 'fn () void'
     variable: '_Complex float'
      name: cf
      init:
-      arrayInitExpr: '_Complex float'
+      arrayInitExpr: '_Complex float' (value: 1 + 2i)
         floatLiteral: 'float' (value: 1)
 
         floatLiteral: 'float' (value: 2)
@@ -36,7 +36,7 @@ fnDef: 'fn () void'
     variable: '_Complex int'
      name: ci
      init:
-      arrayInitExpr: '_Complex int'
+      arrayInitExpr: '_Complex int' (value: 1 + 2i)
         intLiteral: 'int' (value: 1)
 
         intLiteral: 'int' (value: 2)
@@ -48,11 +48,11 @@ fnDef: 'fn () void'
      rhs:
       implicit cast: (LValToRVal) '_Complex double'
         compoundLiteralExpr: '_Complex double' lvalue
-         arrayInitExpr: '_Complex double'
-           implicit cast: (FloatCast) 'double'
+         arrayInitExpr: '_Complex double' (value: 1 + 2i)
+           implicit cast: (FloatCast) 'double' (value: 1)
              floatLiteral: 'float' (value: 1)
 
-           implicit cast: (FloatCast) 'double'
+           implicit cast: (FloatCast) 'double' (value: 2)
              floatLiteral: 'float' (value: 2)
 
     assignExpr: '_Complex float'
@@ -62,11 +62,11 @@ fnDef: 'fn () void'
      rhs:
       implicit cast: (LValToRVal) '_Complex float'
         compoundLiteralExpr: '_Complex float' lvalue
-         arrayInitExpr: '_Complex float'
-           implicit cast: (FloatCast) 'float'
+         arrayInitExpr: '_Complex float' (value: 1 + 2i)
+           implicit cast: (FloatCast) 'float' (value: 1)
              floatLiteral: 'double' (value: 1)
 
-           implicit cast: (FloatCast) 'float'
+           implicit cast: (FloatCast) 'float' (value: 2)
              floatLiteral: 'double' (value: 2)
 
     implicit returnStmt: 'void'

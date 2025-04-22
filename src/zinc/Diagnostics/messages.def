@@ -2480,3 +2480,7 @@ complex_conj
     .opt = W("pedantic")
     .extra = .str
     .kind = .off
+
+constexpr_requires_const
+    .msg = "constexpr variable must be initialized by a constant expression"
+    .kind = .@"error"
