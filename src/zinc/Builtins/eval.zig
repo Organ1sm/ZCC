@@ -50,16 +50,16 @@ pub fn eval(tag: Builtin.Tag, p: *Parser, args: []const Tree.Node.Index) !Value 
             const val = p.tree.valueMap.get(args[0]) orelse break :blk;
             return Value.fromBool(val.isInf(p.comp));
         },
-        // Builtin.tagFromName("__builtin_isinf_sign").? => blk: {
-        //     if (args.len == 0) break :blk;
-        //     const val = p.tree.valueMap.get(args[0]) orelse break :blk;
-        //     switch (val.isInfSign(p.comp)) {
-        //         .unknown => {},
-        //         .finite => return Value.zero,
-        //         .positive => return Value.one,
-        //         .negative => return Value.int(@as(i64, -1), p.comp),
-        //     }
-        // },
+        Builtin.tagFromName("__builtin_isinf_sign").? => blk: {
+            if (args.len == 0) break :blk;
+            const val = p.tree.valueMap.get(args[0]) orelse break :blk;
+            switch (val.isInfSign(p.comp)) {
+                .unknown => {},
+                .finite => return Value.zero,
+                .positive => return Value.one,
+                .negative => return Value.int(@as(i64, -1), p.comp),
+            }
+        },
         Builtin.tagFromName("__builtin_isnan").? => blk: {
             if (args.len == 0) break :blk;
             const val = p.tree.valueMap.get(args[0]) orelse break :blk;

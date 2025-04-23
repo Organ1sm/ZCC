@@ -388,6 +388,23 @@ pub fn imaginaryPart(v: Value, comp: *Compilation) !Value {
     };
 }
 
+const IsInfKind = enum(i32) {
+    negative = -1,
+    finite = 0,
+    positive = 1,
+    unknown = std.math.maxInt(i32),
+};
+
+pub fn isInfSign(v: Value, comp: *const Compilation) IsInfKind {
+    if (v.isNone()) return .unknown;
+    return switch (comp.interner.get(v.ref())) {
+        .float => |repr| switch (repr) {
+            inline else => |data| if (std.math.isPositiveInf(data)) .positive else if (std.math.isNegativeInf(data)) .negative else .finite,
+        },
+        else => .unknown,
+    };
+}
+
 pub fn isInf(v: Value, comp: *const Compilation) bool {
     if (v.isNone()) return false;
     return switch (comp.interner.get(v.ref())) {
