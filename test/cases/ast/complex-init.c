@@ -33,14 +33,6 @@ fnDef: 'fn () void'
 
         floatLiteral: 'float' (value: 2)
 
-    variable: '_Complex int'
-     name: ci
-     init:
-      arrayInitExpr: '_Complex int' (value: 1 + 2i)
-        intLiteral: 'int' (value: 1)
-
-        intLiteral: 'int' (value: 2)
-
     assignExpr: '_Complex double'
      lhs:
       declRefExpr: '_Complex double' lvalue
