@@ -31,9 +31,9 @@ pub fn eval(tag: Builtin.Tag, p: *Parser, args: []const Tree.Node.Index) !Value 
         Builtin.tagFromName("__builtin_infl").?,
         => {
             const ty: Type = switch (tag) {
-                Builtin.tagFromName("__builtin_inff").? => .{ .specifier = .float },
-                Builtin.tagFromName("__builtin_inf").? => .{ .specifier = .double },
-                Builtin.tagFromName("__builtin_infl").? => .{ .specifier = .long_double },
+                Builtin.tagFromName("__builtin_inff").? => .{ .specifier = .Float },
+                Builtin.tagFromName("__builtin_inf").? => .{ .specifier = .Double },
+                Builtin.tagFromName("__builtin_infl").? => .{ .specifier = .LongDouble },
                 else => unreachable,
             };
             const f: Interner.Key.Float = switch (ty.bitSizeof(p.comp).?) {
@@ -70,7 +70,7 @@ pub fn eval(tag: Builtin.Tag, p: *Parser, args: []const Tree.Node.Index) !Value 
             const val = p.getDecayedStringLiteral(args[0]) orelse break :blk;
             const bytes = p.comp.interner.get(val.ref()).bytes;
 
-            const f: Interner.Key.Float = switch ((Type{ .specifier = .double }).bitSizeof(p.comp).?) {
+            const f: Interner.Key.Float = switch (Type.Double.bitSizeof(p.comp).?) {
                 32 => .{ .f32 = makeNan(f32, bytes) },
                 64 => .{ .f64 = makeNan(f64, bytes) },
                 80 => .{ .f80 = makeNan(f80, bytes) },

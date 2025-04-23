@@ -32,31 +32,31 @@ variable: 'bool'
 variable: 'bool'
  name: c
  init:
-  implicit cast: (IntToBool) 'bool'
+  implicit cast: (IntToBool) 'bool' (value: false)
     intLiteral: 'int' (value: 0)
 
 variable: 'bool'
  name: d
  init:
-  implicit cast: (IntToBool) 'bool'
+  implicit cast: (IntToBool) 'bool' (value: true)
     intLiteral: 'int' (value: 1)
 
 variable: 'int'
  name: e
  init:
-  implicit cast: (BoolToInt) 'int'
+  implicit cast: (BoolToInt) 'int' (value: 1)
     boolLiteral: 'bool' (value: true)
 
 variable: 'int'
  name: f
  init:
-  implicit cast: (BoolToInt) 'int'
+  implicit cast: (BoolToInt) 'int' (value: 0)
     boolLiteral: 'bool' (value: false)
 
 variable: 'int'
  name: g
  init:
-  addExpr: 'int'
+  addExpr: 'int' (value: 2)
    lhs:
     implicit cast: (BoolToInt) 'int'
       boolLiteral: 'bool' (value: true)

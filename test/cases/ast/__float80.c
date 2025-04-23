@@ -41,7 +41,7 @@ fnDef: 'fn () void'
        name: z
      rhs:
       implicit cast: (ComplexFloatCast) '_Complex long double'
-        imaginaryLiteral: '_Complex double'
+        imaginaryLiteral: '_Complex double' (value: 0 + 1i)
          operand:
           floatLiteral: 'long double'
 
@@ -51,7 +51,7 @@ fnDef: 'fn () void'
        name: z
      rhs:
       implicit cast: (ComplexFloatCast) '_Complex long double'
-        imaginaryLiteral: '_Complex double'
+        imaginaryLiteral: '_Complex double' (value: 0 + 1i)
          operand:
           floatLiteral: 'long double'
 

@@ -46,7 +46,7 @@ fnDef: 'fn () void'
     variable: '_Complex float'
      name: ca
      init:
-      implicit cast: (RealToComplexFloat) '_Complex float'
+      implicit cast: (RealToComplexFloat) '_Complex float' (value: 0 + 0i)
         floatLiteral: 'float' (value: 0)
 
     assignExpr: '_Complex float'

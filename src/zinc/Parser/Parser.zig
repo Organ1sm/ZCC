@@ -24,6 +24,7 @@ const StringId = @import("../Basic/StringInterner.zig").StringId;
 const RecordLayout = @import("../Basic/RecordLayout.zig");
 const Builtins = @import("../Builtins.zig");
 const Builtin = Builtins.Builtin;
+const evalBuiltin = @import("../Builtins/eval.zig").eval;
 
 const Token = AST.Token;
 const NumberPrefix = Token.NumberPrefix;
@@ -98,6 +99,8 @@ constDeclFolding: ConstDeclFoldingMode = .FoldConstDecls,
 /// address-of-label expression (tracked with ContainsAddressOfLabel)
 computedGotoTok: ?TokenIndex = null,
 
+initContext: InitContext = .runtime,
+
 /// Various variables that are different for each function.
 func: struct {
     /// null if not in function, will always be plain func, varargs func or OldStyleFunc
@@ -156,6 +159,15 @@ stringsIds: struct {
 const Label = union(enum) {
     unresolvedGoto: TokenIndex,
     label: TokenIndex,
+};
+
+pub const InitContext = enum {
+    /// inits do not need to be compile-time constants
+    runtime,
+    /// constexpr variable, could be any scope but inits must be compile-time constants
+    constexpr,
+    /// static and global variables, inits must be compile-time constants
+    static,
 };
 
 fn checkIdentifierCodepointWarnings(comp: *Compilation, codepoint: u21, loc: Source.Location) Compilation.Error!bool {
@@ -570,6 +582,20 @@ fn findLabel(p: *Parser, name: []const u8) ?TokenIndex {
 
 fn nodeIs(p: *Parser, node: Node.Index, comptime tag: std.meta.Tag(AST.Node)) bool {
     return p.getNode(node, tag) != null;
+}
+
+pub fn getDecayedStringLiteral(p: *Parser, node: Node.Index) ?Value {
+    const cast = p.getNode(node, .cast) orelse return null;
+    if (cast.kind != .ArrayToPointer) return null;
+
+    var cur = cast.operand;
+    while (true) {
+        switch (cur.get(&p.tree)) {
+            .parenExpr => |un| cur = un.operand,
+            .stringLiteralExpr => return p.tree.valueMap.get(cur),
+            else => return null,
+        }
+    }
 }
 
 fn getNode(p: *Parser, node: Node.Index, comptime tag: std.meta.Tag(AST.Node)) ?@FieldType(Node, @tagName(tag)) {
@@ -1253,7 +1279,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
                 initDeclarator.d.type,
                 initDeclarator.d.name,
                 declNode,
-                if (initDeclarator.d.type.isConst()) init.value else .{},
+                if (initDeclarator.d.type.isConst() or declSpec.constexpr != null) init.value else .{},
                 declSpec.constexpr != null,
             );
         } else if (p.func.type != null and declSpec.storageClass != .@"extern") {
@@ -1827,6 +1853,10 @@ fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec, attrBufferTop: usize, de
 
         const internedName = try p.getInternString(ID.d.name);
         try p.symStack.declareSymbol(internedName, ID.d.type, ID.d.name, declNode);
+
+        const initContext = p.initContext;
+        defer p.initContext = initContext;
+        p.initContext = declSpec.initContext(p);
 
         var initListExpr = try p.initializer(ID.d.type);
         ID.initializer = initListExpr;
@@ -3416,6 +3446,69 @@ fn parseTypeName(p: *Parser) Error!?Type {
     return try Attribute.applyTypeAttributes(p, ty, attrBufferTop, .align_ignored);
 }
 
+fn complexInitializer(p: *Parser, initTy: Type) Error!Result {
+    assert(p.currToken() == .LBrace);
+    assert(initTy.isComplex());
+
+    const realTy = initTy.makeReal();
+    if (realTy.isInt())
+        return p.todo("Complex integer initializer");
+
+    const lbrace = p.tokenIdx;
+    p.tokenIdx += 1;
+    try p.errToken(.complex_component_init, lbrace);
+
+    const firstToken = p.tokenIdx;
+    var first = try p.expect(parseAssignExpr);
+    try p.coerceInit(&first, firstToken, realTy);
+
+    const second = if (p.eat(.Comma)) |_| second: {
+        const secondToken = p.tokenIdx;
+        var second = (try p.parseAssignExpr()) orelse break :second null;
+        try p.coerceInit(&second, secondToken, realTy);
+        break :second second;
+    } else null;
+
+    var extraToken: ?TokenIndex = null;
+    while (p.eat(.Comma)) |_| {
+        if (p.currToken() == .RBrace) break;
+        extraToken = p.tokenIdx;
+
+        if ((try p.parseAssignExpr()) == null) {
+            try p.errToken(.expected_expr, p.tokenIdx);
+            p.skipTo(.RBrace);
+            return error.ParsingFailed;
+        }
+    }
+
+    try p.expectClosing(lbrace, .RBrace);
+    if (extraToken) |tok|
+        try p.errToken(.excess_scalar_init, tok);
+
+    var res: Result = .{
+        .node = try p.addNode(.{
+            .arrayInitExpr = .{
+                .containerType = initTy,
+                .items = if (second) |some| &.{ first.node, some.node } else &.{first.node},
+                .lbraceToken = lbrace,
+            },
+        }),
+        .ty = initTy,
+    };
+
+    const firstValue = p.tree.valueMap.get(first.node) orelse return res;
+    const secondValue = if (second) |some| p.tree.valueMap.get(some.node) orelse return res else Value.zero;
+    res.value = try Value.intern(p.comp, switch (realTy.bitSizeof(p.comp).?) {
+        32 => .{ .complex = .{ .cf32 = .{ firstValue.toFloat(f32, p.comp), secondValue.toFloat(f32, p.comp) } } },
+        64 => .{ .complex = .{ .cf64 = .{ firstValue.toFloat(f64, p.comp), secondValue.toFloat(f64, p.comp) } } },
+        80 => .{ .complex = .{ .cf80 = .{ firstValue.toFloat(f80, p.comp), secondValue.toFloat(f80, p.comp) } } },
+        128 => .{ .complex = .{ .cf128 = .{ firstValue.toFloat(f128, p.comp), secondValue.toFloat(f128, p.comp) } } },
+        else => unreachable,
+    });
+    try res.putValue(p);
+    return res;
+}
+
 /// initializer
 ///  : assign-expression
 ///  : braced-initializer
@@ -3438,6 +3531,9 @@ pub fn initializer(p: *Parser, initType: Type) Error!Result {
         try p.err(.auto_type_with_init_list);
         return error.ParsingFailed;
     }
+
+    if (initType.isComplex())
+        return p.complexInitializer(initType);
 
     var il: InitList = .{};
     defer il.deinit(p.gpa);
@@ -3913,6 +4009,22 @@ fn coerceInit(p: *Parser, item: *Result, token: TokenIndex, target: Type) !void 
         return;
     }
     try item.coerce(p, target, token, .init);
+    if (item.value.isNone()) runtime: {
+        const tag: Diagnostics.Tag = switch (p.initContext) {
+            .runtime => break :runtime,
+            .constexpr => .constexpr_requires_const,
+            .static => break :runtime,
+        };
+
+        p.initContext = .runtime;
+        try p.errToken(tag, token);
+    }
+
+    if (target.isConst() or p.initContext == .constexpr) {
+        var copy = item.*;
+        return copy.saveValue(p);
+    }
+    return item.saveValue(p);
 }
 
 fn isStringInit(p: *Parser, ty: Type) bool {
@@ -4562,7 +4674,6 @@ fn parseWhileStmt(p: *Parser, kwWhile: TokenIndex) Error!Node.Index {
     const condToken = p.tokenIdx;
 
     var cond = try p.expect(parseExpr);
-    try cond.lvalConversion(p, condToken);
     try cond.usualUnaryConversion(p, condToken);
 
     if (!cond.ty.isScalar())
@@ -6070,7 +6181,7 @@ fn parseUnaryExpr(p: *Parser) Error!?Result {
                 try p.errStr(.invalid_argument_un, token, try p.typeStr(operand.ty));
 
             try operand.usualUnaryConversion(p, token);
-            if (operand.value.isNumeric(p.comp))
+            if (operand.value.isArithmetic(p.comp))
                 _ = try operand.value.sub(Value.zero, operand.value, operand.ty, p.comp)
             else
                 operand.value = .{};
@@ -6145,6 +6256,10 @@ fn parseUnaryExpr(p: *Parser) Error!?Result {
                 if (operand.value.is(.int, p.comp)) {
                     operand.value = try operand.value.bitNot(operand.ty, p.comp);
                 }
+            } else if (operand.ty.isComplex()) {
+                try p.errStr(.complex_conj, token, try p.typeStr(operand.ty));
+                if (operand.value.is(.complex, p.comp))
+                    operand.value = try operand.value.complexConj(operand.ty, p.comp);
             } else {
                 try p.errStr(.invalid_argument_un, token, try p.typeStr(operand.ty));
                 operand.value = .{};
@@ -6317,6 +6432,8 @@ fn parseUnaryExpr(p: *Parser) Error!?Result {
                             operand.value = Value.zero;
                     },
                 }
+            } else if (operand.ty.isComplex()) {
+                operand.value = try operand.value.imaginaryPart(p.comp);
             }
 
             // convert _Complex F to F
@@ -6337,6 +6454,7 @@ fn parseUnaryExpr(p: *Parser) Error!?Result {
             }
 
             operand.ty = operand.ty.makeReal();
+            operand.value = try operand.value.realPart(p.comp);
 
             try operand.un(p, .realExpr, token);
             return operand;
@@ -6394,6 +6512,11 @@ fn parseCompoundLiteral(p: *Parser) Error!?Result {
         try p.errStr(.variable_incomplete_ty, p.tokenIdx, try p.typeStr(ty));
         return error.ParsingFailed;
     }
+
+    const initContext = p.initContext;
+    defer p.initContext = initContext;
+
+    p.initContext = d.initContext(p);
 
     var initlistExpr = try p.initializer(ty);
     if (d.constexpr) |_| {
@@ -6719,7 +6842,12 @@ const CallExpr = union(enum) {
             .standard => true,
             .builtin => |builtin| switch (builtin.tag) {
                 .__builtin_va_start, .__va_start, .va_start => argIdx != 1,
-                .__builtin_complex => false,
+
+                .__builtin_complex,
+                .__builtin_isinf,
+                .__builtin_isinf_sign,
+                .__builtin_isnan,
+                => false,
                 else => true,
             },
         };
@@ -6754,6 +6882,9 @@ const CallExpr = union(enum) {
                 .__c11_atomic_thread_fence,
                 .__c11_atomic_signal_fence,
                 .__c11_atomic_is_lock_free,
+                .__builtin_isinf,
+                .__builtin_isinf_sign,
+                .__builtin_isnan,
                 => 1,
 
                 .__builtin_complex,
@@ -6882,6 +7013,7 @@ const CallExpr = union(enum) {
                 }),
             },
             .builtin => |builtin| return .{
+                .value = try evalBuiltin(builtin.tag, p, args),
                 .ty = retTy,
                 .node = try p.addNode(.{
                     .builtinCallExpr = .{
@@ -7440,7 +7572,13 @@ fn parseFloat(p: *Parser, buf: []const u8, suffix: NumberSuffix, tokenIdx: Token
             .IQ, .IF128 => Type.ComplexFloat128,
             else => unreachable,
         };
-        res.value = .{}; // TOOD: add complex values
+        res.value = try Value.intern(p.comp, switch (res.ty.bitSizeof(p.comp).?) {
+            64 => .{ .complex = .{ .cf32 = .{ 0.0, val.toFloat(f32, p.comp) } } },
+            128 => .{ .complex = .{ .cf64 = .{ 0.0, val.toFloat(f64, p.comp) } } },
+            160 => .{ .complex = .{ .cf80 = .{ 0.0, val.toFloat(f80, p.comp) } } },
+            256 => .{ .complex = .{ .cf128 = .{ 0.0, val.toFloat(f128, p.comp) } } },
+            else => unreachable,
+        });
         try res.un(p, .imaginaryLiteral, tokenIdx);
     }
     return res;
@@ -7728,7 +7866,6 @@ fn parsePPNumber(p: *Parser) Error!Result {
         }
         res.ty = if (res.ty.isUnsignedInt(p.comp)) p.comp.types.intmax.makeIntegerUnsigned() else p.comp.types.intmax;
     } else if (!res.value.isNone()) {
-        // TODO add complex values
         try res.putValue(p);
     }
     return res;

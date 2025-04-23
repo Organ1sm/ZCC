@@ -2474,3 +2474,13 @@ c23_auto_requires_initializer
 c23_auto_scalar_init
     .msg = "'auto' requires a scalar initializer"
     .kind = .@"error"
+
+complex_conj
+    .msg = "ISO C does not support '~' for complex conjugation of '{s}'"
+    .opt = W("pedantic")
+    .extra = .str
+    .kind = .off
+
+constexpr_requires_const
+    .msg = "constexpr variable must be initialized by a constant expression"
+    .kind = .@"error"

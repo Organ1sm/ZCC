@@ -466,6 +466,7 @@ pub fn intCast(res: *Result, p: *Parser, intType: Type, token: TokenIndex) Error
 
     // Cast from pointer to integer.
     else if (res.ty.isPointer()) {
+        res.value = .{};
         res.ty = intType.makeReal();
         try res.implicitCast(p, .PointerToInt, token);
         if (!intType.isReal()) {
@@ -858,6 +859,7 @@ pub fn castType(res: *Result, p: *Parser, to: Type, operandToken: TokenIndex, lp
                     explicitCastKind = .RealToComplexInt;
                 } else {
                     explicitCastKind = .PointerToInt;
+                    res.value = .{};
                 }
             } else if (oldIsReal and newIsReal) {
                 explicitCastKind = .FloatToInt;
