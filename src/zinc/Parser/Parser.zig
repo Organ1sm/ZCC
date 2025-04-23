@@ -584,6 +584,20 @@ fn nodeIs(p: *Parser, node: Node.Index, comptime tag: std.meta.Tag(AST.Node)) bo
     return p.getNode(node, tag) != null;
 }
 
+pub fn getDecayedStringLiteral(p: *Parser, node: Node.Index) ?Value {
+    const cast = p.getNode(node, .cast) orelse return null;
+    if (cast.kind != .ArrayToPointer) return null;
+
+    var cur = cast.operand;
+    while (true) {
+        switch (cur.get(&p.tree)) {
+            .parenExpr => |un| cur = un.operand,
+            .stringLiteralExpr => return p.tree.valueMap.get(cur),
+            else => return null,
+        }
+    }
+}
+
 fn getNode(p: *Parser, node: Node.Index, comptime tag: std.meta.Tag(AST.Node)) ?@FieldType(Node, @tagName(tag)) {
     var cur = node;
     while (true) {
@@ -1265,7 +1279,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
                 initDeclarator.d.type,
                 initDeclarator.d.name,
                 declNode,
-                if (initDeclarator.d.type.isConst()) init.value else .{},
+                if (initDeclarator.d.type.isConst() or declSpec.constexpr != null) init.value else .{},
                 declSpec.constexpr != null,
             );
         } else if (p.func.type != null and declSpec.storageClass != .@"extern") {
@@ -6486,7 +6500,7 @@ fn parseCompoundLiteral(p: *Parser) Error!?Result {
     defer p.initContext = initContext;
 
     p.initContext = d.initContext(p);
-    
+
     var initlistExpr = try p.initializer(ty);
     if (d.constexpr) |_| {
         //TODO error if not constexpr

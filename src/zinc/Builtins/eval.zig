@@ -65,20 +65,20 @@ pub fn eval(tag: Builtin.Tag, p: *Parser, args: []const Tree.Node.Index) !Value 
             const val = p.tree.valueMap.get(args[0]) orelse break :blk;
             return Value.fromBool(val.isNan(p.comp));
         },
-        // Builtin.tagFromName("__builtin_nan").? => blk: {
-        //     if (args.len == 0) break :blk;
-        //     const val = p.getDecayedStringLiteral(args[0]) orelse break :blk;
-        //     const bytes = p.comp.interner.get(val.ref()).bytes;
+        Builtin.tagFromName("__builtin_nan").? => blk: {
+            if (args.len == 0) break :blk;
+            const val = p.getDecayedStringLiteral(args[0]) orelse break :blk;
+            const bytes = p.comp.interner.get(val.ref()).bytes;
 
-        //     const f: Interner.Key.Float = switch ((Type{ .specifier = .double }).bitSizeof(p.comp).?) {
-        //         32 => .{ .f32 = makeNan(f32, bytes) },
-        //         64 => .{ .f64 = makeNan(f64, bytes) },
-        //         80 => .{ .f80 = makeNan(f80, bytes) },
-        //         128 => .{ .f128 = makeNan(f128, bytes) },
-        //         else => unreachable,
-        //     };
-        //     return Value.intern(p.comp, .{ .float = f });
-        // },
+            const f: Interner.Key.Float = switch (Type.Double.bitSizeof(p.comp).?) {
+                32 => .{ .f32 = makeNan(f32, bytes) },
+                64 => .{ .f64 = makeNan(f64, bytes) },
+                80 => .{ .f80 = makeNan(f80, bytes) },
+                128 => .{ .f128 = makeNan(f128, bytes) },
+                else => unreachable,
+            };
+            return Value.intern(p.comp, .{ .float = f });
+        },
         else => {},
     }
     return .{};
