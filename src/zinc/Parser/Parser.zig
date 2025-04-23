@@ -3466,7 +3466,21 @@ fn complexInitializer(p: *Parser, initTy: Type) Error!Result {
         break :second second;
     } else null;
 
+    var extraToken: ?TokenIndex = null;
+    while (p.eat(.Comma)) |_| {
+        if (p.currToken() == .RBrace) break;
+        extraToken = p.tokenIdx;
+
+        if ((try p.parseAssignExpr()) == null) {
+            try p.errToken(.expected_expr, p.tokenIdx);
+            p.skipTo(.RBrace);
+            return error.ParsingFailed;
+        }
+    }
+
     try p.expectClosing(lbrace, .RBrace);
+    if (extraToken) |tok|
+        try p.errToken(.excess_scalar_init, tok);
 
     var res: Result = .{
         .node = try p.addNode(.{
