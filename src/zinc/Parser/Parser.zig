@@ -375,6 +375,12 @@ pub fn errStr(p: *Parser, tag: Diagnostics.Tag, index: TokenIndex, str: []const 
 
 pub fn errExtra(p: *Parser, tag: Diagnostics.Tag, tokIdx: TokenIndex, extra: Diagnostics.Message.Extra) Compilation.Error!void {
     @branchHint(.cold);
+    // Suppress pedantic diagnostics inside __extension__ blocks.
+    if (p.extensionSuppressd) {
+        const prop = tag.property();
+        if (prop.extension and prop.kind == .off) return;
+    }
+
     const token = p.pp.tokens.get(tokIdx);
     var loc = token.loc;
 
@@ -2292,8 +2298,12 @@ fn parseRecordSpec(p: *Parser) Error!Type {
     try p.parseRecordDecls();
 
     if (p.record.flexibleField) |some| {
-        if (p.recordBuffer.items[recordBufferTop..].len == 1 and isStruct)
-            try p.errToken(.flexible_in_empty, some);
+        if (p.recordBuffer.items[recordBufferTop..].len == 1 and isStruct) {
+            if (p.comp.langOpts.emulate == .msvc)
+                try p.errToken(.flexible_in_empty_msvc, some)
+            else
+                try p.errToken(.flexible_in_empty, some);
+        }
     }
 
     for (p.recordBuffer.items[recordBufferTop..]) |field| {
@@ -2516,8 +2526,12 @@ fn parseRecordDeclarator(p: *Parser) Error!bool {
         } else if (ty.is(.VariableLenArray)) {
             try p.errToken(.vla_field, firstToken);
         } else if (ty.is(.IncompleteArray)) {
-            if (p.record.kind == .KeywordUnion)
-                try p.errToken(.flexible_in_union, firstToken);
+            if (p.record.kind == .KeywordUnion) {
+                if (p.comp.langOpts.emulate == .msvc)
+                    try p.errToken(.flexible_in_union_msvc, firstToken)
+                else
+                    try p.errToken(.flexible_in_union, firstToken);
+            }
             if (p.record.flexibleField) |some| {
                 if (p.record.kind == .KeywordStruct)
                     try p.errToken(.flexible_non_final, some);
@@ -6329,7 +6343,7 @@ fn parseUnaryExpr(p: *Parser) Error!?Result {
                 try p.errStr(.sizeof_array_arg, token, errString);
             }
 
-            if (res.ty.sizeof(p.comp)) |size| {
+            if (res.ty.sizeof(p.comp) and p.comp.langOpts.emulate == .msvc) |size| {
                 if (size == 0) try p.errToken(.sizeof_returns_zero, token);
                 res.value = try Value.int(size, p.comp);
                 res.ty = p.comp.types.size;

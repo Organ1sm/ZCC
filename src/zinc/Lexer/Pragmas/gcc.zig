@@ -17,8 +17,8 @@ pragma: Pragma = .{
     .parserHandler = parserHandler,
     .preserveTokens = preserveTokens,
 },
-originalOptions: Diagnostics.Options = .{},
-optionsStack: std.ArrayListUnmanaged(Diagnostics.Options) = .{},
+originalState: Diagnostics.State = .{},
+stateStack: std.ArrayListUnmanaged(Diagnostics.State) = .{},
 
 const Directive = enum {
     warning,
@@ -37,19 +37,19 @@ const Directive = enum {
 
 fn beforePreprocess(pragma: *Pragma, comp: *Compilation) void {
     var self: *GCC = @alignCast(@fieldParentPtr("pragma", pragma));
-    self.originalOptions = comp.diagnostics.options;
+    self.originalState = comp.diagnostics.options;
 }
 
 fn beforeParse(pragma: *Pragma, comp: *Compilation) void {
     var self: *GCC = @alignCast(@fieldParentPtr("pragma", pragma));
-    comp.diagnostics.options = self.originalOptions;
-    self.optionsStack.items.len = 0;
+    comp.diagnostics.options = self.originalState;
+    self.stateStack.items.len = 0;
 }
 
 fn afterParse(pragma: *Pragma, comp: *Compilation) void {
     var self: *GCC = @alignCast(@fieldParentPtr("pragma", pragma));
-    comp.diagnostics.options = self.originalOptions;
-    self.optionsStack.items.len = 0;
+    comp.diagnostics.options = self.originalState;
+    self.stateStack.items.len = 0;
 }
 
 pub fn init(allocator: std.mem.Allocator) !*Pragma {
@@ -60,7 +60,7 @@ pub fn init(allocator: std.mem.Allocator) !*Pragma {
 
 pub fn deinit(pragma: *Pragma, comp: *Compilation) void {
     const self: *GCC = @alignCast(@fieldParentPtr("pragma", pragma));
-    self.optionsStack.deinit(comp.gpa);
+    self.stateStack.deinit(comp.gpa);
     comp.gpa.destroy(self);
 }
 
@@ -102,8 +102,8 @@ fn diagnosticHandler(self: *GCC, pp: *Preprocessor, startIdx: TokenIndex) Pragma
 
             try pp.comp.diagnostics.set(str[2..], newKind);
         },
-        .push => try self.optionsStack.append(pp.comp.gpa, pp.comp.diagnostics.options),
-        .pop => pp.comp.diagnostics.options = self.optionsStack.pop() orelse self.originalOptions,
+        .push => try self.stateStack.append(pp.comp.gpa, pp.comp.diagnostics.state),
+        .pop => pp.comp.diagnostics.state = self.stateStack.pop() orelse self.originalState,
     }
 }
 

@@ -1,579 +1,510 @@
 const std = @import("std");
+const Allocator = std.mem.Allocator;
 const builtin = @import("builtin");
+
+const Compilation = @import("Compilation.zig");
+const LangOpts = @import("../Basic/LangOpts.zig");
 const Source = @import("Source.zig");
 const TokenType = @import("TokenType.zig").TokenType;
-const Tree = @import("../AST/AST.zig");
-const Compilation = @import("Compilation.zig");
-const Attribute = @import("../Lexer/Attribute.zig");
-const Builtins = @import("../Builtins.zig");
-const Builtin = Builtins.Builtin;
-const Header = @import("../Builtins/Properties.zig").Header;
-const LangOpts = @import("../Basic/LangOpts.zig");
-const IsWindows = @import("builtin").os.tag == .windows;
-
-const Allocator = std.mem.Allocator;
 const Diagnostics = @This();
 
 pub const Message = struct {
-    tag: Tag,
-    loc: Source.Location = .{},
-    extra: Extra = .{ .none = {} },
-    kind: Kind = undefined,
+    kind: Kind,
+    text: []const u8,
 
-    pub const Extra = union {
-        str: []const u8,
-        tokenId: struct {
-            expected: TokenType,
-            actual: TokenType,
-        },
-        expectedTokenId: TokenType,
+    opt: ?Option = null,
+    extension: bool = false,
+    location: ?Source.ExpandedLocation = null,
 
-        arguments: struct {
-            expected: u32,
-            actual: u32,
-        },
-
-        codePoints: struct {
-            actual: u21,
-            resembles: u21,
-        },
-        attrArgCount: struct {
-            attribute: Attribute.Tag,
-            expected: u32,
-        },
-        attrArgType: struct {
-            expected: Attribute.ArgumentType,
-            actual: Attribute.ArgumentType,
-        },
-        attrEnum: struct {
-            tag: Attribute.Tag,
-        },
-        ignoredRecordAttr: struct {
-            tag: Attribute.Tag,
-            specifier: enum { @"struct", @"union", @"enum" },
-        },
-        builtinWithHeader: struct {
-            builtin: Builtin.Tag,
-            header: Header,
-        },
-        invalidEscape: struct {
-            offset: u32,
-            char: u8,
-        },
-        actualCodePoint: u21,
-        ascii: u7,
-        pow2AsString: u8,
-        unsigned: u64,
-        offset: u64,
-        signed: i64,
-        none: void,
+    pub const Kind = enum {
+        off,
+        note,
+        warning,
+        @"error",
+        @"fatal error",
     };
 };
 
-const Properties = struct {
-    msg: []const u8,
-    kind: Kind,
-    extra: std.meta.FieldEnum(Message.Extra) = .none,
-    opt: ?u8 = null,
-    all: bool = false,
-    w_extra: bool = false,
-    pedantic: bool = false,
-    suppress_version: ?LangOpts.Standard = null,
-    suppress_unless_version: ?LangOpts.Standard = null,
-    suppress_gnu: bool = false,
-    suppress_gcc: bool = false,
-    suppress_clang: bool = false,
-    suppress_msvc: bool = false,
+pub const Option = enum {
+    @"unsupported-pragma",
+    @"c99-extensions",
+    @"implicit-int",
+    @"duplicate-decl-specifier",
+    @"missing-declaration",
+    @"extern-initializer",
+    @"implicit-function-declaration",
+    @"unused-value",
+    @"unreachable-code",
+    @"unknown-warning-option",
+    @"gnu-empty-struct",
+    @"gnu-alignof-expression",
+    @"macro-redefined",
+    @"generic-qual-type",
+    multichar,
+    @"pointer-integer-compare",
+    @"compare-distinct-pointer-types",
+    @"literal-conversion",
+    @"cast-qualifiers",
+    @"array-bounds",
+    @"int-conversion",
+    @"pointer-type-mismatch",
+    @"c23-extensions",
+    @"incompatible-pointer-types",
+    @"excess-initializers",
+    @"division-by-zero",
+    @"initializer-overrides",
+    @"incompatible-pointer-types-discards-qualifiers",
+    @"unknown-attributes",
+    @"ignored-attributes",
+    @"builtin-macro-redefined",
+    @"gnu-label-as-value",
+    @"malformed-warning-check",
+    @"#pragma-messages",
+    @"newline-eof",
+    @"empty-translation-unit",
+    @"implicitly-unsigned-literal",
+    @"c99-compat",
+    @"unicode-zero-width",
+    @"unicode-homoglyph",
+    unicode,
+    @"return-type",
+    @"dollar-in-identifier-extension",
+    @"unknown-pragmas",
+    @"predefined-identifier-outside-function",
+    @"many-braces-around-scalar-init",
+    uninitialized,
+    @"gnu-statement-expression",
+    @"gnu-imaginary-constant",
+    @"gnu-complex-integer",
+    @"ignored-qualifiers",
+    @"integer-overflow",
+    @"extra-semi",
+    @"gnu-binary-literal",
+    @"variadic-macros",
+    varargs,
+    @"#warnings",
+    @"deprecated-declarations",
+    @"backslash-newline-escape",
+    @"pointer-to-int-cast",
+    @"gnu-case-range",
+    @"c++-compat",
+    vla,
+    @"float-overflow-conversion",
+    @"float-zero-conversion",
+    @"float-conversion",
+    @"gnu-folding-constant",
+    undef,
+    @"ignored-pragmas",
+    @"gnu-include-next",
+    @"include-next-outside-header",
+    @"include-next-absolute-path",
+    @"enum-too-large",
+    @"fixed-enum-extension",
+    @"designated-init",
+    @"attribute-warning",
+    @"invalid-noreturn",
+    @"zero-length-array",
+    @"old-style-flexible-struct",
+    @"gnu-zero-variadic-macro-arguments",
+    @"main-return-type",
+    @"expansion-to-defined",
+    @"bit-int-extension",
+    @"keyword-macro",
+    @"pointer-arith",
+    @"sizeof-array-argument",
+    @"pre-c23-compat",
+    @"pointer-bool-conversion",
+    @"string-conversion",
+    @"gnu-auto-type",
+    @"gnu-pointer-arith",
+    @"gnu-union-cast",
+    @"pointer-sign",
+    @"fuse-ld-path",
+    @"language-extension-token",
+    @"complex-component-init",
+    @"microsoft-include",
+    @"microsoft-end-of-file",
+    @"invalid-source-encoding",
+    @"four-char-constants",
+    @"unknown-escape-sequence",
+    @"invalid-pp-token",
+    @"deprecated-non-prototype",
+    @"duplicate-embed-param",
+    @"unsupported-embed-param",
+    @"unused-result",
+    normalized,
+    @"shift-count-negative",
+    @"shift-count-overflow",
+    @"constant-conversion",
+    @"sign-conversion",
+    @"address-of-packed-member",
+    nonnull,
+    @"atomic-access",
+    @"gnu-designator",
+    @"empty-body",
+    @"nullability-extension",
+    nullability,
+    @"microsoft-flexible-array",
 
-    pub fn makeOpt(comptime str: []const u8) u16 {
-        return @offsetOf(Options, str);
-    }
+    /// GNU extensions
+    pub const gnu = [_]Option{
+        .@"gnu-empty-struct",
+        .@"gnu-alignof-expression",
+        .@"gnu-label-as-value",
+        .@"gnu-statement-expression",
+        .@"gnu-imaginary-constant",
+        .@"gnu-complex-integer",
+        .@"gnu-binary-literal",
+        .@"gnu-case-range",
+        .@"gnu-folding-constant",
+        .@"gnu-include-next",
+        .@"gnu-zero-variadic-macro-arguments",
+        .@"gnu-auto-type",
+        .@"gnu-pointer-arith",
+        .@"gnu-union-cast",
+        .@"gnu-designator",
+        .@"zero-length-array",
+    };
 
-    pub fn getKind(prop: Properties, options: *Options) Kind {
-        const opt = @as([*]Kind, @ptrCast(options))[prop.opt orelse return prop.kind];
-        if (opt == .default) return prop.kind;
-        return opt;
-    }
+    /// Clang extensions
+    pub const clang = [_]Option{
+        .@"fixed-enum-extension",
+        .@"bit-int-extension",
+        .@"nullability-extension",
+    };
 
-    pub const max_bits = Compilation.BitIntMaxBits;
+    /// Microsoft extensions
+    pub const microsoft = [_]Option{
+        .@"microsoft-end-of-file",
+        .@"microsoft-include",
+        .@"microsoft-flexible-array",
+    };
+
+    pub const extra = [_]Option{
+        .@"initializer-overrides",
+        .@"ignored-qualifiers",
+        .@"initializer-overrides",
+        .@"expansion-to-defined",
+        .@"fuse-ld-path",
+    };
+
+    pub const implicit = [_]Option{
+        .@"implicit-int",
+        .@"implicit-function-declaration",
+    };
+
+    pub const unused = [_]Option{
+        .@"unused-value",
+        .@"unused-result",
+    };
+
+    pub const most = implicit ++ unused ++ [_]Option{
+        .@"initializer-overrides",
+        .@"ignored-qualifiers",
+        .@"initializer-overrides",
+        .multichar,
+        .@"return-type",
+        .@"sizeof-array-argument",
+        .uninitialized,
+        .@"unknown-pragmas",
+    };
+
+    pub const all = most ++ [_]Option{
+        .nonnull,
+        .@"unreachable-code",
+        .@"malformed-warning-check",
+    };
 };
 
-pub const Tag = @import("Diagnostics/messages.def").with(Properties).Tag;
-
-pub const Kind = enum { @"fatal error", @"error", note, warning, off, default };
-
-pub const Options = struct {
-    // do not directly use these, instead add `const NAME = true;`
-    all: Kind = .default,
-    extra: Kind = .default,
-    pedantic: Kind = .default,
-
-    @"unsupported-pragma": Kind = .default,
-    @"c99-extensions": Kind = .default,
-    @"implicit-int": Kind = .default,
-    @"duplicate-decl-specifier": Kind = .default,
-    @"missing-declaration": Kind = .default,
-    @"extern-initializer": Kind = .default,
-    @"implicit-function-declaration": Kind = .default,
-    @"unused-value": Kind = .default,
-    @"unreachable-code": Kind = .default,
-    @"unknown-warning-option": Kind = .default,
-    @"gnu-empty-struct": Kind = .default,
-    @"gnu-alignof-expression": Kind = .default,
-    @"macro-redefined": Kind = .default,
-    @"generic-qual-type": Kind = .default,
-    multichar: Kind = .default,
-    @"pointer-integer-compare": Kind = .default,
-    @"compare-distinct-pointer-types": Kind = .default,
-    @"literal-conversion": Kind = .default,
-    @"cast-qualifiers": Kind = .default,
-    @"array-bounds": Kind = .default,
-    @"int-conversion": Kind = .default,
-    @"pointer-type-mismatch": Kind = .default,
-    @"c23-extensions": Kind = .default,
-    @"incompatible-pointer-types": Kind = .default,
-    @"excess-initializers": Kind = .default,
-    @"division-by-zero": Kind = .default,
-    @"initializer-overrides": Kind = .default,
-    @"incompatible-pointer-types-discards-qualifiers": Kind = .default,
-    @"unknown-attributes": Kind = .default,
-    @"ignored-attributes": Kind = .default,
-    @"builtin-macro-redefined": Kind = .default,
-    @"gnu-label-as-value": Kind = .default,
-    @"malformed-warning-check": Kind = .default,
-    @"#pragma-messages": Kind = .default,
-    @"newline-eof": Kind = .default,
-    @"empty-translation-unit": Kind = .default,
-    @"implicitly-unsigned-literal": Kind = .default,
-    @"c99-compat": Kind = .default,
-    unicode: Kind = .default,
-    @"unicode-zero-width": Kind = .default,
-    @"unicode-homoglyph": Kind = .default,
-    @"return-type": Kind = .default,
-    @"dollar-in-identifier-extension": Kind = .default,
-    @"unknown-pragmas": Kind = .default,
-    @"predefined-identifier-outside-function": Kind = .default,
-    @"many-braces-around-scalar-init": Kind = .default,
-    uninitialized: Kind = .default,
-    @"gnu-statement-expression": Kind = .default,
-    @"gnu-imaginary-constant": Kind = .default,
-    @"gnu-complex-integer": Kind = .default,
-    @"ignored-qualifiers": Kind = .default,
-    @"integer-overflow": Kind = .default,
-    @"extra-semi": Kind = .default,
-    @"gnu-binary-literal": Kind = .default,
-    @"variadic-macros": Kind = .default,
-    varargs: Kind = .default,
-    @"#warnings": Kind = .default,
-    @"deprecated-declarations": Kind = .default,
-    @"backslash-newline-escape": Kind = .default,
-    @"pointer-to-int-cast": Kind = .default,
-    @"gnu-case-range": Kind = .default,
-    @"c++-compat": Kind = .default,
-    vla: Kind = .default,
-    @"float-overflow-conversion": Kind = .default,
-    @"float-zero-conversion": Kind = .default,
-    @"float-conversion": Kind = .default,
-    @"gnu-folding-constant": Kind = .default,
-    undef: Kind = .default,
-    @"gnu-include-next": Kind = .default,
-    @"include-next-outside-header": Kind = .default,
-    @"include-next-absolute-path": Kind = .default,
-    @"ignored-pragmas": Kind = .default,
-    @"enum-too-large": Kind = .default,
-    @"fixed-enum-extension": Kind = .default,
-    @"designated-init": Kind = .default,
-    @"attribute-warning": Kind = .default,
-    @"invalid-noreturn": Kind = .default,
-    @"zero-length-array": Kind = .default,
-    @"old-style-flexible-struct": Kind = .default,
-    @"gnu-zero-variadic-macro-arguments": Kind = .default,
-    @"expansion-to-defined": Kind = .default,
-    @"main-return-type": Kind = .default,
-    @"bit-int-extension": Kind = .default,
-    @"keyword-macro": Kind = .default,
-    @"pointer-arith": Kind = .default,
-    @"sizeof-array-argument": Kind = .default,
-    @"pre-c23-compat": Kind = .default,
-    @"pointer-bool-conversion": Kind = .default,
-    @"string-conversion": Kind = .default,
-    @"gnu-auto-type": Kind = .default,
-    @"gnu-union-cast": Kind = .default,
-    @"pointer-sign": Kind = .default,
-    @"deprecated-non-prototype": Kind = .default,
-    @"fuse-ld-path": Kind = .default,
-    @"language-extension-token": Kind = .default,
-    @"complex-component-init": Kind = .default,
-    @"microsoft-include": Kind = .default,
-    @"microsoft-end-of-file": Kind = .default,
-    @"invalid-source-encoding": Kind = .default,
-    @"four-char-constants": Kind = .default,
-    @"unknown-escape-sequence": Kind = .default,
-    @"invalid-pp-token": Kind = .default,
-    @"duplicate-embed-param": Kind = .default,
-    @"unsupported-embed-param": Kind = .default,
-    @"unused-result": Kind = .default,
+pub const State = struct {
+    // Treat all errors as fatal, set by -Wfatal-errors
+    fatal_errors: bool = false,
+    // Treat all warnings as errors, set by -Werror
+    error_warnings: bool = false,
+    /// Enable all warnings, set by -Weverything
+    enable_all_warnings: bool = false,
+    /// Ignore all warnings, set by -w
+    ignore_warnings: bool = false,
+    /// How to treat extension diagnostics, set by -Wpedantic
+    extensions: Message.Kind = .off,
+    /// How to treat individual options, set by -W<name>
+    options: std.EnumMap(Option, Message.Kind) = .{},
 };
 
-list: std.ArrayListUnmanaged(Message) = .{},
-arena: std.heap.ArenaAllocator,
-fatalErrors: bool = false,
-options: Options = .{},
+output: union(enum) {
+    toFile: struct {
+        file: std.fs.File,
+        config: std.io.tty.Config,
+    },
+    toList: struct {
+        messages: std.ArrayListUnmanaged(Message),
+        arena: std.heap.ArenaAllocator,
+    },
+},
+
+state: State = .{},
+/// Amount of error or fatal error messages that have been sent to `output`.
 errors: u32 = 0,
+/// Amount of warnings that have been sent to `output`.
+warnings: u32 = 0,
+// Total amount of diagnostics messages sent to `output`.
+total: u32 = 0,
 macroBacktraceLimit: u32 = 6,
 
-pub fn warningExists(name: []const u8) bool {
-    inline for (std.meta.fields(Options)) |f| {
-        if (std.mem.eql(u8, f.name, name)) return true;
+pub fn deinit(d: *Diagnostics) void {
+    switch (d.output) {
+        .toFile => {},
+        .toList => |*list| {
+            list.messages.deinit(list.arena.child_allocator);
+            list.arena.deinit();
+        },
     }
-    return false;
 }
 
-pub fn set(diag: *Diagnostics, name: []const u8, to: Kind) !void {
-    inline for (std.meta.fields(Options)) |f| {
-        if (std.mem.eql(u8, f.name, name)) {
-            @field(diag.options, f.name) = to;
+/// Used by the __has_warning builtin macro.
+pub fn warningExists(name: []const u8) bool {
+    if (std.mem.eql(u8, name, "pedantic")) return true;
+    inline for (comptime std.meta.declarations(Option)) |group| {
+        if (std.mem.eql(u8, name, group.name)) return true;
+    }
+    return std.meta.stringToEnum(Option, name) != null;
+}
+
+pub fn set(d: *Diagnostics, name: []const u8, to: Message.Kind) !void {
+    if (std.mem.eql(u8, name, "pedantic")) {
+        d.state.extensions = to;
+        return;
+    }
+
+    if (std.meta.stringToEnum(Option, name)) |option| {
+        d.state.options.put(option, to);
+        return;
+    }
+
+    inline for (comptime std.meta.declarations(Option)) |group| {
+        if (std.mem.eql(u8, name, group.name)) {
+            for (@field(Option, group.name)) |option| {
+                d.state.options.put(option, to);
+            }
             return;
         }
     }
-    try diag.addExtra(
-        .{},
-        .{ .tag = .unknown_warning, .extra = .{ .str = name } },
-        &.{},
-        true,
-    );
+
+    var buf: [256]u8 = undefined;
+    const slice = std.fmt.bufPrint(&buf, "unknown warning '{s}'", .{name}) catch &buf;
+
+    try d.add(.{
+        .text = slice,
+        .kind = .warning,
+        .opt = .@"unknown-warning-option",
+        .location = null,
+    });
 }
 
-pub fn setAll(diag: *Diagnostics, to: Kind) void {
-    inline for (std.meta.fields(Options)) |f| {
-        @field(diag.options, f.name) = to;
+pub fn effectiveKind(diag: *Diagnostics, message: anytype) Message.Kind {
+    var kind = message.kind;
+
+    // -w disregards explicit kind set with -W<name>
+    if (diag.state.ignore_warnings and kind == .warning) return .off;
+
+    // Get explicit kind set by -W<name>=
+    var setExplicit = false;
+    if (message.opt) |option| {
+        if (diag.state.options.get(option)) |explicit| {
+            kind = explicit;
+            setExplicit = true;
+        }
     }
+
+    // Use extension diagnostic behavior if not set explicitly.
+    if (message.extension and !setExplicit) {
+        kind = @enumFromInt(@max(@intFromEnum(kind), @intFromEnum(diag.state.extensions)));
+    }
+
+    // Make diagnostic a warning if -Weverything is set.
+    if (kind == .off and diag.state.enable_all_warnings) kind = .warning;
+
+    // Upgrade warnigns to errors if -Werror is set
+    if (kind == .warning and diag.state.error_warnings) kind = .@"error";
+
+    // Upgrade errors to fatal errors if -Wfatal-errors is set
+    if (kind == .@"error" and diag.state.fatal_errors) kind = .@"fatal error";
+
+    return kind;
 }
 
-pub fn init(gpa: Allocator) Diagnostics {
-    return .{ .arena = std.heap.ArenaAllocator.init(gpa) };
+pub fn add(d: *Diagnostics, msg: Message) Compilation.Error!void {
+    var copy = msg;
+    copy.kind = d.effectiveKind(msg);
+    if (copy.kind == .off) return;
+    try d.addMessage(copy);
+    if (copy.kind == .@"fatal error") return error.FatalError;
 }
 
-pub fn deinit(diag: *Diagnostics) void {
-    diag.list.deinit(diag.arena.child_allocator);
-    diag.arena.deinit();
-}
-
-pub fn add(comp: *Compilation, msg: Message, expansionLocs: []const Source.Location) Compilation.Error!void {
-    return comp.diagnostics.addExtra(comp.langOpts, msg, expansionLocs, true);
-}
-
-pub fn addExtra(
+pub fn addWithLocation(
     diag: *Diagnostics,
-    langopts: LangOpts,
+    comp: *const Compilation,
     msg: Message,
     expansionLocs: []const Source.Location,
     noteMsgLoc: bool,
 ) Compilation.Error!void {
-    const kind = diag.tagKind(msg.tag, langopts);
-    if (kind == .off) return;
     var copy = msg;
-    copy.kind = kind;
-
-    if (expansionLocs.len != 0)
-        copy.loc = expansionLocs[expansionLocs.len - 1];
-
-    try diag.list.append(diag.arena.child_allocator, copy);
+    copy.kind = diag.effectiveKind(msg);
+    if (copy.kind == .off) return;
+    if (copy.kind == .@"error" or copy.kind == .@"fatal error") diag.errors += 1;
+    if (expansionLocs.len != 0) copy.location = expansionLocs[expansionLocs.len - 1].expand(comp);
+    try diag.addMessage(copy);
 
     if (expansionLocs.len != 0) {
         // Add macro backtrace notes in reverse order omitting from the middle if needed.
         var i = expansionLocs.len - 1;
         const half = diag.macroBacktraceLimit / 2;
         const limit = if (i < diag.macroBacktraceLimit) 0 else i - half;
-        try diag.list.ensureUnusedCapacity(
-            diag.arena.child_allocator,
-            if (limit == 0) expansionLocs.len else diag.macroBacktraceLimit + 1,
-        );
         while (i > limit) {
             i -= 1;
-            diag.list.appendAssumeCapacity(.{
-                .tag = .expanded_from_here,
+            try diag.addMessage(.{
                 .kind = .note,
-                .loc = expansionLocs[i],
+                .text = "expanded from here",
+                .location = expansionLocs[i].expand(comp),
             });
         }
         if (limit != 0) {
-            diag.list.appendAssumeCapacity(.{
-                .tag = .skipping_macro_backtrace,
+            var buf: [256]u8 = undefined;
+            try diag.addMessage(.{
                 .kind = .note,
-                .extra = .{ .unsigned = expansionLocs.len - diag.macroBacktraceLimit },
+                .text = std.fmt.bufPrint(
+                    &buf,
+                    "(skipping {d} expansions in backtrace; use -fmacro-backtrace-limit=0 to see all)",
+                    .{expansionLocs.len - diag.macroBacktraceLimit},
+                ) catch unreachable,
+                .location = null,
             });
-            i = half - 1;
+            i = half -| 1;
             while (i > 0) {
                 i -= 1;
-                diag.list.appendAssumeCapacity(.{
-                    .tag = .expanded_from_here,
+                try diag.addMessage(.{
                     .kind = .note,
-                    .loc = expansionLocs[i],
+                    .text = "expanded from here",
+                    .location = expansionLocs[i].expand(comp),
                 });
             }
         }
 
-        if (noteMsgLoc) diag.list.appendAssumeCapacity(.{
-            .tag = .expanded_from_here,
-            .kind = .note,
-            .loc = msg.loc,
-        });
-    }
-
-    if (kind == .@"fatal error" or (kind == .@"error" and diag.fatalErrors))
-        return error.FatalError;
-}
-
-pub fn defaultMsgWriter(config: std.io.tty.Config) MsgWriter {
-    return MsgWriter.init(config);
-}
-
-pub fn render(comp: *Compilation, config: std.io.tty.Config) void {
-    if (comp.diagnostics.list.items.len == 0) return;
-
-    var m = defaultMsgWriter(config);
-    defer m.deinit();
-
-    renderMessages(comp, &m);
-}
-
-pub fn renderMessages(comp: *Compilation, m: anytype) void {
-    var errors: u32 = 0;
-    var warnings: u32 = 0;
-    for (comp.diagnostics.list.items) |msg| {
-        switch (msg.kind) {
-            .@"fatal error", .@"error" => errors += 1,
-            .warning => warnings += 1,
-            .note => {},
-            .off => continue, // happens if an error is added before it is disabled
-            .default => unreachable,
-        }
-        renderMessage(comp, m, msg);
-    }
-
-    const ws: []const u8 = if (warnings == 1) "" else "s";
-    const es: []const u8 = if (errors == 1) "" else "s";
-    if (errors != 0 and warnings != 0) {
-        m.print("{d} warning{s} and {d} error{s} generated.\n", .{ warnings, ws, errors, es });
-    } else if (warnings != 0) {
-        m.print("{d} warning{s} generated.\n", .{ warnings, ws });
-    } else if (errors != 0) {
-        m.print("{d} error{s} generated.\n", .{ errors, es });
-    }
-
-    comp.diagnostics.list.items.len = 0;
-    comp.diagnostics.errors += errors;
-}
-
-pub fn renderMessage(comp: *Compilation, m: anytype, msg: Message) void {
-    var line: ?[]const u8 = null;
-    var endWithSplice = false;
-    const width = if (msg.loc.id != .unused) blk: {
-        var loc = msg.loc;
-        switch (msg.tag) {
-            .escape_sequence_overflow,
-            .invalid_universal_character,
-            => loc.byteOffset += @as(u32, @truncate(msg.extra.offset)),
-            .non_standard_escape_char,
-            .unknown_escape_sequence,
-            => loc.byteOffset += msg.extra.invalidEscape.offset,
-            else => {},
-        }
-
-        const source = comp.getSource(loc.id);
-        var lineAndCol = source.getLineCol(loc);
-        line = lineAndCol.line;
-        endWithSplice = lineAndCol.endWithSplic;
-        if (msg.tag == .backslash_newline_escape) {
-            line = lineAndCol.line[0 .. lineAndCol.col - 1];
-            lineAndCol.col += 1;
-            lineAndCol.width += 1;
-        }
-        m.location(source.path, lineAndCol.lineNO, lineAndCol.col);
-        break :blk lineAndCol.width;
-    } else 0;
-
-    m.start(msg.kind);
-    const prop = msg.tag.property();
-    switch (prop.extra) {
-        .str => printRt(m, prop.msg, .{"{s}"}, .{msg.extra.str}),
-        .tokenId => printRt(m, prop.msg, .{ "{s}", "{s}" }, .{
-            msg.extra.tokenId.expected.symbol(),
-            msg.extra.tokenId.actual.symbol(),
-        }),
-        .expectedTokenId => printRt(m, prop.msg, .{"{s}"}, .{msg.extra.expectedTokenId.symbol()}),
-        .arguments => printRt(m, prop.msg, .{ "{d}", "{d}" }, .{
-            msg.extra.arguments.expected,
-            msg.extra.arguments.actual,
-        }),
-        .codePoints => printRt(m, prop.msg, .{ "{X:0>4}", "{u}" }, .{
-            msg.extra.codePoints.actual,
-            msg.extra.codePoints.resembles,
-        }),
-        .attrArgCount => printRt(m, prop.msg, .{ "{s}", "{d}" }, .{
-            @tagName(msg.extra.attrArgCount.attribute),
-            msg.extra.attrArgCount.expected,
-        }),
-        .attrArgType => printRt(m, prop.msg, .{ "{s}", "{s}" }, .{
-            msg.extra.attrArgType.expected.toString(),
-            msg.extra.attrArgType.actual.toString(),
-        }),
-        .actualCodePoint => printRt(m, prop.msg, .{"{X:0>4}"}, .{msg.extra.actualCodePoint}),
-        .ascii => printRt(m, prop.msg, .{"{c}"}, .{msg.extra.ascii}),
-        .unsigned => printRt(m, prop.msg, .{"{d}"}, .{msg.extra.unsigned}),
-        .pow2AsString => printRt(m, prop.msg, .{"{s}"}, .{switch (msg.extra.pow2AsString) {
-            63 => "9223372036854775808",
-            64 => "18446744073709551616",
-            127 => "170141183460469231731687303715884105728",
-            128 => "340282366920938463463374607431768211456",
-            else => unreachable,
-        }}),
-        .signed => printRt(m, prop.msg, .{"{d}"}, .{msg.extra.signed}),
-        .attrEnum => printRt(m, prop.msg, .{ "{s}", "{s}" }, .{
-            @tagName(msg.extra.attrEnum.tag),
-            Attribute.Formatting.choices(msg.extra.attrEnum.tag),
-        }),
-        .ignoredRecordAttr => printRt(m, prop.msg, .{ "{s}", "{s}" }, .{
-            @tagName(msg.extra.ignoredRecordAttr.tag),
-            @tagName(msg.extra.ignoredRecordAttr.specifier),
-        }),
-        .builtinWithHeader => printRt(m, prop.msg, .{ "{s}", "{s}" }, .{
-            @tagName(msg.extra.builtinWithHeader.header),
-            Builtin.nameFromTag(msg.extra.builtinWithHeader.builtin).span(),
-        }),
-        .invalidEscape => {
-            if (std.ascii.isPrint(msg.extra.invalidEscape.char)) {
-                const str: [1]u8 = .{msg.extra.invalidEscape.char};
-                printRt(m, prop.msg, .{"{s}"}, .{&str});
-            } else {
-                var buf: [3]u8 = undefined;
-                const str = std.fmt.bufPrint(&buf, "x{x}", .{std.fmt.fmtSliceHexLower(&.{msg.extra.invalidEscape.char})}) catch unreachable;
-                printRt(m, prop.msg, .{"{s}"}, .{str});
-            }
-        },
-        .none, .offset => m.write(prop.msg),
-    }
-
-    if (prop.opt) |some| {
-        if (msg.kind == .@"error" and prop.kind != .@"error") {
-            m.print(" [-Werror, -W{s}]", .{optName(some)});
-        } else if (msg.kind != .note) {
-            m.print(" [-W{s}]", .{optName(some)});
+        if (noteMsgLoc) {
+            try diag.add(.{
+                .kind = .note,
+                .text = "expanded from here",
+                .location = msg.location.?,
+            });
         }
     }
-
-    m.end(line, width, endWithSplice);
+    if (copy.kind == .@"fatal error") return error.FatalError;
 }
 
-fn printRt(m: anytype, str: []const u8, comptime fmts: anytype, args: anytype) void {
+pub fn formatArgs(w: anytype, fmt: []const u8, args: anytype) !void {
     var i: usize = 0;
-    inline for (fmts, args) |fmt, arg| {
-        const new = std.mem.indexOfPos(u8, str, i, fmt).?;
-        m.write(str[i..new]);
-        i = new + fmt.len;
-        m.print(fmt, .{arg});
-    }
-    m.write(str[i..]);
-}
-
-fn optName(offset: u16) []const u8 {
-    return std.meta.fieldNames(Options)[offset / @sizeOf(Kind)];
-}
-
-fn tagKind(diag: *Diagnostics, tag: Tag, langOpts: LangOpts) Kind {
-    const prop = tag.property();
-    var kind = prop.getKind(&diag.options);
-
-    if (prop.all) {
-        if (diag.options.all != .default)
-            kind = diag.options.all;
-    }
-
-    if (prop.w_extra) {
-        if (diag.options.extra != .default)
-            kind = diag.options.extra;
-    }
-
-    if (prop.pedantic) {
-        if (diag.options.pedantic != .default)
-            kind = diag.options.pedantic;
-    }
-
-    if (prop.suppress_version) |some| if (langOpts.standard.atLeast(some)) return .off;
-    if (prop.suppress_unless_version) |some| if (!langOpts.standard.atLeast(some)) return .off;
-    if (prop.suppress_gnu and langOpts.standard.isExplicitGNU()) return .off;
-    if (prop.suppress_gcc and langOpts.emulate == .gcc) return .off;
-    if (prop.suppress_clang and langOpts.emulate == .clang) return .off;
-    if (prop.suppress_msvc and langOpts.emulate == .msvc) return .off;
-    if (kind == .@"error" and diag.fatalErrors) kind = .@"fatal error";
-
-    return kind;
-}
-
-const MsgWriter = struct {
-    w: std.io.BufferedWriter(4096, std.fs.File.Writer),
-    config: std.io.tty.Config,
-
-    fn init(config: std.io.tty.Config) MsgWriter {
-        std.debug.lockStdErr();
-        return .{
-            .w = std.io.bufferedWriter(std.io.getStdErr().writer()),
-            .config = config,
+    inline for (std.meta.fields(@TypeOf(args))) |arg_info| {
+        const arg = @field(args, arg_info.name);
+        i += switch (@TypeOf(arg)) {
+            []const u8 => try formatString(w, fmt[i..], arg),
+            else => switch (@typeInfo(@TypeOf(arg))) {
+                .int, .comptime_int => try Diagnostics.formatInt(w, fmt[i..], arg),
+                .pointer => try Diagnostics.formatString(w, fmt[i..], arg),
+                else => unreachable,
+            },
         };
     }
+    try w.writeAll(fmt[i..]);
+}
 
-    pub fn deinit(m: *MsgWriter) void {
-        m.w.flush() catch {};
-        std.debug.unlockStdErr();
+pub fn formatString(w: anytype, fmt: []const u8, str: []const u8) !usize {
+    const i = std.mem.indexOf(u8, fmt, "{s}").?;
+    try w.writeAll(fmt[0..i]);
+    try w.writeAll(str);
+    return i;
+}
+
+pub fn formatInt(w: anytype, fmt: []const u8, int: anytype) !usize {
+    const i = std.mem.indexOf(u8, fmt, "{d}").?;
+    try w.writeAll(fmt[0..i]);
+    try std.fmt.formatInt(int, 10, .lower, .{}, w);
+    return i;
+}
+
+fn addMessage(d: *Diagnostics, msg: Message) Compilation.Error!void {
+    switch (msg.kind) {
+        .off => unreachable,
+        .@"error", .@"fatal error" => d.errors += 1,
+        .warning => d.warnings += 1,
+        .note => {},
     }
+    d.total += 1;
 
-    pub fn print(m: *MsgWriter, comptime fmt: []const u8, args: anytype) void {
-        m.w.writer().print(fmt, args) catch {};
+    switch (d.output) {
+        .toFile => |to_file| {
+            d.writeToFile(msg, to_file, to_file.config) catch {
+                return error.FatalError;
+            };
+        },
+        .toList => |*toList| {
+            const arena = toList.arena.allocator();
+            try toList.messages.append(toList.arena.child_allocator, .{
+                .kind = msg.kind,
+                .text = try arena.dupe(u8, msg.text),
+                .location = if (msg.location) |some| .{
+                    .path = try arena.dupe(u8, some.path),
+                    .line = try arena.dupe(u8, some.line),
+                    .col = some.col,
+                    .lineNO = some.lineNo,
+                    .width = some.width,
+                    .endWithSplice = some.endWithSplice,
+                } else null,
+            });
+        },
     }
+}
 
-    fn write(m: *MsgWriter, msg: []const u8) void {
-        m.w.writer().writeAll(msg) catch {};
+fn writeToFile(d: *Diagnostics, msg: Message, file: std.fs.File, config: std.io.tty.Config) !void {
+    const w = file.writer();
+
+    try config.setColor(w, .bold);
+    if (msg.location) |loc|
+        try w.print("{s}:{d}:{d}: ", .{ loc.path, loc.lineNo, loc.col });
+
+    switch (msg.kind) {
+        .@"fatal error", .@"error" => try config.setColor(w, .bright_red),
+        .note => try config.setColor(w, .bright_cyan),
+        .warning => try config.setColor(w, .bright_magenta),
+        .off => unreachable,
     }
+    try w.print("{s}: ", .{@tagName(msg.kind)});
 
-    fn setColor(m: *MsgWriter, color: std.io.tty.Color) void {
-        m.config.setColor(m.w.writer(), color) catch {};
-    }
-
-    fn location(m: *MsgWriter, path: []const u8, line: u32, col: u32) void {
-        m.setColor(.bold);
-        m.print("{s}:{d}:{d}: ", .{ path, line, col });
-    }
-
-    fn start(m: *MsgWriter, kind: Kind) void {
-        switch (kind) {
-            .@"fatal error", .@"error" => m.setColor(.bright_red),
-            .note => m.setColor(.bright_cyan),
-            .warning => m.setColor(.bright_magenta),
-            .off, .default => unreachable,
+    try config.setColor(w, .white);
+    try w.writeAll(msg.text);
+    if (msg.opt) |some| {
+        if (msg.kind == .@"error" and d.state.options.get(some) == .@"error") {
+            try w.print(" [-Werror,-W{s}]", .{@tagName(some)});
+        } else if (msg.kind != .note) {
+            try w.print(" [-W{s}]", .{@tagName(some)});
         }
-        m.write(switch (kind) {
-            .@"fatal error" => "fatal error: ",
-            .@"error" => "error: ",
-            .note => "note: ",
-            .warning => "warning: ",
-            .off, .default => unreachable,
-        });
-        m.setColor(.white);
+    } else if (msg.extension) {
+        if (msg.kind == .@"error") {
+            try w.writeAll(" [-Werror,-Wpedantic]");
+        } else {
+            try w.writeAll(" [-Wpedantic]");
+        }
     }
 
-    fn end(m: *MsgWriter, maybe_line: ?[]const u8, col: u32, endWithSplice: bool) void {
-        const line = maybe_line orelse {
-            m.write("\n");
-            m.setColor(.reset);
-            return;
-        };
-        const trailer = if (endWithSplice) "\\ " else "";
-        m.setColor(.reset);
-        m.print("\n{s}{s}\n{s: >[3]}", .{ line, trailer, "", col });
-        m.setColor(.bold);
-        m.setColor(.bright_green);
-        m.write("^\n");
-        m.setColor(.reset);
+    if (msg.location) |loc| {
+        const trailer = if (loc.endWithSplice) "\\ " else "";
+        try config.setColor(w, .reset);
+        try w.print("\n{s}{s}\n{s: >[3]}", .{ loc.line, trailer, "", loc.col });
+        try config.setColor(w, .bold);
+        try config.setColor(w, .bright_green);
+        try w.writeAll("^\n");
+        try config.setColor(w, .reset);
+    } else {
+        try w.writeAll("\n");
+        try config.setColor(w, .reset);
     }
-};
+}
