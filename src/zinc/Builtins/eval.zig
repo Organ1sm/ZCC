@@ -26,14 +26,14 @@ pub fn eval(tag: Builtin.Tag, p: *Parser, args: []const Tree.Node.Index) !Value 
     if (!builtin.properties.attributes.const_evaluable) return .{};
 
     switch (tag) {
-        Builtin.tagFromName("__builtin_inff").?,
-        Builtin.tagFromName("__builtin_inf").?,
-        Builtin.tagFromName("__builtin_infl").?,
+        .__builtin_inff,
+        .__builtin_inf,
+        .__builtin_infl,
         => {
             const ty: Type = switch (tag) {
-                Builtin.tagFromName("__builtin_inff").? => .{ .specifier = .Float },
-                Builtin.tagFromName("__builtin_inf").? => .{ .specifier = .Double },
-                Builtin.tagFromName("__builtin_infl").? => .{ .specifier = .LongDouble },
+                .__builtin_inff => .{ .specifier = .Float },
+                .__builtin_inf => .{ .specifier = .Double },
+                .__builtin_infl => .{ .specifier = .LongDouble },
                 else => unreachable,
             };
             const f: Interner.Key.Float = switch (ty.bitSizeof(p.comp).?) {
@@ -45,12 +45,12 @@ pub fn eval(tag: Builtin.Tag, p: *Parser, args: []const Tree.Node.Index) !Value 
             };
             return Value.intern(p.comp, .{ .float = f });
         },
-        Builtin.tagFromName("__builtin_isinf").? => blk: {
+        .__builtin_isinf => blk: {
             if (args.len == 0) break :blk;
             const val = p.tree.valueMap.get(args[0]) orelse break :blk;
             return Value.fromBool(val.isInf(p.comp));
         },
-        Builtin.tagFromName("__builtin_isinf_sign").? => blk: {
+        .__builtin_isinf_sign => blk: {
             if (args.len == 0) break :blk;
             const val = p.tree.valueMap.get(args[0]) orelse break :blk;
             switch (val.isInfSign(p.comp)) {
@@ -60,12 +60,12 @@ pub fn eval(tag: Builtin.Tag, p: *Parser, args: []const Tree.Node.Index) !Value 
                 .negative => return Value.int(@as(i64, -1), p.comp),
             }
         },
-        Builtin.tagFromName("__builtin_isnan").? => blk: {
+        .__builtin_isnan => blk: {
             if (args.len == 0) break :blk;
             const val = p.tree.valueMap.get(args[0]) orelse break :blk;
             return Value.fromBool(val.isNan(p.comp));
         },
-        Builtin.tagFromName("__builtin_nan").? => blk: {
+        .__builtin_nan => blk: {
             if (args.len == 0) break :blk;
             const val = p.getDecayedStringLiteral(args[0]) orelse break :blk;
             const bytes = p.comp.interner.get(val.ref()).bytes;
