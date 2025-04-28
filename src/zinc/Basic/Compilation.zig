@@ -2,18 +2,23 @@
 /// and declared symbols as well and house all compiler operation
 const std = @import("std");
 const assert = std.debug.assert;
+
+const backend = @import("backend");
+const Interner = backend.Interner;
+
 const Source = @import("Source.zig");
 const Diagnostics = @import("../Basic/Diagnostics.zig");
 const Builtins = @import("../Builtins.zig");
 const Builtin = Builtins.Builtin;
 const Token = @import("../Lexer/Token.zig").Token;
 const LangOpts = @import("LangOpts.zig");
-const Type = @import("../AST/Type.zig");
 const Pragma = @import("../Lexer/Pragma.zig");
 const StringInterner = @import("../Basic/StringInterner.zig");
 const RecordLayout = @import("RecordLayout.zig");
 const Target = @import("Target.zig");
-const Interner = @import("backend").Interner;
+const TypeStore = @import("../AST/TypeStore.zig");
+const Type = TypeStore.Type;
+const QualType = TypeStore.QualType;
 
 const Allocator = std.mem.Allocator;
 const EpochSeconds = std.time.epoch.EpochSeconds;
@@ -104,33 +109,11 @@ pragmaHandlers: std.StringArrayHashMapUnmanaged(*Pragma) = .{},
 langOpts: LangOpts = .{},
 generatedBuffer: std.ArrayListUnmanaged(u8) = .{},
 builtins: Builtins = .{},
-types: struct {
-    wchar: Type = undefined,
-    uintLeast16Ty: Type = undefined,
-    uintLeast32Ty: Type = undefined,
-    ptrdiff: Type = undefined,
-    size: Type = undefined,
-    vaList: Type = undefined,
-    pidTy: Type = undefined,
-    nsConstantString: struct {
-        ty: Type = undefined,
-        record: Type.Record = undefined,
-        fields: [4]Type.Record.Field = undefined,
-        intTy_: Type = .{ .specifier = .Int, .qual = .{ .@"const" = true } },
-        charTy_: Type = .{ .specifier = .Char, .qual = .{ .@"const" = true } },
-    } = .{},
-    file: Type = Type.Invalid,
-    jmpBuffer: Type = Type.Invalid,
-    sigjmpBuffer: Type = Type.Invalid,
-    ucontextTy: Type = Type.Invalid,
-    intmax: Type = Type.Invalid,
-    intptr: Type = Type.Invalid,
-    int16: Type = Type.Invalid,
-    int64: Type = Type.Invalid,
-} = undefined,
 
 stringInterner: StringInterner = .{},
 interner: Interner = .{},
+typeStore: TypeStore = .{},
+
 /// If this is not null, the directory containing the specified Source will be searched for includes
 /// Used by MS extensions which allow searching for includes relative to the directory of the main source file.
 msCwdSourceId: ?Source.ID = null,
@@ -183,6 +166,8 @@ pub fn deinit(comp: *Compilation) void {
     comp.stringInterner.deinit(comp.gpa);
     comp.interner.deinit(comp.gpa);
     comp.environment.deinit(comp.gpa);
+    comp.typeStore.deinit(comp.gpa);
+    comp.* = undefined;
 }
 
 pub fn internString(comp: *Compilation, str: []const u8) !StringInterner.StringId {
@@ -468,55 +453,57 @@ pub fn generateSystemDefines(comp: *Compilation, w: anytype) !void {
     try w.writeAll("#define __CHAR_BIT__ 8\n");
 
     // int maxs
-    try comp.generateIntWidth(w, "BOOL", Type.Bool);
-    try comp.generateIntMaxAndWidth(w, "SCHAR", Type.SChar);
-    try comp.generateIntMaxAndWidth(w, "SHRT", Type.Short);
-    try comp.generateIntMaxAndWidth(w, "INT", Type.Int);
-    try comp.generateIntMaxAndWidth(w, "LONG", Type.Long);
-    try comp.generateIntMaxAndWidth(w, "LONG_LONG", Type.LongLong);
-    try comp.generateIntMaxAndWidth(w, "WCHAR", comp.types.wchar);
-    // try comp.generateIntMax(w, "WINT", comp.types.wchar);
-    try comp.generateIntMaxAndWidth(w, "INTMAX", comp.types.intmax);
-    try comp.generateIntMaxAndWidth(w, "SIZE", comp.types.size);
-    try comp.generateIntMaxAndWidth(w, "UINTMAX", comp.types.intmax.makeIntegerUnsigned());
-    try comp.generateIntMaxAndWidth(w, "PTRDIFF", comp.types.ptrdiff);
-    try comp.generateIntMaxAndWidth(w, "INTPTR", comp.types.intptr);
-    try comp.generateIntMaxAndWidth(w, "UINTPTR", comp.types.intptr.makeIntegerUnsigned());
+    try comp.generateIntWidth(w, "BOOL", .bool);
+    try comp.generateIntMaxAndWidth(w, "SCHAR", .schar);
+    try comp.generateIntMaxAndWidth(w, "SHRT", .short);
+    try comp.generateIntMaxAndWidth(w, "INT", .int);
+    try comp.generateIntMaxAndWidth(w, "LONG", .long);
+    try comp.generateIntMaxAndWidth(w, "LONG_LONG", .longlong);
+    try comp.generateIntMaxAndWidth(w, "WCHAR", comp.typeStore.wchar);
+    // try comp.generateIntMax(w, "WINT", comp.typeStore.wchar);
+    try comp.generateIntMaxAndWidth(w, "INTMAX", comp.typeStore.intmax);
+    try comp.generateIntMaxAndWidth(w, "SIZE", comp.typeStore.size);
+    try comp.generateIntMaxAndWidth(w, "UINTMAX", try comp.typeStore.intmax.makeIntUnsigned(comp));
+    try comp.generateIntMaxAndWidth(w, "PTRDIFF", comp.typeStore.ptrdiff);
+    try comp.generateIntMaxAndWidth(w, "INTPTR", comp.typeStore.intptr);
+    try comp.generateIntMaxAndWidth(w, "UINTPTR", try comp.typeStore.intptr.makeIntUnsigned(comp));
 
     // int widths
     try w.print("#define __BITINT_MAXWIDTH__ {d}\n", .{BitIntMaxBits});
 
     // sizeof types
-    try comp.generateSizeofType(w, "__SIZEOF_FLOAT__", Type.Float);
-    try comp.generateSizeofType(w, "__SIZEOF_DOUBLE__", Type.Double);
-    try comp.generateSizeofType(w, "__SIZEOF_LONG_DOUBLE__", Type.LongDouble);
-    try comp.generateSizeofType(w, "__SIZEOF_SHORT__", Type.Short);
-    try comp.generateSizeofType(w, "__SIZEOF_INT__", Type.Int);
-    try comp.generateSizeofType(w, "__SIZEOF_LONG__", Type.Long);
-    try comp.generateSizeofType(w, "__SIZEOF_LONG_LONG__", Type.LongLong);
-    try comp.generateSizeofType(w, "__SIZEOF_POINTER__", Type.Pointer);
-    try comp.generateSizeofType(w, "__SIZEOF_PTRDIFF_T__", comp.types.ptrdiff);
-    try comp.generateSizeofType(w, "__SIZEOF_SIZE_T__", comp.types.size);
-    try comp.generateSizeofType(w, "__SIZEOF_WCHAR_T__", comp.types.wchar);
-    // try comp.generateSizeofType(w, "__SIZEOF_WINT_T__", Type.Pointer);
+    try comp.generateSizeofType(w, "__SIZEOF_FLOAT__", .float);
+    try comp.generateSizeofType(w, "__SIZEOF_DOUBLE__", .double);
+    try comp.generateSizeofType(w, "__SIZEOF_LONG_DOUBLE__", .longDouble);
+    try comp.generateSizeofType(w, "__SIZEOF_SHORT__", .short);
+    try comp.generateSizeofType(w, "__SIZEOF_INT__", .int);
+    try comp.generateSizeofType(w, "__SIZEOF_LONG__", .long);
+    try comp.generateSizeofType(w, "__SIZEOF_LONG_LONG__", .longlong);
+    try comp.generateSizeofType(w, "__SIZEOF_POINTER__", .voidPointer);
+    try comp.generateSizeofType(w, "__SIZEOF_PTRDIFF_T__", comp.typeStore.ptrdiff);
+    try comp.generateSizeofType(w, "__SIZEOF_SIZE_T__", comp.typeStore.size);
+    try comp.generateSizeofType(w, "__SIZEOF_WCHAR_T__", comp.typeStore.wchar);
+    // try comp.generateSizeofType(w, "__SIZEOF_WINT_T__", .voidPointer);
 
     if (Target.hasInt128(comp.target)) {
-        try comp.generateSizeofType(w, "__SIZEOF_INT128__", Type.Int128);
+        try comp.generateSizeofType(w, "__SIZEOF_INT128__", .int128);
     }
 
     // various int types
-    try comp.generateTypeMacro(w, "__INTPTR_TYPE__", comp.types.intptr);
-    try comp.generateTypeMacro(w, "__UINTPTR_TYPE__", comp.types.intptr.makeIntegerUnsigned());
+    try comp.generateTypeMacro(w, "__INTPTR_TYPE__", comp.typeStore.intptr);
+    try comp.generateTypeMacro(w, "__UINTPTR_TYPE__", try comp.typeStore.intptr.makeIntUnsigned(comp));
 
-    try comp.generateTypeMacro(w, "__INTMAX_TYPE__", comp.types.intmax);
-    try comp.generateSuffixMacro("__INTMAX", w, comp.types.intptr);
+    try comp.generateTypeMacro(w, "__INTMAX_TYPE__", comp.typeStore.intmax);
+    try comp.generateSuffixMacro("__INTMAX", w, comp.typeStore.intptr);
 
-    try comp.generateTypeMacro(w, "__UINTMAX_TYPE__", comp.types.intmax.makeIntegerUnsigned());
-    try comp.generateSuffixMacro("__UINTMAX", w, comp.types.intptr.makeIntegerUnsigned());
+    try comp.generateTypeMacro(w, "__UINTMAX_TYPE__", try comp.typeStore.intmax.makeIntUnsigned(comp));
+    try comp.generateSuffixMacro("__UINTMAX", w, try comp.typeStore.intptr.makeIntUnsigned(comp));
 
-    try comp.generateTypeMacro(w, "__PTRDIFF_TYPE__", comp.types.ptrdiff);
-    try comp.generateTypeMacro(w, "__SIZE_TYPE__", comp.types.size);
-    try comp.generateTypeMacro(w, "__WCHAR_TYPE__", comp.types.wchar);
+    try comp.generateTypeMacro(w, "__PTRDIFF_TYPE__", comp.typeStore.ptrdiff);
+    try comp.generateTypeMacro(w, "__SIZE_TYPE__", comp.typeStore.size);
+    try comp.generateTypeMacro(w, "__WCHAR_TYPE__", comp.typeStore.wchar);
+    try comp.generateTypeMacro(w, "__CHAR16_TYPE__", comp.typeStore.uintLeast16Ty);
+    try comp.generateTypeMacro(w, "__CHAR32_TYPE__", comp.typeStore.uintLeast32Ty);
 
     try comp.generateExactWidthTypes(w);
     try comp.generateFastAndLeastWidthTypes(w);
@@ -542,7 +529,7 @@ pub fn generateSystemDefines(comp: *Compilation, w: anytype) !void {
 
 /// Generate builtin macros that will be available to each source file.
 pub fn generateBuiltinMacros(comp: *Compilation, systemDefinesMode: SystemDefinesMode) !Source {
-    try comp.generateBuiltinTypes();
+    try comp.typeStore.initNamedTypes(comp);
 
     var buf = std.ArrayList(u8).init(comp.gpa);
     defer buf.deinit();
@@ -642,112 +629,29 @@ fn generateFloatMacros(w: anytype, prefix: []const u8, semantics: Target.FPSeman
         },
     );
 
-    var buf: [32]u8 = undefined;
-    var fba = std.heap.FixedBufferAllocator.init(&buf);
-    var defPrefix = std.ArrayList(u8).initCapacity(fba.allocator(), 3 + prefix.len) catch unreachable; // fib
-    defPrefix.appendSliceAssumeCapacity("__");
-    defPrefix.appendSliceAssumeCapacity(prefix);
-    defPrefix.appendSliceAssumeCapacity("_");
+    try w.print("#define __{s}_DENORM_MIN__ {s}{s}\n", .{ prefix, denormMin, ext });
+    try w.print("#define __{s}_HAS_DENORM__\n", .{prefix});
+    try w.print("#define __{s}_DIG__ {d}\n", .{ prefix, digits });
+    try w.print("#define __{s}_DECIMAL_DIG__ {d}\n", .{ prefix, decimalDigits });
 
-    try w.print("#define {s}DENORM_MIN__ {s}{s}\n", .{ defPrefix.items, denormMin, ext });
-    try w.print("#define {s}HAS_DENORM__\n", .{defPrefix.items});
-    try w.print("#define {s}DIG__ {d}\n", .{ defPrefix.items, digits });
-    try w.print("#define {s}DECIMAL_DIG__ {d}\n", .{ defPrefix.items, decimalDigits });
+    try w.print("#define __{s}_EPSILON__ {s}{s}\n", .{ prefix, epsilon, ext });
+    try w.print("#define __{s}_HAS_INFINITY__\n", .{prefix});
+    try w.print("#define __{s}_HAS_QUIET_NAN__\n", .{prefix});
+    try w.print("#define __{s}_MANT_DIG__ {d}\n", .{ prefix, mantissaDigits });
 
-    try w.print("#define {s}EPSILON__ {s}{s}\n", .{ defPrefix.items, epsilon, ext });
-    try w.print("#define {s}HAS_INFINITY__\n", .{defPrefix.items});
-    try w.print("#define {s}HAS_QUIET_NAN__\n", .{defPrefix.items});
-    try w.print("#define {s}MANT_DIG__ {d}\n", .{ defPrefix.items, mantissaDigits });
+    try w.print("#define __{s}_MAX_10_EXP__ {d}\n", .{ prefix, max10Exp });
+    try w.print("#define __{s}_MAX_EXP__ {d}\n", .{ prefix, maxExp });
+    try w.print("#define __{s}_MAX__ {s}{s}\n", .{ prefix, max, ext });
 
-    try w.print("#define {s}MAX_10_EXP__ {d}\n", .{ defPrefix.items, max10Exp });
-    try w.print("#define {s}MAX_EXP__ {d}\n", .{ defPrefix.items, maxExp });
-    try w.print("#define {s}MAX__ {s}{s}\n", .{ defPrefix.items, max, ext });
-
-    try w.print("#define {s}MIN_10_EXP__ ({d})\n", .{ defPrefix.items, min10Exp });
-    try w.print("#define {s}MIN_EXP__ ({d})\n", .{ defPrefix.items, minExp });
-    try w.print("#define {s}MIN__ {s}{s}\n", .{ defPrefix.items, min, ext });
+    try w.print("#define __{s}_MIN_10_EXP__ ({d})\n", .{ prefix, min10Exp });
+    try w.print("#define __{s}_MIN_EXP__ ({d})\n", .{ prefix, minExp });
+    try w.print("#define __{s}_MIN__ {s}{s}\n", .{ prefix, min, ext });
 }
 
-fn generateTypeMacro(comp: *const Compilation, w: anytype, name: []const u8, ty: Type) !void {
+fn generateTypeMacro(comp: *const Compilation, w: anytype, name: []const u8, qt: QualType) !void {
     try w.print("#define {s} ", .{name});
-    try ty.print(comp, w);
+    try qt.print(comp, w);
     try w.writeByte('\n');
-}
-
-fn generateBuiltinTypes(comp: *Compilation) !void {
-    const os = comp.target.os.tag;
-    const wchar = switch (comp.target.cpu.arch) {
-        .xcore => Type.UChar,
-        .ve, .msp430 => Type.UInt,
-        .arm, .armeb, .thumb, .thumbeb => if (os != .windows and os != .netbsd and os != .openbsd) Type.UInt else Type.Int,
-        .aarch64, .aarch64_be => if (!os.isDarwin() and os != .netbsd) Type.UInt else Type.Int,
-        .x86_64, .x86 => if (os == .windows) Type.UShort else Type.Int,
-        else => Type.Int,
-    };
-
-    const ptrdiff = if (os == .windows and comp.target.ptrBitWidth() == 64)
-        Type.LongLong
-    else switch (comp.target.ptrBitWidth()) {
-        16 => Type.Int,
-        32 => Type.Int,
-        64 => Type.Long,
-        else => unreachable,
-    };
-
-    const size = if (os == .windows and comp.target.ptrBitWidth() == 64)
-        Type.ULongLong
-    else switch (comp.target.ptrBitWidth()) {
-        16 => Type.UInt,
-        32 => Type.UInt,
-        64 => Type.ULong,
-        else => unreachable,
-    };
-
-    const vaList = try comp.generateVaListType();
-
-    const pidTy: Type = switch (os) {
-        .haiku => Type.Long,
-        else => Type.Int,
-    };
-
-    const intmax = Target.intMaxType(comp.target);
-    const intptr = Target.intPtrType(comp.target);
-    const int16 = Target.int16Type(comp.target);
-    const int64 = Target.int64Type(comp.target);
-
-    comp.types = .{
-        .wchar = wchar,
-        .ptrdiff = ptrdiff,
-        .size = size,
-        .vaList = vaList,
-        .pidTy = pidTy,
-        .intmax = intmax,
-        .intptr = intptr,
-        .int16 = int16,
-        .int64 = int64,
-        .uintLeast16Ty = comp.intLeastN(16, .unsigned),
-        .uintLeast32Ty = comp.intLeastN(32, .unsigned),
-    };
-
-    try comp.generateNsConstantStringType();
-}
-
-fn generateNsConstantStringType(comp: *Compilation) !void {
-    comp.types.nsConstantString.record = .{
-        .name = try comp.internString("__NSConstantString_tag"),
-        .fields = &comp.types.nsConstantString.fields,
-        .fieldAttributes = null,
-        .typeLayout = undefined,
-    };
-    const constIntPtr = Type{ .specifier = .Pointer, .data = .{ .subType = &comp.types.nsConstantString.intTy_ } };
-    const constCharPtr = Type{ .specifier = .Pointer, .data = .{ .subType = &comp.types.nsConstantString.charTy_ } };
-
-    comp.types.nsConstantString.fields[0] = .{ .name = try comp.internString("isa"), .ty = constIntPtr };
-    comp.types.nsConstantString.fields[1] = .{ .name = try comp.internString("flags"), .ty = Type.Int };
-    comp.types.nsConstantString.fields[2] = .{ .name = try comp.internString("str"), .ty = constCharPtr };
-    comp.types.nsConstantString.fields[3] = .{ .name = try comp.internString("length"), .ty = Type.Long };
-    comp.types.nsConstantString.ty = .{ .specifier = .Struct, .data = .{ .record = &comp.types.nsConstantString.record } };
-    RecordLayout.compute(&comp.types.nsConstantString.record, comp.types.nsConstantString.ty, comp, null);
 }
 
 pub fn hasHalfPrecisionFloatABI(comp: *const Compilation) bool {
@@ -758,14 +662,9 @@ pub fn hasFloat128(comp: *const Compilation) bool {
     return Target.hasFloat128(comp.target);
 }
 
-pub fn float80Type(comp: *const Compilation) ?Type {
+pub fn float80Type(comp: *const Compilation) ?QualType {
     if (comp.langOpts.emulate != .gcc) return null;
     return Target.float80Type(comp.target);
-}
-
-fn intSize(comp: *const Compilation, specifier: Type.Specifier) u64 {
-    const ty = Type{ .specifier = specifier };
-    return ty.sizeof(comp).?;
 }
 
 fn generateFastOrLeastType(
@@ -813,75 +712,75 @@ fn generateFastAndLeastWidthTypes(comp: *Compilation, w: anytype) !void {
     }
 }
 
-fn generateExactWidthTypes(comp: *const Compilation, w: anytype) !void {
-    try comp.generateExactWidthType(w, .SChar);
+fn generateExactWidthTypes(comp: *Compilation, w: anytype) !void {
+    try comp.generateExactWidthType(w, .schar);
 
-    if (comp.intSize(.Short) > comp.intSize(.Char))
-        try comp.generateExactWidthType(w, .Short);
+    if (QualType.short.sizeof(comp) > QualType.char.sizeof(comp))
+        try comp.generateExactWidthType(w, .short);
 
-    if (comp.intSize(.Int) > comp.intSize(.Short))
-        try comp.generateExactWidthType(w, .Int);
+    if (QualType.int.sizeof(comp) > QualType.short.sizeof(comp))
+        try comp.generateExactWidthType(w, .int);
 
-    if (comp.intSize(.Long) > comp.intSize(.Int))
-        try comp.generateExactWidthType(w, .Long);
+    if (QualType.long.sizeof(comp) > QualType.int.sizeof(comp))
+        try comp.generateExactWidthType(w, .long);
 
-    if (comp.intSize(.LongLong) > comp.intSize(.Long))
-        try comp.generateExactWidthType(w, .LongLong);
+    if (QualType.longlong.sizeof(comp) > QualType.long.sizeof(comp))
+        try comp.generateExactWidthType(w, .longlong);
 
-    try comp.generateExactWidthType(w, .UChar);
-    try comp.generateExactWidthIntMax(w, .UChar);
-    try comp.generateExactWidthIntMax(w, .SChar);
+    try comp.generateExactWidthType(w, .uchar);
+    try comp.generateExactWidthIntMax(w, .uchar);
+    try comp.generateExactWidthIntMax(w, .schar);
 
-    if (comp.intSize(.Short) > comp.intSize(.Char)) {
-        try comp.generateExactWidthType(w, .UShort);
-        try comp.generateExactWidthIntMax(w, .UShort);
-        try comp.generateExactWidthIntMax(w, .Short);
+    if (QualType.short.sizeof(comp) > QualType.char.sizeof(comp)) {
+        try comp.generateExactWidthType(w, .ushort);
+        try comp.generateExactWidthIntMax(w, .ushort);
+        try comp.generateExactWidthIntMax(w, .short);
     }
 
-    if (comp.intSize(.Int) > comp.intSize(.Short)) {
-        try comp.generateExactWidthType(w, .UInt);
-        try comp.generateExactWidthIntMax(w, .UInt);
-        try comp.generateExactWidthIntMax(w, .Int);
+    if (QualType.int.sizeof(comp) > QualType.short.sizeof(comp)) {
+        try comp.generateExactWidthType(w, .uint);
+        try comp.generateExactWidthIntMax(w, .uint);
+        try comp.generateExactWidthIntMax(w, .int);
     }
 
-    if (comp.intSize(.Long) > comp.intSize(.Int)) {
-        try comp.generateExactWidthType(w, .ULong);
-        try comp.generateExactWidthIntMax(w, .ULong);
-        try comp.generateExactWidthIntMax(w, .Long);
+    if (QualType.long.sizeof(comp) > QualType.int.sizeof(comp)) {
+        try comp.generateExactWidthType(w, .ulong);
+        try comp.generateExactWidthIntMax(w, .ulong);
+        try comp.generateExactWidthIntMax(w, .long);
     }
 
-    if (comp.intSize(.Long) > comp.intSize(.Long)) {
-        try comp.generateExactWidthType(w, .ULongLong);
-        try comp.generateExactWidthIntMax(w, .ULongLong);
-        try comp.generateExactWidthIntMax(w, .LongLong);
+    if (QualType.longlong.sizeof(comp) > QualType.long.sizeof(comp)) {
+        try comp.generateExactWidthType(w, .ulonglong);
+        try comp.generateExactWidthIntMax(w, .ulonglong);
+        try comp.generateExactWidthIntMax(w, .longlong);
     }
 }
 
-fn generateFmt(comp: *const Compilation, prefix: []const u8, w: anytype, ty: Type) !void {
-    const unsigned = ty.isUnsignedInt(comp);
-    const modifier = ty.formatModifier();
+fn generateFmt(comp: *const Compilation, prefix: []const u8, w: anytype, qt: QualType) !void {
+    const unsigned = qt.isUnsignedInt(comp);
+    const modifier = qt.formatModifier(comp);
     const formats = if (unsigned) "ouxX" else "di";
     for (formats) |c|
         try w.print("#define {s}_FMT{c}__ \"{s}{c}\"\n", .{ prefix, c, modifier, c });
 }
 
-fn generateSuffixMacro(comp: *const Compilation, prefix: []const u8, w: anytype, ty: Type) !void {
-    return w.print("#define {s}_C_SUFFIX__ {s}\n", .{ prefix, ty.intValueSuffix(comp) });
+fn generateSuffixMacro(comp: *const Compilation, prefix: []const u8, w: anytype, qt: QualType) !void {
+    return w.print("#define {s}_C_SUFFIX__ {s}\n", .{ prefix, qt.intValueSuffix(comp) });
 }
 
 /// Generate the following for ty:
 ///     Name macro (e.g. #define __UINT32_TYPE__ unsigned int)
 ///     Format strings (e.g. #define __UINT32_FMTu__ "u")
 ///     Suffix macro (e.g. #define __UINT32_C_SUFFIX__ U)
-fn generateExactWidthType(comp: *const Compilation, w: anytype, specifier: Type.Specifier) !void {
-    var ty = Type{ .specifier = specifier };
-    const width = 8 * ty.sizeof(comp).?;
-    const unsigned = ty.isUnsignedInt(comp);
+fn generateExactWidthType(comp: *Compilation, w: anytype, originalQt: QualType) !void {
+    var qt = originalQt;
+    const width = qt.bitSizeof(comp);
+    const unsigned = qt.isUnsignedInt(comp);
 
     if (width == 16) {
-        ty = if (unsigned) comp.types.int16.makeIntegerUnsigned() else comp.types.int16;
+        qt = if (unsigned) try comp.typeStore.int16.makeIntUnsigned(comp) else comp.typeStore.int16;
     } else if (width == 64) {
-        ty = if (unsigned) comp.types.int64.makeIntegerUnsigned() else comp.types.int64;
+        qt = if (unsigned) try comp.typeStore.int64.makeIntUnsigned(comp) else comp.typeStore.int64;
     }
 
     var buffer: [16]u8 = undefined;
@@ -890,98 +789,17 @@ fn generateExactWidthType(comp: *const Compilation, w: anytype, specifier: Type.
         if (unsigned) "__UINT" else "__INT", width, suffix,
     }) catch return error.OutOfMemory;
 
-    try comp.generateTypeMacro(w, full, ty);
+    try comp.generateTypeMacro(w, full, qt);
 
     // remove "_TYPE__"
     const prefix = full[0 .. full.len - suffix.len];
-    try comp.generateFmt(prefix, w, ty);
-    try comp.generateSuffixMacro(prefix, w, ty);
+    try comp.generateFmt(prefix, w, qt);
+    try comp.generateSuffixMacro(prefix, w, qt);
 }
 
-fn generateVaListType(comp: *Compilation) !Type {
-    const Kind = enum { char_ptr, void_ptr, aarch64_va_list, x86_64_va_list };
-    const kind: Kind = switch (comp.target.cpu.arch) {
-        .aarch64 => switch (comp.target.os.tag) {
-            .windows => @as(Kind, .char_ptr),
-            .ios, .macos, .tvos, .watchos => .char_ptr,
-            else => .aarch64_va_list,
-        },
-        .sparc, .wasm32, .wasm64, .bpfel, .bpfeb, .riscv32, .riscv64, .avr, .spirv32, .spirv64 => .void_ptr,
-        .powerpc => switch (comp.target.os.tag) {
-            .ios, .macos, .tvos, .watchos, .aix => @as(Kind, .char_ptr),
-            else => return Type.Void, // unknown
-        },
-        .x86, .msp430 => .char_ptr,
-        .x86_64 => switch (comp.target.os.tag) {
-            .windows => @as(Kind, .char_ptr),
-            else => .x86_64_va_list,
-        },
-        else => return Type.Void, // unknown
-    };
-
-    // TODO this might be bad?
-    const arena = comp.diagnostics.arena.allocator();
-
-    var ty: Type = undefined;
-    switch (kind) {
-        .char_ptr => ty = Type.Char,
-        .void_ptr => ty = Type.Void,
-        .aarch64_va_list => {
-            const recordType = try arena.create(Type.Record);
-            recordType.* = .{
-                .name = try comp.internString("__va_list_tag"),
-                .fields = try arena.alloc(Type.Record.Field, 5),
-                .fieldAttributes = null,
-                .typeLayout = undefined,
-            };
-            const voidType = try arena.create(Type);
-            voidType.* = Type.Void;
-            const voidPtr = Type{ .specifier = .Pointer, .data = .{ .subType = voidType } };
-            recordType.fields[0] = .{ .name = try comp.internString("__stack"), .ty = voidPtr };
-            recordType.fields[1] = .{ .name = try comp.internString("__gr_top"), .ty = voidPtr };
-            recordType.fields[2] = .{ .name = try comp.internString("__vr_top"), .ty = voidPtr };
-            recordType.fields[3] = .{ .name = try comp.internString("__gr_offs"), .ty = Type.Int };
-            recordType.fields[4] = .{ .name = try comp.internString("__vr_offs"), .ty = Type.Int };
-            ty = .{ .specifier = .Struct, .data = .{ .record = recordType } };
-            RecordLayout.compute(recordType, ty, comp, null);
-        },
-        .x86_64_va_list => {
-            const recordType = try arena.create(Type.Record);
-            recordType.* = .{
-                .name = try comp.internString("__va_list_tag"),
-                .fields = try arena.alloc(Type.Record.Field, 4),
-                .fieldAttributes = null,
-                .typeLayout = undefined, // compute below
-            };
-            const voidType = try arena.create(Type);
-            voidType.* = Type.Void;
-            const voidPtr = Type{ .specifier = .Pointer, .data = .{ .subType = voidType } };
-            recordType.fields[0] = .{ .name = try comp.internString("gp_offset"), .ty = Type.UInt };
-            recordType.fields[1] = .{ .name = try comp.internString("fp_offset"), .ty = Type.UInt };
-            recordType.fields[2] = .{ .name = try comp.internString("overflow_arg_area"), .ty = voidPtr };
-            recordType.fields[3] = .{ .name = try comp.internString("reg_save_area"), .ty = voidPtr };
-            ty = .{ .specifier = .Struct, .data = .{ .record = recordType } };
-            RecordLayout.compute(recordType, ty, comp, null);
-        },
-    }
-
-    if (kind == .char_ptr or kind == .void_ptr) {
-        const elemType = try arena.create(Type);
-        elemType.* = ty;
-        ty = Type{ .specifier = .Pointer, .data = .{ .subType = elemType } };
-    } else {
-        const arrayType = try arena.create(Type.Array);
-        arrayType.* = .{ .len = 1, .elem = ty };
-        ty = Type{ .specifier = .Array, .data = .{ .array = arrayType } };
-    }
-
-    return ty;
-}
-
-fn generateIntMax(comp: *const Compilation, w: anytype, name: []const u8, ty: Type) !void {
-    const bitCount = @as(u8, @intCast(ty.sizeof(comp).? * 8));
-    const unsigned = ty.isUnsignedInt(comp);
-    const max: u128 = switch (bitCount) {
+fn generateIntMax(comp: *const Compilation, w: anytype, name: []const u8, qt: QualType) !void {
+    const unsigned = qt.isUnsignedInt(comp);
+    const max: u128 = switch (qt.bitSizeof(comp)) {
         8 => if (unsigned) std.math.maxInt(u8) else std.math.maxInt(i8),
         16 => if (unsigned) std.math.maxInt(u16) else std.math.maxInt(i16),
         32 => if (unsigned) std.math.maxInt(u32) else std.math.maxInt(i32),
@@ -989,13 +807,13 @@ fn generateIntMax(comp: *const Compilation, w: anytype, name: []const u8, ty: Ty
         128 => if (unsigned) std.math.maxInt(u128) else std.math.maxInt(i128),
         else => unreachable,
     };
-    try w.print("#define __{s}_MAX__ {d}{s}\n", .{ name, max, ty.intValueSuffix(comp) });
+    try w.print("#define __{s}_MAX__ {d}{s}\n", .{ name, max, qt.intValueSuffix(comp) });
 }
 
 /// Largest value that can be stored in wchar_t
 pub fn wcharMax(comp: *const Compilation) u32 {
-    const unsigned = comp.types.wchar.isUnsignedInt(comp);
-    return switch (comp.types.wchar.bitSizeof(comp).?) {
+    const unsigned = comp.typeStore.wchar.signedness(comp) == .unsigned;
+    return switch (comp.typeStore.wchar.bitSizeof(comp)) {
         8 => if (unsigned) std.math.maxInt(u8) else std.math.maxInt(i8),
         16 => if (unsigned) std.math.maxInt(u16) else std.math.maxInt(i16),
         32 => if (unsigned) std.math.maxInt(u32) else std.math.maxInt(i32),
@@ -1003,68 +821,66 @@ pub fn wcharMax(comp: *const Compilation) u32 {
     };
 }
 
-fn generateExactWidthIntMax(comp: *const Compilation, w: anytype, specifier: Type.Specifier) !void {
-    var ty = Type{ .specifier = specifier };
-    const bitCount: u8 = @intCast(ty.sizeof(comp).? * 8);
-    const unsigned = ty.isUnsignedInt(comp);
+fn generateExactWidthIntMax(comp: * Compilation, w: anytype, orginalQt: QualType) !void {
+    var qt = orginalQt;
+    const bitCount: u8 = @intCast(qt.sizeof(comp) * 8);
+    const unsigned = qt.isUnsignedInt(comp);
 
     if (bitCount == 64)
-        ty = if (unsigned) comp.types.int64.makeIntegerUnsigned() else comp.types.int64;
+        qt = if (unsigned) try comp.typeStore.int64.makeIntUnsigned(comp) else comp.typeStore.int64;
 
     var nameBuffer: [6]u8 = undefined;
     const name = std.fmt.bufPrint(&nameBuffer, "{s}{d}", .{
         if (unsigned) "UINT" else "INT", bitCount,
     }) catch return error.OutOfMemory;
 
-    return comp.generateIntMax(w, name, ty);
+    return comp.generateIntMax(w, name, qt);
 }
 
-fn generateIntWidth(comp: *Compilation, w: anytype, name: []const u8, ty: Type) !void {
-    try w.print("#define __{s}_WIDTH__ {d}\n", .{ name, 8 * ty.sizeof(comp).? });
+fn generateIntWidth(comp: *Compilation, w: anytype, name: []const u8, qt: QualType) !void {
+    try w.print("#define __{s}_WIDTH__ {d}\n", .{ name, 8 * qt.sizeof(comp) });
 }
 
-fn generateIntMaxAndWidth(comp: *Compilation, w: anytype, name: []const u8, ty: Type) !void {
-    try comp.generateIntMax(w, name, ty);
-    try comp.generateIntWidth(w, name, ty);
+fn generateIntMaxAndWidth(comp: *Compilation, w: anytype, name: []const u8, qt: QualType) !void {
+    try comp.generateIntMax(w, name, qt);
+    try comp.generateIntWidth(w, name, qt);
 }
 
-fn generateSizeofType(comp: *Compilation, w: anytype, name: []const u8, ty: Type) !void {
-    try w.print("#define {s} {d}\n", .{ name, ty.sizeof(comp).? });
+fn generateSizeofType(comp: *Compilation, w: anytype, name: []const u8, qt: QualType) !void {
+    try w.print("#define {s} {d}\n", .{ name, qt.sizeof(comp) });
 }
 
-pub fn nextLargestIntSameSign(comp: *const Compilation, ty: Type) ?Type {
-    assert(ty.isInt());
-    const specifiers = if (ty.isUnsignedInt(comp))
-        [_]Type.Specifier{ .Short, .Int, .Long, .LongLong }
+pub fn nextLargestIntSameSign(comp: *const Compilation, qt: QualType) ?QualType {
+    assert(qt.isInt());
+    const candidates: [4]QualType = if (qt.isUnsignedInt(comp))
+        .{ .short, .int, .long, .longlong }
     else
-        [_]Type.Specifier{ .UShort, .UInt, .ULong, .ULongLong };
-    const size = ty.sizeof(comp).?;
-    for (specifiers) |specifier| {
-        const candidate = Type.create(specifier);
-        if (candidate.sizeof(comp).? > size) return candidate;
+        .{ .ushort, .uint, .ulong, .ulonglong };
+    const size = qt.sizeof(comp).?;
+    for (candidates) |candidate| {
+        if (candidate.sizeof(comp) > size) return candidate;
     }
     return null;
 }
 
 /// Smallest integer type with at least N bits
-pub fn intLeastN(comp: *const Compilation, bits: usize, signedness: std.builtin.Signedness) Type {
+pub fn intLeastN(comp: *const Compilation, bits: usize, signedness: std.builtin.Signedness) QualType {
     const target = comp.target;
     // WebAssembly and Darwin use `long long` for `int_least64_t` and `int_fast64_t`.
     if (bits == 64 and (target.os.tag.isDarwin() or target.cpu.arch.isWasm()))
-        return if (signedness == .signed) Type.LongLong else Type.ULongLong;
+        return if (signedness == .signed) .longlong else .ulonglong;
 
     // AVR uses int for int_least16_t and int_fast16_t.
     if (bits == 16 and target.cpu.arch == .avr)
-        return if (signedness == .signed) Type.Int else Type.UInt;
+        return if (signedness == .signed) .int else .uint;
 
-    const candidates = switch (signedness) {
-        .signed => &[_]Type.Specifier{ .SChar, .Short, .Int, .Long, .LongLong },
-        .unsigned => &[_]Type.Specifier{ .UChar, .UShort, .UInt, .ULong, .ULongLong },
+    const candidates: [5]QualType = switch (signedness) {
+        .signed => .{ .schar, .short, .int, .long, .longlong },
+        .unsigned => .{ .uchar, .ushort, .uint, .ulong, .ulonglong },
     };
 
-    for (candidates) |specifier| {
-        const ty: Type = .{ .specifier = specifier };
-        if (ty.sizeof(comp).? * 8 >= bits) return ty;
+    for (candidates) |qt| {
+        if (qt.bitSizeof(comp) >= bits) return qt;
     } else unreachable;
 }
 
@@ -1072,10 +888,10 @@ pub fn intLeastN(comp: *const Compilation, bits: usize, signedness: std.builtin.
 /// __attribute__((packed)) or the range of values of the corresponding enumerator constants,
 /// specify it here.
 /// TODO: likely incomplete
-pub fn fixedEnumTagSpecifier(comp: *const Compilation) ?Type.Specifier {
+pub fn fixedEnumTagSpecifier(comp: *const Compilation) ?QualType {
     switch (comp.langOpts.emulate) {
-        .msvc => return .Int,
-        .clang => if (comp.target.os.tag == .windows) return .Int,
+        .msvc => return .int,
+        .clang => if (comp.target.os.tag == .windows) return .int,
         .gcc => {},
     }
     return null;

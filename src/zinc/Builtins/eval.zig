@@ -5,7 +5,9 @@ const Builtins = @import("../Builtins.zig");
 const Builtin = Builtins.Builtin;
 const Parser = @import("../Parser/Parser.zig");
 const Tree = @import("../AST/AST.zig");
-const Type = @import("../AST/Type.zig");
+const TypeStore = @import("../AST/TypeStore.zig");
+const Type = TypeStore.Type;
+const QualType = TypeStore.QualType;
 const Value = @import("../AST/Value.zig");
 
 fn makeNan(comptime T: type, str: []const u8) T {
@@ -30,13 +32,13 @@ pub fn eval(tag: Builtin.Tag, p: *Parser, args: []const Tree.Node.Index) !Value 
         .__builtin_inf,
         .__builtin_infl,
         => {
-            const ty: Type = switch (tag) {
-                .__builtin_inff => .{ .specifier = .Float },
-                .__builtin_inf => .{ .specifier = .Double },
-                .__builtin_infl => .{ .specifier = .LongDouble },
+            const qt: QualType = switch (tag) {
+                .__builtin_inff => .float,
+                .__builtin_inf => .double,
+                .__builtin_infl => .longDouble,
                 else => unreachable,
             };
-            const f: Interner.Key.Float = switch (ty.bitSizeof(p.comp).?) {
+            const f: Interner.Key.Float = switch (qt.bitSizeof(p.comp).?) {
                 32 => .{ .f32 = std.math.inf(f32) },
                 64 => .{ .f64 = std.math.inf(f64) },
                 80 => .{ .f80 = std.math.inf(f80) },
@@ -70,7 +72,7 @@ pub fn eval(tag: Builtin.Tag, p: *Parser, args: []const Tree.Node.Index) !Value 
             const val = p.getDecayedStringLiteral(args[0]) orelse break :blk;
             const bytes = p.comp.interner.get(val.ref()).bytes;
 
-            const f: Interner.Key.Float = switch (Type.Double.bitSizeof(p.comp).?) {
+            const f: Interner.Key.Float = switch (Type.Float.bits(p.comp)) {
                 32 => .{ .f32 = makeNan(f32, bytes) },
                 64 => .{ .f64 = makeNan(f64, bytes) },
                 80 => .{ .f80 = makeNan(f80, bytes) },

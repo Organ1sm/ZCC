@@ -3,13 +3,13 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const testing = std.testing;
+
+const Diagnostics = @import("../Basic/Diagnostics.zig");
+const Parser = @import("Parser.zig");
 const Tree = @import("../AST/AST.zig");
 const Token = Tree.Token;
 const TokenIndex = Tree.TokenIndex;
 const Node = Tree.Node;
-const Type = @import("../AST/Type.zig");
-const Diagnostics = @import("../Basic/Diagnostics.zig");
-const Parser = @import("Parser.zig");
 
 const InitList = @This();
 

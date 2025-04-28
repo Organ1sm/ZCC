@@ -1,14 +1,15 @@
 const std = @import("std");
-const assert = std.debug.assert;
-const Tree = @import("../AST/AST.zig");
-const Type = @import("../AST/Type.zig");
-const Parser = @import("../Parser/Parser.zig");
-const Value = @import("../AST/Value.zig");
-const TokenType = @import("../Basic/TokenType.zig").TokenType;
-const StringId = @import("../Basic/StringInterner.zig").StringId;
-
 const mem = std.mem;
 const Allocator = mem.Allocator;
+const assert = std.debug.assert;
+
+const Parser = @import("../Parser/Parser.zig");
+const QualType = @import("../AST/TypeStore.zig").QualType;
+const Value = @import("../AST/Value.zig");
+const StringId = @import("../Basic/StringInterner.zig").StringId;
+
+const TokenType = @import("../Basic/TokenType.zig").TokenType;
+const Tree = @import("../AST/AST.zig");
 const Token = Tree.Token;
 const TokenIndex = Tree.TokenIndex;
 const Node = Tree.Node;
@@ -19,7 +20,7 @@ pub const Symbol = struct {
     /// The name of the symbol.
     name: StringId,
     /// The type of the symbol.
-    type: Type,
+    qt: QualType,
     /// The token index that represents this symbol.
     token: TokenIndex,
     /// The node index in the AST (Abstract Syntax Tree) that represents this symbol.
@@ -201,15 +202,15 @@ pub fn define(self: *SymbolStack, symbol: Symbol) !void {
 pub fn defineTypedef(
     self: *SymbolStack,
     name: StringId,
-    ty: Type,
+    qt: QualType,
     token: TokenIndex,
     node: Node.Index,
 ) !void {
     if (self.get(name, .vars)) |prev| {
         switch (prev.kind) {
             .typedef => {
-                if (!ty.eql(prev.type, self.p.comp, true)) {
-                    try self.p.errStr(.redefinition_of_typedef, token, try self.p.typePairStrExtra(ty, " vs ", prev.type));
+                if (!qt.eql(prev.qt, self.p.comp, true)) {
+                    try self.p.errStr(.redefinition_of_typedef, token, try self.p.typePairStrExtra(qt, " vs ", prev.qt));
                     if (prev.token != 0)
                         try self.p.errToken(.previous_definition, prev.token);
                 }
@@ -229,9 +230,9 @@ pub fn defineTypedef(
         .token = token,
         .type = .{
             .name = name,
-            .specifier = ty.specifier,
-            .qual = ty.qual,
-            .data = ty.data,
+            .specifier = qt.specifier,
+            .qual = qt.qual,
+            .data = qt.data,
         },
         .node = .pack(node),
         .value = .{},
@@ -256,7 +257,7 @@ pub fn defineTypedef(
 pub fn defineSymbol(
     self: *SymbolStack,
     name: StringId,
-    ty: Type,
+    qt: QualType,
     token: TokenIndex,
     node: Node.Index,
     val: Value,
@@ -269,7 +270,7 @@ pub fn defineSymbol(
                 try self.p.errToken(.previous_definition, prev.token);
             },
             .declaration => {
-                if (!ty.eql(prev.type, self.p.comp, true)) {
+                if (!qt.eql(prev.qt, self.p.comp, true)) {
                     try self.p.errStr(.redefinition_incompatible, token, self.p.getTokenText(token));
                     try self.p.errToken(.previous_definition, prev.token);
                 }
@@ -289,7 +290,7 @@ pub fn defineSymbol(
         .kind = if (constexpr) .constexpr else .definition,
         .name = name,
         .token = token,
-        .type = ty,
+        .type = qt,
         .node = .pack(node),
         .value = val,
     });
@@ -307,7 +308,7 @@ pub fn getPtr(s: *SymbolStack, name: StringId, kind: ScopeKind) *Symbol {
 pub fn declareSymbol(
     self: *SymbolStack,
     name: StringId,
-    ty: Type,
+    qt: QualType,
     token: TokenIndex,
     node: Node.Index,
 ) !void {
@@ -318,13 +319,13 @@ pub fn declareSymbol(
                 try self.p.errToken(.previous_definition, prev.token);
             },
             .declaration => {
-                if (!ty.eql(prev.type, self.p.comp, true)) {
+                if (!qt.eql(prev.qt, self.p.comp, true)) {
                     try self.p.errStr(.redefinition_incompatible, token, self.p.getTokenText(token));
                     try self.p.errToken(.previous_definition, prev.token);
                 }
             },
             .definition, .constexpr => {
-                if (!ty.eql(prev.type, self.p.comp, true)) {
+                if (!qt.eql(prev.qt, self.p.comp, true)) {
                     try self.p.errStr(.redefinition_incompatible, token, self.p.getTokenText(token));
                     try self.p.errToken(.previous_definition, prev.token);
                 } else {
@@ -342,7 +343,7 @@ pub fn declareSymbol(
         .kind = .declaration,
         .name = name,
         .token = token,
-        .type = ty,
+        .type = qt,
         .node = .pack(node),
         .value = .{},
     });
@@ -351,7 +352,7 @@ pub fn declareSymbol(
 pub fn defineParam(
     self: *SymbolStack,
     name: StringId,
-    ty: Type,
+    qt: QualType,
     token: TokenIndex,
     node: ?Node.Index,
 ) !void {
@@ -369,14 +370,14 @@ pub fn defineParam(
         }
     }
 
-    if (ty.is(.FP16) and !self.p.comp.hasHalfPrecisionFloatABI())
+    if (qt.is(.FP16) and !self.p.comp.hasHalfPrecisionFloatABI())
         try self.p.errStr(.suggest_pointer_for_invalid_fp16, token, "parameters");
 
     try self.define(.{
         .kind = .definition,
         .name = name,
         .token = token,
-        .type = ty,
+        .type = qt,
         .node = .packOpt(node),
         .value = .{},
     });
@@ -415,7 +416,7 @@ pub fn defineTag(
 pub fn defineEnumeration(
     self: *SymbolStack,
     name: StringId,
-    ty: Type,
+    qt: QualType,
     token: TokenIndex,
     value: Value,
     node: Node.Index,
@@ -444,7 +445,7 @@ pub fn defineEnumeration(
         .kind = .enumeration,
         .name = name,
         .token = token,
-        .type = ty,
+        .type = qt,
         .value = value,
         .node = .pack(node),
     });

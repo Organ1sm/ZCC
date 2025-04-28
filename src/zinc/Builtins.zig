@@ -4,7 +4,7 @@ const Compilation = @import("Basic/Compilation.zig");
 const LangOpts = @import("Basic/LangOpts.zig");
 const Parser = @import("Parser/Parser.zig");
 const target_util = @import("Basic/Target.zig");
-const Type = @import("AST/Type.zig");
+const QualType = @import("AST/TypeStore.zig").QualType;
 const TypeBuilder = @import("AST/TypeBuilder.zig");
 const TypeDescription = @import("Builtins/TypeDescription.zig");
 
@@ -12,11 +12,11 @@ const Properties = @import("Builtins/Properties.zig");
 pub const Builtin = @import("Builtins/Builtin.def").with(Properties);
 
 const Expanded = struct {
-    ty: Type,
+    qt: QualType,
     builtin: Builtin,
 };
 
-const NameToTypeMap = std.StringHashMapUnmanaged(Type);
+const NameToTypeMap = std.StringHashMapUnmanaged(QualType);
 
 const Builtins = @This();
 
@@ -26,18 +26,18 @@ pub fn deinit(b: *Builtins, gpa: std.mem.Allocator) void {
     b._name_to_type_map.deinit(gpa);
 }
 
-fn specForSize(comp: *const Compilation, size_bits: u32) TypeBuilder.Specifier {
-    var ty = Type{ .specifier = .Short };
-    if (ty.sizeof(comp).? * 8 == size_bits) return .Short;
+fn specForSize(comp: *const Compilation, sizeBits: u32) TypeBuilder.Specifier {
+    var qt: QualType = .short;
+    if (qt.bitSizeof(comp).? * 8 == sizeBits) return .Short;
 
-    ty.specifier = .Int;
-    if (ty.sizeof(comp).? * 8 == size_bits) return .Int;
+    qt = .int;
+    if (qt.bitSizeof(comp).? * 8 == sizeBits) return .Int;
 
-    ty.specifier = .Long;
-    if (ty.sizeof(comp).? * 8 == size_bits) return .Long;
+    qt = .long;
+    if (qt.bitSizeof(comp).? * 8 == sizeBits) return .Long;
 
-    ty.specifier = .LongLong;
-    if (ty.sizeof(comp).? * 8 == size_bits) return .LongLong;
+    qt = .longlong;
+    if (qt.bitSizeof(comp).? * 8 == sizeBits) return .LongLong;
 
     unreachable;
 }
@@ -47,8 +47,8 @@ fn createType(
     it: *TypeDescription.TypeIterator,
     comp: *const Compilation,
     allocator: std.mem.Allocator,
-) !Type {
-    var builder: TypeBuilder = .{ .errorOnInvalid = true };
+) !QualType {
+    var builder: QualType.Builder = .{ .errorOnInvalid = true };
     var requireNativeInt32 = false;
     var requireNativeInt64 = false;
     for (desc.prefix) |prefix| {
@@ -108,7 +108,7 @@ fn createType(
         .x => builder.combine(undefined, .Float16, 0) catch unreachable,
         .y => {
             // Todo: __bf16
-            return Type.Invalid;
+            return .invalid;
         },
         .f => builder.combine(undefined, .Float, 0) catch unreachable,
         .d => {
@@ -120,58 +120,58 @@ fn createType(
         },
         .z => {
             std.debug.assert(builder.specifier == .None);
-            builder.specifier = TypeBuilder.fromType(comp.types.size);
+            builder.specifier = QualType.Builder.fromType(comp.types.size);
         },
         .w => {
             std.debug.assert(builder.specifier == .None);
-            builder.specifier = TypeBuilder.fromType(comp.types.wchar);
+            builder.specifier = QualType.Builder.fromType(comp.types.wchar);
         },
         .F => {
-            return Type.Invalid;
+            return .invalid;
         },
         .G => {
             // Todo: id
-            return Type.Invalid;
+            return .invalid;
         },
         .H => {
             // Todo: SEL
-            return Type.Invalid;
+            return .invalid;
         },
         .M => {
             // Todo: struct objc_super
-            return Type.Invalid;
+            return .invalid;
         },
         .a => {
             std.debug.assert(builder.specifier == .None);
             std.debug.assert(desc.suffix.len == 0);
-            builder.specifier = TypeBuilder.fromType(comp.types.vaList);
+            builder.specifier = QualType.Builder.fromType(comp.types.vaList);
         },
         .A => {
             std.debug.assert(builder.specifier == .None);
             std.debug.assert(desc.suffix.len == 0);
-            var vaList = comp.types.vaList;
+            var vaList = comp.typeStore.vaList;
             if (vaList.isArray()) vaList.decayArray();
-            builder.specifier = TypeBuilder.fromType(vaList);
+            builder.specifier = QualType.Builder.fromType(vaList);
         },
         .V => |elementCount| {
             std.debug.assert(desc.suffix.len == 0);
             const childDesc = it.next().?;
             const childTy = try createType(childDesc, undefined, comp, allocator);
-            const arrTy = try allocator.create(Type.Array);
+            const arrTy = try allocator.create(QualType.Array);
             arrTy.* = .{
                 .len = elementCount,
                 .elem = childTy,
             };
-            const vectorTy: Type = .{ .specifier = .Vector, .data = .{ .array = arrTy } };
-            builder.specifier = TypeBuilder.fromType(vectorTy);
+            const vectorTy: QualType = .{ .specifier = .Vector, .data = .{ .array = arrTy } };
+            builder.specifier = QualType.Builder.fromType(vectorTy);
         },
         .q => {
             // Todo: scalable vector
-            return Type.Invalid;
+            return .invalid;
         },
         .E => {
             // Todo: ext_vector (OpenCL vector)
-            return Type.Invalid;
+            return .invalid;
         },
         .X => |child| {
             builder.combine(undefined, .Complex, 0) catch unreachable;
@@ -185,39 +185,39 @@ fn createType(
             }
         },
         .Y => {
-            return Type.Invalid;
+            return .invalid;
         },
         .P => {
-            return Type.Invalid;
+            return .invalid;
         },
         .J => {
-            return Type.Invalid;
+            return .invalid;
         },
         .SJ => {
             // todo
-            return Type.Invalid;
+            return .invalid;
         },
         .K => {
             // todo
-            return Type.Invalid;
+            return .invalid;
         },
         .p => {
-            return Type.Invalid;
+            return .invalid;
         },
-        .@"!" => return Type.Invalid,
+        .@"!" => return .invalid,
     }
     for (desc.suffix) |suffix| {
         switch (suffix) {
             .@"*" => |addressSpace| {
                 _ = addressSpace; // TODO: handle address space
-                const elemTy = try allocator.create(Type);
+                const elemTy = try allocator.create(QualType);
                 elemTy.* = builder.finish(undefined) catch unreachable;
-                const ty = Type{
+                const ty = QualType{
                     .specifier = .Pointer,
                     .data = .{ .subType = elemTy },
                 };
                 builder.qual = .{};
-                builder.specifier = TypeBuilder.fromType(ty);
+                builder.specifier = QualType.Builder.fromType(ty);
             },
             .C => builder.qual.@"const" = 0,
             .D => builder.qual.@"volatile" = 0,
@@ -227,7 +227,7 @@ fn createType(
     return builder.finish(undefined) catch unreachable;
 }
 
-fn createBuiltin(comp: *const Compilation, builtin: Builtin, typeArena: std.mem.Allocator) !Type {
+fn createBuiltin(comp: *const Compilation, builtin: Builtin, typeArena: std.mem.Allocator) !QualType {
     var it = TypeDescription.TypeIterator.init(builtin.properties.param_str);
 
     const retTyDesc = it.next().?;
@@ -236,13 +236,13 @@ fn createBuiltin(comp: *const Compilation, builtin: Builtin, typeArena: std.mem.
     }
     const retTy = try createType(retTyDesc, &it, comp, typeArena);
     var paramCount: usize = 0;
-    var params: [Builtin.max_param_count]Type.Function.Param = undefined;
+    var params: [Builtin.max_param_count]QualType.Func.Param = undefined;
     while (it.next()) |desc| : (paramCount += 1) {
         params[paramCount] = .{ .nameToken = 0, .ty = try createType(desc, &it, comp, typeArena), .name = .empty, .node = .null };
     }
 
-    const dupedParams = try typeArena.dupe(Type.Function.Param, params[0..paramCount]);
-    const func = try typeArena.create(Type.Function);
+    const dupedParams = try typeArena.dupe(QualType.Func.Param, params[0..paramCount]);
+    const func = try typeArena.create(QualType.Func);
 
     func.* = .{
         .returnType = retTy,
@@ -257,11 +257,8 @@ fn createBuiltin(comp: *const Compilation, builtin: Builtin, typeArena: std.mem.
 /// Asserts that the builtin has already been created
 pub fn lookup(b: *const Builtins, name: []const u8) Expanded {
     const builtin = Builtin.fromName(name).?;
-    const ty = b._name_to_type_map.get(name).?;
-    return .{
-        .builtin = builtin,
-        .ty = ty,
-    };
+    const qt = b._name_to_type_map.get(name).?;
+    return .{ .builtin = builtin, .qt = qt };
 }
 
 pub fn getOrCreate(b: *Builtins, comp: *Compilation, name: []const u8, typeArena: std.mem.Allocator) !?Expanded {

@@ -6,7 +6,7 @@ const Compilation = @import("../Basic/Compilation.zig");
 const Diagnostics = @import("../Basic/Diagnostics.zig");
 const Parser = @import("../Parser/Parser.zig");
 const Result = @import("../Parser/Result.zig");
-const Type = @import("../AST/Type.zig");
+const QualType = @import("../AST/TypeStore.zig").QualType;
 const Tree = @import("../AST/AST.zig");
 const Value = @import("../AST/Value.zig");
 const TokenIndex = Tree.TokenIndex;
@@ -39,51 +39,43 @@ pub const Kind = enum {
 };
 
 pub const Iterator = struct {
-    source: union(enum) {
-        ty: Type,
-        slice: []const Attribute,
+    source: ?struct {
+        qt: QualType,
+        comp: *const Compilation,
     },
+    slice: []const Attribute,
     index: usize,
 
-    pub fn initSlice(slice: ?[]const Attribute) Iterator {
-        return .{ .source = .{ .slice = slice orelse &.{} }, .index = 0 };
+    pub fn initSlice(slice: []const Attribute) Iterator {
+        return .{ .source = null, .slice = slice, .index = 0 };
     }
 
-    pub fn initType(ty: Type) Iterator {
-        return .{ .source = .{ .ty = ty }, .index = 0 };
+    pub fn initType(qt: QualType, comp: *const Compilation) Iterator {
+        return .{ .source = .{ .qt = qt, .comp = comp }, .slice = &.{}, .index = 0 };
     }
 
     /// returns the next attribute as well as its index within the slice or current type
     /// The index can be used to determine when a nested type has been recursed into
     pub fn next(self: *Iterator) ?struct { Attribute, usize } {
-        switch (self.source) {
-            .slice => |slice| {
-                if (self.index < slice.len) {
-                    defer self.index += 1;
-                    return .{ slice[self.index], self.index };
-                }
-            },
-            .ty => |ty| {
-                switch (ty.specifier) {
-                    .TypeofType => {
-                        self.* = .{ .source = .{ .ty = ty.data.subType.* }, .index = 0 };
-                        return self.next();
+        if (self.index < self.slice.len) {
+            defer self.index += 1;
+            return .{ self.slice[self.index], self.index };
+        }
+        if (self.source) |source| {
+            var cur = source.qt;
+            while (true)
+                switch (cur.type(source.comp)) {
+                    .typeof => |typeof| cur = typeof.base,
+                    .attributed => |attributed| {
+                        self.slice = attributed.attributes;
+                        self.index = 1;
+                        return .{ self.slice[0], 0 };
                     },
-                    .TypeofExpr => {
-                        self.* = .{ .source = .{ .ty = ty.data.expr.ty }, .index = 0 };
-                        return self.next();
+                    else => {
+                        self.source = null;
+                        break;
                     },
-                    .Attributed => {
-                        if (self.index < ty.data.attributed.attributes.len) {
-                            defer self.index += 1;
-                            return .{ ty.data.attributed.attributes[self.index], self.index };
-                        }
-                        self.* = .{ .source = .{ .ty = ty.data.attributed.base }, .index = 0 };
-                        return self.next();
-                    },
-                    else => {},
-                }
-            },
+                };
         }
         return null;
     }
@@ -318,10 +310,12 @@ fn diagnoseField(
         },
         .bytes => |bytes| {
             if (Wanted == Value) {
-                std.debug.assert(node == .stringLiteralExpr);
-
-                const nodeElemTy = node.stringLiteralExpr.type.getElemType();
-                if (!nodeElemTy.is(.Char) and !nodeElemTy.is(.UChar)) {
+                validate: {
+                    if (node != .stringLiteralExpr) break :validate;
+                    switch (node.stringLiteralExpr.qt.childType(p.comp).get(p.comp, .int).?) {
+                        .Char, .UChar, .SChar => {},
+                        else => break :validate,
+                    }
                     return .{
                         .tag = .attribute_requires_string,
                         .extra = .{ .str = decl.name },
@@ -820,12 +814,12 @@ fn ignoredAttrErr(p: *Parser, token: TokenIndex, attr: Attribute.Tag, context: [
 }
 
 pub const applyParameterAttributes = applyVariableAttributes;
-pub fn applyVariableAttributes(p: *Parser, ty: Type, attrBufferStart: usize, tag: ?Diagnostics.Tag) !Type {
+pub fn applyVariableAttributes(p: *Parser, qt: QualType, attrBufferStart: usize, tag: ?Diagnostics.Tag) !QualType {
     const attrs = p.attrBuffer.items(.attr)[attrBufferStart..];
     const toks = p.attrBuffer.items(.tok)[attrBufferStart..];
     p.attrApplicationBuffer.items.len = 0;
 
-    var baseTy = ty;
+    var baseQt = qt;
     var common = false;
     var nocommon = false;
     for (attrs, toks) |attr, tok| switch (attr.tag) {
@@ -849,11 +843,11 @@ pub fn applyVariableAttributes(p: *Parser, ty: Type, attrBufferStart: usize, tag
             nocommon = true;
         },
 
-        .vector_size => try attr.applyVectorSize(p, tok, &baseTy),
-        .aligned => try attr.applyAligned(p, baseTy, tag),
+        .vector_size => try attr.applyVectorSize(p, tok, &baseQt),
+        .aligned => try attr.applyAligned(p, baseQt, tag),
 
-        .nonstring => if (!baseTy.isArray() or !baseTy.isChar()) {
-            try p.errStr(.non_string_ignored, tok, try p.typeStr(ty));
+        .nonstring => if (!baseQt.isArray() or !baseQt.isChar()) {
+            try p.errStr(.non_string_ignored, tok, try p.typeStr(qt));
         } else {
             try p.attrApplicationBuffer.append(p.gpa, attr);
         },
@@ -878,10 +872,10 @@ pub fn applyVariableAttributes(p: *Parser, ty: Type, attrBufferStart: usize, tag
         else => try ignoredAttrErr(p, tok, attr.tag, "variables"),
     };
 
-    return baseTy.withAttributes(p.arena, p.attrApplicationBuffer.items);
+    return baseQt.withAttributes(p.arena, p.attrApplicationBuffer.items);
 }
 
-pub fn applyFieldAttributes(p: *Parser, fieldTy: *Type, attrBufferStart: usize) ![]const Attribute {
+pub fn applyFieldAttributes(p: *Parser, fieldTy: *QualType, attrBufferStart: usize) ![]const Attribute {
     const attrs = p.attrBuffer.items(.attr)[attrBufferStart..];
     const toks = p.attrBuffer.items(.tok)[attrBufferStart..];
     p.attrApplicationBuffer.items.len = 0;
@@ -901,12 +895,12 @@ pub fn applyFieldAttributes(p: *Parser, fieldTy: *Type, attrBufferStart: usize) 
     return p.arena.dupe(Attribute, p.attrApplicationBuffer.items);
 }
 
-pub fn applyTypeAttributes(p: *Parser, ty: Type, attrBufferStart: usize, tag: ?Diagnostics.Tag) !Type {
+pub fn applyTypeAttributes(p: *Parser, qt: QualType, attrBufferStart: usize, tag: ?Diagnostics.Tag) !QualType {
     const attrs = p.attrBuffer.items(.attr)[attrBufferStart..];
     const toks = p.attrBuffer.items(.tok)[attrBufferStart..];
     p.attrApplicationBuffer.items.len = 0;
 
-    var baseTy = ty;
+    var baseQt = qt;
     for (attrs, toks) |attr, tok| switch (attr.tag) {
         .@"packed",
         .may_alias,
@@ -917,11 +911,11 @@ pub fn applyTypeAttributes(p: *Parser, ty: Type, attrBufferStart: usize, tag: ?D
         .mode,
         => try p.attrApplicationBuffer.append(p.gpa, attr),
 
-        .transparent_union => try attr.applyTransparentUnion(p, tok, baseTy),
-        .vector_size => try attr.applyVectorSize(p, tok, &baseTy),
-        .aligned => try attr.applyAligned(p, baseTy, tag),
+        .transparent_union => try attr.applyTransparentUnion(p, tok, baseQt),
+        .vector_size => try attr.applyVectorSize(p, tok, &baseQt),
+        .aligned => try attr.applyAligned(p, baseQt, tag),
 
-        .designated_init => if (baseTy.is(.Struct)) {
+        .designated_init => if (baseQt.is(.Struct)) {
             try p.attrApplicationBuffer.append(p.gpa, attr);
         } else {
             try p.errToken(.designated_init_invalid, tok);
@@ -936,15 +930,15 @@ pub fn applyTypeAttributes(p: *Parser, ty: Type, attrBufferStart: usize, tag: ?D
         else => try ignoredAttrErr(p, tok, attr.tag, "types"),
     };
 
-    return baseTy.withAttributes(p.arena, p.attrApplicationBuffer.items);
+    return baseQt.withAttributes(p.arena, p.attrApplicationBuffer.items);
 }
 
-pub fn applyFunctionAttributes(p: *Parser, ty: Type, attrBufferStart: usize) !Type {
+pub fn applyFunctionAttributes(p: *Parser, qt: QualType, attrBufferStart: usize) !QualType {
     const attrs = p.attrBuffer.items(.attr)[attrBufferStart..];
     const toks = p.attrBuffer.items(.tok)[attrBufferStart..];
     p.attrApplicationBuffer.items.len = 0;
 
-    const baseTy = ty;
+    const baseQt = qt;
     var hot = false;
     var cold = false;
     var @"noinline" = false;
@@ -986,8 +980,8 @@ pub fn applyFunctionAttributes(p: *Parser, ty: Type, attrBufferStart: usize) !Ty
             @"noinline" = true;
         },
 
-        .aligned => try attr.applyAligned(p, baseTy, null),
-        .format => try attr.applyFormat(p, baseTy),
+        .aligned => try attr.applyAligned(p, baseQt, null),
+        .format => try attr.applyFormat(p, baseQt),
 
         .calling_convention => switch (attr.args.calling_convention.cc) {
             .C => continue,
@@ -1045,11 +1039,10 @@ pub fn applyFunctionAttributes(p: *Parser, ty: Type, attrBufferStart: usize) !Ty
         => std.debug.panic("apply type attribute {s}", .{@tagName(attr.tag)}),
         else => try ignoredAttrErr(p, tok, attr.tag, "functions"),
     };
-    return ty.withAttributes(p.arena, p.attrApplicationBuffer.items);
+    return qt.withAttributes(p.arena, p.attrApplicationBuffer.items);
 }
 
-pub fn applyLabelAttributes(p: *Parser, attrBufferStart: usize) !Type {
-    const ty = Type.Void;
+pub fn applyLabelAttributes(p: *Parser, attrBufferStart: usize) !QualType {
     const attrs = p.attrBuffer.items(.attr)[attrBufferStart..];
     const toks = p.attrBuffer.items(.tok)[attrBufferStart..];
     p.attrApplicationBuffer.items.len = 0;
@@ -1058,11 +1051,10 @@ pub fn applyLabelAttributes(p: *Parser, attrBufferStart: usize) !Type {
         .cold, .hot, .unused => try p.attrApplicationBuffer.append(p.gpa, attr),
         else => try ignoredAttrErr(p, tok, attr.tag, "labels"),
     };
-    return ty.withAttributes(p.arena, p.attrApplicationBuffer.items);
+    return QualType.void.withAttributes(p.arena, p.attrApplicationBuffer.items);
 }
 
-pub fn applyStatementAttributes(p: *Parser, exprStart: TokenIndex, attrBufferStart: usize) !Type {
-    const ty = Type.Void;
+pub fn applyStatementAttributes(p: *Parser, exprStart: TokenIndex, attrBufferStart: usize) !QualType {
     const attrs = p.attrBuffer.items(.attr)[attrBufferStart..];
     const toks = p.attrBuffer.items(.tok)[attrBufferStart..];
     p.attrApplicationBuffer.items.len = 0;
@@ -1078,10 +1070,10 @@ pub fn applyStatementAttributes(p: *Parser, exprStart: TokenIndex, attrBufferSta
         },
         else => try p.errStr(.cannot_apply_attribute_to_statement, tok, @tagName(attr.tag)),
     };
-    return ty.withAttributes(p.arena, p.attrApplicationBuffer.items);
+    return QualType.void.withAttributes(p.arena, p.attrApplicationBuffer.items);
 }
 
-pub fn applyEnumeratorAttributes(p: *Parser, ty: Type, attrBufferStart: usize) !Type {
+pub fn applyEnumeratorAttributes(p: *Parser, qt: QualType, attrBufferStart: usize) !QualType {
     const attrs = p.attrBuffer.items(.attr)[attrBufferStart..];
     const toks = p.attrBuffer.items(.tok)[attrBufferStart..];
     p.attrApplicationBuffer.items.len = 0;
@@ -1090,19 +1082,19 @@ pub fn applyEnumeratorAttributes(p: *Parser, ty: Type, attrBufferStart: usize) !
         .deprecated, .unavailable => try p.attrApplicationBuffer.append(p.gpa, attr),
         else => try ignoredAttrErr(p, tok, attr.tag, "enums"),
     };
-    return ty.withAttributes(p.arena, p.attrApplicationBuffer.items);
+    return qt.withAttributes(p.arena, p.attrApplicationBuffer.items);
 }
 
-fn applyAligned(attr: Attribute, p: *Parser, ty: Type, tag: ?Diagnostics.Tag) !void {
-    const base = ty.canonicalize(.standard);
-    const defaultAlign = base.alignof(p.comp);
+fn applyAligned(attr: Attribute, p: *Parser, qt: QualType, tag: ?Diagnostics.Tag) !void {
     if (attr.args.aligned.alignment) |alignment| alignas: {
         if (attr.syntax != .keyword)
             break :alignas;
 
         const alignToken = attr.args.aligned.__name_token;
         if (tag) |t| try p.errToken(t, alignToken);
-        if (ty.isFunc()) {
+
+        const defaultAlign = qt.base().alignof(p.comp);
+        if (qt.isFunc()) {
             try p.errToken(.alignas_on_func, alignToken);
         } else if (alignment.requested < defaultAlign) {
             try p.errExtra(.minimum_alignment, alignToken, .{ .unsigned = defaultAlign });
@@ -1111,8 +1103,8 @@ fn applyAligned(attr: Attribute, p: *Parser, ty: Type, tag: ?Diagnostics.Tag) !v
     try p.attrApplicationBuffer.append(p.gpa, attr);
 }
 
-fn applyTransparentUnion(attr: Attribute, p: *Parser, token: TokenIndex, ty: Type) !void {
-    const unionTy = ty.get(.Union) orelse {
+fn applyTransparentUnion(attr: Attribute, p: *Parser, token: TokenIndex, qt: QualType) !void {
+    const unionTy = qt.get(.Union) orelse {
         return p.errToken(.transparent_union_wrong_type, token);
     };
 
@@ -1124,9 +1116,9 @@ fn applyTransparentUnion(attr: Attribute, p: *Parser, token: TokenIndex, ty: Typ
     if (fields.len == 0)
         return p.errToken(.transparent_union_one_field, token);
 
-    const firstFieldSize = fields[0].ty.bitSizeof(p.comp).?;
+    const firstFieldSize = fields[0].qt.bitSizeof(p.comp).?;
     for (fields[1..]) |field| {
-        const fieldSize = field.ty.bitSizeof(p.comp).?;
+        const fieldSize = field.qt.bitSizeof(p.comp).?;
         if (fieldSize == firstFieldSize)
             continue;
 
@@ -1142,31 +1134,29 @@ fn applyTransparentUnion(attr: Attribute, p: *Parser, token: TokenIndex, ty: Typ
     try p.attrApplicationBuffer.append(p.gpa, attr);
 }
 
-fn applyVectorSize(attr: Attribute, p: *Parser, tok: TokenIndex, ty: *Type) !void {
-    const base = ty.base();
-    if (!(ty.isInt() or ty.isFloat()) or !ty.isReal()) {
-        const originTy = try p.typeStr(ty.*);
-        ty.* = Type.Invalid;
+fn applyVectorSize(attr: Attribute, p: *Parser, tok: TokenIndex, qt: *QualType) !void {
+    const scalarKind = qt.scalarKind(p.comp);
+    if (!scalarKind.isArithmetic() or !scalarKind.isReal()) {
+        const originTy = try p.typeStr(qt.*);
         return p.errStr(.invalid_vec_elem_ty, tok, originTy);
     }
 
     const vecBytes = attr.args.vector_size.bytes;
-    const tySize = ty.sizeof(p.comp).?;
-    if (vecBytes % tySize != 0)
+    const elemSize = qt.sizeof(p.comp);
+    if (vecBytes % elemSize != 0)
         return p.errToken(.vec_size_not_multiple, tok);
 
-    const vec_size = vecBytes / tySize;
-
-    const arrTy = try p.arena.create(Type.Array);
-    arrTy.* = .{ .elem = ty.*, .len = vec_size };
-    base.* = .{
-        .specifier = .Vector,
-        .data = .{ .array = arrTy },
-    };
+    const vecLen: u32 = vecBytes / elemSize;
+    try p.comp.typeStore.put(p.gpa, .{
+        .vector = .{
+            .elem = qt.*,
+            .len = vecLen,
+        },
+    });
 }
 
-fn applyFormat(attr: Attribute, p: *Parser, ty: Type) !void {
+fn applyFormat(attr: Attribute, p: *Parser, qt: QualType) !void {
     // TODO validate
-    _ = ty;
+    _ = qt;
     try p.attrApplicationBuffer.append(p.gpa, attr);
 }
