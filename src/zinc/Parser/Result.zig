@@ -996,8 +996,8 @@ pub fn castType(res: *Result, p: *Parser, to: Type, operandToken: TokenIndex, lp
 /// @param ty    The type within which the value should fit.
 /// @return      Returns true if the value fits within the type bounds, false otherwise.
 pub fn intFitsInType(res: Result, p: *Parser, ty: Type) !bool {
-    const maxInt = try Value.int(ty.maxInt(p.comp), p.comp);
-    const minInt = try Value.int(ty.minInt(p.comp), p.comp);
+    const maxInt = try Value.maxInt(ty, p.comp);
+    const minInt = try Value.minInt(ty, p.comp);
 
     return res.value.compare(.lte, maxInt, p.comp) and
         (res.ty.isUnsignedInt(p.comp) or res.value.compare(.gte, minInt, p.comp));

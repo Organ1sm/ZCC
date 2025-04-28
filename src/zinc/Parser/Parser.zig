@@ -2917,13 +2917,11 @@ fn enumerator(p: *Parser, e: *Enumerator) Error!?EnumFieldAndNode {
     if (errStart == p.comp.diagnostics.list.items.len) {
         // only do these warnings if we didn't already warn about overflow or non-representable values
         if (e.value.compare(.lt, Value.zero, p.comp)) {
-            const minInt = Type.Int.minInt(p.comp);
-            const minValue = try Value.int(minInt, p.comp);
+            const minValue = try Value.minInt(Type.Int, p.comp);
             if (e.value.compare(.lt, minValue, p.comp))
                 try p.errStr(.enumerator_too_small, nameToken, try e.str(p));
         } else {
-            const maxInt = Type.Int.maxInt(p.comp);
-            const maxValue = try Value.int(maxInt, p.comp);
+            const maxValue = try Value.maxInt(Type.Int, p.comp);
             if (e.value.compare(.gt, maxValue, p.comp))
                 try p.errStr(.enumerator_too_large, nameToken, try e.str(p));
         }
@@ -7669,8 +7667,13 @@ fn fixedSizeInt(p: *Parser, base: u8, buf: []const u8, suffix: NumberSuffix, tok
         return res;
     }
 
-    if (suffix.isSignedInteger() and value > p.comp.types.intmax.maxInt(p.comp))
-        try p.errToken(.implicitly_unsigned_literal, tokenIdx);
+    const internedVal = try Value.int(value, p.comp);
+    if (suffix.isSignedInteger()) {
+        const maxInt = try Value.maxInt(p.comp.types.intmax, p.comp);
+        if (internedVal.compare(.gt, maxInt, p.comp)) {
+            try p.errToken(.implicitly_unsigned_literal, tokenIdx);
+        }
+    }
 
     const signedSpecs = .{ .Int, .Long, .LongLong };
     const unsignedSpecs = .{ .UInt, .ULong, .ULongLong };
@@ -7695,8 +7698,8 @@ fn fixedSizeInt(p: *Parser, base: u8, buf: []const u8, suffix: NumberSuffix, tok
     for (specs) |spec| {
         res.ty = Type{ .specifier = spec };
         if (res.ty.compareIntegerRanks(suffixTy, p.comp).compare(.lt)) continue;
-        const maxInt = res.ty.maxInt(p.comp);
-        if (value <= maxInt) break;
+        const maxInt = try Value.maxInt(res.ty, p.comp);
+        if (internedVal.compare(.lte, maxInt, p.comp)) break;
     } else {
         res.ty = Type.ULongLong;
     }

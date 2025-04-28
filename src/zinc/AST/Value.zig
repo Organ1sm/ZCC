@@ -681,11 +681,11 @@ pub fn rem(lhs: Value, rhs: Value, ty: Type, comp: *Compilation) !Value {
 
     const signedness = ty.signedness(comp);
     if (signedness == .signed) {
-        var spaces: [3]BigIntSpace = undefined;
-        const minVal = BigIntMutable.init(&spaces[0].limbs, ty.minInt(comp)).toConst();
-        const negative = BigIntMutable.init(&spaces[1].limbs, -1).toConst();
-        const bigOne = BigIntMutable.init(&spaces[2].limbs, 1).toConst();
-        if (lhsBigInt.eql(minVal) and rhsBigInt.eql(negative)) {
+        var spaces: [2]BigIntSpace = undefined;
+        const minVal = try Value.minInt(ty, comp);
+        const negative = BigIntMutable.init(&spaces[0].limbs, -1).toConst();
+        const bigOne = BigIntMutable.init(&spaces[1].limbs, 1).toConst();
+        if (lhs.compare(.eq, minVal, comp) and rhsBigInt.eql(negative)) {
             return .{};
         } else if (rhsBigInt.order(bigOne).compare(.lt)) {
             // lhs - @divTrunc(lhs, rhs) * rhs
@@ -782,9 +782,9 @@ pub fn shl(res: *Value, lhs: Value, rhs: Value, ty: Type, comp: *Compilation) !b
     const bits: usize = @intCast(ty.bitSizeof(comp).?);
     if (shift > bits) {
         if (lhsBigInt.positive) {
-            res.* = try intern(comp, .{ .int = .{ .u64 = ty.maxInt(comp) } });
+            res.* = try Value.maxInt(ty, comp);
         } else {
-            res.* = try intern(comp, .{ .int = .{ .i64 = ty.minInt(comp) } });
+            res.* = try Value.minInt(ty, comp);
         }
         return true;
     }
@@ -877,6 +877,43 @@ pub fn hash(v: Value) u64 {
         .int => return std.hash.Wyhash.hash(0, std.mem.asBytes(&v.data.int)),
         else => @panic("TODO"),
     }
+}
+
+fn twosCompIntLimit(limit: std.math.big.int.TwosCompIntLimit, ty: Type, comp: *Compilation) !Value {
+    const signedness = ty.signedness(comp);
+    if (limit == .min and signedness == .unsigned) return Value.zero;
+
+    const magBits: usize = @intCast(ty.bitSizeof(comp).?);
+    switch (magBits) {
+        inline 8, 16, 32, 64 => |bits| {
+            if (limit == .min) return Value.int(@as(i64, std.math.minInt(std.meta.Int(.signed, bits))), comp);
+            return switch (signedness) {
+                inline else => |sign| Value.int(std.math.maxInt(std.meta.Int(sign, bits)), comp),
+            };
+        },
+        else => {},
+    }
+
+    const signBits = @intFromBool(signedness == .signed);
+    const totalBits = magBits + signBits;
+
+    const limbs = try comp.gpa.alloc(
+        std.math.big.Limb,
+        std.math.big.int.calcTwosCompLimbCount(totalBits),
+    );
+    defer comp.gpa.free(limbs);
+
+    var result: BigIntMutable = .{ .limbs = limbs, .positive = undefined, .len = undefined };
+    result.setTwosCompIntLimit(limit, signedness, magBits);
+    return Value.intern(comp, .{ .int = .{ .bigInt = result.toConst() } });
+}
+
+pub fn minInt(ty: Type, comp: *Compilation) !Value {
+    return twosCompIntLimit(.min, ty, comp);
+}
+
+pub fn maxInt(ty: Type, comp: *Compilation) !Value {
+    return twosCompIntLimit(.max, ty, comp);
 }
 
 pub fn print(v: Value, ty: Type, comp: *const Compilation, w: anytype) @TypeOf(w).Error!void {
