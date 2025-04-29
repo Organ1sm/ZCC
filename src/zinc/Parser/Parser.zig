@@ -1074,14 +1074,12 @@ fn parseDeclaration(p: *Parser) Error!bool {
 
         // collect old style parameters
         if (initDeclarator.d.oldTypeFunc != null) {
+            // ensure attributed specifier is not lost for old-style functions
+            var baseTy = initDeclarator.d.type.base();
+            baseTy.specifier = .Func;
+
             const paramBufferTop = p.paramBuffer.items.len;
             defer p.paramBuffer.items.len = paramBufferTop;
-
-            // ensure attributed specifier is not lost for old-style functions
-            const attrs = initDeclarator.d.type.getAttributes();
-            var baseTy = if (initDeclarator.d.type.specifier == .Attributed) initDeclarator.d.type.data.attributed.base else initDeclarator.d.type;
-            baseTy.specifier = .Func;
-            initDeclarator.d.type = try baseTy.withAttributes(p.arena, attrs);
 
             paramLoop: while (true) {
                 const paramDeclSpec = (try p.parseDeclSpec()) orelse break;
@@ -4093,8 +4091,6 @@ fn convertInitList(p: *Parser, il: InitList, initType: Type) Error!Node.Index {
             const arrayType = try p.arena.create(Type.Array);
             arrayType.* = .{ .elem = initType.getElemType(), .len = start };
             arrInitTy = .{ .specifier = .Array, .data = .{ .array = arrayType } };
-            const attrs = initType.getAttributes();
-            arrInitTy = try arrInitTy.withAttributes(p.arena, attrs);
         } else if (start < maxItems) {
             const elem = try p.addNode(.{
                 .arrayFillerExpr = .{

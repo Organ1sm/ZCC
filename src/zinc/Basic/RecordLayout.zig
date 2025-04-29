@@ -106,7 +106,7 @@ const SysVContext = struct {
         fieldAttrs: ?[]const Attribute,
         fieldLayout: TypeLayout,
     ) FieldLayout {
-        const annotationAlignmentBits = BITS_PER_BYTE * (Type.annotationAlignment(self.comp, fieldAttrs) orelse 1);
+        const annotationAlignmentBits = BITS_PER_BYTE * (Type.annotationAlignment(self.comp, Attribute.Iterator.initSlice(fieldAttrs)) orelse 1);
         const isAttrPacked = self.attrPacked or isPacked(fieldAttrs);
         const ignoreTypeAlign = ignoreTypeAlignment(isAttrPacked, field.bitWidth, self.ongoingBitfield, fieldLayout);
 
@@ -242,7 +242,7 @@ const SysVContext = struct {
 
         // The field alignment can be increased by __attribute__((aligned)) annotations on the
         // field. See test case 0085.
-        if (Type.annotationAlignment(self.comp, fieldAttrs)) |anno|
+        if (Type.annotationAlignment(self.comp, Attribute.Iterator.initSlice(fieldAttrs))) |anno|
             fieldAlignBits = @max(fieldAlignBits, anno * BITS_PER_BYTE);
 
         // #pragma pack takes precedence over all other attributes. See test cases 0084 and
@@ -296,7 +296,7 @@ const SysVContext = struct {
         // field. See test case 0067.
         const attrPacked = self.attrPacked or isPacked(fieldAttrs);
         const hasPackingAnnotation = attrPacked or self.maxFieldAlignBits != null;
-        const annotationAlignment: u32 = if (Type.annotationAlignment(self.comp, fieldAttrs)) |anno| anno * BITS_PER_BYTE else 1;
+        const annotationAlignment: u32 = if (Type.annotationAlignment(self.comp, Attribute.Iterator.initSlice(fieldAttrs))) |anno| anno * BITS_PER_BYTE else 1;
         const firstUnusedBit: u64 = if (self.isUnion) 0 else self.sizeBits;
 
         var fieldAlignBits: u64 = 1;
@@ -436,7 +436,7 @@ const MsvcContext = struct {
         // underlying type and the __declspec(align) annotation on the field itself.
         // See test case 0028.
         var reqAlign = typeLayout.requiredAlignmentBits;
-        if (Type.annotationAlignment(self.comp, fieldAttrs)) |anno|
+        if (Type.annotationAlignment(self.comp, Attribute.Iterator.initSlice(fieldAttrs))) |anno|
             reqAlign = @max(anno * BITS_PER_BYTE, reqAlign);
 
         // The required alignment of a record is the maximum of the required alignments of its

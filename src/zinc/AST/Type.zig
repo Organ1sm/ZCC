@@ -212,20 +212,13 @@ pub const Attributed = struct {
     attributes: []Attribute,
     base: Type, // base type
 
-    pub fn create(
-        allocator: std.mem.Allocator,
-        base: Type,
-        existingAttrs: []const Attribute,
-        attributes: []const Attribute,
-    ) !*Attributed {
+    pub fn create(allocator: std.mem.Allocator, baseTy: Type, attributes: []const Attribute) !*Attributed {
         const attrType = try allocator.create(Attributed);
         errdefer allocator.destroy(attrType);
 
-        var allAttrs = try allocator.alloc(Attribute, existingAttrs.len + attributes.len);
-        @memcpy(allAttrs[0..existingAttrs.len], existingAttrs);
-        @memcpy(allAttrs[existingAttrs.len..], attributes);
+        const duped = try allocator.dupe(Attribute, attributes);
 
-        attrType.* = .{ .attributes = allAttrs, .base = base };
+        attrType.* = .{ .attributes = duped, .base = baseTy };
         return attrType;
     }
 };
@@ -501,8 +494,8 @@ pub fn withAttributes(self: Type, allocator: std.mem.Allocator, attributes: []co
     if (attributes.len == 0)
         return self;
 
-    const attributedType = try Type.Attributed.create(allocator, self, self.getAttributes(), attributes);
-    return Type{
+    const attributedType = try Type.Attributed.create(allocator, self, attributes);
+    return .{
         .specifier = .Attributed,
         .data = .{ .attributed = attributedType },
         .decayed = self.decayed,
@@ -831,18 +824,12 @@ pub fn isAnonymousRecord(ty: Type, comp: *const Compilation) bool {
 /// The canonicalized type after processing qualifiers and special cases related to `typeof` and `decay` operations.
 pub fn canonicalize(ty: Type, qualHandling: enum { standard, preserve_quals }) Type {
     var cur = ty;
-    if (cur.specifier == .Attributed) {
-        cur = cur.data.attributed.base;
-        cur.decayed = ty.decayed;
-    }
-    if (!cur.isTypeof())
-        return cur;
-
     var qual = cur.qual;
     while (true) {
         switch (cur.specifier) {
             .TypeofType => cur = cur.data.subType.*,
             .TypeofExpr => cur = cur.data.expr.ty,
+            .Attributed => cur = cur.data.attributed.base,
             else => break,
         }
         qual = qual.mergeAllQualifiers(cur.qual);
@@ -1322,7 +1309,7 @@ pub fn requestedAlignment(ty: Type, comp: *const Compilation) ?u29 {
     return switch (ty.specifier) {
         .TypeofType => ty.data.subType.requestedAlignment(comp),
         .TypeofExpr => ty.data.expr.ty.requestedAlignment(comp),
-        .Attributed => annotationAlignment(comp, ty.data.attributed.attributes),
+        .Attributed => annotationAlignment(comp, Attribute.Iterator.initType(ty)),
         else => null,
     };
 }
@@ -1335,17 +1322,23 @@ pub fn requestedAlignment(ty: Type, comp: *const Compilation) ?u29 {
 /// @param comp A pointer to the Compilation context.
 /// @param attrs An optional array of Attribute structures to inspect.
 /// @return The maximum requested alignment as u29, or null if not applicable.
-pub fn annotationAlignment(comp: *const Compilation, attrs: ?[]const Attribute) ?u29 {
-    // If attrs is null, exit early as there are no attributes to process.
-    const a = attrs orelse return null;
+pub fn annotationAlignment(comp: *const Compilation, attrs: Attribute.Iterator) ?u29 {
+    var it = attrs;
 
     // Initialize maxRequested to null, to be updated with the max alignment found.
     var maxRequested: ?u29 = null;
+    var lastAlignedIndex: ?usize = null;
 
-    for (a) |attribute| {
-        // Skip any attribute that is not tagged as 'aligned'.
+    while (it.next()) |item| {
+        const attribute, const index = item;
         if (attribute.tag != .aligned) continue;
 
+        if (lastAlignedIndex) |alignedIndex| {
+            // Once we recurse into a new type, after an `aligned` attribute was found, we're done.
+            if (index <= alignedIndex) break;
+        }
+
+        lastAlignedIndex = index;
         // Get the requested alignment from the attribute, or use the default if not specified.
         const requested = if (attribute.args.aligned.alignment) |alignment|
             alignment.requested
@@ -1494,21 +1487,21 @@ pub fn floatRank(ty: Type) usize {
 
 pub fn makeReal(ty: Type) Type {
     // TODO discards attributed/typeof
-    var base = ty.canonicalize(.standard);
-    switch (base.specifier) {
+    var baseTy = ty.canonicalize(.standard);
+    switch (baseTy.specifier) {
         .ComplexFloat16,
         .ComplexFloat,
         .ComplexDouble,
         .ComplexLongDouble,
         .ComplexFloat128,
         => {
-            base.specifier = @enumFromInt(@intFromEnum(base.specifier) - 5);
-            return base;
+            baseTy.specifier = @enumFromInt(@intFromEnum(baseTy.specifier) - 5);
+            return baseTy;
         },
 
         .ComplexBitInt => {
-            base.specifier = .BitInt;
-            return base;
+            baseTy.specifier = .BitInt;
+            return baseTy;
         },
 
         .ComplexChar,
@@ -1525,8 +1518,8 @@ pub fn makeReal(ty: Type) Type {
         .ComplexInt128,
         .ComplexUInt128,
         => {
-            base.specifier = @enumFromInt(@intFromEnum(base.specifier) - 13);
-            return base;
+            baseTy.specifier = @enumFromInt(@intFromEnum(baseTy.specifier) - 13);
+            return baseTy;
         },
 
         else => return ty,
@@ -1535,11 +1528,11 @@ pub fn makeReal(ty: Type) Type {
 
 pub fn makeComplex(ty: Type) Type {
     // TODO discards attributed/typeof
-    var base = ty.canonicalize(.standard);
-    switch (base.specifier) {
+    var baseTy = ty.canonicalize(.standard);
+    switch (baseTy.specifier) {
         .Float, .Double, .LongDouble, .Float128 => {
-            base.specifier = @enumFromInt(@intFromEnum(base.specifier) + 4);
-            return base;
+            baseTy.specifier = @enumFromInt(@intFromEnum(baseTy.specifier) + 4);
+            return baseTy;
         },
 
         .Char,
@@ -1556,13 +1549,13 @@ pub fn makeComplex(ty: Type) Type {
         .Int128,
         .UInt128,
         => {
-            base.specifier = @enumFromInt(@intFromEnum(base.specifier) + 13);
-            return base;
+            baseTy.specifier = @enumFromInt(@intFromEnum(baseTy.specifier) + 13);
+            return baseTy;
         },
 
         .BitInt => {
-            base.specifier = .ComplexBitInt;
-            return base;
+            baseTy.specifier = .ComplexBitInt;
+            return baseTy;
         },
 
         else => return ty,
@@ -1664,6 +1657,16 @@ pub fn validateCombinedType(ty: Type, p: *Parser, sourceToken: TokenIndex) Parse
     }
 }
 
+/// Use with caution
+pub fn base(ty: *Type) *Type {
+    return switch (ty.specifier) {
+        .TypeofType => ty.data.subType.base(),
+        .TypeofExpr => ty.data.expr.ty.base(),
+        .Attributed => ty.data.attributed.base.base(),
+        else => ty,
+    };
+}
+
 /// Return the attribute with the specified tag from the given type.
 /// If the type is a TypeofType or TypeofExpr, the search is performed on
 /// the subtype or the type of the expression, respectively.
@@ -1675,29 +1678,13 @@ pub fn validateCombinedType(ty: Type, p: *Parser, sourceToken: TokenIndex) Parse
 /// @param tag The attribute tag to search for.
 /// @return The attribute with the given tag if it exists, or null otherwise.
 pub fn getAttribute(ty: Type, comptime tag: Attribute.Tag) ?Attribute.ArgumentsForTag(tag) {
-    switch (ty.specifier) {
-        .TypeofType => return ty.data.subType.getAttribute(tag),
-        .TypeofExpr => return ty.data.expr.ty.getAttribute(tag),
-
-        .Attributed => {
-            for (ty.data.attributed.attributes) |attr| {
-                if (attr.tag == tag)
-                    return @field(attr.args, @tagName(tag));
-            }
-            return null;
-        },
-
-        else => return null,
+    var it = Attribute.Iterator.initType(ty);
+    while (it.next()) |item| {
+        const attrbute, _ = item;
+        if (attrbute.tag == tag)
+            return @field(attrbute.args, @tagName(tag));
     }
-}
-
-pub fn getAttributes(ty: Type) []const Attribute {
-    return switch (ty.specifier) {
-        .Attributed => ty.data.attributed.attributes,
-        .TypeofType => ty.data.subType.getAttributes(),
-        .TypeofExpr => ty.data.expr.ty.getAttributes(),
-        else => &.{},
-    };
+    return null;
 }
 
 pub fn getRecord(ty: Type) ?*const Type.Record {
@@ -1711,7 +1698,9 @@ pub fn getRecord(ty: Type) ?*const Type.Record {
 }
 
 pub fn hasAttribute(ty: Type, tag: Attribute.Tag) bool {
-    for (ty.getAttributes()) |attr| {
+    var it = Attribute.Iterator.initType(ty);
+    while (it.next()) |item| {
+        const attr, _ = item;
         if (attr.tag == tag) return true;
     }
     return false;
@@ -1769,8 +1758,8 @@ fn realIntegerConversion(lhs: Type, rhs: Type, comp: *const Compilation) Type {
 
 pub fn makeIntegerUnsigned(ty: Type) Type {
     // TODO discards attributed/typeof
-    var base = ty.canonicalize(.standard);
-    switch (base.specifier) {
+    var baseTy = ty.canonicalize(.standard);
+    switch (baseTy.specifier) {
         // zig fmt: off
         .UChar, .UShort, .UInt, .ULong, .ULongLong, .UInt128,
         .ComplexUChar, .ComplexUShort, .ComplexUInt, .ComplexULong, .ComplexULongLong, .ComplexUInt128,
@@ -1778,21 +1767,21 @@ pub fn makeIntegerUnsigned(ty: Type) Type {
         // zig fmt: on
 
         .Char, .ComplexChar => {
-            base.specifier = @enumFromInt(@intFromEnum(base.specifier) + 2);
-            return base;
+            baseTy.specifier = @enumFromInt(@intFromEnum(baseTy.specifier) + 2);
+            return baseTy;
         },
 
         // zig fmt: off
         .SChar, .Short, .Int, .Long, .LongLong, .Int128,
         .ComplexSChar, .ComplexShort, .ComplexInt, .ComplexLong, .ComplexLongLong, .ComplexInt128 => {
-            base.specifier = @enumFromInt(@intFromEnum(base.specifier) + 1);
-            return base;
+            baseTy.specifier = @enumFromInt(@intFromEnum(baseTy.specifier) + 1);
+            return baseTy;
         },
         // zig fmt: on
 
         .BitInt, .ComplexBitInt => {
-            base.data.int.signedness = .unsigned;
-            return base;
+            baseTy.data.int.signedness = .unsigned;
+            return baseTy;
         },
 
         else => unreachable,
@@ -2137,7 +2126,7 @@ pub fn dump(ty: Type, si: StringInterner, langOpts: LangOpts, w: anytype) @TypeO
         .Attributed => {
             if (ty.isDecayed()) try w.writeAll("*d:");
             try w.writeAll("attributed(");
-            try ty.data.attributed.base.dump(si, langOpts, w);
+            try ty.data.attributed.base.canonicalize(.standard).dump(si, langOpts, w);
             try w.writeAll(")");
         },
 

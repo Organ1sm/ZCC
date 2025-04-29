@@ -38,6 +38,57 @@ pub const Kind = enum {
     }
 };
 
+pub const Iterator = struct {
+    source: union(enum) {
+        ty: Type,
+        slice: []const Attribute,
+    },
+    index: usize,
+
+    pub fn initSlice(slice: ?[]const Attribute) Iterator {
+        return .{ .source = .{ .slice = slice orelse &.{} }, .index = 0 };
+    }
+
+    pub fn initType(ty: Type) Iterator {
+        return .{ .source = .{ .ty = ty }, .index = 0 };
+    }
+
+    /// returns the next attribute as well as its index within the slice or current type
+    /// The index can be used to determine when a nested type has been recursed into
+    pub fn next(self: *Iterator) ?struct { Attribute, usize } {
+        switch (self.source) {
+            .slice => |slice| {
+                if (self.index < slice.len) {
+                    defer self.index += 1;
+                    return .{ slice[self.index], self.index };
+                }
+            },
+            .ty => |ty| {
+                switch (ty.specifier) {
+                    .TypeofType => {
+                        self.* = .{ .source = .{ .ty = ty.data.subType.* }, .index = 0 };
+                        return self.next();
+                    },
+                    .TypeofExpr => {
+                        self.* = .{ .source = .{ .ty = ty.data.expr.ty }, .index = 0 };
+                        return self.next();
+                    },
+                    .Attributed => {
+                        if (self.index < ty.data.attributed.attributes.len) {
+                            defer self.index += 1;
+                            return .{ ty.data.attributed.attributes[self.index], self.index };
+                        }
+                        self.* = .{ .source = .{ .ty = ty.data.attributed.base }, .index = 0 };
+                        return self.next();
+                    },
+                    else => {},
+                }
+            },
+        }
+        return null;
+    }
+};
+
 pub const ArgumentType = enum {
     string,
     identifier,
@@ -775,9 +826,6 @@ pub fn applyVariableAttributes(p: *Parser, ty: Type, attrBufferStart: usize, tag
     p.attrApplicationBuffer.items.len = 0;
 
     var baseTy = ty;
-    if (baseTy.specifier == .Attributed)
-        baseTy = baseTy.data.attributed.base;
-
     var common = false;
     var nocommon = false;
     for (attrs, toks) |attr, tok| switch (attr.tag) {
@@ -830,14 +878,7 @@ pub fn applyVariableAttributes(p: *Parser, ty: Type, attrBufferStart: usize, tag
         else => try ignoredAttrErr(p, tok, attr.tag, "variables"),
     };
 
-    const existing = ty.getAttributes();
-    if (existing.len == 0 and p.attrApplicationBuffer.items.len == 0)
-        return baseTy;
-    if (existing.len == 0)
-        return baseTy.withAttributes(p.arena, p.attrApplicationBuffer.items);
-
-    const attributedTy = try Type.Attributed.create(p.arena, baseTy, existing, p.attrApplicationBuffer.items);
-    return Type{ .specifier = .Attributed, .data = .{ .attributed = attributedTy } };
+    return baseTy.withAttributes(p.arena, p.attrApplicationBuffer.items);
 }
 
 pub fn applyFieldAttributes(p: *Parser, fieldTy: *Type, attrBufferStart: usize) ![]const Attribute {
@@ -866,9 +907,6 @@ pub fn applyTypeAttributes(p: *Parser, ty: Type, attrBufferStart: usize, tag: ?D
     p.attrApplicationBuffer.items.len = 0;
 
     var baseTy = ty;
-    if (baseTy.specifier == .Attributed)
-        baseTy = baseTy.data.attributed.base;
-
     for (attrs, toks) |attr, tok| switch (attr.tag) {
         .@"packed",
         .may_alias,
@@ -898,18 +936,7 @@ pub fn applyTypeAttributes(p: *Parser, ty: Type, attrBufferStart: usize, tag: ?D
         else => try ignoredAttrErr(p, tok, attr.tag, "types"),
     };
 
-    const existing = ty.getAttributes();
-    // TODO: the alignment annotation on a type should override
-    // the decl it refers to. This might not be true for others.  Maybe bug.
-
-    // if there are annotations on this type def use those.
-    if (p.attrApplicationBuffer.items.len > 0) {
-        return try baseTy.withAttributes(p.arena, p.attrApplicationBuffer.items);
-    } else if (existing.len > 0) {
-        // else use the ones on the typedef decl we were refering to.
-        return try baseTy.withAttributes(p.arena, existing);
-    }
-    return baseTy;
+    return baseTy.withAttributes(p.arena, p.attrApplicationBuffer.items);
 }
 
 pub fn applyFunctionAttributes(p: *Parser, ty: Type, attrBufferStart: usize) !Type {
@@ -917,10 +944,7 @@ pub fn applyFunctionAttributes(p: *Parser, ty: Type, attrBufferStart: usize) !Ty
     const toks = p.attrBuffer.items(.tok)[attrBufferStart..];
     p.attrApplicationBuffer.items.len = 0;
 
-    var baseTy = ty;
-    if (baseTy.specifier == .Attributed)
-        baseTy = baseTy.data.attributed.base;
-
+    const baseTy = ty;
     var hot = false;
     var cold = false;
     var @"noinline" = false;
@@ -1119,6 +1143,7 @@ fn applyTransparentUnion(attr: Attribute, p: *Parser, token: TokenIndex, ty: Typ
 }
 
 fn applyVectorSize(attr: Attribute, p: *Parser, tok: TokenIndex, ty: *Type) !void {
+    const base = ty.base();
     if (!(ty.isInt() or ty.isFloat()) or !ty.isReal()) {
         const originTy = try p.typeStr(ty.*);
         ty.* = Type.Invalid;
@@ -1134,7 +1159,7 @@ fn applyVectorSize(attr: Attribute, p: *Parser, tok: TokenIndex, ty: *Type) !voi
 
     const arrTy = try p.arena.create(Type.Array);
     arrTy.* = .{ .elem = ty.*, .len = vec_size };
-    ty.* = Type{
+    base.* = .{
         .specifier = .Vector,
         .data = .{ .array = arrTy },
     };
