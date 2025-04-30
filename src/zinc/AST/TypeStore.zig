@@ -2,7 +2,9 @@ pub const std = @import("std");
 
 const Attribute = @import("../Lexer//Attribute.zig");
 const Compilation = @import("../Basic/Compilation.zig");
+const LangOpts = @import("../Basic/LangOpts.zig");
 const RecordLayout = @import("../Basic/RecordLayout.zig");
+const Parser = @import("../Parser/Parser.zig");
 const StringInterner = @import("../Basic/StringInterner.zig");
 const StringId = StringInterner.StringId;
 const TargetUtil = @import("../Basic/Target.zig");
@@ -1197,3 +1199,797 @@ fn generateVaListType(ts: *TypeStore, comp: *Compilation) !QualType {
         },
     }
 }
+
+pub const Builder = struct {
+    parser: *Parser,
+
+    @"const": ?TokenIndex = null,
+    atomic: ?TokenIndex = null,
+    @"volatile": ?TokenIndex = null,
+    restrict: ?TokenIndex = null,
+
+    complexToken: ?TokenIndex = null,
+    bitIntToken: ?TokenIndex = null,
+    typedef: bool = false,
+    typeof: bool = false,
+
+    type: Specifier = .none,
+    /// When true an error is returned instead of adding a diagnostic message.
+    /// Used for trying to combine typedef types.
+    errorOnInvalid: bool = false,
+
+    pub const Specifier = union(enum) {
+        None,
+        Void,
+        /// GNU __auto_type extension
+        AutoType,
+        C23Auto,
+        NullptrTy,
+        Bool,
+        Char,
+        SChar,
+        UChar,
+        ComplexChar,
+        ComplexSChar,
+        ComplexUChar,
+
+        Unsigned,
+        Signed,
+        Short,
+        SShort,
+        UShort,
+        ShortInt,
+        SShortInt,
+        UShortInt,
+        Int,
+        SInt,
+        UInt,
+        Long,
+        SLong,
+        ULong,
+        LongInt,
+        SLongInt,
+        ULongInt,
+        LongLong,
+        SLongLong,
+        ULongLong,
+        LongLongInt,
+        SLongLongInt,
+        ULongLongInt,
+        Int128,
+        SInt128,
+        UInt128,
+        ComplexUnsigned,
+        ComplexSigned,
+        ComplexShort,
+        ComplexSshort,
+        ComplexUshort,
+        ComplexShortInt,
+        ComplexSshortInt,
+        ComplexUshortInt,
+        ComplexInt,
+        ComplexSint,
+        ComplexUint,
+        ComplexLong,
+        ComplexSlong,
+        ComplexUlong,
+        ComplexLongInt,
+        ComplexSlongInt,
+        ComplexUlongInt,
+        ComplexLongLong,
+        ComplexSlongLong,
+        ComplexUlongLong,
+        ComplexLongLongInt,
+        ComplexSlongLongInt,
+        ComplexUlongLongInt,
+        ComplexInt128,
+        ComplexSint128,
+        ComplexUint128,
+        BitInt: u64,
+        SBitInt: u64,
+        UBitInt: u64,
+        ComplexBitInt: u64,
+        ComplexSbitInt: u64,
+        ComplexUbitInt: u64,
+
+        FP16,
+        Float16,
+        Float,
+        Double,
+        LongDouble,
+        Float128,
+        Complex,
+        ComplexFloat16,
+        ComplexFloat,
+        ComplexDouble,
+        ComplexLongDouble,
+        ComplexFloat128,
+
+        // Any not simply constructed from specifier keywords.
+        other: QualType,
+
+        pub fn str(spec: Builder.Specifier, langopts: LangOpts) ?[]const u8 {
+            return switch (spec) {
+                .None => unreachable,
+                .Void => "void",
+                .AutoType => "__auto_type",
+                .C23Auto => "auto",
+                .NullptrTy => "nullptr_t",
+                .Bool => if (langopts.standard.atLeast(.c23)) "bool" else "_Bool",
+                .Char => "char",
+                .SChar => "signed char",
+                .UChar => "unsigned char",
+                .Unsigned => "unsigned",
+                .signed => "signed",
+                .short => "short",
+                .UShort => "unsigned short",
+                .SShort => "signed short",
+                .ShortInt => "short int",
+                .SShortInt => "signed short int",
+                .UShortInt => "unsigned short int",
+                .Int => "int",
+                .SInt => "signed int",
+                .UInt => "unsigned int",
+                .Long => "long",
+                .SLong => "signed long",
+                .ULong => "unsigned long",
+                .LongInt => "long int",
+                .SLongInt => "signed long int",
+                .ULongInt => "unsigned long int",
+                .LongLong => "long long",
+                .SLongLong => "signed long long",
+                .ULongLong => "unsigned long long",
+                .LongLongInt => "long long int",
+                .SLongLongInt => "signed long long int",
+                .ULongLongInt => "unsigned long long int",
+                .Int128 => "__int128",
+                .SInt128 => "signed __int128",
+                .UInt128 => "unsigned __int128",
+                .ComplexChar => "_Complex char",
+                .ComplexSChar => "_Complex signed char",
+                .ComplexUChar => "_Complex unsigned char",
+                .ComplexUnsigned => "_Complex unsigned",
+                .ComplexSigned => "_Complex signed",
+                .ComplexShort => "_Complex short",
+                .ComplexUshort => "_Complex unsigned short",
+                .ComplexSshort => "_Complex signed short",
+                .ComplexShortInt => "_Complex short int",
+                .ComplexSshortInt => "_Complex signed short int",
+                .ComplexUshortInt => "_Complex unsigned short int",
+                .ComplexInt => "_Complex int",
+                .ComplexSint => "_Complex signed int",
+                .ComplexUint => "_Complex unsigned int",
+                .ComplexLong => "_Complex long",
+                .ComplexSlong => "_Complex signed long",
+                .ComplexUlong => "_Complex unsigned long",
+                .ComplexLongInt => "_Complex long int",
+                .ComplexSlongInt => "_Complex signed long int",
+                .ComplexUlongInt => "_Complex unsigned long int",
+                .ComplexLongLong => "_Complex long long",
+                .ComplexSlongLong => "_Complex signed long long",
+                .ComplexUlongLong => "_Complex unsigned long long",
+                .ComplexLongLongInt => "_Complex long long int",
+                .ComplexSlongLongInt => "_Complex signed long long int",
+                .ComplexUlongLongInt => "_Complex unsigned long long int",
+                .ComplexInt128 => "_Complex __int128",
+                .ComplexSint128 => "_Complex signed __int128",
+                .ComplexUint128 => "_Complex unsigned __int128",
+
+                .FP16 => "__fp16",
+                .Float16 => "_Float16",
+                .Float => "float",
+                .Double => "double",
+                .LongDouble => "long double",
+                .Float128 => "__float128",
+                .Complex => "_Complex",
+                .ComplexFloat16 => "_Complex _Float16",
+                .ComplexFloat => "_Complex float",
+                .ComplexDouble => "_Complex double",
+                .ComplexLongDouble => "_Complex long double",
+                .ComplexFloat128 => "_Complex __float128",
+
+                else => null,
+            };
+        }
+    };
+
+    pub fn finish(b: Builder) Parser.Error!QualType {
+        const qt: QualType = switch (b.type) {
+            .None => blk: {
+                if (b.parser.comp.langOpts.standard.atLeast(.c23)) {
+                    try b.parser.err(.missing_type_specifier_c23);
+                } else {
+                    try b.parser.err(.missing_type_specifier);
+                }
+                break :blk .int;
+            },
+            .void => .void,
+            .AutoType => .autoType,
+            .C23Auto => .c23Auto,
+            .NullptrTy => unreachable, // nullptr_t can only be accessed via typeof(nullptr)
+            .Bool => .bool,
+            .Char => .char,
+            .SChar => .schar,
+            .UChar => .uchar,
+
+            .Unsigned => .uint,
+            .Signed => .int,
+            .ShortInt, .SShortInt, .Short, .SShort => .short,
+            .UShort, .UShortInt => .ushort,
+            .Int, .SInt => .int,
+            .UInt => .uint,
+            .Long, .SLong, .LongInt, .SLongInt => .long,
+            .ULong, .ULongInt => .ulong,
+            .LongLong, .SLongLong, .LongLongInt, .SLongLongInt => .longlong,
+            .ULongLong, .ULongLongInt => .ulonglong,
+            .Int128, .SInt128 => .int128,
+            .UInt128 => .uint128,
+
+            .ComplexChar,
+            .ComplexSChar,
+            .ComplexUChar,
+            .ComplexUnsigned,
+            .ComplexSigned,
+            .ComplexShortInt,
+            .ComplexSshortInt,
+            .ComplexShort,
+            .ComplexSshort,
+            .ComplexUshort,
+            .ComplexUshortInt,
+            .ComplexInt,
+            .ComplexSint,
+            .ComplexUint,
+            .ComplexLong,
+            .ComplexSlong,
+            .ComplexLongInt,
+            .ComplexSlongInt,
+            .ComplexUlong,
+            .ComplexUlongInt,
+            .ComplexLongLong,
+            .ComplexSlongLong,
+            .ComplexLongLongInt,
+            .ComplexSlongLongInt,
+            .ComplexUlongLong,
+            .ComplexUlongLongInt,
+            .ComplexInt128,
+            .ComplexSint128,
+            .ComplexUint128,
+            => blk: {
+                const baseQt: QualType = switch (b.type) {
+                    .ComplexChar => .char,
+                    .ComplexSChar => .schar,
+                    .ComplexUChar => .uchar,
+                    .ComplexUnsigned => .uint,
+                    .ComplexSigned => .int,
+                    .ComplexShortInt, .ComplexSshortInt, .ComplexShort, .ComplexSshort => .short,
+                    .ComplexUshort, .ComplexUshortInt => .ushort,
+                    .ComplexInt, .ComplexSint => .int,
+                    .ComplexUint => .uint,
+                    .ComplexLong, .ComplexSlong, .ComplexLongInt, .ComplexSlongInt => .long,
+                    .ComplexUlong, .ComplexUlongInt => .ulong,
+                    .ComplexLongLong, .ComplexSlongLong, .ComplexLongLongInt, .ComplexSlongLongInt => .longlong,
+                    .ComplexUlongLong, .ComplexUlongLongInt => .ulonglong,
+                    .ComplexInt128, .ComplexSint128 => .int128,
+                    .ComplexUint128 => .uint128,
+                    else => unreachable,
+                };
+                if (b.complexToken) |tok| try b.parser.errToken(.complex_int, tok);
+                break :blk try baseQt.toComplex(b.parser.comp);
+            },
+
+            .BitInt, .SBitInt, .UBitInt, .ComplexBitInt, .ComplexUbitInt, .ComplexSbitInt => |bits| blk: {
+                const unsigned = b.type == .UBitInt or b.type == .ComplexUbitInt;
+                const complex = b.type == .ComplexBitInt or b.type == .ComplexUbitInt or b.type == .ComplexSbitInt;
+                const complexStr = if (complex) "_Complex " else "";
+
+                if (unsigned) {
+                    if (bits < 1) {
+                        try b.parser.errStr(.unsigned_bit_int_too_small, b.bitIntToken.?, complexStr);
+                        return .invalid;
+                    }
+                } else {
+                    if (bits < 2) {
+                        try b.parser.errStr(.signed_bit_int_too_small, b.bitIntToken.?, complexStr);
+                        return .invalid;
+                    }
+                }
+                if (bits > Compilation.BitIntMaxBits) {
+                    try b.parser.errStr(if (unsigned) .unsigned_bit_int_too_big else .signed_bit_int_too_big, b.bitIntToken.?, complexStr);
+                    return .invalid;
+                }
+                if (b.complexToken) |tok| try b.parser.errToken(.complex_int, tok);
+
+                const qt = try b.parser.comp.typeStore.put(b.parser.gpa, .{
+                    .bitInt = .{
+                        .signedness = if (unsigned) .unsigned else .signed,
+                        .bits = @intCast(bits),
+                    },
+                });
+                break :blk if (complex) try qt.toComplex(b.parser.comp) else qt;
+            },
+
+            .FP16 => .fp16,
+            .Float16 => .float16,
+            .Float => .float,
+            .Double => .double,
+            .LongDouble => .longDouble,
+            .Float128 => .float128,
+
+            .ComplexFloat16,
+            .ComplexFloat,
+            .ComplexDouble,
+            .ComplexLongDouble,
+            .ComplexFloat128,
+            .Complex,
+            => blk: {
+                const baseQt: QualType = switch (b.type) {
+                    .ComplexFloat16 => .float16,
+                    .ComplexFloat => .float,
+                    .ComplexDouble => .double,
+                    .ComplexLongDouble => .longDouble,
+                    .ComplexFloat128 => .float128,
+                    .Complex => .double,
+                    else => unreachable,
+                };
+                if (b.type == .complex) try b.parser.errToken(.plain_complex, b.parser.tokenIdx - 1);
+                break :blk try baseQt.toComplex(b.parser.comp);
+            },
+
+            .other => |qt| qt,
+        };
+        return b.finishQuals(qt);
+    }
+
+    pub fn finishQuals(b: Builder, qt: QualType) !QualType {
+        var resultQt = qt;
+        if (b.@"const" != null) resultQt.@"const" = true;
+        if (b.@"volatile" != null) resultQt.@"volatile" = true;
+
+        if (b.restrict) |restrictToken| {
+            switch (qt.base(b.parser.comp).type) {
+                .array, .pointer => resultQt.restrict = true,
+                else => {
+                    try b.parser.errStr(.restrict_non_pointer, restrictToken, try b.parser.typeStr(qt));
+                },
+            }
+        }
+
+        if (b.atomic) |atomicToken| {
+            _ = atomicToken;
+            // if (qt.isArray()) try b.parser.errStr(.atomic_array, atomic_tok, try b.parser.typeStr(qt));
+            // if (qt.isFunc()) try b.parser.errStr(.atomic_func, atomic_tok, try b.parser.typeStr(qt));
+            // if (qt.hasIncompleteSize()) try b.parser.errStr(.atomic_incomplete, atomic_tok, try b.parser.typeStr(qt));
+            // TODO erro if quals
+            // TODO make atomic
+        }
+        return resultQt;
+    }
+
+    fn cannotCombine(b: Builder, sourceToken: TokenIndex) !void {
+        const typeStr = b.type.str(b.parser.comp.langOpts) orelse try b.parser.typeStr(try b.finish());
+        try b.parser.errExtra(.cannot_combine_spec, sourceToken, .{ .str = typeStr });
+    }
+
+    fn duplicateSpec(b: *Builder, sourceToken: TokenIndex, spec: []const u8) !void {
+        if (b.parser.comp.langOpts.emulate != .clang) return b.cannotCombine(sourceToken);
+        try b.parser.errStr(.duplicate_decl_spec, b.parser.tokenIdx, spec);
+    }
+
+    pub fn combineFromTypeof(b: *Builder, new: QualType, sourceToken: TokenIndex) Compilation.Error!void {
+        if (b.typedef) return b.parser.errStr(.cannot_combine_spec, sourceToken, "type-name");
+        if (b.typeof) return b.parser.errStr(.cannot_combine_spec, sourceToken, "typeof");
+        if (b.type != .None) return b.parser.errStr(.cannot_combine_with_typeof, sourceToken, @tagName(b.type));
+        b.type = .{ .other = new };
+    }
+
+    /// Try to combine type from typedef, returns true if successful.
+    pub fn combineTypedef(b: *Builder, typedefQt: QualType) bool {
+        if (b.type != .none) return false;
+
+        b.typedef = true;
+        b.type = .{ .other = typedefQt };
+        return true;
+    }
+
+    pub fn combine(b: *Builder, new: Builder.Specifier, sourceToken: TokenIndex) !void {
+        if (b.typeof)
+            try b.parser.errStr(.cannot_combine_with_typeof, sourceToken, @tagName(new));
+
+        if (b.typedef)
+            try b.parser.errStr(.cannot_combine_spec, sourceToken, "type-name");
+
+        switch (new) {
+            .Complex => b.complexToken = sourceToken,
+            .BitInt => b.bitIntToken = sourceToken,
+            else => {},
+        }
+
+        if (new == .Int128 and !TargetUtil.hasInt128(b.parser.comp.target)) {
+            try b.parser.errStr(.type_not_supported_on_target, sourceToken, "__int128");
+        }
+
+        b.type = switch (new) {
+            else => switch (b.type) {
+                .None => new,
+                else => return b.cannotCombine(sourceToken),
+            },
+            .Signed => switch (b.type) {
+                .None => .Signed,
+                .Char => .SChar,
+                .Short => .SShort,
+                .ShortInt => .SShortInt,
+                .Int => .SInt,
+                .Long => .SLong,
+                .LongInt => .SLongInt,
+                .LongLong => .SLongLong,
+                .LongLongInt => .SLongLongInt,
+                .Int128 => .SInt128,
+                .BitInt => |bits| .{ .SBitInt = bits },
+
+                .Complex => .ComplexSigned,
+                .ComplexChar => .ComplexSChar,
+                .ComplexShort => .ComplexSshort,
+                .ComplexShortInt => .ComplexSshortInt,
+                .ComplexInt => .ComplexSint,
+                .ComplexLong => .ComplexSlong,
+                .ComplexLongInt => .ComplexSlongInt,
+                .ComplexLongLong => .ComplexSlongLong,
+                .ComplexLongLongInt => .ComplexSlongLongInt,
+                .ComplexInt128 => .ComplexSint128,
+                .ComplexBitInt => |bits| .{ .ComplexSbitInt = bits },
+
+                .Signed,
+                .SChar,
+                .SShort,
+                .SShortInt,
+                .SInt,
+                .SLong,
+                .SLongInt,
+                .SLongLong,
+                .SLongLongInt,
+                .SInt128,
+                .SBitInt,
+                .ComplexSChar,
+                .ComplexSigned,
+                .ComplexSshort,
+                .ComplexSshortInt,
+                .ComplexSint,
+                .ComplexSlong,
+                .ComplexSlongInt,
+                .ComplexSlongLong,
+                .ComplexSlongLongInt,
+                .ComplexSint128,
+                .ComplexSbitInt,
+                => return b.duplicateSpec(sourceToken, "signed"),
+                else => return b.cannotCombine(sourceToken),
+            },
+
+            .Unsigned => switch (b.type) {
+                .None => .Unsigned,
+                .Char => .UChar,
+                .Short => .UShort,
+                .ShortInt => .UShortInt,
+                .Int => .UInt,
+                .Long => .ULong,
+                .LongInt => .ULongInt,
+                .LongLong => .ULongLong,
+                .LongLongInt => .ULongLongInt,
+                .Int128 => .UInt128,
+                .BitInt => |bits| .{ .UBitInt = bits },
+
+                .Complex => .ComplexUnsigned,
+                .ComplexChar => .ComplexUChar,
+                .ComplexShort => .ComplexUshort,
+                .ComplexShortInt => .ComplexUshortInt,
+                .ComplexInt => .ComplexUint,
+                .ComplexLong => .ComplexUlong,
+                .ComplexLongInt => .ComplexUlongInt,
+                .ComplexLongLong => .ComplexUlongLong,
+                .ComplexLongLongInt => .ComplexUlongLongInt,
+                .ComplexInt128 => .ComplexUint128,
+                .ComplexBitInt => |bits| .{ .ComplexUbitInt = bits },
+
+                .Unsigned,
+                .UShort,
+                .UShortInt,
+                .UInt,
+                .ULong,
+                .ULongInt,
+                .ULongLong,
+                .ULongLongInt,
+                .UInt128,
+                .UBitInt,
+                .ComplexUChar,
+                .ComplexUnsigned,
+                .ComplexUshort,
+                .ComplexUshortInt,
+                .ComplexUint,
+                .ComplexUlong,
+                .ComplexUlongInt,
+                .ComplexUlongLong,
+                .ComplexUlongLongInt,
+                .ComplexUint128,
+                .ComplexUbitInt,
+                => return b.duplicateSpec(sourceToken, "unsigned"),
+                else => return b.cannotCombine(sourceToken),
+            },
+
+            .Char => switch (b.type) {
+                .None => .Char,
+                .Unsigned => .SChar,
+                .Signed => .Char,
+                .Complex => .ComplexChar,
+                .ComplexSigned => .SChar,
+                .ComplexUnsigned => .UChar,
+                else => return b.cannotCombine(sourceToken),
+            },
+
+            .Short => switch (b.type) {
+                .None => .Short,
+                .Unsigned => .UShort,
+                .Signed => .SShort,
+                .Int => .ShortInt,
+                .SInt => .SShortInt,
+                .UInt => .UShortInt,
+                .Complex => .ComplexShort,
+                .ComplexSigned => .SShort,
+                .ComplexUnsigned => .UShort,
+                else => return b.cannotCombine(sourceToken),
+            },
+
+            .Int => switch (b.type) {
+                .None => .Int,
+                .Signed => .SInt,
+                .Unsigned => .UInt,
+                .Short => .ShortInt,
+                .SShort => .SShortInt,
+                .UShort => .UShortInt,
+                .Long => .LongInt,
+                .SLong => .SLongInt,
+                .ULong => .ULongInt,
+                .LongLong => .LongLongInt,
+                .SLongLong => .SLongLongInt,
+                .ULongLong => .ULongLongInt,
+                .Complex => .ComplexInt,
+                .ComplexSigned => .ComplexSint,
+                .ComplexUnsigned => .ComplexUint,
+                .ComplexShort => .ComplexShortInt,
+                .ComplexSshort => .ComplexSshortInt,
+                .ComplexUshort => .ComplexUshortInt,
+                .ComplexLong => .ComplexLongInt,
+                .ComplexSlong => .ComplexSlongInt,
+                .ComplexUlong => .ComplexUlongInt,
+                .ComplexLongLong => .ComplexLongLongInt,
+                .ComplexSlongLong => .ComplexSlongLongInt,
+                .ComplexUlongLong => .ComplexUlongLongInt,
+                else => return b.cannotCombine(sourceToken),
+            },
+
+            .Long => switch (b.type) {
+                .None => .Long,
+                .Double => .LongDouble,
+                .Unsigned => .ULong,
+                .Signed => .Long,
+                .Int => .LongInt,
+                .SInt => .SLongInt,
+                .Long => .LongLong,
+                .SLong => .SLongLong,
+                .ULong => .ULongLong,
+                .Complex => .ComplexLong,
+                .ComplexSigned => .ComplexSlong,
+                .ComplexUnsigned => .ComplexUlong,
+                .ComplexLong => .ComplexLongLong,
+                .ComplexSlong => .ComplexSlongLong,
+                .ComplexUlong => .ComplexUlongLong,
+                .ComplexDouble => .ComplexLongDouble,
+                else => return b.cannotCombine(sourceToken),
+            },
+
+            .Int128 => switch (b.type) {
+                .None => .Int128,
+                .Unsigned => .UInt128,
+                .Signed => .SInt128,
+                .Complex => .ComplexInt128,
+                .ComplexSigned => .ComplexSint128,
+                .ComplexUnsigned => .ComplexUint128,
+                else => return b.cannotCombine(sourceToken),
+            },
+
+            .BitInt => switch (b.type) {
+                .None => .{ .BitInt = new.BitInt },
+                .Unsigned => .{ .UBitInt = new.BitInt },
+                .Signed => .{ .SBitInt = new.BitInt },
+                .Complex => .{ .ComplexBitInt = new.BitInt },
+                .ComplexSigned => .{ .ComplexSbitInt = new.BitInt },
+                .ComplexUnsigned => .{ .ComplexUbitInt = new.BitInt },
+                else => return b.cannotCombine(sourceToken),
+            },
+
+            .AutoType => switch (b.type) {
+                .None => .AutoType,
+                else => return b.cannotCombine(sourceToken),
+            },
+            .C23Auto => switch (b.type) {
+                .None => .C23Auto,
+                else => return b.cannotCombine(sourceToken),
+            },
+            .FP16 => switch (b.type) {
+                .None => .FP16,
+                else => return b.cannotCombine(sourceToken),
+            },
+            .Float16 => switch (b.type) {
+                .None => .Float16,
+                .Complex => .ComplexFloat16,
+                else => return b.cannotCombine(sourceToken),
+            },
+            .Float => switch (b.type) {
+                .None => .Float,
+                .Complex => .ComplexFloat,
+                else => return b.cannotCombine(sourceToken),
+            },
+            .Double => switch (b.type) {
+                .None => .Double,
+                .Long => .LongDouble,
+                .Complex => .ComplexDouble,
+                .ComplexLong => .ComplexLongDouble,
+                else => return b.cannotCombine(sourceToken),
+            },
+            .Float128 => switch (b.type) {
+                .None => .Float128,
+                .Complex => .ComplexFloat128,
+                else => return b.cannotCombine(sourceToken),
+            },
+            .Complex => switch (b.type) {
+                .None => .Complex,
+                .Float16 => .ComplexFloat16,
+                .Float => .ComplexFloat,
+                .Double => .ComplexDouble,
+                .LongDouble => .ComplexLongDouble,
+                .Float128 => .ComplexFloat128,
+                .Char => .ComplexChar,
+                .SChar => .ComplexSChar,
+                .UChar => .ComplexUChar,
+                .Unsigned => .ComplexUnsigned,
+                .Signed => .ComplexSigned,
+                .Short => .ComplexShort,
+                .SShort => .ComplexSshort,
+                .UShort => .ComplexUshort,
+                .ShortInt => .ComplexShortInt,
+                .SShortInt => .ComplexSshortInt,
+                .UShortInt => .ComplexUshortInt,
+                .Int => .ComplexInt,
+                .SInt => .ComplexSint,
+                .UInt => .ComplexUint,
+                .Long => .ComplexLong,
+                .SLong => .ComplexSlong,
+                .ULong => .ComplexUlong,
+                .LongInt => .ComplexLongInt,
+                .SLongInt => .ComplexSlongInt,
+                .ULongInt => .ComplexUlongInt,
+                .LongLong => .ComplexLongLong,
+                .SLongLong => .ComplexSlongLong,
+                .ULongLong => .ComplexUlongLong,
+                .LongLongInt => .ComplexLongLongInt,
+                .SLongLongInt => .ComplexSlongLongInt,
+                .ULongLongInt => .ComplexUlongLongInt,
+                .Int128 => .ComplexInt128,
+                .SInt128 => .ComplexSint128,
+                .UInt128 => .ComplexUint128,
+
+                .BitInt => |bits| .{ .ComplexBitInt = bits },
+                .SBitInt => |bits| .{ .ComplexSbitInt = bits },
+                .UBitInt => |bits| .{ .ComplexUbitInt = bits },
+
+                .Complex,
+                .ComplexFloat,
+                .ComplexDouble,
+                .ComplexLongDouble,
+                .ComplexFloat128,
+                .ComplexChar,
+                .ComplexSChar,
+                .ComplexUchar,
+                .ComplexUnsigned,
+                .ComplexSigned,
+                .ComplexShort,
+                .ComplexSshort,
+                .ComplexUshort,
+                .ComplexShortInt,
+                .ComplexSshortInt,
+                .ComplexUshortInt,
+                .ComplexInt,
+                .ComplexSint,
+                .ComplexUint,
+                .ComplexLong,
+                .ComplexSlong,
+                .ComplexUlong,
+                .ComplexLongInt,
+                .ComplexSlongInt,
+                .ComplexUlongInt,
+                .ComplexLongLong,
+                .ComplexSlongLong,
+                .ComplexUlongLong,
+                .ComplexLongLongInt,
+                .ComplexSlongLongInt,
+                .ComplexUlongLongInt,
+                .ComplexInt128,
+                .ComplexSint128,
+                .ComplexUint128,
+                .ComplexBitInt,
+                .ComplexSbitInt,
+                .ComplexUbitInt,
+                => return b.duplicateSpec(sourceToken, "_Complex"),
+                else => return b.cannotCombine(sourceToken),
+            },
+        };
+    }
+
+    pub fn fromType(comp: *const Compilation, qt: QualType) Builder.Specifier {
+        return switch (qt.base(comp).type) {
+            .void => .Void,
+            .nullptrTy => .NullptrTy,
+            .bool => .Bool,
+            .int => |int| switch (int) {
+                .Char => .Char,
+                .SChar => .SChar,
+                .UChar => .UChar,
+                .Short => .Short,
+                .UShort => .UShort,
+                .Int => .Int,
+                .UInt => .UInt,
+                .Long => .Long,
+                .ULong => .ULong,
+                .LongLong => .LongLong,
+                .ULongLong => .ULongLong,
+                .Int128 => .Int128,
+                .UInt128 => .UInt128,
+            },
+
+            .bitInt => |bitInt| if (bitInt.signedness == .unsigned) {
+                return .{ .UBitInt = bitInt.bits };
+            } else {
+                return .{ .BitInt = bitInt.bits };
+            },
+
+            .float => |float| switch (float) {
+                .FP16 => .FP16,
+                .Float16 => .Float16,
+                .Float => .Float,
+                .Double => .Double,
+                .LongDouble => .LongDouble,
+                .Float128 => .Float128,
+            },
+            .complex => |complex| switch (complex.base(comp).type) {
+                .int => |int| switch (int) {
+                    .Char => .ComplexChar,
+                    .SChar => .ComplexSChar,
+                    .UChar => .ComplexUChar,
+                    .Short => .ComplexShort,
+                    .UShort => .ComplexUshort,
+                    .Int => .ComplexInt,
+                    .UInt => .ComplexUint,
+                    .Long => .ComplexLong,
+                    .ULong => .ComplexUlong,
+                    .LongLong => .ComplexLongLong,
+                    .ULongLong => .ComplexUlongLong,
+                    .Int128 => .ComplexInt128,
+                    .UInt128 => .ComplexUint128,
+                },
+                .bitInt => |bitInt| if (bitInt.signedness == .unsigned) {
+                    return .{ .ComplexUbitInt = bitInt.bits };
+                } else {
+                    return .{ .ComplexBitInt = bitInt.bits };
+                },
+                .float => |float| switch (float) {
+                    .FP16 => unreachable,
+                    .Float16 => .Float16,
+                    .Float => .Float,
+                    .Double => .Double,
+                    .LongDouble => .LongDouble,
+                    .Float128 => .Float128,
+                },
+                else => unreachable,
+            },
+            else => .{ .other = qt },
+        };
+    }
+};
