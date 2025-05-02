@@ -184,12 +184,12 @@ pub fn floatToInt(v: *Value, destTy: QualType, comp: *Compilation) !FloatToIntCh
     const floatVal = v.toFloat(f128, comp);
     const wasZero = floatVal == 0;
 
-    if (destTy.is(.Bool)) {
+    if (destTy.is(comp, .Bool)) {
         const wasOne = floatVal == 1.0;
         v.* = fromBool(!wasZero);
         if (wasZero or wasOne) return .none;
         return .valueChanged;
-    } else if (destTy.isUnsignedInt(comp) and v.compare(.lt, zero, comp)) {
+    } else if (destTy.isUnsignedInt(comp) and floatVal < 0) {
         v.* = zero;
         return .outOfRange;
     }

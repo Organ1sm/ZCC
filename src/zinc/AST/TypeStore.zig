@@ -131,6 +131,31 @@ pub const QualType = packed struct(u32) {
         return qt._index == .Invalid;
     }
 
+    pub fn isAutoType(qt: QualType) bool {
+        return qt._index == .AutoType;
+    }
+
+    pub fn isC23Auto(qt: QualType) bool {
+        return qt._index == .C23Auto;
+    }
+
+    pub fn isQualified(qt: QualType) bool {
+        return qt.@"const" or qt.@"volatile" or qt.restrict;
+    }
+
+    pub fn unqualified(qt: QualType) QualType {
+        return .{ ._index = qt._index };
+    }
+
+    pub fn withQualifiers(target: QualType, quals_from: QualType) QualType {
+        return .{
+            ._index = target._index,
+            .@"const" = quals_from.@"const",
+            .@"volatile" = quals_from.@"volatile",
+            .restrict = quals_from.restrict,
+        };
+    }
+
     pub fn @"type"(qt: QualType, comp: *const Compilation) Type {
         switch (qt._index) {
             .Invalid => unreachable,
@@ -177,16 +202,55 @@ pub const QualType = packed struct(u32) {
                 },
             },
 
-            .Func,
-            .FuncVariadic,
-            .FuncOldStyle,
-            .FuncZero,
-            .FuncVariadicZero,
-            .FuncOldStyleZero,
+            .FuncZero => .{
+                .func = .{
+                    .returnType = @bitCast(repr.data[0]),
+                    .kind = .Normal,
+                    .params = &.{},
+                },
+            },
+            .FuncVariadicZero => .{
+                .func = .{
+                    .returnType = @bitCast(repr.data[0]),
+                    .kind = .Variadic,
+                    .params = &.{},
+                },
+            },
+
+            .FuncOldStyleOne => .{
+                .func = .{
+                    .returnType = @bitCast(repr.data[0]),
+                    .kind = .OldStyle,
+                    .params = &.{},
+                },
+            },
+
             .FuncOne,
             .FuncVariadicOne,
             .FuncOldStyleOne,
-            => @panic("TODO"),
+            .Func,
+            .FuncVariadic,
+            .FuncOldStyle,
+            => {
+                const paramSize = 3;
+                const paramsLen = switch (repr.tag) {
+                    .FuncOne, .FuncVariadicOne, .FuncOldStyleOne => 1 * paramSize,
+                    .Func, .FuncVariadic, .FuncOldStyle => extra[repr.data[1]] * paramSize,
+                    else => unreachable,
+                };
+                const extraParams = extra[repr.data[1] + @intFromBool(paramsLen > 1)][0..paramsLen];
+
+                return .{ .func = .{
+                    .returnType = @bitCast(repr.data[0]),
+                    .kind = switch (repr.tag) {
+                        .FuncOne, .Func => .Normal,
+                        .FuncVariadicOne, .FuncVariadic => .Variadic,
+                        .FuncOldStyleOne, .FuncOldStyle => .OldStyle,
+                        else => unreachable,
+                    },
+                    .params = std.mem.bytesAsSlice(Type.Func.Param, std.mem.sliceAsBytes(extraParams)),
+                } };
+            },
 
             .Pointer => .{
                 .pointer = .{
@@ -238,14 +302,15 @@ pub const QualType = packed struct(u32) {
             },
             .Struct, .Union => {
                 const layoutSize = 6;
+                const fieldSize = 10;
                 const layout = @as(*Type.Record.Layout, @alignCast(@ptrCast(extra[repr.data[1]..][0..layoutSize]))).*;
-                const fieldsLen = extra[repr.data[1] + layoutSize];
-                const fields = extra[repr.data[1] + layoutSize + 1 ..][0..fieldsLen];
+                const fieldsLen = extra[repr.data[1] + layoutSize] * fieldSize;
+                const extraFields = extra[repr.data[1] + layoutSize + 1 ..][0..fieldsLen];
 
                 const record: Type.Record = .{
                     .name = @enumFromInt(repr.data[0]),
                     .layout = layout,
-                    .fields = std.mem.bytesAsSlice(Type.Record.Field, std.mem.sliceAsBytes(fields)),
+                    .fields = std.mem.bytesAsSlice(Type.Record.Field, std.mem.sliceAsBytes(extraFields)),
                 };
                 return switch (repr.tag) {
                     .Struct => .{ .@"struct" = record },
@@ -376,7 +441,7 @@ pub const QualType = packed struct(u32) {
     }
 
     pub fn sizeofOrNull(qt: QualType, comp: *const Compilation) ?u64 {
-        _ = qt;
+        if (qt.isInvalid()) return null;
         _ = comp;
         @panic("TODO");
     }
@@ -388,7 +453,7 @@ pub const QualType = packed struct(u32) {
     }
 
     pub fn bitSizeofOrNull(qt: QualType, comp: *const Compilation) ?u64 {
-        _ = qt;
+        if (qt.isInvalid()) return null;
         _ = comp;
         @panic("TODO");
     }
@@ -472,12 +537,110 @@ pub const QualType = packed struct(u32) {
         }
     }
 
+    pub fn toReal(qt: QualType, comp: *const Compilation) QualType {
+        _ = qt;
+        _ = comp;
+        @panic("TODO");
+    }
+
+    pub fn toComplex(qt: QualType, comp: *Compilation) !QualType {
+        _ = qt;
+        _ = comp;
+        @panic("TODO");
+    }
+
+    pub fn decay(qt: QualType, comp: *Compilation) !QualType {
+        switch (qt.base(comp).type) {
+            .array => |arrayTy| {
+                if (arrayTy.elem.isInvalid()) return .invalid;
+                var ptrQt = try comp.typeStore.put(comp.gpa, .{ .pointer = .{
+                    .child = arrayTy.elem,
+                    .decayed = qt,
+                } });
+                // Copy qualifiers
+                ptrQt.@"const" = qt.@"const";
+                ptrQt.@"volatile" = qt.@"volatile";
+                ptrQt.restrict = qt.restrict;
+                return ptrQt;
+            },
+            .func => |funcTy| {
+                if (funcTy.returnType.isInvalid())
+                    return .invalid;
+
+                for (funcTy.params) |param| {
+                    if (param.qt.isInvalid()) {
+                        return .invalid;
+                    }
+                }
+
+                return comp.typeStore.put(comp.gpa, .{ .pointer = .{
+                    .child = qt,
+                    .decayed = null,
+                } });
+            },
+            else => return qt,
+        }
+    }
+
+    /// Rank for floating point conversions, ignoring domain (complex vs real)
+    /// Asserts that ty is a floating point type
+    pub fn floatRank(qt: QualType, comp: *const Compilation) usize {
+        _ = qt;
+        _ = comp;
+        @panic("TODO");
+    }
+
+    /// Rank for integer conversions, ignoring domain (complex vs real)
+    /// Asserts that ty is an integer type
+    pub fn intRank(qt: QualType, comp: *const Compilation) usize {
+        _ = qt;
+        _ = comp;
+        @panic("TODO");
+    }
+
+    pub fn intRankOrder(a: QualType, b: QualType, comp: *const Compilation) std.math.Order {
+        std.debug.assert(a.isInt(comp) and b.isInt(comp));
+
+        const aUnsigned = a.signedness(comp) == .unsigned;
+        const bUnsigned = b.signedness(comp) == .unsigned;
+
+        const aRank = a.intRank(comp);
+        const bRank = b.intRank(comp);
+        if (aUnsigned == bUnsigned)
+            return std.math.order(aRank, bRank);
+
+        if (aUnsigned) {
+            if (aRank >= bRank) return .gt;
+            return .lt;
+        }
+
+        std.debug.assert(bUnsigned);
+        if (bRank >= aRank) return .lt;
+        return .gt;
+    }
+
+    pub fn promoteInt(qt: QualType, comp: *const Compilation) QualType {
+        const intQualTy = switch (qt.base(comp).type) {
+            .@"enum" => |@"enum"| @"enum".tag orelse return .int,
+            .bitInt => return qt,
+            .complex => return qt, // Assume complex integer type
+            else => qt, // Not an integer type
+        };
+        return switch (intQualTy.get(comp, .int)) {
+            .Bool, .Char, .SChar, .UChar, .Short => .int,
+            .UShort => if (Type.IntType.UChar.bits(comp) == Type.IntType.Int.bits(comp)) .uint else .int,
+            else => return intQualTy,
+        };
+    }
+
     pub const ScalarKind = enum {
         Enum,
         Bool,
         Int,
         Float,
         Pointer,
+        NullptrTy,
+        VoidPointer,
         ComplexInt,
         ComplexFloat,
         None,
@@ -503,6 +666,13 @@ pub const QualType = packed struct(u32) {
             };
         }
 
+        pub fn isPointer(sk: ScalarKind) bool {
+            return switch (sk) {
+                .Pointer, .VoidPointer => true,
+                else => false,
+            };
+        }
+
         pub fn isArithmetic(sk: ScalarKind) bool {
             return switch (sk) {
                 .Bool, .Enum, .Int, .ComplexInt, .Float, .ComplexFloat => true,
@@ -514,17 +684,137 @@ pub const QualType = packed struct(u32) {
     pub fn scalarKind(qt: QualType, comp: *const Compilation) ScalarKind {
         loop: switch (qt.base(comp).type) {
             .bool => return .Bool,
-            .int => return .Int,
+            .int, .bitInt => return .Int,
             .float => return .Float,
-            .pointer => return .Pointer,
+            .nullptrTy => return .NullptrTy,
+            .pointer => |pointer| switch (pointer.child.base(comp).type) {
+                .void => return .VoidPointer,
+                else => return .Pointer,
+            },
             .@"enum" => return .Enum,
             .complex => |complex| switch (complex.base(comp).type) {
-                .int => return .ComplexInt,
+                .int, .bitInt => return .ComplexInt,
                 .float => return .ComplexFloat,
                 else => unreachable,
             },
             .atomic => |atomic| continue :loop atomic.base(comp).type,
-            else => return .none,
+            else => return .None,
+        }
+    }
+
+    // Prefer calling scalarKind directly if checking multiple kinds.
+    pub fn isInt(qt: QualType, comp: *const Compilation) bool {
+        return qt.scalarKind(comp).isInt();
+    }
+
+    // Prefer calling scalarKind directly if checking multiple kinds.
+    pub fn isFloat(qt: QualType, comp: *const Compilation) bool {
+        return qt.scalarKind(comp).isFloat();
+    }
+
+    // Prefer calling scalarKind directly if checking multiple kinds.
+    pub fn isPointer(qt: QualType, comp: *const Compilation) bool {
+        return qt.scalarKind(comp).isPointer();
+    }
+
+    pub fn eqlQualified(aQualTy: QualType, bQualTy: QualType, comp: *const Compilation) bool {
+        if (aQualTy.@"const" != bQualTy.@"const") return false;
+        if (aQualTy.@"volatile" != bQualTy.@"volatile") return false;
+        if (aQualTy.restrict != bQualTy.restrict) return false;
+
+        return aQualTy.eql(bQualTy, comp);
+    }
+
+    pub fn eql(aQualTy: QualType, bQualTy: QualType, comp: *const Compilation) bool {
+        if (aQualTy.isInvalid() or bQualTy.isInvalid()) return false;
+        if (aQualTy._index == bQualTy._index) return true;
+
+        const aType = aQualTy.base(comp).type;
+        const bType = bQualTy.base(comp).type;
+        if (std.meta.activeTag(aType) != bType) return false;
+
+        switch (aType) {
+            .void => unreachable, // Handled in _index check above.
+            .bool => unreachable, // Handled in _index check above.
+            .nullptrTy => unreachable, // Handled in _index check above.
+            .int => unreachable, // Handled in _index check above.
+            .float => unreachable, // Handled in _index check above.
+
+            .complex => |aComplex| {
+                const bComplex = bType.complex;
+                // Complex child type cannot be qualified.
+                return aComplex.eql(bComplex, comp);
+            },
+
+            .bitInt => |aBitInt| {
+                const bBitInt = bType.bitInt;
+                if (aBitInt.bits != bBitInt.bits) return false;
+                if (aBitInt.signedness != bBitInt.signedness) return false;
+                return true;
+            },
+            .atomic => |aAtomic| {
+                const bAtomic = bType.atomic;
+                // Atomic child type cannot be qualified.
+                return aAtomic.eql(bAtomic, comp);
+            },
+            .func => |aFunc| {
+                const bFunc = bType.func;
+
+                if (aFunc.params.len != bFunc.params.len) {
+                    if (aFunc.kind == .OldStyle or bFunc.kind == .OldStyle) {
+                        if (true) @panic("TODO is this correct?");
+                        const maybeHasParams = if (aFunc.kind == .OldStyle) bFunc else aFunc;
+
+                        // Check if any args undergo default argument promotion.
+                        for (maybeHasParams.params) |param| {
+                            switch (param.qt.base(comp).type) {
+                                .bool => return false,
+                                .int => |intTy| switch (intTy) {
+                                    .Char, .UChar, .SChar => return false,
+                                    else => {},
+                                },
+                                .float => |floatTy| if (floatTy != .Double) return false,
+                                .@"enum" => |enumTy| {
+                                    if (comp.langOpts.emulate == .clang and enumTy.tag == null) return false;
+                                },
+                                else => {},
+                            }
+                        }
+                        return true;
+                    }
+                    return false;
+                }
+
+                if ((aFunc.kind == .Normal) != (bFunc.kind == .Normal)) return false;
+
+                // Function return type cannot be qualified.
+                if (!aFunc.returnType.eql(bFunc.returnType, comp)) return false;
+
+                for (aFunc.params, bFunc.params) |aParam, bParam| {
+                    // Function parameters cannot be qualified.
+                    if (!aParam.qt.eql(bParam.qt, comp)) return false;
+                }
+                return true;
+            },
+            .pointer => |aPointer| {
+                const bPointer = bType.pointer;
+                return aPointer.child.eqlQualified(bPointer.child, comp);
+            },
+            .array => |aArray| {
+                const bArray = bType.array;
+                // Array element qualifiers are ignored.
+                return aArray.elem.eql(bArray.elem, comp);
+            },
+            .vector => |aVector| {
+                const bVector = bType.vector;
+                // Vector elemnent qualifiers are checked.
+                return aVector.elem.eqlQualified(bVector.elem, comp);
+            },
+            .@"struct", .@"union", .@"enum" => return false, // Should have matched in the _index check above.
+
+            .typeof => unreachable, // Never returned from base()
+            .typedef => unreachable, // Never returned from base()
+            .attributed => unreachable, // Never returned from base()
         }
     }
 
@@ -538,9 +828,7 @@ pub const QualType = packed struct(u32) {
     }
 
     pub fn requestedAlignment(qt: QualType, comp: *const Compilation) ?u32 {
-        _ = qt;
-        _ = comp;
-        @panic("TODO");
+        return annotationAlignment(comp, Attribute.Iterator.initType(qt, comp));
     }
 
     pub fn annotationAlignment(comp: *const Compilation, attrs: Attribute.Iterator) ?u32 {
@@ -582,8 +870,8 @@ pub const Type = union(enum) {
     /// C23 nullptr_t
     nullptrTy,
 
-    int: Int,
-    float: Float,
+    int: IntType,
+    float: FloatType,
     complex: QualType,
     bitInt: BitInt,
     atomic: QualType,
@@ -601,7 +889,7 @@ pub const Type = union(enum) {
     typedef: TypeDef,
     attributed: Attributed,
 
-    pub const Int = enum {
+    pub const IntType = enum {
         Char,
         SChar,
         UChar,
@@ -616,7 +904,7 @@ pub const Type = union(enum) {
         Int128,
         UInt128,
 
-        pub fn bits(int: Int, comp: *const Compilation) u16 {
+        pub fn bits(int: IntType, comp: *const Compilation) u16 {
             return switch (int) {
                 .Char => comp.target.cTypeBitSize(.char),
                 .SChar => comp.target.cTypeBitSize(.char),
@@ -635,7 +923,7 @@ pub const Type = union(enum) {
         }
     };
 
-    pub const Float = enum {
+    pub const FloatType = enum {
         FP16,
         Float16,
         Float,
@@ -643,7 +931,7 @@ pub const Type = union(enum) {
         LongDouble,
         Float128,
 
-        pub fn bits(float: Float, comp: *const Compilation) u16 {
+        pub fn bits(float: FloatType, comp: *const Compilation) u16 {
             return switch (float) {
                 .FP16 => 16,
                 .Float16 => 16,
@@ -769,6 +1057,12 @@ pub const Type = union(enum) {
             /// targets. On MSVC targets, this value restricts the effects of `#pragma pack` except
             /// in some cases involving bit-fields.
             requiredAlignmentBits: u32,
+
+            pub fn isAnonymous(record: Record, comp: *const Compilation) bool {
+                // anonymous records can be recognized by their names which are in
+                // the format "(anonymous TAG at path:line:col)".
+                return record.name.lookup(comp)[0] == '(';
+            }
         };
     };
 

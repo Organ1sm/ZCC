@@ -821,7 +821,7 @@ pub fn wcharMax(comp: *const Compilation) u32 {
     };
 }
 
-fn generateExactWidthIntMax(comp: * Compilation, w: anytype, orginalQt: QualType) !void {
+fn generateExactWidthIntMax(comp: *Compilation, w: anytype, orginalQt: QualType) !void {
     var qt = orginalQt;
     const bitCount: u8 = @intCast(qt.sizeof(comp) * 8);
     const unsigned = qt.isUnsignedInt(comp);
@@ -888,7 +888,7 @@ pub fn intLeastN(comp: *const Compilation, bits: usize, signedness: std.builtin.
 /// __attribute__((packed)) or the range of values of the corresponding enumerator constants,
 /// specify it here.
 /// TODO: likely incomplete
-pub fn fixedEnumTagSpecifier(comp: *const Compilation) ?QualType {
+pub fn fixedEnumTagType(comp: *const Compilation) ?QualType {
     switch (comp.langOpts.emulate) {
         .msvc => return .int,
         .clang => if (comp.target.os.tag == .windows) return .int,

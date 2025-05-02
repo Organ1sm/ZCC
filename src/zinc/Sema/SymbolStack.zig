@@ -209,7 +209,7 @@ pub fn defineTypedef(
     if (self.get(name, .vars)) |prev| {
         switch (prev.kind) {
             .typedef => {
-                if (!qt.eql(prev.qt, self.p.comp, true)) {
+                if (!qt.eqlQulified(prev.qt, self.p.comp)) {
                     try self.p.errStr(.redefinition_of_typedef, token, try self.p.typePairStrExtra(qt, " vs ", prev.qt));
                     if (prev.token != 0)
                         try self.p.errToken(.previous_definition, prev.token);
@@ -228,12 +228,7 @@ pub fn defineTypedef(
         .kind = .typedef,
         .name = name,
         .token = token,
-        .type = .{
-            .name = name,
-            .specifier = qt.specifier,
-            .qual = qt.qual,
-            .data = qt.data,
-        },
+        .qt = qt,
         .node = .pack(node),
         .value = .{},
     });
@@ -270,7 +265,7 @@ pub fn defineSymbol(
                 try self.p.errToken(.previous_definition, prev.token);
             },
             .declaration => {
-                if (!qt.eql(prev.qt, self.p.comp, true)) {
+                if (!qt.eqlQulified(prev.qt, self.p.comp, true)) {
                     try self.p.errStr(.redefinition_incompatible, token, self.p.getTokenText(token));
                     try self.p.errToken(.previous_definition, prev.token);
                 }
