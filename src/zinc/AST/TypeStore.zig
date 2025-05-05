@@ -1602,7 +1602,7 @@ pub const Builder = struct {
         // Any not simply constructed from specifier keywords.
         other: QualType,
 
-        pub fn str(spec: Builder.Specifier, langopts: LangOpts) ?[]const u8 {
+        pub fn toString(spec: Builder.Specifier, langopts: LangOpts) ?[]const u8 {
             return switch (spec) {
                 .None => unreachable,
                 .Void => "void",
@@ -1860,7 +1860,7 @@ pub const Builder = struct {
     }
 
     fn cannotCombine(b: Builder, sourceToken: TokenIndex) !void {
-        const typeStr = b.type.str(b.parser.comp.langOpts) orelse try b.parser.typeStr(try b.finish());
+        const typeStr = b.type.toString(b.parser.comp.langOpts) orelse try b.parser.typeStr(try b.finish());
         try b.parser.errExtra(.cannot_combine_spec, sourceToken, .{ .str = typeStr });
     }
 

@@ -884,6 +884,12 @@ pub fn intLeastN(comp: *const Compilation, bits: usize, signedness: std.builtin.
     } else unreachable;
 }
 
+/// Maximum size of an array, in bytes
+pub fn maxArrayBytes(comp: *const Compilation) u64 {
+    const maxBits = @min(61, comp.target.ptrBitWidth());
+    return (@as(u64, 1) << @truncate(maxBits)) - 1;
+}
+
 /// If `enum E { ... }` syntax has a fixed underlying integer type regardless of the presence of
 /// __attribute__((packed)) or the range of values of the corresponding enumerator constants,
 /// specify it here.

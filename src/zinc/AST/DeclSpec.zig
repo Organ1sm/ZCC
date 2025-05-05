@@ -1,6 +1,6 @@
 const AST = @import("AST.zig");
 const TokenIndex = AST.TokenIndex;
-const Type = @import("Type.zig");
+const QualType = @import("TypeStore.zig").QualType;
 const Parser = @import("../Parser/Parser.zig");
 const Compilation = @import("../Basic/Compilation.zig");
 
@@ -21,9 +21,10 @@ constexpr: ?TokenIndex = null,
 @"inline": ?TokenIndex = null,
 noreturn: ?TokenIndex = null,
 autoType: ?TokenIndex = null,
-type: Type,
+c23Auto: ?TokenIndex = null,
+qt: QualType,
 
-pub fn validateParam(d: DeclSpec, p: *Parser, ty: *Type) Error!void {
+pub fn validateParam(d: DeclSpec, p: *Parser, qt: *QualType) Error!void {
     switch (d.storageClass) {
         .none, .register => {},
         .auto, .@"extern", .static, .typedef => |tokenIndex| try p.errToken(.invalid_storage_on_param, tokenIndex),
@@ -35,7 +36,12 @@ pub fn validateParam(d: DeclSpec, p: *Parser, ty: *Type) Error!void {
     if (d.constexpr) |tokenIndex| try p.errToken(.invalid_storage_on_param, tokenIndex);
     if (d.autoType) |tokenIndex| {
         try p.errStr(.auto_type_not_allowed, tokenIndex, "function prototype");
-        ty.* = Type.Invalid;
+        qt.* = .invalid;
+    }
+
+    if (d.c23Auto) |tokenIdx| {
+        try p.errStr(.c23_auto_not_allowed, tokenIdx, "function prototype");
+        qt.* = .invalid;
     }
 }
 
@@ -49,11 +55,11 @@ pub fn validateFnDef(d: DeclSpec, p: *Parser) Error!void {
     if (d.constexpr) |tokenIdx| try p.errToken(.illegal_storage_on_func, tokenIdx);
 }
 
-pub fn validate(d: DeclSpec, p: *Parser, ty: *Type) Error!void {
-    if (ty.isFunc() and d.storageClass != .typedef) {
+pub fn validate(d: DeclSpec, p: *Parser, qt: *QualType) Error!void {
+    if (qt.is(p.comp, .func) and d.storageClass != .typedef) {
         switch (d.storageClass) {
             .none, .@"extern" => {},
-            .static => |tokenIdx| if (p.func.type != null) try p.errToken(.static_func_not_global, tokenIdx),
+            .static => |tokenIdx| if (p.func.qt != null) try p.errToken(.static_func_not_global, tokenIdx),
             .typedef => unreachable,
             .auto, .register => |tokenIdx| try p.errToken(.illegal_storage_on_func, tokenIdx),
         }
@@ -65,10 +71,10 @@ pub fn validate(d: DeclSpec, p: *Parser, ty: *Type) Error!void {
         if (d.noreturn) |tokenIdx| try p.errStr(.func_spec_non_func, tokenIdx, "_Noreturn");
 
         switch (d.storageClass) {
-            .auto => if (p.func.type == null and !p.comp.langOpts.standard.atLeast(.c23)) {
+            .auto => if (p.func.qt == null and !p.comp.langOpts.standard.atLeast(.c23)) {
                 try p.err(.illegal_storage_on_global);
             },
-            .register => if (p.func.type == null) try p.err(.illegal_storage_on_global),
+            .register => if (p.func.qt == null) try p.err(.illegal_storage_on_global),
             else => {},
         }
     }
@@ -76,6 +82,6 @@ pub fn validate(d: DeclSpec, p: *Parser, ty: *Type) Error!void {
 
 pub fn initContext(d: DeclSpec, p: *Parser) Parser.InitContext {
     if (d.constexpr != null) return .constexpr;
-    if (p.func.type == null or d.storageClass == .static) return .static;
+    if (p.func.qt == null or d.storageClass == .static) return .static;
     return .runtime;
 }
