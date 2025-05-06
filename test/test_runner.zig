@@ -605,8 +605,8 @@ const StmtTypeDumper = struct {
         const maybeRet = node.get(tree);
         if (maybeRet == .returnStmt and maybeRet.returnStmt.operand == .implicit) return;
 
-        const ty = node.type(tree);
-        ty.dump(tree.comp.stringInterner, tree.comp.langOpts, m.buf.writer()) catch {};
+        const ty = node.qt(tree);
+        ty.dump(tree.comp, m.buf.writer()) catch {};
 
         const owned = try m.buf.toOwnedSlice();
         errdefer m.buf.allocator.free(owned);

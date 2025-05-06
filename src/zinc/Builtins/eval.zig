@@ -38,7 +38,7 @@ pub fn eval(tag: Builtin.Tag, p: *Parser, args: []const Tree.Node.Index) !Value 
                 .__builtin_infl => .longDouble,
                 else => unreachable,
             };
-            const f: Interner.Key.Float = switch (qt.bitSizeof(p.comp).?) {
+            const f: Interner.Key.Float = switch (qt.bitSizeof(p.comp)) {
                 32 => .{ .f32 = std.math.inf(f32) },
                 64 => .{ .f64 = std.math.inf(f64) },
                 80 => .{ .f80 = std.math.inf(f80) },
@@ -72,7 +72,7 @@ pub fn eval(tag: Builtin.Tag, p: *Parser, args: []const Tree.Node.Index) !Value 
             const val = p.getDecayedStringLiteral(args[0]) orelse break :blk;
             const bytes = p.comp.interner.get(val.ref()).bytes;
 
-            const f: Interner.Key.Float = switch (Type.FloatType.bits(p.comp)) {
+            const f: Interner.Key.Float = switch (Type.FloatType.Double.bits(p.comp)) {
                 32 => .{ .f32 = makeNan(f32, bytes) },
                 64 => .{ .f64 = makeNan(f64, bytes) },
                 80 => .{ .f80 = makeNan(f80, bytes) },

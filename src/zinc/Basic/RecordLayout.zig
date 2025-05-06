@@ -46,7 +46,7 @@ const SysVContext = struct {
         const reqAlign = @as(u32, (qt.requestedAlignment(comp) orelse 1)) * BITS_PER_BYTE;
 
         return SysVContext{
-            .attrPacked = qt.hasAttribute(.@"packed"),
+            .attrPacked = qt.hasAttribute(comp, .@"packed"),
             .maxFieldAlignBits = packValue,
             .alignedBits = reqAlign,
             .isUnion = qt.is(comp, .@"union"),
@@ -230,7 +230,7 @@ const SysVContext = struct {
         self: *SysVContext,
         fieldAttrs: []const Attribute,
         fieldLayout: RecordLayout,
-    ) FieldLayout {
+    ) !FieldLayout {
         var fieldAlignBits = fieldLayout.fieldAlignmentBits;
 
         // If the struct or the field is packed, then the alignment of the underlying type is
@@ -267,7 +267,7 @@ const SysVContext = struct {
         fieldLayout: RecordLayout,
         isNamed: bool,
         bitWidth: u64,
-    ) FieldLayout {
+    ) !FieldLayout {
         const tySizeBits = fieldLayout.sizeBits;
         var tyFieldAlignBits: u32 = fieldLayout.fieldAlignmentBits;
 
@@ -420,7 +420,7 @@ const MsvcContext = struct {
         };
     }
 
-    fn layoutField(self: *MsvcContext, field: *const Field, fieldAttrs: []const Attribute) FieldLayout {
+    fn layoutField(self: *MsvcContext, field: *const Field, fieldAttrs: []const Attribute) !FieldLayout {
         const typeLayout = computeLayout(field.qt, self.comp);
 
         // The required alignment of the field is the maximum of the required alignment of the
@@ -565,8 +565,8 @@ pub fn compute(fields: []Type.Record.Field, qt: QualType, comp: *const Compilati
     switch (comp.langOpts.emulate) {
         .gcc, .clang => {
             var context = SysVContext.init(qt, comp, pragmaPack);
+            try context.layoutFields(fields);
 
-            context.layoutFields(fields);
             context.sizeBits = std.mem.alignForward(u64, context.sizeBits, context.alignedBits);
 
             return .{

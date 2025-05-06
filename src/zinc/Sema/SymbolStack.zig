@@ -209,7 +209,7 @@ pub fn defineTypedef(
     if (self.get(name, .vars)) |prev| {
         switch (prev.kind) {
             .typedef => {
-                if (!qt.eqlQulified(prev.qt, self.p.comp)) {
+                if (!qt.eqlQualified(prev.qt, self.p.comp)) {
                     try self.p.errStr(.redefinition_of_typedef, token, try self.p.typePairStrExtra(qt, " vs ", prev.qt));
                     if (prev.token != 0)
                         try self.p.errToken(.previous_definition, prev.token);
@@ -265,7 +265,7 @@ pub fn defineSymbol(
                 try self.p.errToken(.previous_definition, prev.token);
             },
             .declaration => {
-                if (!qt.eqlQulified(prev.qt, self.p.comp, true)) {
+                if (!qt.eqlQualified(prev.qt, self.p.comp)) {
                     try self.p.errStr(.redefinition_incompatible, token, self.p.getTokenText(token));
                     try self.p.errToken(.previous_definition, prev.token);
                 }
@@ -285,7 +285,7 @@ pub fn defineSymbol(
         .kind = if (constexpr) .constexpr else .definition,
         .name = name,
         .token = token,
-        .type = qt,
+        .qt = qt,
         .node = .pack(node),
         .value = val,
     });
@@ -314,13 +314,13 @@ pub fn declareSymbol(
                 try self.p.errToken(.previous_definition, prev.token);
             },
             .declaration => {
-                if (!qt.eql(prev.qt, self.p.comp, true)) {
+                if (!qt.eql(prev.qt, self.p.comp)) {
                     try self.p.errStr(.redefinition_incompatible, token, self.p.getTokenText(token));
                     try self.p.errToken(.previous_definition, prev.token);
                 }
             },
             .definition, .constexpr => {
-                if (!qt.eql(prev.qt, self.p.comp, true)) {
+                if (!qt.eql(prev.qt, self.p.comp)) {
                     try self.p.errStr(.redefinition_incompatible, token, self.p.getTokenText(token));
                     try self.p.errToken(.previous_definition, prev.token);
                 } else {
@@ -338,7 +338,7 @@ pub fn declareSymbol(
         .kind = .declaration,
         .name = name,
         .token = token,
-        .type = qt,
+        .qt = qt,
         .node = .pack(node),
         .value = .{},
     });
@@ -365,14 +365,11 @@ pub fn defineParam(
         }
     }
 
-    if (qt.is(.FP16) and !self.p.comp.hasHalfPrecisionFloatABI())
-        try self.p.errStr(.suggest_pointer_for_invalid_fp16, token, "parameters");
-
     try self.define(.{
         .kind = .definition,
         .name = name,
         .token = token,
-        .type = qt,
+        .qt = qt,
         .node = .packOpt(node),
         .value = .{},
     });
@@ -440,7 +437,7 @@ pub fn defineEnumeration(
         .kind = .enumeration,
         .name = name,
         .token = token,
-        .type = qt,
+        .qt = qt,
         .value = value,
         .node = .pack(node),
     });

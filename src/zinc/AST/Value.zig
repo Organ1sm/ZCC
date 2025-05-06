@@ -184,7 +184,7 @@ pub fn floatToInt(v: *Value, destTy: QualType, comp: *Compilation) !FloatToIntCh
     const floatVal = v.toFloat(f128, comp);
     const wasZero = floatVal == 0;
 
-    if (destTy.is(comp, .Bool)) {
+    if (destTy.is(comp, .bool)) {
         const wasOne = floatVal == 1.0;
         v.* = fromBool(!wasZero);
         if (wasZero or wasOne) return .none;
@@ -301,8 +301,8 @@ pub fn imag(v: Value, comptime T: type, comp: *const Compilation) T {
 pub fn floatCast(v: *Value, destTy: QualType, comp: *Compilation) !void {
     if (v.isNone()) return;
 
-    const bits = destTy.bitSizeof(comp).?;
-    if (destTy.isComplex()) {
+    const bits = destTy.bitSizeof(comp);
+    if (destTy.is(comp, .complex)) {
         const cf: Interner.Key.Complex = switch (bits) {
             64 => .{ .cf32 = .{ v.toFloat(f32, comp), v.imag(f32, comp) } },
             128 => .{ .cf64 = .{ v.toFloat(f64, comp), v.imag(f64, comp) } },
@@ -626,7 +626,7 @@ pub fn mul(res: *Value, lhs: Value, rhs: Value, qt: QualType, comp: *Compilation
 
 /// caller guarantees rhs != 0
 pub fn div(res: *Value, lhs: Value, rhs: Value, qt: QualType, comp: *Compilation) !bool {
-    const bits: usize = @intCast(qt.bitSizeof(comp).?);
+    const bits: usize = @intCast(qt.bitSizeof(comp));
     const scalarKind = qt.scalarKind(comp);
     if (scalarKind.isFloat()) {
         if (scalarKind == .ComplexFloat) {
@@ -924,7 +924,7 @@ pub fn maxInt(qt: QualType, comp: *Compilation) !Value {
 }
 
 pub fn print(v: Value, qt: QualType, comp: *const Compilation, w: anytype) @TypeOf(w).Error!void {
-    if (qt.is(.Bool))
+    if (qt.is(comp, .bool))
         return w.writeAll(if (v.isZero(comp)) "false" else "true");
 
     const key = comp.interner.get(v.ref());

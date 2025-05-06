@@ -217,7 +217,7 @@ pub const QualType = packed struct(u32) {
                 },
             },
 
-            .FuncOldStyleOne => .{
+            .FuncOldStyleZero => .{
                 .func = .{
                     .returnType = @bitCast(repr.data[0]),
                     .kind = .OldStyle,
@@ -232,13 +232,13 @@ pub const QualType = packed struct(u32) {
             .FuncVariadic,
             .FuncOldStyle,
             => {
-                const paramSize = 3;
+                const paramSize = 4;
                 const paramsLen = switch (repr.tag) {
-                    .FuncOne, .FuncVariadicOne, .FuncOldStyleOne => 1 * paramSize,
-                    .Func, .FuncVariadic, .FuncOldStyle => extra[repr.data[1]] * paramSize,
+                    .FuncOne, .FuncVariadicOne, .FuncOldStyleOne => 1,
+                    .Func, .FuncVariadic, .FuncOldStyle => extra[repr.data[1]],
                     else => unreachable,
                 };
-                const extraParams = extra[repr.data[1] + @intFromBool(paramsLen > 1)][0..paramsLen];
+                const extraParams = extra[repr.data[1] + @intFromBool(paramsLen > 1) ..][0 .. paramsLen * paramSize];
 
                 return .{ .func = .{
                     .returnType = @bitCast(repr.data[0]),
@@ -398,6 +398,13 @@ pub const QualType = packed struct(u32) {
         return null;
     }
 
+    pub fn getRecord(qt: QualType, comp: *const Compilation) ?Type.Record {
+        return switch (qt.base(comp).type) {
+            .@"struct", .@"union" => |record| record,
+            else => null,
+        };
+    }
+
     pub fn is(qt: QualType, comp: *const Compilation, comptime tag: std.meta.Tag(Type)) bool {
         return qt.get(comp, tag) != null;
     }
@@ -432,6 +439,18 @@ pub const QualType = packed struct(u32) {
             .fixed, .static => |len| return len,
             else => return null,
         }
+    }
+
+    pub const TypeSizeOrder = enum { lt, gt, eq, indeterminate };
+
+    pub fn sizeCompare(lhs: QualType, rhs: QualType, comp: *const Compilation) TypeSizeOrder {
+        const lhsSize = lhs.sizeofOrNull(comp) orelse return .indeterminate;
+        const rhsSize = rhs.sizeofOrNull(comp) orelse return .indeterminate;
+        return switch (std.math.order(lhsSize, rhsSize)) {
+            .lt => .lt,
+            .gt => .gt,
+            .eq => .eq,
+        };
     }
 
     pub fn sizeof(qt: QualType, comp: *const Compilation) u64 {
@@ -619,18 +638,44 @@ pub const QualType = packed struct(u32) {
         return .gt;
     }
 
+    /// Returns true if `lhs` and `rhs` are integer types that differ only in sign
+    pub fn sameRankDifferentSign(lhs: QualType, rhs: QualType, comp: *const Compilation) bool {
+        if (!lhs.isInt(comp) or !rhs.isInt(comp)) return false;
+        if (lhs.intRank(comp) != rhs.intRank(comp)) return false;
+        return lhs.signedness(comp) != rhs.signedness(comp);
+    }
+
     pub fn promoteInt(qt: QualType, comp: *const Compilation) QualType {
         const intQualTy = switch (qt.base(comp).type) {
+            .bool => return .int,
             .@"enum" => |@"enum"| @"enum".tag orelse return .int,
             .bitInt => return qt,
             .complex => return qt, // Assume complex integer type
             else => qt, // Not an integer type
         };
         return switch (intQualTy.get(comp, .int)) {
-            .Bool, .Char, .SChar, .UChar, .Short => .int,
+            .Char, .SChar, .UChar, .Short => .int,
             .UShort => if (Type.IntType.UChar.bits(comp) == Type.IntType.Int.bits(comp)) .uint else .int,
             else => return intQualTy,
         };
+    }
+
+    /// Promote a bitfield. If `int` can hold all the values of the underlying field,
+    /// promote to int. Otherwise, promote to unsigned int
+    /// Returns null if no promotion is necessary
+    pub fn promoteBitfield(qt: QualType, comp: *const Compilation, width: u32) ?QualType {
+        const typeSizeBits = qt.bitSizeof(comp);
+
+        // Note: GCC and clang will promote `long: 3` to int even though the C standard does not allow this
+        if (width < typeSizeBits) {
+            return .int;
+        }
+
+        if (width == typeSizeBits) {
+            return if (qt.signedness(comp) == .unsigned) .uint else .int;
+        }
+
+        return null;
     }
 
     pub const ScalarKind = enum {
@@ -673,6 +718,7 @@ pub const QualType = packed struct(u32) {
             };
         }
 
+        /// Equivalent to ( isInt() or isFloat() )
         pub fn isArithmetic(sk: ScalarKind) bool {
             return switch (sk) {
                 .Bool, .Enum, .Int, .ComplexInt, .Float, .ComplexFloat => true,
@@ -818,6 +864,16 @@ pub const QualType = packed struct(u32) {
         }
     }
 
+    pub fn getAttribute(qt: QualType, comp: *const Compilation, comptime tag: Attribute.Tag) ?Attribute.ArgumentsForTag(tag) {
+        if (tag == .aligned) @compileError("use requestedAlignment");
+        var it = Attribute.Iterator.initType(qt, comp);
+        while (it.next()) |item| {
+            const attribute, _ = item;
+            if (attribute.tag == tag) return @field(attribute.args, @tagName(tag));
+        }
+        return null;
+    }
+
     pub fn hasAttribute(qt: QualType, comp: *const Compilation, tag: Attribute.Tag) bool {
         var it = Attribute.Iterator.initType(qt, comp);
         while (it.next()) |item| {
@@ -825,6 +881,15 @@ pub const QualType = packed struct(u32) {
             if (attr.tag == tag) return true;
         }
         return false;
+    }
+
+    pub fn alignable(qt: QualType, comp: *const Compilation) bool {
+        if (qt.isInvalid()) return false;
+        const baseType = qt.base(comp);
+        switch (baseType.type) {
+            .array, .void => return false,
+            else => return baseType.qt.sizeofOrNull(comp) != null,
+        }
     }
 
     pub fn requestedAlignment(qt: QualType, comp: *const Compilation) ?u32 {
@@ -851,7 +916,30 @@ pub const QualType = packed struct(u32) {
         return maxRequested;
     }
 
+    pub fn enumIsPacked(qt: QualType, comp: *const Compilation) bool {
+        std.debug.assert(qt.is(comp, .@"enum"));
+        return comp.langOpts.shortEnums or TargetUtil.packAllEnums(comp.target) or qt.hasAttribute(comp, .@"packed");
+    }
+
     pub fn print(qt: QualType, comp: *const Compilation, w: anytype) @TypeOf(w).Error!void {
+        _ = try qt.printPrologue(comp, w);
+        try qt.printEpilogue(comp, w);
+    }
+
+    pub fn printNamed(qt: QualType, name: []const u8, comp: *const Compilation, w: anytype) @TypeOf(w).Error!void {
+        const simple = try qt.printPrologue(comp, w);
+        if (simple) try w.writeByte(' ');
+        try w.writeAll(name);
+        try qt.printEpilogue(comp, w);
+    }
+
+    fn printPrologue(qt: QualType, comp: *const Compilation, w: anytype) @TypeOf(w).Error!bool {
+        _ = qt;
+        _ = comp;
+        @panic("TODO");
+    }
+
+    fn printEpilogue(qt: QualType, comp: *const Compilation, w: anytype) @TypeOf(w).Error!void {
         _ = qt;
         _ = comp;
         @panic("TODO");
@@ -965,6 +1053,7 @@ pub const Type = union(enum) {
         pub const Param = extern struct {
             qt: QualType,
             name: StringId,
+            nameToken: TokenIndex,
             node: Node.OptIndex,
         };
     };
@@ -1017,6 +1106,10 @@ pub const Type = union(enum) {
                 return comp.typeStore.attributes.items[field._attr_index..][0..field._attr_len];
             }
 
+            pub fn isAnonymousRecord(field: Field) bool {
+                return field.name and field.qt.isRecord();
+            }
+
             pub const Layout = extern struct {
                 /// `offset_bits` and `size_bits` should both be INVALID if and only if the field
                 /// is an unnamed bitfield. There is no way to reference an unnamed bitfield in C, so
@@ -1057,13 +1150,25 @@ pub const Type = union(enum) {
             /// targets. On MSVC targets, this value restricts the effects of `#pragma pack` except
             /// in some cases involving bit-fields.
             requiredAlignmentBits: u32,
-
-            pub fn isAnonymous(record: Record, comp: *const Compilation) bool {
-                // anonymous records can be recognized by their names which are in
-                // the format "(anonymous TAG at path:line:col)".
-                return record.name.lookup(comp)[0] == '(';
-            }
         };
+
+        pub fn isAnonymous(record: Record, comp: *const Compilation) bool {
+            // anonymous records can be recognized by their names which are in
+            // the format "(anonymous TAG at path:line:col)".
+            return record.name.lookup(comp)[0] == '(';
+        }
+
+        pub fn hasField(record: Record, comp: *const Compilation, name: StringId) bool {
+            std.debug.assert(record.layout != null);
+            std.debug.assert(name != .empty);
+            for (record.fields) |field| {
+                if (name == field.name) return true;
+                if (field.name == .empty) if (field.qt.getRecord(comp)) |fieldRecordTy| {
+                    if (fieldRecordTy.hasField(comp, name)) return true;
+                };
+            }
+            return false;
+        }
     };
 
     pub const Enum = struct {
@@ -1073,10 +1178,10 @@ pub const Type = union(enum) {
         fields: []const Field,
 
         pub const Field = extern struct {
-            type: QualType,
+            qt: QualType,
             name: StringId,
             nameToken: TokenIndex,
-            node: Node.Index,
+            node: Node.OptIndex,
         };
     };
 
@@ -1194,7 +1299,7 @@ pub fn set(ts: *TypeStore, gpa: std.mem.Allocator, ty: Type, index: usize) !void
                 try ts.extra.append(gpa, @intCast(func.params.len));
             }
 
-            const paramSize = 3;
+            const paramSize = 4;
             comptime std.debug.assert(@sizeOf(Type.Func.Param) == @sizeOf(u32) * paramSize);
 
             try ts.extra.ensureUnusedCapacity(gpa, func.params.len * paramSize);
@@ -1507,7 +1612,7 @@ pub const Builder = struct {
     typedef: bool = false,
     typeof: bool = false,
 
-    type: Specifier = .none,
+    type: Specifier = .None,
     /// When true an error is returned instead of adding a diagnostic message.
     /// Used for trying to combine typedef types.
     errorOnInvalid: bool = false,
@@ -1614,8 +1719,8 @@ pub const Builder = struct {
                 .SChar => "signed char",
                 .UChar => "unsigned char",
                 .Unsigned => "unsigned",
-                .signed => "signed",
-                .short => "short",
+                .Signed => "signed",
+                .Short => "short",
                 .UShort => "unsigned short",
                 .SShort => "signed short",
                 .ShortInt => "short int",
@@ -1697,7 +1802,7 @@ pub const Builder = struct {
                 }
                 break :blk .int;
             },
-            .void => .void,
+            .Void => .void,
             .AutoType => .autoType,
             .C23Auto => .c23Auto,
             .NullptrTy => unreachable, // nullptr_t can only be accessed via typeof(nullptr)
@@ -1825,7 +1930,7 @@ pub const Builder = struct {
                     .Complex => .double,
                     else => unreachable,
                 };
-                if (b.type == .complex) try b.parser.errToken(.plain_complex, b.parser.tokenIdx - 1);
+                if (b.type == .Complex) try b.parser.errToken(.plain_complex, b.parser.tokenIdx - 1);
                 break :blk try baseQt.toComplex(b.parser.comp);
             },
 
@@ -1866,7 +1971,7 @@ pub const Builder = struct {
 
     fn duplicateSpec(b: *Builder, sourceToken: TokenIndex, spec: []const u8) !void {
         if (b.parser.comp.langOpts.emulate != .clang) return b.cannotCombine(sourceToken);
-        try b.parser.errStr(.duplicate_decl_spec, b.parser.tokenIdx, spec);
+        try b.parser.errStr(.duplicate_declspec, b.parser.tokenIdx, spec);
     }
 
     pub fn combineFromTypeof(b: *Builder, new: QualType, sourceToken: TokenIndex) Compilation.Error!void {
@@ -1878,7 +1983,7 @@ pub const Builder = struct {
 
     /// Try to combine type from typedef, returns true if successful.
     pub fn combineTypedef(b: *Builder, typedefQt: QualType) bool {
-        if (b.type != .none) return false;
+        if (b.type != .None) return false;
 
         b.typedef = true;
         b.type = .{ .other = typedefQt };
@@ -2181,7 +2286,7 @@ pub const Builder = struct {
                 .ComplexFloat128,
                 .ComplexChar,
                 .ComplexSChar,
-                .ComplexUchar,
+                .ComplexUChar,
                 .ComplexUnsigned,
                 .ComplexSigned,
                 .ComplexShort,

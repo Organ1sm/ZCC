@@ -143,43 +143,41 @@ pub fn implicitCast(operand: *Result, p: *Parser, kind: Node.Cast.Kind, token: T
 }
 
 pub fn adjustCondExprPtrs(lhs: *Result, token: TokenIndex, rhs: *Result, p: *Parser) !bool {
-    assert(lhs.qt.isPointer() and rhs.qt.isPointer());
+    assert(lhs.qt.isPointer(p.comp) and rhs.qt.isPointer(p.comp));
 
     const lhsElem = lhs.qt.childType(p.comp);
     const rhsElem = rhs.qt.childType(p.comp);
-    if (lhsElem.eql(rhsElem, p.comp))
-        return true;
+    if (lhsElem.eqlQualified(rhsElem, p.comp)) return true;
 
-    var adjustedElemType = lhsElem;
-
-    const hasVoidStarBranch = lhs.qt.isVoidStar() or rhs.qt.isVoidStar();
+    const hasVoidPtrBranch = lhs.qt.scalarKind(p.comp) == .VoidPointer or rhs.qt.scalarKind(p.comp) == .VoidPointer;
     const onlyQualsDiffer = lhsElem.eql(rhsElem, p.comp);
-    const pointersCompatible = onlyQualsDiffer or hasVoidStarBranch;
+    const pointersCompatible = onlyQualsDiffer or hasVoidPtrBranch;
 
-    if (!pointersCompatible or hasVoidStarBranch) {
+    var adjustedElemQt = lhsElem;
+    if (!pointersCompatible or hasVoidPtrBranch) {
         if (!pointersCompatible)
             try p.errStr(.pointer_mismatch, token, try p.typePairStrExtra(lhs.qt, " and ", rhs.qt));
-        adjustedElemType = .void;
+        adjustedElemQt = .void;
     }
 
     if (pointersCompatible) {
-        adjustedElemType.@"const" = lhsElem.@"const" or rhsElem.@"const";
-        adjustedElemType.@"volatile" = lhsElem.@"volatile" or rhsElem.@"volatile";
+        adjustedElemQt.@"const" = lhsElem.@"const" or rhsElem.@"const";
+        adjustedElemQt.@"volatile" = lhsElem.@"volatile" or rhsElem.@"volatile";
     }
 
-    if (!adjustedElemType.eql(lhsElem, p.comp)) {
-        lhs.qt = .{
-            .data = .{ .subType = adjustedElemType },
-            .specifier = .Pointer,
-        };
+    if (!adjustedElemQt.eqlQualified(lhsElem, p.comp)) {
+        lhs.qt = try p.comp.typeStore.put(p.gpa, .{ .pointer = .{
+            .child = adjustedElemQt,
+            .decayed = null,
+        } });
         try lhs.implicitCast(p, .Bitcast, token);
     }
 
-    if (!adjustedElemType.eql(rhsElem, p.comp)) {
-        rhs.qt = .{
-            .data = .{ .subType = adjustedElemType },
-            .specifier = .Pointer,
-        };
+    if (!adjustedElemQt.eqlQualified(rhsElem, p.comp)) {
+        rhs.qt = try p.comp.typeStore.put(p.gpa, .{ .pointer = .{
+            .child = adjustedElemQt,
+            .decayed = null,
+        } });
         try rhs.implicitCast(p, .Bitcast, token);
     }
     return true;
@@ -211,7 +209,7 @@ pub fn adjustTypes(lhs: *Result, token: TokenIndex, rhs: *Result, p: *Parser, ki
     const lhsIsVec = lhs.qt.is(p.comp, .vector);
     const rhsIsVec = rhs.qt.is(p.comp, .vector);
     if (lhsIsVec and rhsIsVec) {
-        if (lhs.qt.eql(rhs.ty, p.comp))
+        if (lhs.qt.eql(rhs.qt, p.comp))
             return lhs.shouldEval(rhs, p);
         return lhs.invalidBinTy(token, rhs, p);
     } else if (lhsIsVec or rhsIsVec) {
@@ -227,9 +225,9 @@ pub fn adjustTypes(lhs: *Result, token: TokenIndex, rhs: *Result, p: *Parser, ki
         }
     }
 
-    const lhsIsInt = lhs.qt.isInt();
-    const rhsIsInt = rhs.qt.isInt();
-    if (lhsIsInt and rhsIsInt) {
+    const lhsSK = lhs.qt.scalarKind(p.comp);
+    const rhsSK = rhs.qt.scalarKind(p.comp);
+    if (lhsSK.isInt() and rhsSK.isInt()) {
         try lhs.usualArithmeticConversion(rhs, p, token);
         return lhs.shouldEval(rhs, p);
     }
@@ -237,13 +235,9 @@ pub fn adjustTypes(lhs: *Result, token: TokenIndex, rhs: *Result, p: *Parser, ki
     if (kind == .integer)
         return lhs.invalidBinTy(token, rhs, p);
 
-    const lhsIsFloat = lhs.qt.isFloat(p.comp);
-    const rhsIsFloat = rhs.qt.isFloat(p.comp);
-    const lhsIsArithmetic = lhsIsInt or lhsIsFloat;
-    const rhsIsArithmetic = rhsIsInt or rhsIsFloat;
-    if (lhsIsArithmetic and rhsIsArithmetic) {
+    if (lhsSK.isArithmetic() and rhsSK.isArithmetic()) {
         // <, <=, >, >= only work on real types
-        if (kind == .relational and (!lhs.qt.isReal() or !rhs.qt.isReal()))
+        if (kind == .relational and (!lhsSK.isReal() or !rhsSK.isReal()))
             return lhs.invalidBinTy(token, rhs, p);
 
         try lhs.usualArithmeticConversion(rhs, p, token);
@@ -253,32 +247,30 @@ pub fn adjustTypes(lhs: *Result, token: TokenIndex, rhs: *Result, p: *Parser, ki
     if (kind == .arithmetic)
         return lhs.invalidBinTy(token, rhs, p);
 
-    const lhsIsNullptr = lhs.qt.is(.NullPtrTy);
-    const rhsIsNullptr = rhs.qt.is(.NullPtrTy);
-    const lhsIsPtr = lhs.qt.isPointer();
-    const rhsIsPtr = rhs.qt.isPointer();
-    const lhsIsScalar = lhsIsArithmetic or lhsIsPtr;
-    const rhsIsScalar = rhsIsArithmetic or rhsIsPtr;
     switch (kind) {
         .booleanLogic => {
-            if (!(lhsIsScalar or lhsIsNullptr) or !(rhsIsScalar or rhsIsNullptr))
+            if (!(lhsSK != .None or lhsSK == .NullptrTy) or
+                !(rhsSK != .None or rhsSK == .NullptrTy))
+            {
                 return lhs.invalidBinTy(token, rhs, p);
+            }
 
             // Do integer promotions but nothing else
-            if (lhsIsInt) try lhs.castToInt(p, lhs.qt.integerPromotion(p.comp), token);
-            if (rhsIsInt) try rhs.castToInt(p, rhs.qt.integerPromotion(p.comp), token);
+            if (lhsSK.isInt()) try lhs.castToInt(p, lhs.qt.promoteInt(p.comp), token);
+            if (rhsSK.isInt()) try rhs.castToInt(p, rhs.qt.promoteInt(p.comp), token);
             return lhs.shouldEval(rhs, p);
         },
 
         .relational, .equality => {
-            if (kind == .equality and (lhsIsNullptr or rhsIsNullptr)) {
-                if (lhsIsNullptr and rhsIsNullptr)
+            if (kind == .equality and (lhsSK == .NullptrTy or rhsSK == .NullptrTy)) {
+                if (lhsSK == .NullptrTy and rhsSK == .NullptrTy)
                     return lhs.shouldEval(rhs, p);
 
-                const nullPtrRes = if (lhsIsNullptr) lhs else rhs;
-                const otherRes = if (lhsIsNullptr) rhs else lhs;
-                if (otherRes.qt.isPointer()) {
-                    try nullPtrRes.nullCast(p, otherRes.qt, token);
+                const nullPtrRes = if (lhsSK == .NullptrTy) lhs else rhs;
+                const otherRes = if (lhsSK == .NullptrTy) rhs else lhs;
+
+                if (otherRes.qt.isPointer(p.comp)) {
+                    try nullPtrRes.nullToPointer(p, otherRes.qt, token);
                     return otherRes.shouldEval(nullPtrRes, p);
                 } else if (otherRes.value.isZero(p.comp)) {
                     otherRes.value = .null;
@@ -289,18 +281,22 @@ pub fn adjustTypes(lhs: *Result, token: TokenIndex, rhs: *Result, p: *Parser, ki
             }
 
             // comparisons between floats and pointes not allowed
-            if (!lhsIsScalar or !rhsIsScalar or (lhsIsFloat and rhsIsPtr) or (rhsIsFloat and lhsIsPtr))
+            if (lhsSK == .None or rhsSK == .None or
+                (lhsSK.isFloat() and rhsSK.isPointer()) or
+                (rhsSK.isFloat() and lhsSK.isPointer()))
+            {
                 return lhs.invalidBinTy(token, rhs, p);
+            }
 
-            if ((lhsIsInt or rhsIsInt) and !(lhs.value.isZero(p.comp) or rhs.value.isZero(p.comp))) {
+            if ((lhsSK.isInt() or rhsSK.isInt()) and !(lhs.value.isZero(p.comp) or rhs.value.isZero(p.comp))) {
                 try p.errStr(.comparison_ptr_int, token, try p.typePairStr(lhs.qt, rhs.qt));
-            } else if (lhsIsPtr and rhsIsPtr) {
-                if (!lhs.qt.isVoidStar() and !rhs.qt.isVoidStar() and !lhs.qt.eql(rhs.qt, p.comp))
+            } else if (lhsSK.isPointer() and rhsSK.isPointer()) {
+                if (lhsSK != .VoidPointer and rhsSK != .VoidPointer and !lhs.qt.eql(rhs.qt, p.comp))
                     try p.errStr(.comparison_distinct_ptr, token, try p.typePairStr(lhs.qt, rhs.qt));
-            } else if (lhsIsPtr) {
+            } else if (lhsSK.isPointer()) {
                 try rhs.castToPointer(p, lhs.qt, token);
             } else {
-                assert(rhsIsPtr);
+                assert(rhsSK.isPointer());
                 try lhs.castToPointer(p, rhs.qt, token);
             }
 
@@ -309,41 +305,43 @@ pub fn adjustTypes(lhs: *Result, token: TokenIndex, rhs: *Result, p: *Parser, ki
 
         .conditional => {
             // doesn't matter what we return here, as the result is ignored
-            if (lhs.qt.is(.Void) or rhs.qt.is(.Void)) {
+            if (lhs.qt.is(p.comp, .void) or rhs.qt.is(p.comp, .void)) {
                 try lhs.castToVoid(p, token);
                 try rhs.castToVoid(p, token);
                 return true;
             }
 
-            if (lhsIsNullptr and rhsIsNullptr)
+            if (lhsSK == .NullptrTy and rhsSK == .NullptrTy)
                 return true;
 
-            if ((lhsIsPtr and rhsIsInt) or (lhsIsInt and rhsIsPtr)) {
+            if ((lhsSK.isPointer() and rhsSK.isInt()) or (lhsSK.isInt() and rhsSK.isPointer())) {
                 if (lhs.value.isZero(p.comp) or rhs.value.isZero(p.comp)) {
                     try lhs.nullToPointer(p, rhs.qt, token);
                     try rhs.nullToPointer(p, lhs.qt, token);
                     return true;
                 }
 
-                const intType = if (lhsIsInt) lhs else rhs;
-                const ptrType = if (lhsIsPtr) lhs else rhs;
+                const intType = if (lhsSK.isInt()) lhs else rhs;
+                const ptrType = if (lhsSK.isPointer()) lhs else rhs;
 
                 try p.errStr(.implicit_int_to_ptr, token, try p.typePairStrExtra(intType.qt, " to ", ptrType.qt));
                 try intType.castToPointer(p, ptrType.qt, token);
                 return true;
             }
 
-            if (lhsIsPtr and rhsIsPtr)
+            if (lhsSK.isPointer() and rhsSK.isPointer())
                 return lhs.adjustCondExprPtrs(token, rhs, p);
 
-            if ((lhsIsPtr and rhsIsNullptr) or (lhsIsNullptr and rhsIsPtr)) {
-                const nullPtrRes = if (lhsIsNullptr) lhs else rhs;
-                const ptrRes = if (lhsIsNullptr) rhs else lhs;
-                try intType.nullToPointer(p, ptrRes.ty, token);
+            if ((lhsSK.isPointer() and rhsSK == .NullptrTy) or (lhsSK == .NullptrTy and rhsSK.isPointer())) {
+                const nullPtrRes = if (lhsSK == .NullptrTy) lhs else rhs;
+                const ptrRes = if (lhsSK == .NullptrTy) rhs else lhs;
+                try nullPtrRes.nullToPointer(p, ptrRes.qt, token);
                 return true;
             }
 
-            if (lhs.qt.isRecord() and rhs.qt.isRecord() and lhs.qt.eql(rhs.qt, p.comp, false))
+            if (lhsSK.isPointer() and rhsSK.isPointer()) return lhs.adjustCondExprPtrs(token, rhs, p);
+
+            if (lhs.qt.getRecord(p.comp) != null and rhs.qt.getRecord(p.comp) != null and lhs.qt.eql(rhs.qt, p.comp))
                 return true;
 
             return lhs.invalidBinTy(token, rhs, p);
@@ -351,30 +349,30 @@ pub fn adjustTypes(lhs: *Result, token: TokenIndex, rhs: *Result, p: *Parser, ki
 
         .add => {
             // if both aren't arithmetic one should be pointer and the other an integer
-            if (lhsIsPtr == rhsIsPtr or lhsIsInt == rhsIsInt)
+            if (lhsSK.isPointer() == rhsSK.isPointer() or lhsSK.isInt() == rhsSK.isInt())
                 return lhs.invalidBinTy(token, rhs, p);
 
             // Do integer promotions but nothing else
-            if (lhsIsInt) try lhs.castToInt(p, lhs.qt.integerPromotion(p.comp), token);
-            if (rhsIsInt) try rhs.castToInt(p, rhs.qt.integerPromotion(p.comp), token);
+            if (lhsSK.isInt()) try lhs.castToInt(p, lhs.qt.promoteInt(p.comp), token);
+            if (rhsSK.isInt()) try rhs.castToInt(p, rhs.qt.promoteInt(p.comp), token);
 
             // The result type is the type of the pointer operand
-            if (lhsIsInt) lhs.qt = rhs.qt else rhs.qt = lhs.qt;
+            if (lhsSK.isInt()) lhs.qt = rhs.qt else rhs.qt = lhs.qt;
             return lhs.shouldEval(rhs, p);
         },
 
         .sub => {
             // if both aren't arithmetic then either both should be pointers or just a
-            if (!lhsIsPtr or !(rhsIsPtr or rhsIsInt)) return lhs.invalidBinTy(token, rhs, p);
+            if (!lhsSK.isPointer() or !(rhsSK.isPointer() or rhsSK.isInt())) return lhs.invalidBinTy(token, rhs, p);
 
-            if (lhsIsPtr and rhsIsPtr) {
-                if (!lhs.qt.eql(rhs.ty, p.comp))
+            if (lhsSK.isPointer() and rhsSK.isPointer()) {
+                if (!lhs.qt.eql(rhs.qt, p.comp))
                     try p.errStr(.incompatible_pointers, token, try p.typePairStr(lhs.qt, rhs.qt));
                 lhs.qt = p.comp.typeStore.ptrdiff;
             }
 
             // Do integer promotion on b if needed
-            if (rhsIsInt) try rhs.castToInt(p, rhs.qt.integerPromotion(p.comp), token);
+            if (rhsSK.isInt()) try rhs.castToInt(p, rhs.qt.promoteInt(p.comp), token);
             return lhs.shouldEval(rhs, p);
         },
 
@@ -397,7 +395,7 @@ pub fn lvalConversion(res: *Result, p: *Parser, token: TokenIndex) Error!void {
         try res.implicitCast(p, .FunctionToPointer, token);
     }
     // Decay an array type to a pointer to its first element.
-    else if (res.ty.isArray()) {
+    else if (res.qt.is(p.comp, .array)) {
         res.value = .{};
         res.qt = try res.qt.decay(p.comp);
         try res.implicitCast(p, .ArrayToPointer, token);
@@ -458,7 +456,7 @@ pub fn castToInt(res: *Result, p: *Parser, intQt: QualType, token: TokenIndex) E
     }
     // Cast from floating point to integer.
     else if (res.qt.isFloat(p.comp)) {
-        const oldValue = res.val;
+        const oldValue = res.value;
         const valueChangeKind = try res.value.floatToInt(intQt, p.comp);
 
         try res.floatToIntWarning(p, intQt, oldValue, valueChangeKind, token);
@@ -481,22 +479,15 @@ pub fn castToInt(res: *Result, p: *Parser, intQt: QualType, token: TokenIndex) E
             try res.implicitCast(p, .ComplexFloatToComplexInt, token);
         }
     } else if (!res.qt.eql(intQt, p.comp)) {
-        const oldValue = res.value;
-        const valueChangeKind = try res.value.intCast(intQt, p.comp);
-        switch (valueChangeKind) {
-            .none => {},
-            .truncated => try p.errStr(.int_value_changed, token, try p.floatValueChangedStr(res, oldValue, intQt)),
-            .si => try p.errStr(.sign_conversion, token, try p.typePairStrExtra(res.qt, " to ", intQt)),
-        }
-
+        try res.value.intCast(intQt, p.comp);
         if (srcSK.isReal() and destSK.isReal()) {
             res.qt = intQt;
-            try res.implicitCast(p, .int_cast, token);
+            try res.implicitCast(p, .IntCast, token);
         } else if (srcSK.isReal()) {
             const realIntQt = intQt.toReal(p.comp);
             if (!res.qt.eql(realIntQt, p.comp)) {
                 res.qt = realIntQt;
-                try res.implicitCast(p, .int_cast, token);
+                try res.implicitCast(p, .IntCast, token);
             }
             res.qt = intQt;
             try res.implicitCast(p, .RealToComplexInt, token);
@@ -521,9 +512,9 @@ fn floatToIntWarning(
     tok: TokenIndex,
 ) !void {
     switch (changeKind) {
-        .none => return p.errStr(.float_to_int, tok, try p.typePairStrExtra(res.ty, " to ", intTy)),
-        .outOfRange => return p.errStr(.float_out_of_range, tok, try p.typePairStrExtra(res.ty, " to ", intTy)),
-        .overflow => return p.errStr(.float_overflow_conversion, tok, try p.typePairStrExtra(res.ty, " to ", intTy)),
+        .none => return p.errStr(.float_to_int, tok, try p.typePairStrExtra(res.qt, " to ", intTy)),
+        .outOfRange => return p.errStr(.float_out_of_range, tok, try p.typePairStrExtra(res.qt, " to ", intTy)),
+        .overflow => return p.errStr(.float_overflow_conversion, tok, try p.typePairStrExtra(res.qt, " to ", intTy)),
         .nonZeroToZero => return p.errStr(.float_zero_conversion, tok, try p.floatValueChangedStr(res, oldValue, intTy)),
         .valueChanged => return p.errStr(.float_value_changed, tok, try p.floatValueChangedStr(res, oldValue, intTy)),
     }
@@ -553,7 +544,7 @@ pub fn castToFloat(res: *Result, p: *Parser, floatQt: QualType, token: TokenInde
             try res.implicitCast(p, .RealToComplexFloat, token);
         } else if (destSK.isReal()) {
             res.qt = res.qt.toReal(p.comp);
-            try res.implicitCast(p, .complex_int_to_real, token);
+            try res.implicitCast(p, .ComplexIntToReal, token);
             res.qt = floatQt;
             try res.implicitCast(p, .IntToFloat, token);
         } else {
@@ -600,13 +591,13 @@ pub fn castToPointer(res: *Result, p: *Parser, ptrTy: QualType, token: TokenInde
 }
 
 fn castToVoid(res: *Result, p: *Parser, tok: TokenIndex) Error!void {
-    if (!res.qt.is(.void)) {
+    if (!res.qt.is(p.comp, .void)) {
         res.qt = .void;
-        try res.implicitCast(p, .to_void, tok);
+        try res.implicitCast(p, .ToVoid, tok);
     }
 }
 
-fn nullToPointer(res: *Result, p: *Parser, ptrTy: QualType, token: TokenIndex) Error!void {
+pub fn nullToPointer(res: *Result, p: *Parser, ptrTy: QualType, token: TokenIndex) Error!void {
     if (!res.qt.is(p.comp, .nullptrTy) and !res.value.isZero(p.comp)) return;
     res.qt = ptrTy;
     try res.implicitCast(p, .NullToPointer, token);
@@ -624,12 +615,16 @@ fn nullToPointer(res: *Result, p: *Parser, ptrTy: QualType, token: TokenIndex) E
 /// Returns:
 ///   - The cast value if the cast was successful. Otherwise, an error.
 pub fn usualUnaryConversion(res: *Result, p: *Parser, token: TokenIndex) Error!void {
-    if (res.qt.is(.fp16) and !p.comp.langOpts.useNativeHalfType) {
-        return res.castToFloat(p, .float, token);
+    if (!p.comp.langOpts.useNativeHalfType) {
+        if (res.qt.get(p.comp, .float)) |floatTy| {
+            if (floatTy == .FP16) {
+                return res.castToFloat(p, .float, token);
+            }
+        }
     }
-    if (res.qt.isInt(p.comp) and !p.in_macro) {
+    if (res.qt.isInt(p.comp) and !p.inMacro) {
         if (p.tree.bitfieldWidth(res.node, true)) |width| {
-            if (res.qt.bitfieldPromotion(p.comp, width)) |promotionTy| {
+            if (res.qt.promoteBitfield(p.comp, width)) |promotionTy| {
                 return res.castToInt(p, promotionTy, token);
             }
         }
@@ -643,61 +638,66 @@ fn usualArithmeticConversion(lhs: *Result, rhs: *Result, p: *Parser, token: Toke
 
     // if either is a float cast to that type
     if (lhs.qt.isFloat(p.comp) or rhs.qt.isFloat(p.comp)) {
-        const floatTypes = [6][2]QualType{
-            .{ .ComplexFloat128, .Float128 },
-            .{ .complexlongDouble, .LongDouble },
-            .{ .ComplexDouble, .Double },
-            .{ .ComplexFloat, .Float },
-            // No `_Complex __fp16` type
-            .{ .Invalid, .FP16 },
-            .{ .ComplexFloat16, .Float16 },
-        };
+        const lhsIsComplex = lhs.qt.is(p.comp, .complex);
+        const rhsIsComplex = rhs.qt.is(p.comp, .complex);
 
-        const lhsSpec = lhs.qt.canonicalize(.standard).specifier;
-        const rhsSpec = rhs.qt.canonicalize(.standard).specifier;
+        const resQt = if (lhs.qt.floatRank(p.comp) > rhs.qt.floatRank(p.comp))
+            (if (!lhsIsComplex and rhsIsComplex) try lhs.qt.toComplex(p.comp) else lhs.qt)
+        else
+            (if (!rhsIsComplex and lhsIsComplex) try rhs.qt.toComplex(p.comp) else rhs.qt);
 
-        for (floatTypes) |ft| {
-            if (try lhs.floatConversion(rhs, lhsSpec, rhsSpec, p, ft, token)) return;
-        }
-        unreachable;
-    }
-
-    if (lhs.qt.eql(rhs.ty, p.comp, true)) {
-        // cast to promoted type
-        try lhs.castToInt(p, lhs.ty, token);
-        try rhs.castToInt(p, rhs.ty, token);
+        try lhs.castToFloat(p, resQt, token);
+        try rhs.castToFloat(p, resQt, token);
         return;
     }
 
-    const targetTy = lhs.qt.integerConversion(rhs.ty, p.comp);
-    if (!targetTy.isReal()) {
+    if (lhs.qt.eql(rhs.qt, p.comp)) {
+        // cast to promoted type
+        try lhs.castToInt(p, lhs.qt, token);
+        try rhs.castToInt(p, rhs.qt, token);
+        return;
+    }
+
+    const lhsReal = lhs.qt.toReal(p.comp);
+    const rhsReal = rhs.qt.toReal(p.comp);
+
+    const typeOrder = lhs.qt.intRankOrder(rhs.qt, p.comp);
+    const lhsIsSigned = lhs.qt.isUnsignedInt(p.comp);
+    const rhsIsSigned = rhs.qt.isUnsignedInt(p.comp);
+
+    var targetQt: QualType = .invalid;
+    if (lhsIsSigned == rhsIsSigned) {
+        // If both have the same sign, use higher-rank type.
+        targetQt = switch (typeOrder) {
+            .lt => rhs.qt,
+            .eq, .gt => lhsReal,
+        };
+    } else if (typeOrder != if (lhsIsSigned) std.math.Order.gt else std.math.Order.lt) {
+        // Only one is signed; and the unsigned type has rank >= the signed type
+        // Use the unsigned type
+        targetQt = if (rhsIsSigned) lhsReal else rhsReal;
+    } else if (lhsReal.bitSizeof(p.comp) != rhsReal.bitSizeof(p.comp)) {
+        // Signed type is higher rank and sizes are not equal
+        // Use the signed type
+        targetQt = if (lhsIsSigned) lhsReal else rhsReal;
+    } else {
+        // Signed type is higher rank but same size as unsigned type
+        // e.g. `long` and `unsigned` on x86-linux-gnu
+        // Use unsigned version of the signed type
+        targetQt = if (lhsIsSigned) try lhsReal.makeIntUnsigned(p.comp) else try rhsReal.makeIntUnsigned(p.comp);
+    }
+
+    if (lhs.qt.is(p.comp, .complex) or rhs.qt.is(p.comp, .complex)) {
+        targetQt = try targetQt.toComplex(p.comp);
+    }
+
+    if (targetQt.is(p.comp, .complex)) {
+        // TODO implement complex int values
         try lhs.saveValue(p);
         try rhs.saveValue(p);
     }
-    try lhs.castToInt(p, targetTy, token);
-    try rhs.castToInt(p, targetTy, token);
-}
-
-fn floatConversion(
-    lhs: *Result,
-    rhs: *Result,
-    lhsSpec: QualType,
-    rhsSpec: QualType,
-    p: *Parser,
-    pair: [2]QualType,
-    token: TokenIndex,
-) !bool {
-    if (lhsSpec == pair[0] or lhsSpec == pair[1] or
-        rhsSpec == pair[0] or rhsSpec == pair[1])
-    {
-        const bothReal = lhs.qt.isReal() and rhs.qt.isReal();
-        const resSpec = pair[@intFromBool(bothReal)];
-        const ty = QualType{ .specifier = resSpec };
-        try lhs.castToFloat(p, ty, token);
-        try rhs.castToFloat(p, ty, token);
-        return true;
-    }
-    return false;
+    try lhs.castToInt(p, targetQt, token);
+    try rhs.castToInt(p, targetQt, token);
 }
 
 fn invalidBinTy(lhs: *Result, tok: TokenIndex, rhs: *Result, p: *Parser) Error!bool {
@@ -761,7 +761,7 @@ pub fn castType(res: *Result, p: *Parser, destQt: QualType, operandToken: TokenI
             res.qt = .bool;
             try res.implicitCast(p, .PointerToBool, lparen);
             try res.saveValue(p);
-        } else if (destQt.isPointer()) {
+        } else if (destSK.isPointer()) {
             try res.nullToPointer(p, destQt, lparen);
         } else {
             try p.errStr(.invalid_object_cast, lparen, try p.typePairStrExtra(res.qt, " to ", destQt));
@@ -800,10 +800,10 @@ pub fn castType(res: *Result, p: *Parser, destQt: QualType, operandToken: TokenI
             }
         }
         // dest type is int
-        else if (destQt.isInt()) {
-            if (res.qt.is(.bool)) {
+        else if (destSK.isInt()) {
+            if (srcSK == .Bool) {
                 if (!destSK.isReal()) {
-                    res.ty = destQt.toReal(p.comp);
+                    res.qt = destQt.toReal(p.comp);
                     try res.implicitCast(p, .BoolToInt, lparen);
                     explicitCK = .RealToComplexInt;
                 } else {
@@ -825,7 +825,7 @@ pub fn castType(res: *Result, p: *Parser, destQt: QualType, operandToken: TokenI
                 }
             } else if (srcSK.isPointer()) {
                 if (!destSK.isReal()) {
-                    res.ty = destQt.toReal(p.comp);
+                    res.qt = destQt.toReal(p.comp);
                     try res.implicitCast(p, .PointerToInt, lparen);
                     explicitCK = .RealToComplexInt;
                 } else {
@@ -835,7 +835,7 @@ pub fn castType(res: *Result, p: *Parser, destQt: QualType, operandToken: TokenI
             } else if (srcSK.isReal() and destSK.isReal()) {
                 explicitCK = .FloatToInt;
             } else if (srcSK.isReal()) {
-                res.ty = destQt.toReal(p.comp);
+                res.qt = destQt.toReal(p.comp);
                 try res.implicitCast(p, .FloatToInt, lparen);
                 explicitCK = .RealToComplexInt;
             } else if (destSK.isReal()) {
@@ -854,7 +854,7 @@ pub fn castType(res: *Result, p: *Parser, destQt: QualType, operandToken: TokenI
                     try res.implicitCast(p, .ComplexIntToReal, lparen);
                 }
                 explicitCK = .IntToPointer;
-            } else if (srcSK == .bool) {
+            } else if (srcSK == .Bool) {
                 explicitCK = .BoolToPointer;
             } else if (res.qt.is(p.comp, .array)) {
                 explicitCK = .ArrayToPointer;
@@ -867,7 +867,7 @@ pub fn castType(res: *Result, p: *Parser, destQt: QualType, operandToken: TokenI
         } else if (destSK.isFloat()) {
             if (srcSK == .Bool) {
                 if (!destSK.isReal()) {
-                    res.ty = destQt.toReal(p.comp);
+                    res.qt = destQt.toReal(p.comp);
                     try res.implicitCast(p, .BoolToFloat, lparen);
                     explicitCK = .RealToComplexFloat;
                 } else {
@@ -906,7 +906,7 @@ pub fn castType(res: *Result, p: *Parser, destQt: QualType, operandToken: TokenI
 
         const oldInt = srcSK.isInt() or srcSK.isPointer();
         const newInt = destSK.isInt() or destSK.isPointer();
-        if (destQt.is(.Bool)) {
+        if (destSK == .Bool) {
             res.value.boolCast(p.comp);
         } else if (srcSK.isFloat() and newInt) {
             // Explicit cast, no conversion warning
@@ -922,7 +922,7 @@ pub fn castType(res: *Result, p: *Parser, destQt: QualType, operandToken: TokenI
             }
             try res.value.intCast(destQt, p.comp);
         }
-    } else if (destQt.get(p.comp, .Union)) |unionTy| {
+    } else if (destQt.get(p.comp, .@"union")) |unionTy| {
         if (unionTy.layout == null) {
             try p.errStr(.cast_to_incomplete_type, lparen, try p.typeStr(destQt));
             return error.ParsingFailed;
@@ -946,7 +946,7 @@ pub fn castType(res: *Result, p: *Parser, destQt: QualType, operandToken: TokenI
     if (destQt.isQualified())
         try p.errStr(.qual_cast, lparen, try p.typeStr(destQt));
 
-    if (destQt.isInt() and srcSK.isPointer() and destQt.sizeCompare(res.qt, p.comp) == .lt)
+    if (destSK.isInt() and srcSK.isPointer() and destQt.sizeCompare(res.qt, p.comp) == .lt)
         try p.errStr(.cast_to_smaller_int, lparen, try p.typePairStrExtra(destQt, " from ", res.qt));
 
     res.qt = destQt;
@@ -1020,92 +1020,98 @@ fn coerceExtra(
     tok: TokenIndex,
     ctx: CoerceContext,
 ) (Error || error{CoercionFailed})!void {
-    // Subject of the coercion does not need to be qualified.
-    var destUnqual = destQt.unqualified();
-    if (destUnqual.is(.NullPtrTy)) {
-        if (res.qt.is(.NullPtrTy)) return;
+    const srcSK = res.qt.scalarKind(p.comp);
+    const destSK = destQt.scalarKind(p.comp);
+
+    if (destSK == .NullptrTy) {
+        if (srcSK == .NullptrTy) return;
     }
     // dest type is bool
-    else if (destUnqual.is(.Bool)) {
-        if (res.qt.isScalar() and !res.qt.is(.NullPtrTy)) {
+    else if (destSK == .Bool) {
+        if (srcSK != .None and srcSK != .NullptrTy) {
             // this is ridiculous but it's what clang does
-            try res.castToBool(p, destUnqual, tok);
+            try res.castToBool(p, destQt, tok);
             return;
         }
     }
     // dest type is int
-    else if (destUnqual.isInt(p.comp)) {
-        if (res.qt.isInt(p.comp) or res.qt.isFloat(p.comp)) {
-            try res.castToInt(p, destUnqual, tok);
+    else if (destSK.isInt()) {
+        if (srcSK.isArithmetic()) {
+            try res.castToInt(p, destQt, tok);
             return;
-        } else if (res.qt.isPointer()) {
-            if (ctx == .testCoerce)
-                return error.CoercionFailed;
-            try p.errStr(.implicit_ptr_to_int, tok, try p.typePairStrExtra(res.ty, " to ", destQt));
+        } else if (srcSK.isPointer()) {
+            if (ctx == .testCoerce) return error.CoercionFailed;
+            try p.errStr(.implicit_ptr_to_int, tok, try p.typePairStrExtra(res.qt, " to ", destQt));
             try ctx.note(p);
-            try res.castToInt(p, destUnqual, tok);
+            try res.castToInt(p, destQt, tok);
             return;
         }
     }
     // dest type is float
-    else if (destUnqual.isFloat()) {
-        if (res.qt.isInt(p.comp) or res.qt.isFloat(p.comp)) {
-            try res.castToFloat(p, destUnqual, tok);
+    else if (destSK.isFloat()) {
+        if (srcSK.isArithmetic()) {
+            try res.castToFloat(p, destQt, tok);
             return;
         }
     }
     // dest type is pointer
-    else if (destUnqual.isPointer()) {
-        if (res.value.isZero(p.comp) or res.qt.is(.NullPtrTy)) {
+    else if (destSK.isPointer()) {
+        if (res.value.isZero(p.comp) or srcSK == .NullptrTy) {
             try res.nullToPointer(p, destQt, tok);
             return;
-        } else if (res.qt.isInt() and res.qt.isReal()) {
-            if (ctx == .testCoerce)
-                return error.CoercionFailed;
-            try p.errStr(.implicit_int_to_ptr, tok, try p.typePairStrExtra(res.ty, " to ", destQt));
+        } else if (srcSK.isInt() and srcSK.isReal()) {
+            if (ctx == .testCoerce) return error.CoercionFailed;
+            try p.errStr(.implicit_int_to_ptr, tok, try p.typePairStrExtra(res.qt, " to ", destQt));
             try ctx.note(p);
-            try res.castToPointer(p, destUnqual, tok);
+            try res.castToPointer(p, destQt, tok);
             return;
-        } else if (res.qt.isVoidStar() or destUnqual.eql(res.ty, p.comp)) {
+        } else if (srcSK == .VoidPointer or destQt.eql(res.qt, p.comp)) {
             return; // ok
-        } else if (destUnqual.isVoidStar() and res.qt.isPointer() or (res.qt.isInt() and res.qt.isReal())) {
+        } else if (destSK == .VoidPointer and srcSK.isPointer() or (srcSK.isInt() and srcSK.isReal())) {
             return; // ok
-        } else if (destUnqual.eql(res.ty, p.comp, false)) {
-            if (!destUnqual.childType(p.comp).qual.hasQuals(res.ty.childType(p.comp).qual)) {
-                try p.errStr(switch (ctx) {
-                    .assign => .ptr_assign_discards_quals,
-                    .init => .ptr_init_discards_quals,
-                    .ret => .ptr_ret_discards_quals,
-                    .arg => .ptr_arg_discards_quals,
-                    .testCoerce => return error.CoercionFailed,
-                }, tok, try ctx.typePairStr(p, destQt, res.qt));
+        } else if (srcSK.isPointer()) {
+            const srcChild = res.qt.childType(p.comp);
+            const destChild = destQt.childType(p.comp);
+
+            if (srcChild.eql(destChild, p.comp)) {
+                if ((srcChild.@"const" and !destChild.@"const") or
+                    (srcChild.@"volatile" and !destChild.@"volatile") or
+                    (srcChild.restrict and !destChild.restrict))
+                {
+                    try p.errStr(switch (ctx) {
+                        .assign => .ptr_assign_discards_quals,
+                        .init => .ptr_init_discards_quals,
+                        .ret => .ptr_ret_discards_quals,
+                        .arg => .ptr_arg_discards_quals,
+                        .testCoerce => return error.CoercionFailed,
+                    }, tok, try ctx.typePairStr(p, destQt, res.qt));
+                }
+                try res.castToPointer(p, destQt, tok);
+                return;
             }
-            try res.castToPointer(p, destUnqual, tok);
-            return;
-        } else if (res.qt.isPointer()) {
-            const differentSignOnly = destUnqual.childType(p.comp).sameRankDifferentSign(res.qt.childType(p.comp), p.comp);
+            const differentSignOnly = srcChild.sameRankDifferentSign(destChild, p.comp);
             try p.errStr(switch (ctx) {
-                .assign => ([2]Diagnostics.Tag{ .incompatible_ptr_assign, .incompatible_ptr_assign_sign })[@intFromBool(differentSignOnly)],
-                .init => ([2]Diagnostics.Tag{ .incompatible_ptr_init, .incompatible_ptr_init_sign })[@intFromBool(differentSignOnly)],
-                .ret => ([2]Diagnostics.Tag{ .incompatible_return, .incompatible_return_sign })[@intFromBool(differentSignOnly)],
-                .arg => ([2]Diagnostics.Tag{ .incompatible_ptr_arg, .incompatible_ptr_arg_sign })[@intFromBool(differentSignOnly)],
+                .assign => if (differentSignOnly) .incompatible_ptr_assign_sign else .incompatible_ptr_assign,
+                .init => if (differentSignOnly) .incompatible_ptr_init_sign else .incompatible_ptr_init,
+                .ret => if (differentSignOnly) .incompatible_return_sign else .incompatible_return,
+                .arg => if (differentSignOnly) .incompatible_ptr_arg_sign else .incompatible_ptr_arg,
                 .testCoerce => return error.CoercionFailed,
-            }, tok, try ctx.typePairStr(p, destQt, res.ty));
+            }, tok, try ctx.typePairStr(p, destQt, res.qt));
             try ctx.note(p);
 
-            res.qt = destUnqual;
-            return res.implicitCast(p, .bitcat, tok);
+            res.qt = destQt;
+            return res.implicitCast(p, .Bitcast, tok);
         }
     }
     // dest type is record
-    else if (destUnqual.isRecord()) {
-        if (destUnqual.eql(res.ty, p.comp, false))
+    else if (destQt.getRecord(p.comp) != null) {
+        if (destQt.eql(res.qt, p.comp))
             return; // ok
 
         if (ctx == .arg) {
-            if (destUnqual.get(.Union)) |unionTy| {
-                if (destQt.hasAttribute(.transparent_union)) transparent_union: {
-                    res.coerceExtra(p, unionTy.data.record.fields[0].ty, tok, .testCoerce) catch |err| switch (err) {
+            if (destQt.get(p.comp, .@"union")) |unionTy| {
+                if (destQt.hasAttribute(p.comp, .transparent_union)) transparent_union: {
+                    res.coerceExtra(p, unionTy.fields[0].qt, tok, .testCoerce) catch |err| switch (err) {
                         error.CoercionFailed => break :transparent_union,
                         else => |e| return e,
                     };
@@ -1117,18 +1123,18 @@ fn coerceExtra(
                             .unionQt = destQt,
                         },
                     });
-                    res.ty = destQt;
+                    res.qt = destQt;
                     return;
                 }
             }
-        } else if (destUnqual.is(.Vector)) {
-            if (destUnqual.eql(res.qt, p.comp, false))
+        } else if (destQt.is(p.comp, .vector)) {
+            if (destQt.eql(res.qt, p.comp))
                 return; //ok
         }
     }
     // other type
     else {
-        if (ctx == .assign and (destUnqual.isArray() or destUnqual.isFunc())) {
+        if (ctx == .assign and (destQt.is(p.comp, .array) or destQt.is(p.comp, .func))) {
             try p.errToken(.not_assignable, tok);
             return;
         } else if (ctx == .testCoerce) {

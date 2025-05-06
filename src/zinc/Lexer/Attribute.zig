@@ -409,10 +409,12 @@ const EnumTypes = enum {
     string,
     identifier,
 };
+
 pub const Alignment = struct {
     node: Tree.Node.OptIndex = .null,
-    requested: u29,
+    requested: u32,
 };
+
 pub const Identifier = struct {
     tok: TokenIndex = 0,
 };
@@ -897,7 +899,7 @@ pub fn applyFieldAttributes(p: *Parser, fieldTy: *QualType, attrBufferStart: usi
         else => try ignoredAttrErr(p, tok, attr.tag, "fields"),
     };
 
-    if (p.attrApplicationBuffer.items.len == 0) return &[0]Attribute{};
+    if (p.attrApplicationBuffer.items.len == 0) return &.{};
     return p.arena.dupe(Attribute, p.attrApplicationBuffer.items);
 }
 
@@ -1119,9 +1121,9 @@ fn applyTransparentUnion(attr: Attribute, p: *Parser, token: TokenIndex, qt: Qua
     if (unionTy.fields.len == 0)
         return p.errToken(.transparent_union_one_field, token);
 
-    const firstFieldSize = unionTy.fields[0].qt.bitSizeof(p.comp).?;
+    const firstFieldSize = unionTy.fields[0].qt.bitSizeof(p.comp);
     for (unionTy.fields[1..]) |field| {
-        const fieldSize = field.qt.bitSizeof(p.comp).?;
+        const fieldSize = field.qt.bitSizeof(p.comp);
         if (fieldSize == firstFieldSize)
             continue;
 
