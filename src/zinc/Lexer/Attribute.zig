@@ -900,7 +900,8 @@ pub fn applyFieldAttributes(p: *Parser, fieldTy: *QualType, attrBufferStart: usi
     };
 
     if (p.attrApplicationBuffer.items.len == 0) return &.{};
-    return p.arena.dupe(Attribute, p.attrApplicationBuffer.items);
+
+    return p.attrApplicationBuffer.items;
 }
 
 pub fn applyTypeAttributes(p: *Parser, qt: QualType, attrBufferStart: usize, tag: ?Diagnostics.Tag) !QualType {

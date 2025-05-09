@@ -68,8 +68,6 @@ tokenIds: []const TokenType,
 tokenIdx: u32 = 0,
 
 tree: AST,
-// references tree.arena
-arena: Allocator,
 
 // buffers used during compilation
 symStack: SymbolStack = .{},
@@ -77,12 +75,17 @@ strings: std.ArrayList(u8),
 labels: std.ArrayList(Label),
 listBuffer: NodeList,
 declBuffer: NodeList,
+/// Function type parameters, also used for generic selection association
+/// duplicate checking.
 paramBuffer: std.ArrayList(Type.Func.Param),
+/// Enum type fields.
 enumBuffer: std.ArrayList(Type.Enum.Field),
+/// Record type fields.
 recordBuffer: std.ArrayList(Type.Record.Field),
+/// Attributes that have been parsed but not yet validated or applied.
 attrBuffer: std.MultiArrayList(TentativeAttribute) = .{},
+/// Used to store validated attributes before they are applied to types.
 attrApplicationBuffer: std.ArrayListUnmanaged(Attribute) = .{},
-fieldAttrBuffer: std.ArrayList([]const Attribute),
 /// type name -> variable name location for tentative definitions (top-level defs with thus-far-incomplete types)
 /// e.g. `struct Foo bar;` where `struct Foo` is not defined yet.
 /// The key is the StringId of `Foo` and the value is the TokenIndex of `bar`
@@ -120,7 +123,6 @@ record: struct {
     kind: TokenType = .Invalid,
     flexibleField: ?TokenIndex = null,
     start: usize = 0,
-    fieldAttrStart: usize = 0,
 
     fn addField(r: @This(), p: *Parser, name: StringId, token: TokenIndex) Error!void {
         var i = p.recordMembers.items.len;
@@ -149,6 +151,7 @@ record: struct {
 } = .{},
 
 recordMembers: std.ArrayListUnmanaged(struct { token: TokenIndex, name: StringId }) = .{},
+
 @"switch": ?*Switch = null,
 inLoop: bool = false,
 /// #pragma pack value
@@ -693,9 +696,6 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
     assert(pp.linemarkers == .None);
     pp.comp.pragmaEvent(.BeforeParse);
 
-    var arena = std.heap.ArenaAllocator.init(pp.comp.gpa);
-    errdefer arena.deinit();
-
     var p = Parser{
         .pp = pp,
         .comp = pp.comp,
@@ -707,7 +707,6 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
             .tokens = pp.tokens.slice(),
         },
 
-        .arena = arena.allocator(),
         .labels = .init(pp.comp.gpa),
         .strings = .init(pp.comp.gpa),
         .listBuffer = .init(pp.comp.gpa),
@@ -715,7 +714,6 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
         .paramBuffer = .init(pp.comp.gpa),
         .enumBuffer = .init(pp.comp.gpa),
         .recordBuffer = .init(pp.comp.gpa),
-        .fieldAttrBuffer = .init(pp.comp.gpa),
         .stringsIds = .{
             .declSpecId = try pp.comp.internString("__declspec"),
             .mainId = try pp.comp.internString("main"),
@@ -741,8 +739,6 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
         p.attrBuffer.deinit(pp.comp.gpa);
         p.attrApplicationBuffer.deinit(pp.comp.gpa);
         p.tentativeDefs.deinit(pp.comp.gpa);
-        assert(p.fieldAttrBuffer.items.len == 0);
-        p.fieldAttrBuffer.deinit();
     }
 
     //bind p to the symbol stack for simplify symbol stack api
@@ -2310,7 +2306,6 @@ fn parseRecordSpec(p: *Parser) Error!QualType {
 
     const oldRecord = p.record;
     const oldMembers = p.recordMembers.items.len;
-    const oldFieldAttrStart = p.fieldAttrBuffer.items.len;
 
     errdefer p.declBuffer.items.len = declBufferTop - 1;
 
@@ -2319,13 +2314,11 @@ fn parseRecordSpec(p: *Parser) Error!QualType {
         p.recordBuffer.items.len = recordBufferTop;
         p.record = oldRecord;
         p.recordMembers.items.len = oldMembers;
-        p.fieldAttrBuffer.items.len = oldFieldAttrStart;
     }
 
     p.record = .{
         .kind = p.tokenIds[kindToken],
         .start = p.recordMembers.items.len,
-        .fieldAttrStart = p.fieldAttrBuffer.items.len,
     };
 
     try p.parseRecordDecls();
@@ -2337,23 +2330,6 @@ fn parseRecordSpec(p: *Parser) Error!QualType {
             try p.errToken(.flexible_in_empty, some);
     }
 
-    const attrCount = p.fieldAttrBuffer.items.len - oldFieldAttrStart;
-    const recordDecls = p.declBuffer.items[declBufferTop..];
-    if (attrCount > 0) {
-        if (attrCount != recordDecls.len) {
-            // A mismatch here means that non-field decls were parsed. This can happen if there were
-            // parse errors during attribute parsing. Bail here because if there are any field attributes,
-            // there must be exactly one per field.
-            return error.ParsingFailed;
-        }
-        const fieldAttrSlice = p.fieldAttrBuffer.items[oldFieldAttrStart..];
-        for (fields, fieldAttrSlice) |*field, attributes| {
-            field._attr_index = @intCast(p.comp.typeStore.attributes.items.len);
-            field._attr_len = @intCast(attributes.len);
-            try p.comp.typeStore.attributes.appendSlice(p.gpa, attributes);
-        }
-    }
-
     if (p.recordBuffer.items.len == recordBufferTop) {
         try p.errStr(.empty_record, kindToken, p.getTokenText(kindToken));
         try p.errStr(.empty_record_size, kindToken, p.getTokenText(kindToken));
@@ -2363,11 +2339,6 @@ fn parseRecordSpec(p: *Parser) Error!QualType {
     done = true;
     try p.parseAttrSpec();
 
-    // const t = Type{
-    //     .specifier = if (isStruct) .Struct else .Union,
-    //     .data = .{ .record = recordType },
-    // };
-    // ty = try Attribute.applyTypeAttributes(p, t, attrBufferTop, null);
     const attributedQt = try Attribute.applyTypeAttributes(p, qt, attrBufferTop, null);
 
     // if (ty.specifier == .Attributed and maybeIdent != null) {
@@ -2409,7 +2380,7 @@ fn parseRecordSpec(p: *Parser) Error!QualType {
     const cd: Node.ContainerDecl = .{
         .nameOrKindToken = maybeIdent orelse kindToken,
         .containerQt = attributedQt,
-        .fields = recordDecls,
+        .fields = p.declBuffer.items[declBufferTop..],
     };
 
     p.declBuffer.items[declBufferTop - 1] = try p.addNode(if (isStruct) .{ .structDecl = cd } else .{ .unionDecl = cd });
@@ -2522,19 +2493,10 @@ fn parseRecordDecl(p: *Parser) Error!bool {
 
         try p.parseAttrSpec(); // .record
         const toAppend = try Attribute.applyFieldAttributes(p, &qt, attrBufferTop);
-        errdefer p.arena.free(toAppend);
 
-        const anyFieldsHaveAttrs = p.fieldAttrBuffer.items.len > p.record.fieldAttrStart;
-        if (anyFieldsHaveAttrs) {
-            try p.fieldAttrBuffer.append(toAppend);
-        } else {
-            if (toAppend.len > 0) {
-                const preceding = p.recordMembers.items.len - p.record.start;
-                if (preceding > 0)
-                    try p.fieldAttrBuffer.appendNTimes(&.{}, preceding);
-                try p.fieldAttrBuffer.append(toAppend);
-            }
-        }
+        const attrIndex: u32 = @intCast(p.comp.typeStore.attributes.items.len);
+        const attrLen: u32 = @intCast(toAppend.len);
+        try p.comp.typeStore.attributes.appendSlice(p.gpa, toAppend);
 
         if (nameToken == 0 and bits == null) unnamed: {
             // don't allow incompelete size fields in anonymous record.
@@ -2546,6 +2508,8 @@ fn parseRecordDecl(p: *Parser) Error!bool {
                     try p.recordBuffer.append(.{
                         .name = try p.getAnonymousName(firstToken),
                         .qt = qt,
+                        ._attr_index = attrIndex,
+                        ._attr_len = attrLen,
                     });
                     const node = try p.addNode(.{
                         .recordField = .{
@@ -2568,6 +2532,8 @@ fn parseRecordDecl(p: *Parser) Error!bool {
                 .qt = qt,
                 .nameToken = nameToken,
                 .bitWidth = if (bits) |some| @enumFromInt(some) else .null,
+                ._attr_index = attrIndex,
+                ._attr_len = attrLen,
             });
 
             if (nameToken != 0)
@@ -3051,6 +3017,7 @@ fn enumerator(p: *Parser, e: *Enumerator) Error!?EnumFieldAndNode {
             .name = internedName,
             .qt = attributedQt,
             .nameToken = nameToken,
+            .init = .packOpt(fieldInit),
         },
         .node = node,
     };

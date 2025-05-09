@@ -1181,7 +1181,7 @@ pub const Type = union(enum) {
             qt: QualType,
             name: StringId,
             nameToken: TokenIndex,
-            node: Node.OptIndex,
+            init: Node.OptIndex,
         };
     };
 

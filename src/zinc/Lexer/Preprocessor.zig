@@ -1018,7 +1018,6 @@ fn expr(pp: *Preprocessor, lexer: *Lexer) MacroError!bool {
         .strings = std.ArrayList(u8).init(pp.comp.gpa),
 
         .tree = undefined,
-        .arena = undefined,
         .labels = undefined,
         .declBuffer = undefined,
         .listBuffer = undefined,
@@ -1026,7 +1025,6 @@ fn expr(pp: *Preprocessor, lexer: *Lexer) MacroError!bool {
         .enumBuffer = undefined,
         .recordBuffer = undefined,
         .attrBuffer = undefined,
-        .fieldAttrBuffer = undefined,
         .stringsIds = undefined,
     };
     defer parser.strings.deinit();
