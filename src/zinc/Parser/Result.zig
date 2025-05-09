@@ -407,11 +407,14 @@ pub fn lvalConversion(res: *Result, p: *Parser, token: TokenIndex) Error!void {
     }
 }
 
-pub fn castToBool(res: *Result, p: *Parser, boolType: QualType, tok: TokenIndex) Error!void {
+pub fn castToBool(res: *Result, p: *Parser, boolQt: QualType, tok: TokenIndex) Error!void {
+    if (res.qt.isInvalid()) return;
+    std.debug.assert(!boolQt.isInvalid());
+
     const srcSK = res.qt.scalarKind(p.comp);
     if (srcSK.isPointer()) {
         res.value.boolCast(p.comp);
-        res.qt = boolType;
+        res.qt = boolQt;
         try res.implicitCast(p, .PointerToBool, tok);
     } else if (srcSK.isInt() and srcSK != .Bool) {
         res.value.boolCast(p.comp);
@@ -419,17 +422,17 @@ pub fn castToBool(res: *Result, p: *Parser, boolType: QualType, tok: TokenIndex)
             res.qt = res.qt.toReal(p.comp);
             try res.implicitCast(p, .ComplexFloatToReal, tok);
         }
-        res.qt = boolType;
+        res.qt = boolQt;
         try res.implicitCast(p, .IntToBool, tok);
     } else if (srcSK.isFloat()) {
         const oldValue = res.value;
-        const valueChangeKind = try res.value.floatToInt(boolType, p.comp);
-        try res.floatToIntWarning(p, boolType, oldValue, valueChangeKind, tok);
+        const valueChangeKind = try res.value.floatToInt(boolQt, p.comp);
+        try res.floatToIntWarning(p, boolQt, oldValue, valueChangeKind, tok);
         if (!srcSK.isReal()) {
             res.qt = res.qt.toReal(p.comp);
             try res.implicitCast(p, .ComplexFloatToReal, tok);
         }
-        res.qt = boolType;
+        res.qt = boolQt;
         try res.implicitCast(p, .FloatToBool, tok);
     }
 }
@@ -444,10 +447,17 @@ pub fn castToBool(res: *Result, p: *Parser, boolType: QualType, tok: TokenIndex)
 /// @param tok      The token index at which the cast occurs.
 /// @return Error   Returns an error if casting fails or the result type has an incomplete size.
 pub fn castToInt(res: *Result, p: *Parser, intQt: QualType, token: TokenIndex) Error!void {
+    if (res.qt.isInvalid()) return;
+    std.debug.assert(!intQt.isInvalid());
+    if (intQt.sizeofOrNull(p.comp) == null) {
+        return error.ParsingFailed; // Cast to incomplete enum, diagnostic already issued
+    }
+
     const srcSK = res.qt.scalarKind(p.comp);
     const destSK = intQt.scalarKind(p.comp);
 
     if (srcSK == .Bool) {
+        res.qt = intQt.toReal(p.comp);
         try res.implicitCast(p, .BoolToInt, token);
         if (!destSK.isReal()) {
             res.qt = intQt;
@@ -637,7 +647,9 @@ fn usualArithmeticConversion(lhs: *Result, rhs: *Result, p: *Parser, token: Toke
     try rhs.usualUnaryConversion(p, token);
 
     // if either is a float cast to that type
-    if (lhs.qt.isFloat(p.comp) or rhs.qt.isFloat(p.comp)) {
+    const lhsIsFloat = lhs.qt.isFloat(p.comp);
+    const rhsIsFloat = rhs.qt.isFloat(p.comp);
+    if (lhsIsFloat or rhsIsFloat) {
         const lhsIsComplex = lhs.qt.is(p.comp, .complex);
         const rhsIsComplex = rhs.qt.is(p.comp, .complex);
 
@@ -648,6 +660,12 @@ fn usualArithmeticConversion(lhs: *Result, rhs: *Result, p: *Parser, token: Toke
 
         try lhs.castToFloat(p, resQt, token);
         try rhs.castToFloat(p, resQt, token);
+        return;
+    } else if (lhsIsFloat) {
+        try rhs.castToFloat(p, lhs.qt, token);
+        return;
+    } else if (rhsIsFloat) {
+        try lhs.castToFloat(p, rhs.qt, token);
         return;
     }
 
@@ -904,18 +922,18 @@ pub fn castType(res: *Result, p: *Parser, destQt: QualType, operandToken: TokenI
 
         if (res.value.isNone()) break :cast;
 
-        const oldInt = srcSK.isInt() or srcSK.isPointer();
-        const newInt = destSK.isInt() or destSK.isPointer();
+        const srcIsInt = srcSK.isInt() or srcSK.isPointer();
+        const destIsInt = destSK.isInt() or destSK.isPointer();
         if (destSK == .Bool) {
             res.value.boolCast(p.comp);
-        } else if (srcSK.isFloat() and newInt) {
+        } else if (srcSK.isFloat() and destIsInt) {
             // Explicit cast, no conversion warning
             _ = try res.value.floatToInt(destQt, p.comp);
-        } else if (destSK.isFloat() and oldInt) {
+        } else if (destSK.isFloat() and srcIsInt) {
             try res.value.intToFloat(destQt, p.comp);
         } else if (destSK.isFloat() and srcSK.isFloat()) {
             try res.value.floatCast(destQt, p.comp);
-        } else if (oldInt and newInt) {
+        } else if (srcIsInt and destIsInt) {
             if (destQt.sizeofOrNull(p.comp) == null) {
                 try p.errStr(.cast_to_incomplete_type, lparen, try p.typeStr(destQt));
                 return error.ParsingFailed;

@@ -715,7 +715,7 @@ test "target size/align tests" {
 
     const tt: QualType = .longlong;
 
-    try std.testing.expectEqual(@as(u64, 8), tt.sizeof(&comp).?);
+    try std.testing.expectEqual(@as(u64, 8), tt.sizeof(&comp));
     try std.testing.expectEqual(@as(u64, 4), tt.alignof(&comp));
 }
 

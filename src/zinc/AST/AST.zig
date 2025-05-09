@@ -1623,11 +1623,37 @@ pub const Node = union(enum) {
         }
 
         pub fn qtOrNull(index: Index, tree: *const Tree) ?QualType {
-            if (!tree.nodes.items(.tag)[@intFromEnum(index)].isTyped()) {
-                return null;
-            }
-            // If a node is typed the type is stored in data[0].
-            return @bitCast(tree.nodes.items(.data)[@intFromEnum(index)][0]);
+            const tag = tree.nodes.items(.tag)[@intFromEnum(index)];
+            return switch (tag) {
+                .EmptyDecl,
+                .StaticAssert,
+                .CompoundStmt,
+                .CompoundStmtThree,
+                .IfStmt,
+                .SwitchStmt,
+                .CaseStmt,
+                .DefaultStmt,
+                .WhileStmt,
+                .DoWhileStmt,
+                .ForDecl,
+                .ForExpr,
+                .GotoStmt,
+                .ComputedGotoStmt,
+                .ContinueStmt,
+                .BreakStmt,
+                .GnuAsmSimple,
+                .GlobalAsm,
+                .GenericAssociationExpr,
+                .GenericDefaultExpr,
+                => null,
+
+                .BuiltinTypesCompatibleP => .int,
+
+                else => {
+                    // If a node is typed the type is stored in data[0].
+                    return @bitCast(tree.nodes.items(.data)[@intFromEnum(index)][0]);
+                },
+            };
         }
     };
 
@@ -1787,33 +1813,6 @@ pub const Node = union(enum) {
             ArrayFillerExpr,
             DefaultInitExpr,
             CompoundLiteralExpr,
-
-            pub fn isTyped(tag: Tag) bool {
-                return switch (tag) {
-                    .EmptyDecl,
-                    .StaticAssert,
-                    .CompoundStmt,
-                    .CompoundStmtThree,
-                    .IfStmt,
-                    .SwitchStmt,
-                    .CaseStmt,
-                    .DefaultStmt,
-                    .WhileStmt,
-                    .DoWhileStmt,
-                    .ForDecl,
-                    .ForExpr,
-                    .GotoStmt,
-                    .ComputedGotoStmt,
-                    .ContinueStmt,
-                    .BreakStmt,
-                    .GnuAsmSimple,
-                    .GlobalAsm,
-                    .GenericAssociationExpr,
-                    .GenericDefaultExpr,
-                    => false,
-                    else => true,
-                };
-            }
         };
     };
 
@@ -2877,16 +2876,18 @@ fn dumpNode(
         try config.setColor(w, if (node.isImplicit()) IMPLICIT else TAG);
     }
 
-    try w.print("{s}: ", .{@tagName(node)});
-    switch (node) {
-        .cast => |cast| {
-            try config.setColor(w, .white);
-            try w.print("({s}) ", .{@tagName(cast.kind)});
-        },
-        else => {},
-    }
+    try w.print("{s}", .{@tagName(node)});
 
     if (nodeIndex.qtOrNull(tree)) |qt| {
+        try w.writeAll(": ");
+        switch (node) {
+            .cast => |cast| {
+                try config.setColor(w, .white);
+                try w.print("({s}) ", .{@tagName(cast.kind)});
+            },
+            else => {},
+        }
+
         try config.setColor(w, TYPE);
         try w.writeByte('\'');
         try qt.dump(tree.comp, w);
@@ -2918,6 +2919,18 @@ fn dumpNode(
 
     try w.writeAll("\n");
     try config.setColor(w, .reset);
+
+    if (nodeIndex.qtOrNull(tree)) |qt| {
+        try config.setColor(w, ATTRIBUTE);
+        var it = Attribute.Iterator.initType(qt, tree.comp);
+        while (it.next()) |item| {
+            const attr, _ = item;
+            try w.writeByteNTimes(' ', level + half);
+            try w.print("attr: {s}", .{@tagName(attr.tag)});
+            try tree.dumpAttribute(attr, w);
+        }
+        try config.setColor(w, .reset);
+    }
 
     switch (node) {
         .emptyDecl => {},
@@ -3077,16 +3090,22 @@ fn dumpNode(
                 else => unreachable,
             };
 
-            for (decl.fields, fields, 0..) |fieldNode, field, i| {
+            var fieldIndex: u32 = 0;
+            for (decl.fields, 0..) |fieldNode, i| {
                 if (i != 0) try w.writeByte('\n');
                 try tree.dumpNode(fieldNode, level + delta, config, w);
 
-                const fieldAttributes = field.attributes(tree.comp);
+                if (fieldNode.get(tree) != .recordField) continue;
+                if (fields.len == 0) continue;
+
+                const fieldAttributes = fields[fieldIndex].attributes(tree.comp);
                 if (fieldAttributes.len == 0) continue;
 
                 try config.setColor(w, ATTRIBUTE);
                 try tree.dumpFieldAttributes(fieldAttributes, level + delta + half, w);
                 try config.setColor(w, .reset);
+
+                fieldIndex += 1;
             }
         },
 
@@ -3208,20 +3227,7 @@ fn dumpNode(
             try tree.dumpNode(goto.expr, level + delta, config, w);
         },
 
-        .nullStmt => {
-            const qt = nodeIndex.qt(tree);
-            try config.setColor(w, ATTRIBUTE);
-            var it = Attribute.Iterator.initType(qt, tree.comp);
-            while (it.next()) |item| {
-                const attr, _ = item;
-                try w.writeByteNTimes(' ', level + half);
-                try w.print("attr: {s}", .{@tagName(attr.tag)});
-                try tree.dumpAttribute(attr, w);
-            }
-            try config.setColor(w, .reset);
-        },
-
-        .continueStmt, .breakStmt => {},
+        .nullStmt, .continueStmt, .breakStmt => {},
 
         .returnStmt => |ret| {
             switch (ret.operand) {

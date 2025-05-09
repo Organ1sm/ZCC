@@ -774,7 +774,7 @@ fn generateSuffixMacro(comp: *const Compilation, prefix: []const u8, w: anytype,
 ///     Suffix macro (e.g. #define __UINT32_C_SUFFIX__ U)
 fn generateExactWidthType(comp: *Compilation, w: anytype, originalQt: QualType) !void {
     var qt = originalQt;
-    const width = qt.bitSizeof(comp);
+    const width = qt.sizeof(comp) * 8;
     const unsigned = qt.isUnsignedInt(comp);
 
     if (width == 16) {
