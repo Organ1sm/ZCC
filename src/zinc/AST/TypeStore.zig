@@ -45,6 +45,7 @@ const Repr = struct {
         Enum,
         EnumFixed,
         EnumIncomplete,
+        EnumIncompleteFixed,
         Typeof,
         TypeofExpr,
         Typedef,
@@ -233,6 +234,8 @@ pub const QualType = packed struct(u32) {
             .FuncOldStyle,
             => {
                 const paramSize = 4;
+                comptime std.debug.assert(@sizeOf(Type.Func.Param) == @sizeOf(u32) * paramSize);
+
                 const paramsLen = switch (repr.tag) {
                     .FuncOne, .FuncVariadicOne, .FuncOldStyleOne => 1,
                     .Func, .FuncVariadic, .FuncOldStyle => extra[repr.data[1]],
@@ -301,8 +304,11 @@ pub const QualType = packed struct(u32) {
                 },
             },
             .Struct, .Union => {
-                const layoutSize = 6;
+                const layoutSize = 5;
                 const fieldSize = 10;
+                comptime std.debug.assert(@sizeOf(Type.Record.Layout) == @sizeOf(u32) * layoutSize);
+                comptime std.debug.assert(@sizeOf(Type.Record.Field) == @sizeOf(u32) * fieldSize);
+
                 const layout = @as(*Type.Record.Layout, @alignCast(@ptrCast(extra[repr.data[1]..][0..layoutSize]))).*;
                 const fieldsLen = extra[repr.data[1] + layoutSize] * fieldSize;
                 const extraFields = extra[repr.data[1] + layoutSize + 1 ..][0..fieldsLen];
@@ -333,20 +339,28 @@ pub const QualType = packed struct(u32) {
                 },
             },
             .Enum, .EnumFixed => {
+                const fieldSize = 4;
+                comptime std.debug.assert(@sizeOf(Type.Enum.Field) == @sizeOf(u32) * fieldSize);
+
+                const fieldsLen = extra[repr.data[1] + 1] * fieldSize;
+                const extraFields = extra[repr.data[1] + 2 ..][0..fieldsLen];
+
                 return .{
                     .@"enum" = .{
                         .name = @enumFromInt(extra[repr.data[1]]),
                         .tag = @bitCast(repr.data[0]),
                         .fixed = repr.tag == .EnumFixed,
-                        .fields = std.mem.bytesAsSlice(Type.Enum.Field, std.mem.sliceAsBytes(extra[repr.data[1] + 1 ..][0 .. repr.data[1] + 2])),
+                        .incomplete = false,
+                        .fields = std.mem.bytesAsSlice(Type.Enum.Field, std.mem.sliceAsBytes(extraFields)),
                     },
                 };
             },
-            .EnumIncomplete => .{
+            .EnumIncomplete, .EnumIncompleteFixed => .{
                 .@"enum" = .{
-                    .name = @enumFromInt(repr.data[0]),
-                    .tag = null,
-                    .fixed = false,
+                    .tag = @bitCast(repr.data[0]),
+                    .name = @enumFromInt(repr.data[1]),
+                    .incomplete = true,
+                    .fixed = repr.tag == .EnumIncompleteFixed,
                     .fields = &.{},
                 },
             },
@@ -421,7 +435,7 @@ pub const QualType = packed struct(u32) {
             .pointer => |pointer| pointer.child,
             .array => |array| array.elem,
             .vector => |vector| vector.elem,
-            .@"enum" => |@"enum"| @"enum".tag.?,
+            .@"enum" => |@"enum"| @"enum".tag,
             else => unreachable,
         };
     }
@@ -453,40 +467,188 @@ pub const QualType = packed struct(u32) {
         };
     }
 
+    /// Size of a type as reported by the sizeof operator.
     pub fn sizeof(qt: QualType, comp: *const Compilation) u64 {
-        _ = qt;
-        _ = comp;
-        @panic("TODO");
+        return qt.sizeofOrNull(comp).?;
     }
 
+    /// Size of a type as reported by the sizeof operator.
+    /// Returns null for incomplete types.
     pub fn sizeofOrNull(qt: QualType, comp: *const Compilation) ?u64 {
         if (qt.isInvalid()) return null;
-        _ = comp;
-        @panic("TODO");
+        return loop: switch (qt.base(comp).type) {
+            .void => 1,
+            .bool => 1,
+            .func => 1,
+            .nullptrTy, .pointer => comp.target.ptrBitWidth() / 8,
+            .int => |intTy| intTy.bits(comp) / 8,
+            .float => |floatTy| floatTy.bits(comp) / 8,
+            .complex => |complex| complex.sizeofOrNull(comp),
+            .bitInt => |bitInt| {
+                return std.mem.alignForward(u64, (@as(u32, bitInt.bits) + 7) / 8, qt.alignof(comp));
+            },
+            .atomic => |atomic| atomic.sizeofOrNull(comp),
+            .vector => |vector| {
+                const elem_size = vector.elem.sizeofOrNull(comp) orelse return null;
+                return elem_size * vector.len;
+            },
+            .array => |array| {
+                const len = switch (array.len) {
+                    .variable, .unspecifiedVariable => return null,
+                    .incomplete => {
+                        return if (comp.langOpts.emulate == .msvc) 0 else null;
+                    },
+                    .fixed, .static => |len| len,
+                };
+                const elemSize = array.elem.sizeofOrNull(comp) orelse return null;
+                const arrSize = elemSize * len;
+                if (comp.langOpts.emulate == .msvc) {
+                    // msvc ignores array type alignment.
+                    // Since the size might not be a multiple of the field
+                    // alignment, the address of the second element might not be properly aligned
+                    // for the field alignment. A flexible array has size 0. See test case 0018.
+                    return arrSize;
+                } else {
+                    return std.mem.alignForward(u64, arrSize, qt.alignof(comp));
+                }
+            },
+            .@"struct", .@"union" => |record| {
+                const layout = record.layout orelse return null;
+                return layout.sizeBits / 8;
+            },
+            .@"enum" => |enumTy| {
+                if (enumTy.incomplete) return null;
+                continue :loop enumTy.tag.base(comp).type;
+            },
+            .typeof => unreachable,
+            .typedef => unreachable,
+            .attributed => unreachable,
+        };
     }
 
+    /// Size of type in bits as it would have in a bitfield.
     pub fn bitSizeof(qt: QualType, comp: *const Compilation) u64 {
-        _ = qt;
-        _ = comp;
-        @panic("TODO");
+        return qt.bitSizeofOrNull(comp).?;
     }
 
     pub fn bitSizeofOrNull(qt: QualType, comp: *const Compilation) ?u64 {
         if (qt.isInvalid()) return null;
-        _ = comp;
-        @panic("TODO");
+        return loop: switch (qt.base(comp).type) {
+            .bool => if (comp.langOpts.emulate == .msvc) 8 else 1,
+            .bitInt => |bitInt| bitInt.bits,
+            .float => |floatTy| floatTy.bits(comp),
+            .int => |intTy| intTy.bits(comp),
+            .nullptrTy, .pointer => comp.target.ptrBitWidth(),
+            .atomic => |atomic| continue :loop atomic.base(comp).type,
+            .complex => |complex| {
+                const childSize = complex.bitSizeofOrNull(comp) orelse return null;
+                return childSize * 2;
+            },
+            else => 8 * (qt.sizeofOrNull(comp) orelse return null),
+        };
     }
 
     pub fn signedness(qt: QualType, comp: *const Compilation) std.builtin.Signedness {
-        _ = qt;
-        _ = comp;
-        @panic("TODO");
+        return loop: switch (qt.base(comp).type) {
+            .complex => |complex| continue :loop complex.base(comp).type,
+            .atomic => |atomic| continue :loop atomic.base(comp).type,
+            .bool => .unsigned,
+            .bitInt => |bitInt| bitInt.signedness,
+            .int => |intTy| switch (intTy) {
+                .Char => comp.getCharSignedness(),
+                .SChar, .Short, .Int, .Long, .LongLong, .Int128 => .signed,
+                .UChar, .UShort, .UInt, .ULong, .ULongLong, .UInt128 => .unsigned,
+            },
+            // Pointer values are signed.
+            .pointer, .nullptrTy => .signed,
+            .@"enum" => |enumTy| continue :loop enumTy.tag.base(comp).type,
+            else => unreachable,
+        };
     }
 
+    /// Size of a type as reported by the alignof operator.
     pub fn alignof(qt: QualType, comp: *const Compilation) u32 {
-        _ = qt;
-        _ = comp;
-        @panic("TODO");
+        // don't return the attribute for records
+        // layout has already accounted for requested alignment
+        if (qt.requestedAlignment(comp)) |requested| request: {
+            // gcc does not respect alignment on enums
+            if (qt.is(comp, .@"enum")) {
+                if (comp.langOpts.emulate == .gcc) {
+                    break :request;
+                }
+            } else if (qt.getRecord(comp)) |recordTy| {
+                const layout = recordTy.layout orelse return 0;
+
+                const computed = @divExact(layout.fieldAlignmentBits, 8);
+                return @max(requested, computed);
+            } else if (comp.langOpts.emulate == .msvc) {
+                const typeAlign = qt.base(comp).qt.alignof(comp);
+                return @max(requested, typeAlign);
+            }
+            return requested;
+        }
+
+        return loop: switch (qt.base(comp).type) {
+            .void => 1,
+            .bool => 1,
+            .int => |intTy| switch (intTy) {
+                .Char,
+                .SChar,
+                .UChar,
+                => 1,
+
+                .Short => comp.target.cTypeAlignment(.short),
+                .UShort => comp.target.cTypeAlignment(.ushort),
+                .Int => comp.target.cTypeAlignment(.int),
+                .UInt => comp.target.cTypeAlignment(.uint),
+
+                .Long => comp.target.cTypeAlignment(.long),
+                .ULong => comp.target.cTypeAlignment(.ulong),
+                .LongLong => comp.target.cTypeAlignment(.longlong),
+                .ULongLong => comp.target.cTypeAlignment(.ulonglong),
+                .Int128, .UInt128 => if (comp.target.cpu.arch == .s390x and comp.target.os.tag == .linux and comp.target.abi.isGnu()) 8 else 16,
+            },
+            .float => |floatTy| switch (floatTy) {
+                .Float => comp.target.cTypeAlignment(.float),
+                .Double => comp.target.cTypeAlignment(.double),
+                .LongDouble => comp.target.cTypeAlignment(.longdouble),
+                .FP16, .Float16 => 2,
+                .Float128 => 16,
+            },
+            .bitInt => |bitInt| {
+                // https://www.open-std.org/jtc1/sc22/wg14/www/docs/n2709.pdf
+                // _BitInt(N) types align with existing calling conventions. They have the same size and alignment as the
+                // smallest basic type that can contain them. Types that are larger than __int64_t are conceptually treated
+                // as struct of register size chunks. The number of chunks is the smallest number that can contain the type.
+                if (bitInt.bits > 64) return 8;
+                const basicType = comp.intLeastN(bitInt.bits, bitInt.signedness);
+                return basicType.alignof(comp);
+            },
+            .atomic => |atomic| continue :loop atomic.base(comp).type,
+            .complex => |complex| continue :loop complex.base(comp).type,
+
+            .pointer, .nullptrTy => switch (comp.target.cpu.arch) {
+                .avr => 1,
+                else => comp.target.ptrBitWidth() / 8,
+            },
+
+            .func => TargetUtil.defaultFunctionAlignment(comp.target),
+
+            .array => |array| continue :loop array.elem.base(comp).type,
+            .vector => |vector| continue :loop vector.elem.base(comp).type,
+
+            .@"struct", .@"union" => |record| {
+                const layout = record.layout orelse return 0;
+                return layout.fieldAlignmentBits / 8;
+            },
+            .@"enum" => |enumTy| {
+                if (enumTy.incomplete) return 0;
+                continue :loop enumTy.tag.base(comp).type;
+            },
+            .typeof => unreachable,
+            .typedef => unreachable,
+            .attributed => unreachable,
+        };
     }
 
     /// Suffix for integer values of this type
@@ -557,15 +719,22 @@ pub const QualType = packed struct(u32) {
     }
 
     pub fn toReal(qt: QualType, comp: *const Compilation) QualType {
-        _ = qt;
-        _ = comp;
-        @panic("TODO");
+        return switch (qt.base(comp).type) {
+            .complex => |complex| complex,
+            else => qt,
+        };
     }
 
     pub fn toComplex(qt: QualType, comp: *Compilation) !QualType {
-        _ = qt;
-        _ = comp;
-        @panic("TODO");
+        if (std.debug.runtime_safety) {
+            switch (qt.base(comp).type) {
+                .complex => unreachable,
+                .float => |floatTy| if (floatTy == .FP16) unreachable,
+                .int, .bitInt => {},
+                else => unreachable,
+            }
+        }
+        return comp.typeStore.put(comp.gpa, .{ .complex = qt });
     }
 
     pub fn decay(qt: QualType, comp: *Compilation) !QualType {
@@ -604,17 +773,42 @@ pub const QualType = packed struct(u32) {
     /// Rank for floating point conversions, ignoring domain (complex vs real)
     /// Asserts that ty is a floating point type
     pub fn floatRank(qt: QualType, comp: *const Compilation) usize {
-        _ = qt;
-        _ = comp;
-        @panic("TODO");
+        return loop: switch (qt.base(comp).type) {
+            .float => |floatTy| switch (floatTy) {
+                // TODO: bfloat16 => 0
+                .Float16 => 1,
+                .FP16 => 2,
+                .Float => 3,
+                .Double => 4,
+                .LongDouble => 5,
+                .Float128 => 6,
+                // TODO: ibm128 => 7
+            },
+            .complex => |complex| continue :loop complex.base(comp).type,
+            .atomic => |atomic| continue :loop atomic.base(comp).type,
+            else => unreachable,
+        };
     }
 
     /// Rank for integer conversions, ignoring domain (complex vs real)
     /// Asserts that ty is an integer type
     pub fn intRank(qt: QualType, comp: *const Compilation) usize {
-        _ = qt;
-        _ = comp;
-        @panic("TODO");
+        return loop: switch (qt.base(comp).type) {
+            .bitInt => |bitInt| @as(u64, bitInt.bits) * 8,
+            .bool => 1 + (QualType.bool.bitSizeof(comp) * 8),
+            .int => |intTy| switch (intTy) {
+                .Char, .SChar, .UChar => 2 + (intTy.bits(comp) * 8),
+                .Short, .UShort => 3 + (intTy.bits(comp) * 8),
+                .Int, .UInt => 4 + (intTy.bits(comp) * 8),
+                .Long, .ULong => 5 + (intTy.bits(comp) * 8),
+                .LongLong, .ULongLong => 6 + (intTy.bits(comp) * 8),
+                .Int128, .UInt128 => 7 + (intTy.bits(comp) * 8),
+            },
+            .complex => |complex| continue :loop complex.base(comp).type,
+            .atomic => |atomic| continue :loop atomic.base(comp).type,
+            .@"enum" => |enumTy| continue :loop enumTy.tag.base(comp).type,
+            else => unreachable,
+        };
     }
 
     pub fn intRankOrder(a: QualType, b: QualType, comp: *const Compilation) std.math.Order {
@@ -646,17 +840,17 @@ pub const QualType = packed struct(u32) {
     }
 
     pub fn promoteInt(qt: QualType, comp: *const Compilation) QualType {
-        const intQualTy = switch (qt.base(comp).type) {
+        return loop: switch (qt.base(comp).type) {
             .bool => return .int,
-            .@"enum" => |@"enum"| @"enum".tag orelse return .int,
+            .@"enum" => |enum_ty| continue :loop enum_ty.tag.base(comp).type,
             .bitInt => return qt,
             .complex => return qt, // Assume complex integer type
-            else => qt, // Not an integer type
-        };
-        return switch (intQualTy.get(comp, .int)) {
-            .Char, .SChar, .UChar, .Short => .int,
-            .UShort => if (Type.IntType.UChar.bits(comp) == Type.IntType.Int.bits(comp)) .uint else .int,
-            else => return intQualTy,
+            .int => |intTy| switch (intTy) {
+                .Char, .SChar, .UChar, .Short => .int,
+                .UShort => if (Type.IntType.UChar.bits(comp) == Type.IntType.Int.bits(comp)) .uint else .int,
+                else => return qt,
+            },
+            else => unreachable, // Not an integer type
         };
     }
 
@@ -780,11 +974,11 @@ pub const QualType = packed struct(u32) {
         if (std.meta.activeTag(aType) != bType) return false;
 
         switch (aType) {
-            .void => unreachable, // Handled in _index check above.
-            .bool => unreachable, // Handled in _index check above.
-            .nullptrTy => unreachable, // Handled in _index check above.
-            .int => unreachable, // Handled in _index check above.
-            .float => unreachable, // Handled in _index check above.
+            .void => return true,
+            .bool => return true,
+            .nullptrTy => return true,
+            .int => |aInt| return aInt == bType.int,
+            .float => |aFloat| return aFloat == bType.float,
 
             .complex => |aComplex| {
                 const bComplex = bType.complex;
@@ -934,21 +1128,245 @@ pub const QualType = packed struct(u32) {
     }
 
     fn printPrologue(qt: QualType, comp: *const Compilation, w: anytype) @TypeOf(w).Error!bool {
-        _ = qt;
-        _ = comp;
-        @panic("TODO");
+        loop: switch (qt.type(comp)) {
+            .pointer => |pointer| {
+                const simple = try pointer.child.printPrologue(comp, w);
+                if (simple) try w.writeByte(' ');
+                switch (pointer.child.base(comp).type) {
+                    .func, .array => try w.writeByte('('),
+                    else => {},
+                }
+                try w.writeByte('*');
+                if (qt.@"const") try w.writeAll("const");
+                if (qt.@"volatile") {
+                    if (qt.@"const") try w.writeByte(' ');
+                    try w.writeAll("volatile");
+                }
+                if (qt.restrict) {
+                    if (qt.@"const" or qt.@"volatile") try w.writeByte(' ');
+                    try w.writeAll("restrict");
+                }
+                return false;
+            },
+            .func => |func| {
+                const simple = try func.returnType.printPrologue(comp, w);
+                if (simple) try w.writeByte(' ');
+                return false;
+            },
+            .array => |array| {
+                const simple = try array.elem.printPrologue(comp, w);
+                if (simple) try w.writeByte(' ');
+                return false;
+            },
+            .typeof => |typeof| {
+                try w.writeAll("typeof(");
+                try typeof.base.print(comp, w);
+                try w.writeAll(")");
+                return true;
+            },
+            .typedef => |typedef| {
+                try w.writeAll(typedef.name.lookup(comp));
+                return true;
+            },
+            .attributed => |attributed| continue :loop attributed.base.type(comp),
+            else => {},
+        }
+        if (qt.@"const") try w.writeAll("const ");
+        if (qt.@"volatile") try w.writeAll("volatile ");
+
+        switch (qt.base(comp).type) {
+            .pointer => unreachable,
+            .func => unreachable,
+            .array => unreachable,
+            .typeof => unreachable,
+            .typedef => unreachable,
+            .attributed => unreachable,
+
+            .void => try w.writeAll("void"),
+            .bool => try w.writeAll(if (comp.langOpts.standard.atLeast(.c23)) "bool" else "_Bool"),
+            .nullptrTy => try w.writeAll("nullptr_t"),
+            .int => |int_ty| switch (int_ty) {
+                .Char => try w.writeAll("char"),
+                .SChar => try w.writeAll("signed char"),
+                .UChar => try w.writeAll("unsigned char"),
+                .Short => try w.writeAll("short"),
+                .UShort => try w.writeAll("unsigned short"),
+                .Int => try w.writeAll("int"),
+                .UInt => try w.writeAll("unsigned int"),
+                .Long => try w.writeAll("long"),
+                .ULong => try w.writeAll("unsigned long"),
+                .LongLong => try w.writeAll("long long"),
+                .ULongLong => try w.writeAll("unsigned long long"),
+                .Int128 => try w.writeAll("__int128"),
+                .UInt128 => try w.writeAll("unsigned __int128"),
+            },
+            .bitInt => |bitInt| try w.print("{s} _BitInt({d})", .{ @tagName(bitInt.signedness), bitInt.bits }),
+            .float => |floatTy| switch (floatTy) {
+                .FP16 => try w.writeAll("__fp16"),
+                .Float16 => try w.writeAll("_Float16"),
+                .Float => try w.writeAll("float"),
+                .Double => try w.writeAll("double"),
+                .LongDouble => try w.writeAll("long double"),
+                .Float128 => try w.writeAll("__float128"),
+            },
+            .complex => |complex| {
+                try w.writeAll("_Complex ");
+                _ = try complex.printPrologue(comp, w);
+            },
+            .atomic => |atomic| {
+                try w.writeAll("_Atomic(");
+                try atomic.print(comp, w);
+                try w.writeAll(")");
+            },
+
+            .vector => |vector| {
+                try w.print("__attribute__((__vector_size__({d} * sizeof(", .{vector.len});
+                _ = try vector.elem.printPrologue(comp, w);
+                try w.writeAll(")))) ");
+                _ = try vector.elem.printPrologue(comp, w);
+                try w.print(" (vector of {d} '", .{vector.len});
+                _ = try vector.elem.printPrologue(comp, w);
+                try w.writeAll("' values)");
+            },
+
+            .@"struct" => |struct_ty| try w.print("struct {s}", .{struct_ty.name.lookup(comp)}),
+            .@"union" => |union_ty| try w.print("union {s}", .{union_ty.name.lookup(comp)}),
+            .@"enum" => |enum_ty| if (enum_ty.fixed) {
+                try w.print("enum {s}: ", .{enum_ty.name.lookup(comp)});
+                _ = try enum_ty.tag.printPrologue(comp, w);
+            } else {
+                try w.print("enum {s}", .{enum_ty.name.lookup(comp)});
+            },
+        }
+        return true;
     }
 
     fn printEpilogue(qt: QualType, comp: *const Compilation, w: anytype) @TypeOf(w).Error!void {
-        _ = qt;
-        _ = comp;
-        @panic("TODO");
+        loop: switch (qt.type(comp)) {
+            .pointer => |pointer| {
+                switch (pointer.child.base(comp).type) {
+                    .func, .array => try w.writeByte(')'),
+                    else => {},
+                }
+                continue :loop pointer.child.type(comp);
+            },
+            .func => |func| {
+                try w.writeByte('(');
+                for (func.params, 0..) |param, i| {
+                    if (i != 0) try w.writeAll(", ");
+                    try param.qt.print(comp, w);
+                }
+                if (func.kind != .Normal) {
+                    if (func.params.len != 0) try w.writeAll(", ");
+                    try w.writeAll("...");
+                } else if (func.params.len == 0 and !comp.langOpts.standard.atLeast(.c23)) {
+                    try w.writeAll("void");
+                }
+                try w.writeByte(')');
+                continue :loop func.returnType.type(comp);
+            },
+            .array => |array| {
+                try w.writeByte('[');
+                switch (array.len) {
+                    .fixed, .static => |len| try w.print("{d}", .{len}),
+                    .incomplete => {},
+                    .unspecifiedVariable => try w.writeByte('*'),
+                    .variable => try w.writeAll("<expr>"),
+                }
+
+                const static = array.len == .static;
+                if (static) try w.writeAll("static");
+                if (qt.@"const") {
+                    if (static) try w.writeByte(' ');
+                    try w.writeAll("const");
+                }
+                if (qt.@"volatile") {
+                    if (static or qt.@"const") try w.writeByte(' ');
+                    try w.writeAll("volatile");
+                }
+                if (qt.restrict) {
+                    if (static or qt.@"const" or qt.@"volatile") try w.writeByte(' ');
+                    try w.writeAll("restrict");
+                }
+                try w.writeByte(']');
+
+                continue :loop array.elem.type(comp);
+            },
+            .attributed => |attributed| continue :loop attributed.base.type(comp),
+            else => {},
+        }
     }
 
     pub fn dump(qt: QualType, comp: *const Compilation, w: anytype) @TypeOf(w).Error!void {
-        _ = qt;
-        _ = comp;
-        @panic("TODO");
+        if (qt.@"const") try w.writeAll("const ");
+        if (qt.@"volatile") try w.writeAll("volatile ");
+        if (qt.restrict) try w.writeAll("restrict ");
+        if (qt.isInvalid()) return w.writeAll("invalid");
+        switch (qt.type(comp)) {
+            .pointer => |pointer| {
+                if (pointer.decayed) |decayed| {
+                    try w.writeAll("decayed *");
+                    try decayed.dump(comp, w);
+                } else {
+                    try w.writeAll("*");
+                    try pointer.child.dump(comp, w);
+                }
+            },
+            .func => |func| {
+                if (func.kind == .OldStyle)
+                    try w.writeAll("kr (")
+                else
+                    try w.writeAll("fn (");
+
+                for (func.params, 0..) |param, i| {
+                    if (i != 0) try w.writeAll(", ");
+                    if (param.name != .empty) try w.print("{s}: ", .{param.name.lookup(comp)});
+                    try param.qt.dump(comp, w);
+                }
+                if (func.kind != .Normal) {
+                    if (func.params.len != 0) try w.writeAll(", ");
+                    try w.writeAll("...");
+                }
+                try w.writeAll(") ");
+                try func.returnType.dump(comp, w);
+            },
+            .array => |array| {
+                switch (array.len) {
+                    .fixed => |len| try w.print("[{d}]", .{len}),
+                    .static => |len| try w.print("[static {d}]", .{len}),
+                    .incomplete => try w.writeAll("[]"),
+                    .unspecifiedVariable => try w.writeAll("[*]"),
+                    .variable => try w.writeAll("[<expr>]"),
+                }
+                try array.elem.dump(comp, w);
+            },
+            .vector => |vector| {
+                try w.print("vector({d}, ", .{vector.len});
+                try vector.elem.dump(comp, w);
+                try w.writeAll(")");
+            },
+            .typeof => |typeof| {
+                try w.writeAll("typeof(");
+                if (typeof.expr != null) try w.writeAll("<expr>: ");
+                try typeof.base.dump(comp, w);
+                try w.writeAll(")");
+            },
+            .attributed => |attributed| {
+                try w.writeAll("attributed(");
+                try attributed.base.dump(comp, w);
+                try w.writeAll(")");
+            },
+            .typedef => |typedef| {
+                try w.writeAll(typedef.name.lookup(comp));
+                try w.writeAll(": ");
+                try typedef.base.dump(comp, w);
+            },
+            .@"enum" => |enumTy| {
+                try w.print("enum {s}: ", .{enumTy.name.lookup(comp)});
+                try enumTy.tag.dump(comp, w);
+            },
+            else => try qt.unqualified().print(comp, w),
+        }
     }
 };
 
@@ -1172,8 +1590,9 @@ pub const Type = union(enum) {
     };
 
     pub const Enum = struct {
-        tag: ?QualType,
+        tag: QualType,
         fixed: bool,
+        incomplete: bool,
         name: StringId,
         fields: []const Field,
 
@@ -1320,9 +1739,9 @@ pub fn set(ts: *TypeStore, gpa: std.mem.Allocator, ty: Type, index: usize) !void
                     else => .FuncVariadic,
                 },
                 .OldStyle => switch (func.params.len) {
-                    0 => .FuncVariadicZero,
-                    1 => .FuncVariadicOne,
-                    else => .FuncVariadic,
+                    0 => .FuncOldStyleZero,
+                    1 => .FuncOldStyleOne,
+                    else => .FuncOldStyle,
                 },
             };
         },
@@ -1403,13 +1822,13 @@ pub fn set(ts: *TypeStore, gpa: std.mem.Allocator, ty: Type, index: usize) !void
             }
         },
         .@"enum" => |@"enum"| @"enum": {
-            const tagTy = @"enum".tag orelse {
+            repr.data[0] = @bitCast(@"enum".tag);
+            if (@"enum".incomplete) {
                 std.debug.assert(@"enum".fields.len == 0);
-                repr.tag = .EnumIncomplete;
-                repr.data[0] = @intFromEnum(@"enum".name);
+                repr.tag = if (@"enum".fixed) .EnumIncompleteFixed else .EnumIncomplete;
+                repr.data[1] = @intFromEnum(@"enum".name);
                 break :@"enum";
-            };
-            repr.data[0] = @bitCast(tagTy);
+            }
             repr.tag = if (@"enum".fixed) .EnumFixed else .Enum;
 
             const extraIndex: u32 = @intCast(ts.extra.items.len);
@@ -1450,11 +1869,11 @@ pub fn set(ts: *TypeStore, gpa: std.mem.Allocator, ty: Type, index: usize) !void
             if (attrCount > 1) {
                 repr.tag = .Attributed;
                 const extraIndex: u32 = @intCast(ts.extra.items.len);
-                repr.data[0] = extraIndex;
+                repr.data[1] = extraIndex;
                 try ts.extra.appendSlice(gpa, &.{ attrIndex, attrCount });
             } else {
                 repr.tag = .AttributedOne;
-                repr.data[0] = attrIndex;
+                repr.data[1] = attrIndex;
             }
         },
     }
@@ -1554,8 +1973,8 @@ fn generateVaListType(ts: *TypeStore, comp: *Compilation) !QualType {
         else => return .void, // unknown
     };
 
-    switch (kind) {
-        .aarch64_va_list => {
+    const structQt = switch (kind) {
+        .aarch64_va_list => blk: {
             var record: Type.Record = .{
                 .name = try comp.internString("__va_list_tag"),
                 .layout = null,
@@ -1574,9 +1993,9 @@ fn generateVaListType(ts: *TypeStore, comp: *Compilation) !QualType {
             record.layout = RecordLayout.compute(&fields, qt, comp, null) catch unreachable;
             try ts.set(comp.gpa, .{ .@"struct" = record }, @intFromEnum(qt._index));
 
-            return qt;
+            break :blk qt;
         },
-        .x86_64_va_list => {
+        .x86_64_va_list => blk: {
             var record: Type.Record = .{
                 .name = try comp.internString("__va_list_tag"),
                 .layout = null,
@@ -1594,9 +2013,14 @@ fn generateVaListType(ts: *TypeStore, comp: *Compilation) !QualType {
             record.layout = RecordLayout.compute(&fields, qt, comp, null) catch unreachable;
             try ts.set(comp.gpa, .{ .@"struct" = record }, @intFromEnum(qt._index));
 
-            return qt;
+            break :blk qt;
         },
-    }
+    };
+
+    return ts.put(comp.gpa, .{ .array = .{
+        .elem = structQt,
+        .len = .{ .fixed = 1 },
+    } });
 }
 
 pub const Builder = struct {
