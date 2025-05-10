@@ -7200,79 +7200,81 @@ const CallExpr = union(enum) {
         };
     }
 
-    fn returnType(self: CallExpr, p: *Parser, callableTy: QualType) QualType {
-        return switch (self) {
-            .standard => callableTy.getReturnType(),
-            .builtin => |builtin| switch (builtin.tag) {
-                .__builtin_complex => {
-                    if (p.listBuffer.items.len < 1) return .invalid;
-                    const lastParam = p.listBuffer.items[p.listBuffer.items.len - 1];
-                    return lastParam.qt(&p.tree).toComplex(p.comp);
-                },
+    fn returnType(self: CallExpr, p: *Parser, funcQt: QualType) QualType {
+        if (self == .standard)
+            return if (funcQt.get(p.comp, .func)) |funcTy| funcTy.returnType else .invalid;
 
-                .__c11_atomic_load => {
-                    if (p.listBuffer.items.len != 3) return .invalid;
-                    const firstParam = p.listBuffer.items[1];
-                    const qt = firstParam.qt(&p.tree);
-                    if (!qt.scalarKind(p.comp).isPointer()) return .invalid;
-                    return qt.childType(p.comp);
-                },
-
-                .__c11_atomic_exchange => {
-                    if (p.listBuffer.items.len != 4) return .invalid;
-                    const secondParam = p.listBuffer.items[2];
-                    return secondParam.qt(&p.tree);
-                },
-
-                .__atomic_fetch_add,
-                .__atomic_add_fetch,
-                .__c11_atomic_fetch_add,
-
-                .__atomic_fetch_sub,
-                .__atomic_sub_fetch,
-                .__c11_atomic_fetch_sub,
-
-                .__atomic_fetch_and,
-                .__atomic_and_fetch,
-                .__c11_atomic_fetch_and,
-
-                .__atomic_fetch_xor,
-                .__atomic_xor_fetch,
-                .__c11_atomic_fetch_xor,
-
-                .__atomic_fetch_or,
-                .__atomic_or_fetch,
-                .__c11_atomic_fetch_or,
-
-                .__atomic_fetch_nand,
-                .__atomic_nand_fetch,
-                .__c11_atomic_fetch_nand,
-                => {
-                    if (p.listBuffer.items.len != 3) return .invalid;
-                    const secondParam = p.listBuffer.items[2];
-                    return secondParam.qt(&p.tree);
-                },
-
-                .__c11_atomic_compare_exchange_strong,
-                .__c11_atomic_compare_exchange_weak,
-                => {
-                    if (p.listBuffer.items.len != 6) return .invalid;
-                    const thirdParam = p.listBuffer.items[3];
-                    return thirdParam.qt(&p.tree);
-                },
-
-                .__atomic_compare_exchange,
-                .__atomic_compare_exchange_n,
-                .__c11_atomic_is_lock_free,
-                => .bool,
-
-                else => callableTy.getReturnType(),
+        const builtin = self.builtin;
+        const funcTy = funcQt.get(p.comp, .func).?;
+        return switch (builtin.tag) {
+            .__builtin_complex => {
+                if (p.listBuffer.items.len < 1) return .invalid;
+                const lastParam = p.listBuffer.items[p.listBuffer.items.len - 1];
+                return try lastParam.qt(&p.tree).toComplex(p.comp);
             },
+
+            .__c11_atomic_load => {
+                if (p.listBuffer.items.len != 3) return .invalid;
+                const firstParam = p.listBuffer.items[1];
+                const qt = firstParam.qt(&p.tree);
+                if (!qt.scalarKind(p.comp).isPointer()) return .invalid;
+                return qt.childType(p.comp);
+            },
+
+            .__c11_atomic_exchange => {
+                if (p.listBuffer.items.len != 4) return .invalid;
+                const secondParam = p.listBuffer.items[2];
+                return secondParam.qt(&p.tree);
+            },
+
+            .__atomic_fetch_add,
+            .__atomic_add_fetch,
+            .__c11_atomic_fetch_add,
+
+            .__atomic_fetch_sub,
+            .__atomic_sub_fetch,
+            .__c11_atomic_fetch_sub,
+
+            .__atomic_fetch_and,
+            .__atomic_and_fetch,
+            .__c11_atomic_fetch_and,
+
+            .__atomic_fetch_xor,
+            .__atomic_xor_fetch,
+            .__c11_atomic_fetch_xor,
+
+            .__atomic_fetch_or,
+            .__atomic_or_fetch,
+            .__c11_atomic_fetch_or,
+
+            .__atomic_fetch_nand,
+            .__atomic_nand_fetch,
+            .__c11_atomic_fetch_nand,
+            => {
+                if (p.listBuffer.items.len != 3) return .invalid;
+                const secondParam = p.listBuffer.items[2];
+                return secondParam.qt(&p.tree);
+            },
+
+            .__c11_atomic_compare_exchange_strong,
+            .__c11_atomic_compare_exchange_weak,
+            => {
+                if (p.listBuffer.items.len != 6) return .invalid;
+                const thirdParam = p.listBuffer.items[3];
+                return thirdParam.qt(&p.tree);
+            },
+
+            .__atomic_compare_exchange,
+            .__atomic_compare_exchange_n,
+            .__c11_atomic_is_lock_free,
+            => .bool,
+
+            else => funcTy.returnType,
         };
     }
 
     fn finish(self: CallExpr, p: *Parser, funcQt: QualType, listBufferTop: usize, lparen: TokenIndex) Error!Result {
-        const returnQt: QualType = if (funcQt.get(p.comp, .func)) |funcTy| funcTy.returnType else .invalid;
+        const returnQt = self.returnType(p, funcQt);
         const args = p.listBuffer.items[listBufferTop..];
         switch (self) {
             .standard => |funcNode| return .{
