@@ -407,6 +407,12 @@ pub const QualType = packed struct(u32) {
 
     pub fn get(qt: QualType, comp: *const Compilation, comptime tag: std.meta.Tag(Type)) ?@FieldType(Type, @tagName(tag)) {
         comptime std.debug.assert(tag != .typeof and tag != .attributed and tag != .typedef);
+
+        switch (qt._index) {
+            .Invalid, .AutoType, .C23Auto => return null,
+            else => {},
+        }
+
         const baseType = qt.base(comp).type;
         if (baseType == tag) return @field(baseType, @tagName(tag));
         return null;
@@ -428,7 +434,7 @@ pub const QualType = packed struct(u32) {
     }
 
     pub fn childType(qt: QualType, comp: *const Compilation) QualType {
-        if (qt._index == .Invalid) return .invalid;
+        if (qt.isInvalid()) return .invalid;
         return switch (qt.base(comp).type) {
             .complex => |complex| complex,
             .func => |func| func.returnType,
@@ -741,15 +747,17 @@ pub const QualType = packed struct(u32) {
         switch (qt.base(comp).type) {
             .array => |arrayTy| {
                 if (arrayTy.elem.isInvalid()) return .invalid;
-                var ptrQt = try comp.typeStore.put(comp.gpa, .{ .pointer = .{
-                    .child = arrayTy.elem,
+
+                // Copy qualifiers
+                var elemQt = arrayTy.elem;
+                elemQt.@"const" = qt.@"const";
+                elemQt.@"volatile" = qt.@"volatile";
+                elemQt.restrict = qt.restrict;
+
+                return try comp.typeStore.put(comp.gpa, .{ .pointer = .{
+                    .child = elemQt,
                     .decayed = qt,
                 } });
-                // Copy qualifiers
-                ptrQt.@"const" = qt.@"const";
-                ptrQt.@"volatile" = qt.@"volatile";
-                ptrQt.restrict = qt.restrict;
-                return ptrQt;
             },
             .func => |funcTy| {
                 if (funcTy.returnType.isInvalid())
@@ -1001,8 +1009,9 @@ pub const QualType = packed struct(u32) {
                 const bFunc = bType.func;
 
                 if (aFunc.params.len != bFunc.params.len) {
+                    if (aFunc.kind == .OldStyle and bFunc.kind == .OldStyle) return true;
                     if (aFunc.kind == .OldStyle or bFunc.kind == .OldStyle) {
-                        if (true) @panic("TODO is this correct?");
+                        // TODO: is this correct?
                         const maybeHasParams = if (aFunc.kind == .OldStyle) bFunc else aFunc;
 
                         // Check if any args undergo default argument promotion.
@@ -1015,7 +1024,7 @@ pub const QualType = packed struct(u32) {
                                 },
                                 .float => |floatTy| if (floatTy != .Double) return false,
                                 .@"enum" => |enumTy| {
-                                    if (comp.langOpts.emulate == .clang and enumTy.tag == null) return false;
+                                    if (comp.langOpts.emulate == .clang and enumTy.incomplete) return false;
                                 },
                                 else => {},
                             }

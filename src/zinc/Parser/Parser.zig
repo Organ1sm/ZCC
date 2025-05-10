@@ -1043,16 +1043,6 @@ fn parseDeclaration(p: *Parser) Error!bool {
 
     // check for funtion definition
     if (initDeclarator.d.funcDeclarator != null and initDeclarator.initializer == null) fndef: {
-        if (declSpec.autoType) |tokenIdx| {
-            try p.errStr(.auto_type_not_allowed, tokenIdx, "function return type");
-            return error.ParsingFailed;
-        }
-
-        if (declSpec.c23Auto) |tokenIdx| {
-            try p.errStr(.c23_auto_not_allowed, tokenIdx, "function return type");
-            return error.ParsingFailed;
-        }
-
         switch (p.currToken()) {
             .Comma, .Semicolon => break :fndef,
             .LBrace => {},
@@ -1073,8 +1063,8 @@ fn parseDeclaration(p: *Parser) Error!bool {
         p.func = .{ .qt = initDeclarator.d.qt, .name = declaratorName };
         defer p.func = func;
 
-        var funcTy = initDeclarator.d.qt.get(p.comp, .func).?;
         if (internedDeclaratorName == p.stringsIds.mainId) {
+            const funcTy = initDeclarator.d.qt.get(p.comp, .func).?;
             if (funcTy.returnType.get(p.comp, .int)) |intTy| {
                 if (intTy == .Int) try p.errToken(.main_return_type, declaratorName);
             }
@@ -1083,15 +1073,20 @@ fn parseDeclaration(p: *Parser) Error!bool {
         try p.symStack.pushScope();
         defer p.symStack.popScope();
 
-        const newParams = try p.paramBuffer.addManyAsSlice(funcTy.params.len);
-        for (newParams) |*newParam| {
-            newParam.name = .empty;
-        }
-
         // collect old style parameters
         if (initDeclarator.d.oldTypeFunc != null) {
             const paramBufferTop = p.paramBuffer.items.len;
             defer p.paramBuffer.items.len = paramBufferTop;
+
+            // We cannot refer to the function type here because the pointer to
+            // type_store.extra might get invalidated while parsing the param decls.
+            const funcQt = initDeclarator.d.qt.base(p.comp).qt;
+            const paramsLen = funcQt.get(p.comp, .func).?.params.len;
+
+            const newParams = try p.paramBuffer.addManyAsSlice(paramsLen);
+            for (newParams) |*newParam| {
+                newParam.name = .empty;
+            }
 
             paramLoop: while (true) {
                 const paramDeclSpec = (try p.parseDeclSpec()) orelse break;
@@ -1123,9 +1118,9 @@ fn parseDeclaration(p: *Parser) Error!bool {
                         paramD.qt = try paramD.qt.decay(p.comp);
                     }
 
-                    var attributedQt = try Attribute.applyParameterAttributes(p, paramD.qt, attrBufferTopDeclarator, .alignas_on_param);
+                    const attributedQt = try Attribute.applyParameterAttributes(p, paramD.qt, attrBufferTopDeclarator, .alignas_on_param);
 
-                    try paramDeclSpec.validateParam(p, &attributedQt);
+                    try paramDeclSpec.validateParam(p);
                     const paramNode = try p.addNode(.{
                         .param = .{
                             .nameToken = paramD.name,
@@ -1143,7 +1138,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
                     try p.symStack.defineParam(internedName, attributedQt, paramD.name, paramNode);
 
                     // find and correct parameter types
-                    for (funcTy.params, newParams) |param, *newParam| {
+                    for (funcQt.get(p.comp, .func).?.params, newParams) |param, *newParam| {
                         if (param.name == internedName) {
                             newParam.* = .{
                                 .qt = attributedQt,
@@ -1163,6 +1158,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
                 _ = try p.expectToken(.Semicolon);
             }
 
+            const funcTy = funcQt.get(p.comp, .func).?;
             for (funcTy.params, newParams) |param, *newParam| {
                 if (newParam.name == .empty) {
                     try p.errStr(.param_not_declared, param.nameToken, param.name.lookup(p.comp));
@@ -1180,7 +1176,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
                 .params = newParams,
                 .returnType = funcTy.returnType,
             } });
-        } else {
+        } else if (initDeclarator.d.qt.get(p.comp, .func)) |funcTy| {
             for (funcTy.params) |param| {
                 if (param.name == .empty) {
                     try p.errToken(.omitting_parameter_name, param.nameToken);
@@ -1209,7 +1205,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
                     }
                 }
 
-                if (param.qt.sizeofOrNull(p.comp) != null and !param.qt.is(p.comp, .void))
+                if (param.qt.sizeofOrNull(p.comp) == null and !param.qt.is(p.comp, .void))
                     try p.errStr(.parameter_incomplete_ty, param.nameToken, try p.typeStr(param.qt));
             }
         }
@@ -1262,7 +1258,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
         if (initDeclarator.d.oldTypeFunc) |tokenIdx|
             try p.errToken(.invalid_old_style_params, tokenIdx);
 
-        try declSpec.validate(p, &initDeclarator.d.qt);
+        try declSpec.validate(p, initDeclarator.d.qt);
 
         if (declSpec.storageClass == .typedef) {
             try p.tree.setNode(@intFromEnum(declNode), .{
@@ -1272,7 +1268,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
                     .implicit = false,
                 },
             });
-        } else if (initDeclarator.d.qt.is(p.comp, .func)) {
+        } else if (initDeclarator.d.funcDeclarator != null or initDeclarator.d.qt.is(p.comp, .func)) {
             try p.tree.setNode(@intFromEnum(declNode), .{
                 .fnProto = .{
                     .nameToken = initDeclarator.d.name,
@@ -1535,14 +1531,14 @@ fn parseDeclSpec(p: *Parser) Error!?DeclSpec {
             .KeywordAutoType => {
                 try p.errToken(.auto_type_extension, p.tokenIdx);
                 try builder.combine(.AutoType, p.tokenIdx);
-                d.autoType = p.tokenIdx;
+                if (builder.type == .AutoType) d.autoType = p.tokenIdx;
                 p.tokenIdx += 1;
                 continue;
             },
 
             .KeywordAuto => if (p.comp.langOpts.standard.atLeast(.c23)) {
                 try builder.combine(.C23Auto, p.tokenIdx);
-                d.c23Auto = p.tokenIdx;
+                if (builder.type == .C23Auto) d.c23Auto = p.tokenIdx;
                 p.tokenIdx += 1;
                 continue;
             },
@@ -1854,16 +1850,41 @@ fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec, attrBufferTop: usize, de
     if (declSpec.storageClass == .typedef) {
         if (declSpec.autoType) |tokenIdx| {
             try p.errStr(.auto_type_not_allowed, tokenIdx, "typedef");
-            return error.ParsingFailed;
-        }
-        if (declSpec.c23Auto) |tokenIdx| {
+            ID.d.qt = .invalid;
+        } else if (declSpec.c23Auto) |tokenIdx| {
             try p.errStr(.c23_auto_not_allowed, tokenIdx, "typedef");
-            return error.ParsingFailed;
+            ID.d.qt = .invalid;
+        } else {
+            ID.d.qt = try Attribute.applyTypeAttributes(p, ID.d.qt, attrBufferTop, null);
         }
-        ID.d.qt = try Attribute.applyTypeAttributes(p, ID.d.qt, attrBufferTop, null);
+        ID.d.funcDeclarator = null;
     } else if (ID.d.qt.is(p.comp, .func)) {
-        ID.d.qt = try Attribute.applyFunctionAttributes(p, ID.d.qt, attrBufferTop);
+        if (declSpec.autoType) |tokenIdx| {
+            try p.errStr(.auto_type_not_allowed, tokenIdx, "function return type");
+            ID.d.qt = .invalid;
+        } else if (declSpec.c23Auto) |tokenIdx| {
+            try p.errStr(.c23_auto_not_allowed, tokenIdx, "function return type");
+            ID.d.qt = .invalid;
+        } else {
+            ID.d.qt = try Attribute.applyFunctionAttributes(p, ID.d.qt, attrBufferTop);
+        }
     } else {
+        if (ID.d.qt.is(p.comp, .array)) {
+            if (declSpec.autoType) |tokenIdx| {
+                try p.errStr(.auto_type_array, tokenIdx, p.getTokenText(ID.d.name));
+                ID.d.qt = .invalid;
+            } else if (declSpec.c23Auto) |tokenIndex| {
+                try p.errStr(.c23_auto_array, tokenIndex, p.getTokenText(ID.d.name));
+                ID.d.qt = .invalid;
+            }
+        } else if (ID.d.qt.is(p.comp, .pointer)) {
+            if (declSpec.autoType != null or declSpec.c23Auto != null) {
+                // TODO this is not a hard error in clang
+                try p.errToken(.auto_type_requires_plain_declarator, p.tokenIdx);
+                ID.d.qt = .invalid;
+            }
+        }
+        ID.d.funcDeclarator = null;
         applyVarAttributes = true;
     }
 
@@ -1878,6 +1899,9 @@ fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec, attrBufferTop: usize, de
         }
 
         incomplete: {
+            if (ID.d.qt.isInvalid()) break :incomplete;
+            if (ID.d.qt.isC23Auto()) break :incomplete;
+            if (ID.d.qt.isAutoType()) break :incomplete;
             if (ID.d.qt.sizeofOrNull(p.comp) != null) break :incomplete;
             if (ID.d.qt.get(p.comp, .array)) |arrayTy| {
                 if (arrayTy.len == .incomplete) break :incomplete;
@@ -1901,33 +1925,32 @@ fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec, attrBufferTop: usize, de
 
         // int j [] = c; // c -> *int
         // Set incomplete array length if possible.
-        const initBase = ID.d.qt.base(p.comp);
-        if (initBase.type == .array and initBase.type.array.len == .incomplete) {
-            if (initListExpr.qt.get(p.comp, .array)) |array_ty| {
-                switch (array_ty.len) {
+        if (ID.d.qt.get(p.comp, .array)) |baseArrayTy| {
+            if (baseArrayTy.len == .incomplete) if (initListExpr.qt.get(p.comp, .array)) |initArrayTy| {
+                switch (initArrayTy.len) {
                     .fixed, .static => |len| {
                         ID.d.qt = (try p.comp.typeStore.put(p.gpa, .{ .array = .{
-                            .elem = initBase.type.array.elem,
+                            .elem = baseArrayTy.elem,
                             .len = .{ .fixed = len },
                         } })).withQualifiers(ID.d.qt);
                     },
                     else => {},
                 }
-            }
+            };
         }
     }
 
     const name = ID.d.name;
-    if (declSpec.autoType != null or declSpec.c23Auto != null) {
+    if (ID.d.qt.isAutoType() or ID.d.qt.isC23Auto()) {
         if (ID.initializer) |some| {
             ID.d.qt = some.qt;
         } else {
-            ID.d.qt = .invalid;
             try p.errStr(
-                if (declSpec.c23Auto != null) .c23_auto_requires_initializer else .auto_type_requires_initializer,
+                if (ID.d.qt.isC23Auto()) .c23_auto_requires_initializer else .auto_type_requires_initializer,
                 name,
                 p.getTokenText(name),
             );
+            ID.d.qt = .invalid;
             return ID;
         }
     }
@@ -1975,7 +1998,6 @@ fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec, attrBufferTop: usize, de
 
 /// type-specifier
 ///  : `void`
-///  | `auto_type`
 ///  | `char`
 ///  | `short`
 ///  | `int`
@@ -2440,7 +2462,7 @@ fn parseRecordDecl(p: *Parser) Error!bool {
     const attrBufferTop = p.attrBuffer.len;
     defer p.attrBuffer.len = attrBufferTop;
 
-    const baseQt = blk: {
+    const baseQt: QualType = blk: {
         const start = p.tokenIdx;
         var builder: TypeStore.Builder = .{ .parser = p };
         while (true) {
@@ -2464,7 +2486,10 @@ fn parseRecordDecl(p: *Parser) Error!bool {
             break;
         }
         if (p.tokenIdx == start) return false;
-        break :blk try builder.finish();
+        break :blk switch (builder.type) {
+            .AutoType, .C23Auto => .invalid,
+            else => try builder.finish(),
+        };
     };
     try p.parseAttrSpec(); // .record
 
@@ -3116,63 +3141,68 @@ const Declarator = struct {
     /// for c89 old style function
     oldTypeFunc: ?TokenIndex = null,
 
+    const Kind = enum { normal, abstract, param, record };
+
     fn validate(d: *Declarator, p: *Parser, sourceToken: TokenIndex) Parser.Error!void {
-        var cur = d.qt;
-        while (true) {
-            if (cur.isInvalid()) return;
-            if (cur.isAutoType()) return;
-            if (cur.isC23Auto()) return;
+        _ = try validateExtra(p, d.qt, sourceToken);
+    }
 
-            const typeQt = cur.base(p.comp);
-            switch (typeQt.type) {
-                .pointer => |pointerTy| cur = pointerTy.child,
-                .array => |arrayTy| {
-                    const elemQt = arrayTy.elem;
-                    if (elemQt.sizeofOrNull(p.comp) == null) {
-                        try p.errStr(.array_incomplete_elem, sourceToken, try p.typeStr(arrayTy.elem));
-                        return error.ParsingFailed;
+    // Returns true if the type contained invalid or auto types.
+    fn validateExtra(p: *Parser, cur: QualType, sourceToken: TokenIndex) Parser.Error!bool {
+        if (cur.isInvalid()) return true;
+        if (cur.isAutoType()) return true;
+        if (cur.isC23Auto()) return true;
+
+        switch (cur.type(p.comp)) {
+            .pointer => |pointerTy| return validateExtra(p, pointerTy.child, sourceToken),
+            .array => |arrayTy| {
+                const elemQt = arrayTy.elem;
+                if (try validateExtra(p, elemQt, sourceToken)) return true;
+
+                if (elemQt.sizeofOrNull(p.comp) == null) {
+                    try p.errStr(.array_incomplete_elem, sourceToken, try p.typeStr(elemQt));
+                    return error.ParsingFailed;
+                }
+
+                if (elemQt.is(p.comp, .func)) {
+                    try p.errToken(.array_func_elem, sourceToken);
+                    return error.ParsingFailed;
+                }
+
+                if (arrayTy.len == .static and elemQt.is(p.comp, .array))
+                    try p.errToken(.static_non_outermost_array, sourceToken);
+
+                if (cur.isQualified() and elemQt.is(p.comp, .array))
+                    try p.errToken(.qualifier_non_outermost_array, sourceToken);
+
+                return false;
+            },
+            .func => |funcTy| {
+                const retQt = funcTy.returnType;
+                if (try validateExtra(p, retQt, sourceToken)) return true;
+
+                if (retQt.is(p.comp, .array)) try p.errToken(.func_cannot_return_array, sourceToken);
+                if (retQt.is(p.comp, .func)) try p.errToken(.func_cannot_return_func, sourceToken);
+
+                if (retQt.@"const") try p.errStr(.qual_on_ret_type, sourceToken, "const");
+                if (retQt.@"volatile") try p.errStr(.qual_on_ret_type, sourceToken, "volatile");
+                if (retQt.get(p.comp, .float)) |float| {
+                    if (float == .FP16 and !p.comp.hasHalfPrecisionFloatABI()) {
+                        try p.errStr(.suggest_pointer_for_invalid_fp16, sourceToken, "function return value");
                     }
-
-                    if (elemQt.is(p.comp, .func)) {
-                        try p.errToken(.array_func_elem, sourceToken);
-                        return error.ParsingFailed;
-                    }
-
-                    if (arrayTy.len == .static and elemQt.is(p.comp, .array))
-                        try p.errToken(.static_non_outermost_array, sourceToken);
-
-                    if (typeQt.qt.isQualified() and elemQt.is(p.comp, .array))
-                        try p.errToken(.qualifier_non_outermost_array, sourceToken);
-
-                    cur = elemQt;
-                },
-                .func => |funcTy| {
-                    const retQt = funcTy.returnType;
-                    if (retQt.is(p.comp, .array)) try p.errToken(.func_cannot_return_array, sourceToken);
-                    if (retQt.is(p.comp, .func)) try p.errToken(.func_cannot_return_func, sourceToken);
-
-                    if (retQt.@"const") try p.errStr(.qual_on_ret_type, sourceToken, "const");
-                    if (retQt.@"volatile") try p.errStr(.qual_on_ret_type, sourceToken, "volatile");
-                    if (retQt.get(p.comp, .float)) |float| {
-                        if (float == .FP16 and !p.comp.hasHalfPrecisionFloatABI()) {
-                            try p.errStr(.suggest_pointer_for_invalid_fp16, sourceToken, "function return value");
-                        }
-                    }
-                    cur = retQt;
-                },
-                else => return,
-            }
+                }
+                return false;
+            },
+            else => return true,
         }
     }
 };
-
-const DeclaratorKind = enum { normal, abstract, param, record };
 
 /// declarator: pointer? direct-declarator
 /// abstract-declarator
 ///  : pointer
 ///  : pointer? direct-abstract-declarator
-fn declarator(p: *Parser, baseQt: QualType, kind: DeclaratorKind) Error!?Declarator {
+fn declarator(p: *Parser, baseQt: QualType, kind: Declarator.Kind) Error!?Declarator {
     const start = p.tokenIdx;
     var d = Declarator{ .name = 0, .qt = try p.parsePointer(baseQt) };
 
@@ -3195,13 +3225,12 @@ fn declarator(p: *Parser, baseQt: QualType, kind: DeclaratorKind) Error!?Declara
 
         // Correct the base type now that it is known.
         // If outer is invalid there was no pointer, array or function type.
-        if (outer.isInvalid()) {
-            res.qt = baseQt;
+        if (outer.isInvalid() or res.qt.isInvalid()) {
+            res.qt = outer;
         } else {
             var cur = res.qt;
             while (true) {
-                const typeQt = cur.base(p.comp);
-                switch (typeQt.type) {
+                switch (cur.type(p.comp)) {
                     .pointer => |pointerTy| if (!pointerTy.child.isInvalid()) {
                         cur = pointerTy.child;
                         continue;
@@ -3217,10 +3246,9 @@ fn declarator(p: *Parser, baseQt: QualType, kind: DeclaratorKind) Error!?Declara
                     else => unreachable,
                 }
                 // Child type is always stored in repr.data[0]
-                p.comp.typeStore.types.items(.data)[@intFromEnum(typeQt.qt._index)][0] = @bitCast(baseQt);
+                p.comp.typeStore.types.items(.data)[@intFromEnum(cur._index)][0] = @bitCast(outer);
                 break;
             }
-            res.qt = outer;
         }
 
         try res.validate(p, suffixStart);
@@ -3232,7 +3260,7 @@ fn declarator(p: *Parser, baseQt: QualType, kind: DeclaratorKind) Error!?Declara
     const expectedIdent = p.tokenIdx;
 
     d.qt = try p.directDeclarator(d.qt, &d, kind);
-    if (kind == .normal) {
+    if (kind == .normal and !d.qt.isInvalid()) {
         switch (d.qt.base(p.comp).type) {
             .@"enum", .@"struct", .@"union" => {},
             else => {
@@ -3272,7 +3300,12 @@ fn declarator(p: *Parser, baseQt: QualType, kind: DeclaratorKind) Error!?Declara
 ///  | '[' type-qualifier-list+ `static` assign-expression ']'
 ///  | '[' '*' ']'
 ///  | '(' param-decls? ')'
-fn directDeclarator(p: *Parser, baseQt: QualType, d: *Declarator, kind: DeclaratorKind) Error!QualType {
+fn directDeclarator(
+    p: *Parser,
+    baseQt: QualType,
+    paramDeclarator: *Declarator,
+    kind: Declarator.Kind,
+) Error!QualType {
     if (p.eat(.LBracket)) |lb| {
         // Check for C23 attribute
         if (p.currToken() == .LBracket) {
@@ -3324,18 +3357,7 @@ fn directDeclarator(p: *Parser, baseQt: QualType, d: *Declarator, kind: Declarat
 
         if (static) |_| _ = try p.expectResult(optSize);
 
-        const outer = blk: {
-            var elemQt = baseQt;
-            if (elemQt.isAutoType()) {
-                try p.errStr(.auto_type_array, d.name, p.getTokenText(d.name));
-                elemQt = .invalid;
-            } else if (elemQt.isC23Auto()) {
-                try p.errStr(.c23_auto_array, d.name, p.getTokenText(d.name));
-                elemQt = .invalid;
-            }
-
-            break :blk try p.directDeclarator(elemQt, d, kind);
-        };
+        const outer = try p.directDeclarator(baseQt, paramDeclarator, kind);
 
         if (optSize != null and !optSize.?.qt.isInt(p.comp)) {
             try p.errStr(.array_size_non_int, sizeToken, try p.typeStr(optSize.?.qt));
@@ -3346,7 +3368,7 @@ fn directDeclarator(p: *Parser, baseQt: QualType, d: *Declarator, kind: Declarat
             if (size.value.isNone()) {
                 try p.errToken(.vla, sizeToken);
                 if (p.func.qt == null and kind != .param and p.record.kind == .Invalid)
-                    try p.errToken(.variable_len_array_file_scope, d.name);
+                    try p.errToken(.variable_len_array_file_scope, paramDeclarator.name);
 
                 const arrayQt = try p.comp.typeStore.put(p.gpa, .{ .array = .{
                     .elem = outer,
@@ -3363,13 +3385,16 @@ fn directDeclarator(p: *Parser, baseQt: QualType, d: *Declarator, kind: Declarat
                     return error.ParsingFailed;
                 }
 
-                // `outer` is validated later so it may be invalid here
-                const outSize = outer.sizeofOrNull(p.comp) orelse 1;
-                const maxElems = p.comp.maxArrayBytes() / @max(1, outSize);
                 var len = size.value.toInt(u64, p.comp) orelse std.math.maxInt(u64);
-                if (len > maxElems) {
-                    try p.errToken(.array_too_large, lb);
-                    len = maxElems;
+
+                // `outer` is validated later so it may be invalid here
+                if (!outer.isInvalid() and !outer.isAutoType() and !outer.isC23Auto()) {
+                    const outSize = outer.sizeofOrNull(p.comp) orelse 1;
+                    const maxElems = p.comp.maxArrayBytes() / @max(1, outSize);
+                    if (len > maxElems) {
+                        try p.errToken(.array_too_large, lb);
+                        len = maxElems;
+                    }
                 }
 
                 const arrayQt = try p.comp.typeStore.put(p.gpa, .{ .array = .{
@@ -3395,7 +3420,7 @@ fn directDeclarator(p: *Parser, baseQt: QualType, d: *Declarator, kind: Declarat
             return builder.finishQuals(arrayQt);
         }
     } else if (p.eat(.LParen)) |lp| {
-        d.funcDeclarator = lp;
+        paramDeclarator.funcDeclarator = lp;
         var funcType: Type.Func = .{
             .kind = undefined,
             .returnType = undefined,
@@ -3407,7 +3432,7 @@ fn directDeclarator(p: *Parser, baseQt: QualType, d: *Declarator, kind: Declarat
             try p.expectClosing(lp, .RParen);
 
             funcType.kind = if (p.comp.langOpts.standard.atLeast(.c23)) .Variadic else .Normal;
-            funcType.returnType = try p.directDeclarator(baseQt, d, kind);
+            funcType.returnType = try p.directDeclarator(baseQt, paramDeclarator, kind);
             return p.comp.typeStore.put(p.gpa, .{ .func = funcType });
         }
 
@@ -3416,14 +3441,14 @@ fn directDeclarator(p: *Parser, baseQt: QualType, d: *Declarator, kind: Declarat
         const paramBufferTop = p.paramBuffer.items.len;
         defer p.paramBuffer.items.len = paramBufferTop;
 
-        if (try p.parseParamDecls(d)) |params| {
+        if (try p.parseParamDecls(paramDeclarator)) |params| {
             funcType.kind = .Normal;
             funcType.params = params;
             if (p.eat(.Ellipsis)) |_| funcType.kind = .Variadic;
         } else if (p.currToken() == .RParen) {
             funcType.kind = if (p.comp.langOpts.standard.atLeast(.c23)) .Normal else .OldStyle;
         } else if (p.currToken() == .Identifier or p.currToken() == .ExtendedIdentifier) {
-            d.oldTypeFunc = p.tokenIdx;
+            paramDeclarator.oldTypeFunc = p.tokenIdx;
 
             try p.symStack.pushScope();
             defer p.symStack.popScope();
@@ -3451,7 +3476,7 @@ fn directDeclarator(p: *Parser, baseQt: QualType, d: *Declarator, kind: Declarat
 
         try p.expectClosing(lp, .RParen);
 
-        funcType.returnType = try p.directDeclarator(baseQt, d, kind);
+        funcType.returnType = try p.directDeclarator(baseQt, paramDeclarator, kind);
         return p.comp.typeStore.put(p.gpa, .{ .func = funcType });
     } else {
         return baseQt;
@@ -3462,20 +3487,14 @@ fn directDeclarator(p: *Parser, baseQt: QualType, d: *Declarator, kind: Declarat
 fn parsePointer(p: *Parser, baseQt: QualType) Error!QualType {
     var qt = baseQt;
     while (p.eat(.Asterisk)) |_| {
-        if (qt.isAutoType() or qt.isC23Auto()) {
-            // TODO this is not a hard error in clang
-            try p.errToken(.auto_type_requires_plain_declarator, p.tokenIdx);
-            return error.ParsingFailed;
-        }
         var builder: TypeBuilder = .{ .parser = p };
         _ = try p.parseTypeQual(&builder);
-        if (!qt.isInvalid()) {
-            qt = try p.comp.typeStore.put(p.gpa, .{ .pointer = .{
-                .child = qt,
-                .decayed = null,
-            } });
-            qt = try builder.finishQuals(qt);
-        }
+
+        qt = try p.comp.typeStore.put(p.gpa, .{ .pointer = .{
+            .child = qt,
+            .decayed = null,
+        } });
+        qt = try builder.finishQuals(qt);
     }
     return qt;
 }
@@ -3529,14 +3548,24 @@ fn parseParamDecls(p: *Parser, d: *Declarator) Error!?[]Type.Func.Param {
         var internedName: StringId = .empty;
         const firstToken = p.tokenIdx;
         var paramQt = paramDeclSpec.qt;
+
+        if (paramDeclSpec.autoType) |tokenIndex| {
+            try p.errStr(.auto_type_not_allowed, tokenIndex, "function prototype");
+            paramQt = .invalid;
+        }
+
+        if (paramDeclSpec.c23Auto) |tokenIndex| {
+            try p.errStr(.c23_auto_not_allowed, tokenIndex, "function prototype");
+            paramQt = .invalid;
+        }
+
         if (try p.declarator(paramQt, .param)) |some| {
             if (some.oldTypeFunc) |tokenIdx|
                 try p.errToken(.invalid_old_style_params, tokenIdx);
 
             try p.parseAttrSpec();
-
             nameToken = some.name;
-            paramQt = try Attribute.applyParameterAttributes(p, some.qt, attrBufferTop, .alignas_on_param);
+            paramQt = some.qt;
         }
 
         if (paramQt.is(p.comp, .void)) {
@@ -3554,10 +3583,10 @@ fn parseParamDecls(p: *Parser, d: *Declarator) Error!?[]Type.Func.Param {
             return error.ParsingFailed;
         } else {
             // Decay params declared as functions or arrays to pointer.
-            paramQt = try d.qt.decay(p.comp);
+            paramQt = try paramQt.decay(p.comp);
         }
 
-        try paramDeclSpec.validateParam(p, &paramQt);
+        try paramDeclSpec.validateParam(p);
         paramQt = try Attribute.applyParameterAttributes(p, paramQt, attrBufferTop, .alignas_on_param);
 
         if (paramQt.get(p.comp, .float)) |float| {
@@ -3681,36 +3710,38 @@ fn complexInitializer(p: *Parser, initTy: QualType) Error!Result {
 ///
 /// braced-initializer
 ///  | '{' initializerItems '}'
-pub fn initializer(p: *Parser, initType: QualType) Error!Result {
+pub fn initializer(p: *Parser, initQt: QualType) Error!Result {
     // fast path for non-braced initializers
     if (p.currToken() != .LBrace) {
         const token = p.tokenIdx;
         var res = try p.expect(parseAssignExpr);
-        if (try p.coerceArrayInit(&res, token, initType))
+        if (try p.coerceArrayInit(&res, token, initQt))
             return res;
 
-        try p.coerceInit(&res, token, initType);
+        try p.coerceInit(&res, token, initQt);
         return res;
     }
-
-    if (initType.isAutoType()) {
+    // We want to parse the initializer even if the target is
+    // invalidly inferred.
+    var finalInitQt = initQt;
+    if (initQt.isAutoType()) {
         try p.err(.auto_type_with_init_list);
-        return error.ParsingFailed;
-    } else if (initType.isC23Auto()) {
+        finalInitQt = .invalid;
+    } else if (initQt.isC23Auto()) {
         try p.err(.c23_auto_with_init_list);
-        return error.ParsingFailed;
+        finalInitQt = .invalid;
     }
 
-    if (initType.is(p.comp, .complex))
-        return p.complexInitializer(initType);
+    if (finalInitQt.is(p.comp, .complex))
+        return p.complexInitializer(finalInitQt);
 
     var il: InitList = .{};
     defer il.deinit(p.gpa);
 
-    _ = try p.initializerItem(&il, initType);
+    _ = try p.initializerItem(&il, finalInitQt);
 
-    const res = try p.convertInitList(il, initType);
-    return .{ .qt = res.qt(&p.tree).withQualifiers(initType), .node = res };
+    const res = try p.convertInitList(il, finalInitQt);
+    return .{ .qt = res.qt(&p.tree).withQualifiers(finalInitQt), .node = res };
 }
 
 /// initializerItems : designation? initializer (',' designation? initializer)* ','?
@@ -3736,9 +3767,12 @@ pub fn initializerItem(p: *Parser, il: *InitList, initType: QualType) Error!bool
         return true;
     };
 
-    const scalarKind = initType.scalarKind(p.comp);
-    const isScalar = scalarKind != .None;
-    const isComplex = !scalarKind.isReal();
+    const isScalar, const isComplex = blk: {
+        if (initType.isInvalid()) break :blk .{ false, false };
+        const scalarKind = initType.scalarKind(p.comp);
+        break :blk .{ scalarKind != .None, !scalarKind.isReal() };
+    };
+
     const scalarInitsNeeds: usize = if (isComplex) 2 else 1;
     if (p.eat(.RBrace)) |_| {
         if (isScalar)
@@ -3851,11 +3885,11 @@ pub fn initializerItem(p: *Parser, il: *InitList, initType: QualType) Error!bool
             try p.err(.designated_init_needed);
 
         var saw = false;
-        if (isStrInit and p.isStringInit(initType)) {
+        if (isStrInit and p.isStringInit()) {
             var tempIL: InitList = .{};
             defer tempIL.deinit(p.gpa);
             saw = try p.initializerItem(&tempIL, .void);
-        } else if (count == 0 and p.isStringInit(initType)) {
+        } else if (count == 0 and p.isStringInit()) {
             isStrInit = true;
             saw = try p.initializerItem(il, initType);
         } else if (isScalar and count >= scalarInitsNeeds) {
@@ -3920,14 +3954,14 @@ pub fn initializerItem(p: *Parser, il: *InitList, initType: QualType) Error!bool
             if (isStrInit) try p.errToken(.excess_str_init, firstToken);
             if (isScalar and !isComplex) try p.errToken(.excess_scalar_init, firstToken);
         } else if (count == 2) {
-            if (isScalar and isComplex) try p.errToken(.excess_scalar_init, firstToken);
+            if (isScalar and !isComplex) try p.errToken(.excess_scalar_init, firstToken);
         }
 
         if (p.eat(.Comma) == null) break;
     }
     try p.expectClosing(lb, .RBrace);
 
-    if (isComplex and count == 1) // count of 1 means we saw exactly 2 items in the initializer list
+    if (isScalar and isComplex and count == 1) // count of 1 means we saw exactly 2 items in the initializer list
         try p.errToken(.complex_component_init, lb);
 
     if (isScalar or isStrInit)
@@ -3946,12 +3980,12 @@ pub fn initializerItem(p: *Parser, il: *InitList, initType: QualType) Error!bool
 fn findScalarInitializerAt(
     p: *Parser,
     il: **InitList,
-    ty: *QualType,
+    qt: *QualType,
     res: *Result,
     firstToken: TokenIndex,
     startIdx: *u64,
 ) Error!bool {
-    switch (ty.base(p.comp).type) {
+    switch (qt.base(p.comp).type) {
         .array => |arrayTy| {
             if (il.*.node != .null) return false;
             startIdx.* += 1;
@@ -3968,9 +4002,9 @@ fn findScalarInitializerAt(
 
             const arrIL = il.*;
             if (startIdx.* < maxLen) {
-                ty.* = arrayTy.elem;
+                qt.* = arrayTy.elem;
                 il.* = try arrIL.find(p.gpa, startIdx.*);
-                _ = try p.findScalarInitializer(il, ty, res, firstToken);
+                _ = try p.findScalarInitializer(il, qt, res, firstToken);
                 return true;
             }
             return false;
@@ -3987,9 +4021,9 @@ fn findScalarInitializerAt(
 
             const structIL = il.*;
             if (startIdx.* < structTy.fields.len) {
-                ty.* = structTy.fields[@intCast(startIdx.*)].qt;
+                qt.* = structTy.fields[@intCast(startIdx.*)].qt;
                 il.* = try structIL.find(p.gpa, startIdx.*);
-                _ = try p.findScalarInitializer(il, ty, res, firstToken);
+                _ = try p.findScalarInitializer(il, qt, res, firstToken);
                 return true;
             }
             return false;
@@ -4004,16 +4038,17 @@ fn findScalarInitializerAt(
 fn findScalarInitializer(
     p: *Parser,
     il: **InitList,
-    ty: *QualType,
+    qt: *QualType,
     res: *Result,
     firstToken: TokenIndex,
 ) Error!bool {
     const actualQt = res.qt;
+    if (qt.isInvalid()) return il.*.node == .null;
 
-    switch (ty.base(p.comp).type) {
+    switch (qt.base(p.comp).type) {
         .array => |arrayTy| {
             if (il.*.node != .null) return false;
-            if (try p.coerceArrayInitExtra(res, firstToken, ty.*, false)) return true;
+            if (try p.coerceArrayInitExtra(res, firstToken, qt.*, false)) return true;
 
             const startIdx = il.*.list.items.len;
             var index = if (startIdx != 0) il.*.list.items[startIdx - 1].index else startIdx;
@@ -4030,11 +4065,11 @@ fn findScalarInitializer(
             const arrayIL = il.*;
             const elemTy = arrayTy.elem;
             while (index < maxLen) : (index += 1) {
-                ty.* = elemTy;
+                qt.* = elemTy;
                 il.* = try arrayIL.find(p.gpa, index);
                 if (il.*.node == .null and actualQt.eql(elemTy, p.comp))
                     return true;
-                if (try p.findScalarInitializer(il, ty, res, firstToken))
+                if (try p.findScalarInitializer(il, qt, res, firstToken))
                     return true;
             }
             return false;
@@ -4042,7 +4077,7 @@ fn findScalarInitializer(
 
         .@"struct" => |structTy| {
             if (il.*.node != .null) return false;
-            if (actualQt.eql(ty.*, p.comp)) return true;
+            if (actualQt.eql(qt.*, p.comp)) return true;
 
             const startIdx = il.*.list.items.len;
             var index = if (startIdx != 0) il.*.list.items[startIdx - 1].index + 1 else startIdx;
@@ -4055,30 +4090,30 @@ fn findScalarInitializer(
             const structIL = il.*;
             while (index < structTy.fields.len) : (index += 1) {
                 const field = structTy.fields[@intCast(index)];
-                ty.* = field.qt;
+                qt.* = field.qt;
                 il.* = try structIL.find(p.gpa, index);
 
                 if (il.*.node == .null and actualQt.eql(field.qt, p.comp)) return true;
-                if (il.*.node == .null and try p.coerceArrayInitExtra(res, firstToken, ty.*, false)) return true;
-                if (try p.findScalarInitializer(il, ty, res, firstToken)) return true;
+                if (il.*.node == .null and try p.coerceArrayInitExtra(res, firstToken, qt.*, false)) return true;
+                if (try p.findScalarInitializer(il, qt, res, firstToken)) return true;
             }
             return false;
         },
 
         .@"union" => |unionTy| {
             if (il.*.node != .null) return false;
-            if (actualQt.eql(ty.*, p.comp)) return true;
+            if (actualQt.eql(qt.*, p.comp)) return true;
 
             if (unionTy.fields.len == 0) {
                 try p.errToken(.empty_aggregate_init_braces, firstToken);
                 return error.ParsingFailed;
             }
 
-            ty.* = unionTy.fields[0].qt;
+            qt.* = unionTy.fields[0].qt;
             il.* = try il.*.find(p.gpa, 0);
 
-            if (try p.coerceArrayInitExtra(res, firstToken, ty.*, false)) return true;
-            if (try p.findScalarInitializer(il, ty, res, firstToken)) return true;
+            if (try p.coerceArrayInitExtra(res, firstToken, qt.*, false)) return true;
+            if (try p.findScalarInitializer(il, qt, res, firstToken)) return true;
             return false;
         },
 
@@ -4156,6 +4191,7 @@ fn coerceArrayInit(p: *Parser, item: *Result, token: TokenIndex, target: QualTyp
 }
 
 fn coerceArrayInitExtra(p: *Parser, item: *Result, token: TokenIndex, target: QualType, reportError: bool) !bool {
+    if (target.isInvalid()) return false;
     const targetArrayTy = target.get(p.comp, .array) orelse return false;
 
     const isStrLiteral = p.nodeIs(item.node, .stringLiteralExpr);
@@ -4236,10 +4272,7 @@ fn coerceInit(p: *Parser, item: *Result, token: TokenIndex, target: QualType) !v
     return item.saveValue(p);
 }
 
-fn isStringInit(p: *Parser, qt: QualType) bool {
-    const arrayTy = qt.get(p.comp, .array) orelse return false;
-    if (!arrayTy.elem.isInt(p.comp)) return false;
-
+fn isStringInit(p: *Parser) bool {
     var i = p.tokenIdx;
     while (true) : (i += 1) {
         switch (p.tokenIds[i]) {
@@ -4259,6 +4292,13 @@ fn isStringInit(p: *Parser, qt: QualType) bool {
 
 /// Convert InitList into an AST
 fn convertInitList(p: *Parser, il: InitList, initQt: QualType) Error!Node.Index {
+    if (initQt.isInvalid()) {
+        return try p.addNode(.{ .defaultInitExpr = .{
+            .lastToken = p.tokenIdx,
+            .qt = initQt,
+        } });
+    }
+
     const scalarKind = initQt.scalarKind(p.comp);
     if (scalarKind != .None and scalarKind.isReal()) {
         return il.node.unpack() orelse
@@ -4280,7 +4320,11 @@ fn convertInitList(p: *Parser, il: InitList, initQt: QualType) Error!Node.Index 
             const elemType = initQt.childType(p.comp);
             const maxLen = switch (arrayTy.len) {
                 .fixed, .static => |len| len,
-                .variable => return error.ParsingFailed, // vla invalid, reported earlier
+                // vla invalid, reported earlier
+                .variable => return try p.addNode(.{ .defaultInitExpr = .{
+                    .lastToken = p.tokenIdx,
+                    .qt = initQt,
+                } }),
                 else => std.math.maxInt(u64),
             };
 
@@ -4384,7 +4428,11 @@ fn convertInitList(p: *Parser, il: InitList, initQt: QualType) Error!Node.Index 
         },
 
         // initializer target is invalid, reported earily.
-        else => return error.ParsingFailed,
+        // initializer target is invalid, reported earlier
+        else => return try p.addNode(.{ .defaultInitExpr = .{
+            .lastToken = p.tokenIdx,
+            .qt = initQt,
+        } }),
     }
 }
 
@@ -5235,7 +5283,7 @@ fn parseCompoundStmt(p: *Parser, isFnBody: bool, stmtExprState: ?*StmtExprState)
         else
             p.nodeIsNoreturn(p.declBuffer.items[p.declBuffer.items.len - 1]);
 
-        if (lastNoreturn != .yes) {
+        if (lastNoreturn != .yes and !p.func.qt.?.isInvalid()) {
             const retQt: QualType = p.func.qt.?.get(p.comp, .func).?.returnType;
             var returnZero = false;
             if (lastNoreturn == .no) switch (retQt.base(p.comp).type) {
@@ -5876,8 +5924,6 @@ fn parseAddExpr(p: *Parser) Error!?Result {
             p.eatTag(.Minus) orelse break;
         var rhs = try p.expect(parseMulExpr);
 
-        const lhsQt = lhs.qt;
-        const lhsSK = lhsQt.scalarKind(p.comp);
         if (try lhs.adjustTypes(tok, &rhs, p, if (tag == .addExpr) .add else .sub)) {
             if (tag == .addExpr) {
                 if (try lhs.value.add(lhs.value, rhs.value, lhs.qt, p.comp) and
@@ -5886,14 +5932,13 @@ fn parseAddExpr(p: *Parser) Error!?Result {
                 if (try lhs.value.sub(lhs.value, rhs.value, lhs.qt, p.comp) and
                     lhs.qt.signedness(p.comp) != .unsigned) try p.errOverflow(tok, lhs);
             }
+        } else if (!lhs.qt.isInvalid()) {
+            const lhsSK = lhs.qt.scalarKind(p.comp);
+            if (lhsSK == .Pointer and lhs.qt.childType(p.comp).sizeofOrNull(p.comp) == null) {
+                try p.errStr(.ptr_arithmetic_incomplete, tok, try p.typeStr(lhs.qt.childType(p.comp)));
+                lhs.qt = .invalid;
+            }
         }
-
-        const lhsChildType = lhsQt.childType(p.comp);
-        if (!lhs.qt.isInvalid() and lhsSK.isPointer() and lhsSK != .VoidPointer and lhsChildType.sizeofOrNull(p.comp) != null) {
-            try p.errStr(.ptr_arithmetic_incomplete, tok, try p.typeStr(lhsChildType));
-            lhs.qt = .invalid;
-        }
-
         try lhs.bin(p, tag, rhs, tok);
     }
     return lhs;
@@ -7211,16 +7256,16 @@ const CallExpr = union(enum) {
         };
     }
 
-    fn finish(self: CallExpr, p: *Parser, funcTy: Type.Func, listBufferTop: usize, lparen: TokenIndex) Error!?Result {
-        const retTy = funcTy.returnType;
+    fn finish(self: CallExpr, p: *Parser, funQt: QualType, listBufferTop: usize, lparen: TokenIndex) Error!?Result {
+        const returnQt = funQt.get(p.comp, .func).?.returnType;
         const args = p.listBuffer.items[listBufferTop..];
         switch (self) {
             .standard => |funcNode| return .{
-                .qt = retTy,
+                .qt = returnQt,
                 .node = try p.addNode(.{
                     .callExpr = .{
                         .lparenToken = lparen,
-                        .qt = retTy.unqualified(),
+                        .qt = returnQt.unqualified(),
                         .callee = funcNode,
                         .args = args,
                     },
@@ -7228,11 +7273,11 @@ const CallExpr = union(enum) {
             },
             .builtin => |builtin| return .{
                 .value = try evalBuiltin(builtin.tag, p, args),
-                .qt = retTy,
+                .qt = returnQt,
                 .node = try p.addNode(.{
                     .builtinCallExpr = .{
                         .builtinToken = builtin.builtinToken,
-                        .qt = retTy,
+                        .qt = returnQt,
                         .args = args,
                     },
                 }),
@@ -7245,19 +7290,22 @@ fn parseCallExpr(p: *Parser, lhs: Result) Error!?Result {
     const lParen = p.tokenIdx;
     p.tokenIdx += 1;
 
-    const funcTy: Type.Func = blk: {
+    // We cannot refer to the function type here because the pointer to
+    // type_store.extra might get invalidated while parsing args.
+    const funcQt, const paramsLen, const funcKind = blk: {
         var baseQt = lhs.qt;
-        if (lhs.qt.get(p.comp, .pointer)) |ptrTy| baseQt = ptrTy.child;
-        break :blk baseQt.get(p.comp, .func) orelse {
+        if (lhs.qt.get(p.comp, .pointer)) |pointerTy| baseQt = pointerTy.child;
+
+        const funcTyQt = baseQt.base(p.comp);
+        if (funcTyQt.type != .func) {
             try p.errStr(.not_callable, lParen, try p.typeStr(lhs.qt));
             return error.ParsingFailed;
-        };
+        }
+        break :blk .{ funcTyQt.qt, funcTyQt.type.func.params.len, funcTyQt.type.func.kind };
     };
 
     var func = lhs;
     try func.lvalConversion(p, lParen);
-
-    const paramsLen = funcTy.params.len;
 
     const listBufferTop = p.listBuffer.items.len;
     defer p.listBuffer.items.len = listBufferTop;
@@ -7299,9 +7347,9 @@ fn parseCallExpr(p: *Parser, lhs: Result) Error!?Result {
             continue;
         }
 
-        const paramQt = funcTy.params[argCount].qt;
+        const param = funcQt.get(p.comp, .func).?.params[argCount];
         if (callExpr.shouldCoerceArg(argCount)) {
-            try arg.coerce(p, paramQt, paramToken, .{ .arg = funcTy.params[argCount].nameToken });
+            try arg.coerce(p, param.qt, paramToken, .{ .arg = param.nameToken });
         }
 
         try arg.saveValue(p);
@@ -7324,7 +7372,7 @@ fn parseCallExpr(p: *Parser, lhs: Result) Error!?Result {
     if (callExpr.paramCountOverride()) |expected| {
         if (expected != actual)
             try p.errExtra(.expected_arguments, firstAfter, .{ .arguments = .{ .actual = actual, .expected = expected } });
-    } else switch (funcTy.kind) {
+    } else switch (funcKind) {
         .Normal => if (paramsLen != argCount) {
             try p.errExtra(.expected_arguments, firstAfter, extra);
         },
@@ -7332,14 +7380,14 @@ fn parseCallExpr(p: *Parser, lhs: Result) Error!?Result {
             try p.errExtra(.expected_at_least_arguments, firstAfter, extra);
         },
         .OldStyle => if (paramsLen != argCount) {
-            if (funcTy.params.len == 0)
+            if (paramsLen == 0)
                 try p.errToken(.passing_args_to_kr, firstAfter)
             else
                 try p.errExtra(.expected_arguments_old, firstAfter, extra);
         },
     }
 
-    return callExpr.finish(p, funcTy, listBufferTop, lParen);
+    return callExpr.finish(p, funcQt, listBufferTop, lParen);
 }
 
 fn checkArrayBounds(p: *Parser, index: Result, array: Result, token: TokenIndex) !void {

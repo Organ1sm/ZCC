@@ -352,6 +352,9 @@ pub fn adjustTypes(lhs: *Result, token: TokenIndex, rhs: *Result, p: *Parser, ki
             if (lhsSK.isPointer() == rhsSK.isPointer() or lhsSK.isInt() == rhsSK.isInt())
                 return lhs.invalidBinTy(token, rhs, p);
 
+            if (lhsSK == .NullptrTy) try lhs.nullToPointer(p, .voidPointer, token);
+            if (rhsSK == .NullptrTy) try rhs.nullToPointer(p, .voidPointer, token);
+
             // Do integer promotions but nothing else
             if (lhsSK.isInt()) try lhs.castToInt(p, lhs.qt.promoteInt(p.comp), token);
             if (rhsSK.isInt()) try rhs.castToInt(p, rhs.qt.promoteInt(p.comp), token);
@@ -364,6 +367,9 @@ pub fn adjustTypes(lhs: *Result, token: TokenIndex, rhs: *Result, p: *Parser, ki
         .sub => {
             // if both aren't arithmetic then either both should be pointers or just a
             if (!lhsSK.isPointer() or !(rhsSK.isPointer() or rhsSK.isInt())) return lhs.invalidBinTy(token, rhs, p);
+
+            if (lhsSK == .NullptrTy) try lhs.nullToPointer(p, .voidPointer, token);
+            if (rhsSK == .NullptrTy) try rhs.nullToPointer(p, .voidPointer, token);
 
             if (lhsSK.isPointer() and rhsSK.isPointer()) {
                 if (!lhs.qt.eql(rhs.qt, p.comp))
@@ -608,6 +614,7 @@ fn castToVoid(res: *Result, p: *Parser, tok: TokenIndex) Error!void {
 }
 
 pub fn nullToPointer(res: *Result, p: *Parser, ptrTy: QualType, token: TokenIndex) Error!void {
+    res.value = .{};
     if (!res.qt.is(p.comp, .nullptrTy) and !res.value.isZero(p.comp)) return;
     res.qt = ptrTy;
     try res.implicitCast(p, .NullToPointer, token);
@@ -756,6 +763,10 @@ pub fn putValue(res: *const Result, p: *Parser) !void {
 }
 
 pub fn castType(res: *Result, p: *Parser, destQt: QualType, operandToken: TokenIndex, lparen: TokenIndex) !void {
+    if (res.qt.isInvalid()) {
+        res.value = .{};
+        return;
+    }
     var explicitCK: Node.Cast.Kind = undefined;
 
     const destSK = destQt.scalarKind(p.comp);
@@ -773,6 +784,7 @@ pub fn castType(res: *Result, p: *Parser, destQt: QualType, operandToken: TokenI
             return error.ParsingFailed;
         }
     } else if (srcSK == .NullptrTy) {
+        res.value = .{};
         if (destSK == .Bool) {
             try res.nullToPointer(p, res.qt, lparen);
             res.value.boolCast(p.comp);
@@ -842,13 +854,13 @@ pub fn castType(res: *Result, p: *Parser, destQt: QualType, operandToken: TokenI
                     explicitCK = .ComplexIntCast;
                 }
             } else if (srcSK.isPointer()) {
+                res.value = .{};
                 if (!destSK.isReal()) {
                     res.qt = destQt.toReal(p.comp);
                     try res.implicitCast(p, .PointerToInt, lparen);
                     explicitCK = .RealToComplexInt;
                 } else {
                     explicitCK = .PointerToInt;
-                    res.value = .{};
                 }
             } else if (srcSK.isReal() and destSK.isReal()) {
                 explicitCK = .FloatToInt;

@@ -24,7 +24,7 @@ autoType: ?TokenIndex = null,
 c23Auto: ?TokenIndex = null,
 qt: QualType,
 
-pub fn validateParam(d: DeclSpec, p: *Parser, qt: *QualType) Error!void {
+pub fn validateParam(d: DeclSpec, p: *Parser) Error!void {
     switch (d.storageClass) {
         .none, .register => {},
         .auto, .@"extern", .static, .typedef => |tokenIndex| try p.errToken(.invalid_storage_on_param, tokenIndex),
@@ -34,15 +34,6 @@ pub fn validateParam(d: DeclSpec, p: *Parser, qt: *QualType) Error!void {
     if (d.@"inline") |tokenIndex| try p.errStr(.func_spec_non_func, tokenIndex, "inline");
     if (d.noreturn) |tokenIndex| try p.errStr(.func_spec_non_func, tokenIndex, "_Noreturn");
     if (d.constexpr) |tokenIndex| try p.errToken(.invalid_storage_on_param, tokenIndex);
-    if (d.autoType) |tokenIndex| {
-        try p.errStr(.auto_type_not_allowed, tokenIndex, "function prototype");
-        qt.* = .invalid;
-    }
-
-    if (d.c23Auto) |tokenIdx| {
-        try p.errStr(.c23_auto_not_allowed, tokenIdx, "function prototype");
-        qt.* = .invalid;
-    }
 }
 
 pub fn validateFnDef(d: DeclSpec, p: *Parser) Error!void {
@@ -55,8 +46,8 @@ pub fn validateFnDef(d: DeclSpec, p: *Parser) Error!void {
     if (d.constexpr) |tokenIdx| try p.errToken(.illegal_storage_on_func, tokenIdx);
 }
 
-pub fn validate(d: DeclSpec, p: *Parser, qt: *QualType) Error!void {
-    if (qt.is(p.comp, .func) and d.storageClass != .typedef) {
+pub fn validate(d: DeclSpec, p: *Parser, finalQt: QualType) Error!void {
+    if (finalQt.is(p.comp, .func) and d.storageClass != .typedef) {
         switch (d.storageClass) {
             .none, .@"extern" => {},
             .static => |tokenIdx| if (p.func.qt != null) try p.errToken(.static_func_not_global, tokenIdx),

@@ -30,16 +30,16 @@ pub fn deinit(b: *Builtins, gpa: std.mem.Allocator) void {
 
 fn specForSize(comp: *const Compilation, sizeBits: u32) Builder.Specifier {
     var qt: QualType = .short;
-    if (qt.bitSizeof(comp) * 8 == sizeBits) return .Short;
+    if (qt.bitSizeof(comp) == sizeBits) return .Short;
 
     qt = .int;
-    if (qt.bitSizeof(comp) * 8 == sizeBits) return .Int;
+    if (qt.bitSizeof(comp) == sizeBits) return .Int;
 
     qt = .long;
-    if (qt.bitSizeof(comp) * 8 == sizeBits) return .Long;
+    if (qt.bitSizeof(comp) == sizeBits) return .Long;
 
     qt = .longlong;
-    if (qt.bitSizeof(comp) * 8 == sizeBits) return .LongLong;
+    if (qt.bitSizeof(comp) == sizeBits) return .LongLong;
 
     unreachable;
 }
