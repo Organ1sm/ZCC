@@ -33,8 +33,7 @@ pub fn str(res: Result, p: *Parser) ![]const u8 {
 }
 
 pub fn maybeWarnUnused(res: Result, p: *Parser, exprStart: TokenIndex, errStart: usize) Error!void {
-    if (res.qt.is(p.comp, .void))
-        return;
+    if (res.qt.is(p.comp, .void) or res.qt.isInvalid()) return;
 
     // don't warn about unused result if the expression contained errors besides other unused results
     for (p.comp.diagnostics.list.items[errStart..]) |errItem| {
@@ -766,7 +765,12 @@ pub fn castType(res: *Result, p: *Parser, destQt: QualType, operandToken: TokenI
     if (res.qt.isInvalid()) {
         res.value = .{};
         return;
+    } else if (destQt.isInvalid()) {
+        res.value = .{};
+        res.qt = .invalid;
+        return;
     }
+
     var explicitCK: Node.Cast.Kind = undefined;
 
     const destSK = destQt.scalarKind(p.comp);

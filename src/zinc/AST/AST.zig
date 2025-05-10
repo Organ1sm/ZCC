@@ -1365,7 +1365,7 @@ pub const Node = union(enum) {
                         .lparenToken = nodeToken,
                         .qt = @bitCast(nodeData[0]),
                         .callee = @enumFromInt(nodeData[1]),
-                        .args = @ptrCast(nodeData[2..2]),
+                        .args = unPackElems(nodeData[2..]),
                     },
                 },
                 .BuiltinCallExpr => .{
@@ -3104,13 +3104,13 @@ fn dumpNode(
                 if (fields.len == 0) continue;
 
                 const fieldAttributes = fields[fieldIndex].attributes(tree.comp);
+                fieldIndex += 1;
+
                 if (fieldAttributes.len == 0) continue;
 
                 try config.setColor(w, ATTRIBUTE);
                 try tree.dumpFieldAttributes(fieldAttributes, level + delta + half, w);
                 try config.setColor(w, .reset);
-
-                fieldIndex += 1;
             }
         },
 

@@ -905,8 +905,6 @@ pub fn applyFieldAttributes(p: *Parser, fieldTy: *QualType, attrBufferStart: usi
         else => try ignoredAttrErr(p, tok, attr.tag, "fields"),
     };
 
-    if (p.attrApplicationBuffer.items.len == 0) return &.{};
-
     return p.attrApplicationBuffer.items;
 }
 
@@ -1108,6 +1106,8 @@ fn applyAligned(attr: Attribute, p: *Parser, qt: QualType, tag: ?Diagnostics.Tag
         const alignToken = attr.args.aligned.__name_token;
         if (tag) |t| try p.errToken(t, alignToken);
 
+        if (qt.isInvalid()) return;
+
         const defaultAlign = qt.base(p.comp).qt.alignof(p.comp);
         if (qt.is(p.comp, .func)) {
             try p.errToken(.alignas_on_func, alignToken);
@@ -1147,6 +1147,7 @@ fn applyTransparentUnion(attr: Attribute, p: *Parser, token: TokenIndex, qt: Qua
 }
 
 fn applyVectorSize(attr: Attribute, p: *Parser, tok: TokenIndex, qt: *QualType) !void {
+    if (qt.isInvalid()) return;
     const scalarKind = qt.scalarKind(p.comp);
     if (!scalarKind.isArithmetic() or !scalarKind.isReal()) {
         if (qt.get(p.comp, .@"enum")) |enumTy| {
@@ -1178,7 +1179,7 @@ fn applyFormat(attr: Attribute, p: *Parser, qt: QualType) !void {
 }
 
 fn applySelected(qt: QualType, p: *Parser) !QualType {
-    if (p.attrApplicationBuffer.items.len == 0) return qt;
+    if (p.attrApplicationBuffer.items.len == 0 or qt.isInvalid()) return qt;
     return (try p.comp.typeStore.put(p.gpa, .{
         .attributed = .{
             .base = qt,
