@@ -6581,6 +6581,8 @@ fn parseUnaryExpr(p: *Parser) Error!?Result {
                 hasExpr = true;
             }
 
+            const operandQt = res.qt;
+
             if (res.qt.isInvalid()) {
                 res.value = .{};
             } else {
@@ -6610,6 +6612,7 @@ fn parseUnaryExpr(p: *Parser) Error!?Result {
                     .opToken = token,
                     .qt = res.qt,
                     .expr = if (hasExpr) res.node else null,
+                    .operandQt = operandQt,
                 },
             });
             return res;
@@ -6646,10 +6649,12 @@ fn parseUnaryExpr(p: *Parser) Error!?Result {
                 try p.errToken(.alignof_expr, expectedParen);
             }
 
+            const operandQt = res.qt;
+
             if (res.qt.is(p.comp, .void))
                 try p.errStr(.pointer_arith_void, token, "alignof");
 
-            if (res.qt.alignable(p.comp)) {
+            if (res.qt.sizeofOrNull(p.comp) != null) {
                 res.value = try Value.int(res.qt.alignof(p.comp), p.comp);
                 res.qt = p.comp.typeStore.size;
             } else if (!res.qt.isInvalid()) {
@@ -6662,6 +6667,7 @@ fn parseUnaryExpr(p: *Parser) Error!?Result {
                     .opToken = token,
                     .qt = res.qt,
                     .expr = if (hasExpr) res.node else null,
+                    .operandQt = operandQt,
                 },
             });
             return res;

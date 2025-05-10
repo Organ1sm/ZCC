@@ -677,6 +677,7 @@ pub const Node = union(enum) {
         qt: QualType,
         opToken: TokenIndex,
         expr: ?Node.Index,
+        operandQt: QualType,
     };
 
     pub const Index = enum(u32) {
@@ -1465,6 +1466,7 @@ pub const Node = union(enum) {
                         .opToken = nodeToken,
                         .qt = @bitCast(nodeData[0]),
                         .expr = unpackOptIndex(nodeData[1]),
+                        .operandQt = @bitCast(nodeData[2]),
                     },
                 },
                 .AlignofExpr => .{
@@ -1472,6 +1474,7 @@ pub const Node = union(enum) {
                         .opToken = nodeToken,
                         .qt = @bitCast(nodeData[0]),
                         .expr = unpackOptIndex(nodeData[1]),
+                        .operandQt = @bitCast(nodeData[2]),
                     },
                 },
 
@@ -2508,12 +2511,14 @@ pub fn setNode(tree: *Tree, index: usize, node: Node) !void {
             repr.tag = .SizeofExpr;
             repr.data[0] = @bitCast(typeInfo.qt);
             repr.data[1] = packOptIndex(typeInfo.expr);
+            repr.data[2] = @bitCast(typeInfo.operandQt);
             repr.tok = typeInfo.opToken;
         },
         .alignofExpr => |typeInfo| {
             repr.tag = .AlignofExpr;
             repr.data[0] = @bitCast(typeInfo.qt);
             repr.data[1] = packOptIndex(typeInfo.expr);
+            repr.data[2] = @bitCast(typeInfo.operandQt);
             repr.tok = typeInfo.opToken;
         },
         .genericExpr => |generic| {
@@ -3484,6 +3489,13 @@ fn dumpNode(
                 try w.writeByteNTimes(' ', level + 1);
                 try w.writeAll("expr:\n");
                 try tree.dumpNode(some, level + delta, config, w);
+            } else {
+                try w.writeByteNTimes(' ', level + half);
+                try w.writeAll("operand type: ");
+                try config.setColor(w, TYPE);
+                try typeInfo.operandQt.dump(tree.comp, w);
+                try w.writeByte('\n');
+                try config.setColor(w, .reset);
             }
         },
 
