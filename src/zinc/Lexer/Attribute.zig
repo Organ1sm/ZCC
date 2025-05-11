@@ -322,13 +322,14 @@ fn diagnoseField(
                         .Char, .UChar, .SChar => {},
                         else => break :validate,
                     }
-                    return .{
-                        .tag = .attribute_requires_string,
-                        .extra = .{ .str = decl.name },
-                    };
+
+                    @field(@field(arguments, decl.name), field.name) = try p.removeNull(res.value);
+                    return null;
                 }
-                @field(@field(arguments, decl.name), field.name) = try p.removeNull(res.value);
-                return null;
+                return .{
+                    .tag = .attribute_requires_string,
+                    .extra = .{ .str = decl.name },
+                };
             } else if (@typeInfo(Wanted) == .@"enum" and @hasDecl(Wanted, "opts") and Wanted.opts.enum_kind == .string) {
                 const str = bytes[0 .. bytes.len - 1];
                 if (std.meta.stringToEnum(Wanted, str)) |enum_val| {

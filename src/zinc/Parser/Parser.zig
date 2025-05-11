@@ -827,7 +827,7 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
         }
 
         try p.err(.expected_external_decl);
-        p.tokenIdx += 1;
+        p.nextExternDecl();
     }
 
     if (p.tentativeDefs.count() > 0)
@@ -858,9 +858,7 @@ fn nextExternDecl(p: *Parser) void {
     while (true) : (p.tokenIdx += 1) {
         switch (p.currToken()) {
             .LParen, .LBrace, .LBracket => parens += 1,
-            .RParen, .RBrace, .RBracket => if (parens != 0) {
-                parens -= 1;
-            },
+            .RParen, .RBrace, .RBracket => parens -|= 1,
 
             .KeywordTypedef,
             .KeywordExtern,
@@ -1005,7 +1003,8 @@ fn parseDeclaration(p: *Parser) Error!bool {
 
         missingDecl: {
             if (declSpec.qt.type(p.comp) == .typeof) {
-                break :missingDecl; // we follow GCC and clang's behavior here
+                try p.errToken(.missing_declaration, firstToken);
+                return true;
             }
             switch (declSpec.qt.base(p.comp).type) {
                 .@"enum" => break :missingDecl,
@@ -1048,7 +1047,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
             .LBrace => {},
             else => {
                 if (initDeclarator.d.oldTypeFunc == null) {
-                    try p.err(.expected_fn_body);
+                    try p.errToken(.expected_fn_body, p.tokenIdx - 1);
                     return true;
                 }
             },
@@ -1108,7 +1107,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
 
                     try p.parseAttrSpec();
 
-                    if (paramD.qt.sizeofOrNull(p.comp) == null) {
+                    if (paramD.qt.hasIncompleteSize(p.comp)) {
                         if (paramD.qt.is(p.comp, .void)) {
                             try p.errToken(.invalid_void_param, paramD.name);
                         } else {
@@ -1205,7 +1204,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
                     }
                 }
 
-                if (param.qt.sizeofOrNull(p.comp) == null and !param.qt.is(p.comp, .void))
+                if (param.qt.hasIncompleteSize(p.comp) and !param.qt.is(p.comp, .void))
                     try p.errStr(.parameter_incomplete_ty, param.nameToken, try p.typeStr(param.qt));
             }
         }
@@ -1855,7 +1854,7 @@ fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec, attrBufferTop: usize, de
         } else {
             ID.d.qt = try Attribute.applyTypeAttributes(p, ID.d.qt, attrBufferTop, null);
         }
-    } else if (ID.d.qt.is(p.comp, .func)) {
+    } else if (ID.d.declaratorType == .func) {
         if (declSpec.autoType) |tokenIdx| {
             try p.errStr(.auto_type_not_allowed, tokenIdx, "function return type");
             ID.d.qt = .invalid;
@@ -1866,7 +1865,7 @@ fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec, attrBufferTop: usize, de
             ID.d.qt = try Attribute.applyFunctionAttributes(p, ID.d.qt, attrBufferTop);
         }
     } else {
-        if (ID.d.qt.is(p.comp, .array)) {
+        if (ID.d.declaratorType == .array) {
             if (declSpec.autoType) |tokenIdx| {
                 try p.errStr(.auto_type_array, tokenIdx, p.getTokenText(ID.d.name));
                 ID.d.qt = .invalid;
@@ -1874,7 +1873,7 @@ fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec, attrBufferTop: usize, de
                 try p.errStr(.c23_auto_array, tokenIndex, p.getTokenText(ID.d.name));
                 ID.d.qt = .invalid;
             }
-        } else if (ID.d.qt.is(p.comp, .pointer)) {
+        } else if (ID.d.declaratorType == .pointer) {
             if (declSpec.autoType != null or declSpec.c23Auto != null) {
                 // TODO this is not a hard error in clang
                 try p.errToken(.auto_type_requires_plain_declarator, p.tokenIdx);
@@ -1898,7 +1897,7 @@ fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec, attrBufferTop: usize, de
             if (ID.d.qt.isInvalid()) break :incomplete;
             if (ID.d.qt.isC23Auto()) break :incomplete;
             if (ID.d.qt.isAutoType()) break :incomplete;
-            if (ID.d.qt.sizeofOrNull(p.comp) != null) break :incomplete;
+            if (ID.d.qt.hasIncompleteSize(p.comp)) break :incomplete;
             if (ID.d.qt.get(p.comp, .array)) |arrayTy| {
                 if (arrayTy.len == .incomplete) break :incomplete;
             }
@@ -1957,7 +1956,7 @@ fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec, attrBufferTop: usize, de
     incomplete: {
         if (declSpec.storageClass != .typedef) break :incomplete;
         if (ID.d.qt.isInvalid()) break :incomplete;
-        if (ID.d.qt.sizeofOrNull(p.comp)) |_| break :incomplete;
+        if (ID.d.qt.hasIncompleteSize(p.comp)) break :incomplete;
 
         const initType = ID.d.qt.base(p.comp).type;
         if (declSpec.storageClass == .@"extern") switch (initType) {
@@ -2071,14 +2070,7 @@ fn parseTypeSpec(p: *Parser, builder: *TypeBuilder) Error!bool {
                     continue;
                 }
 
-                const newSpec = TypeBuilder.fromType(p.comp, baseQt);
-                try builder.combine(newSpec, atomicToken);
-
-                if (builder.atomic != null)
-                    try p.errStr(.duplicate_declspec, atomicToken, "atomic")
-                else
-                    builder.atomic = atomicToken;
-
+                try builder.combineAtomic(baseQt, atomicToken);
                 continue;
             },
 
@@ -2392,7 +2384,7 @@ fn parseRecordSpec(p: *Parser) Error!QualType {
     // }
 
     for (fields) |field| {
-        if (field.qt.sizeofOrNull(p.comp) == null and !field.qt.is(p.comp, .array))
+        if (field.qt.hasIncompleteSize(p.comp) and !field.qt.is(p.comp, .array))
             break;
     } else {
         const pragmaPackValue = switch (p.comp.langOpts.emulate) {
@@ -2506,9 +2498,11 @@ fn parseRecordDecl(p: *Parser) Error!bool {
         var bitsNode: ?Node.Index = null;
         var bits: ?u32 = null;
         const firstToken = p.tokenIdx;
+        var sawDeclarator = false;
         if (try p.declarator(qt, .record)) |d| {
             nameToken = d.name;
             qt = d.qt;
+            sawDeclarator = true;
         }
 
         if (p.eat(.Colon)) |_| bits: {
@@ -2551,7 +2545,6 @@ fn parseRecordDecl(p: *Parser) Error!bool {
 
         if (nameToken == 0 and bits == null) unnamed: {
             // don't allow incompelete size fields in anonymous record.
-            if (qt.sizeofOrNull(p.comp) == null) break :unnamed;
             switch (qt.base(p.comp).type) {
                 .@"enum" => break :unnamed,
                 .@"struct", .@"union" => |recordTy| if (recordTy.isAnonymous(p.comp)) {
@@ -2575,7 +2568,13 @@ fn parseRecordDecl(p: *Parser) Error!bool {
                 } else break :unnamed,
                 else => {},
             }
-            try p.err(.missing_declaration);
+            if (sawDeclarator) {
+                try p.errToken(.expected_member_name, firstToken);
+            } else {
+                try p.err(.missing_declaration);
+            }
+            if (p.eat(.Comma) == null) break;
+            continue;
         } else {
             const internedName = if (nameToken != 0) try p.getInternString(nameToken) else try p.getAnonymousName(firstToken);
             try p.recordBuffer.append(.{
@@ -2627,7 +2626,7 @@ fn parseRecordDecl(p: *Parser) Error!bool {
                         p.record.flexibleField = firstToken;
                     },
                 },
-                else => if (fieldType.qt.sizeofOrNull(p.comp) == null) {
+                else => if (fieldType.qt.hasIncompleteSize(p.comp)) {
                     try p.errStr(.field_incomplete_ty, firstToken, try p.typeStr(qt));
                 } else if (p.record.flexibleField) |some| {
                     std.debug.assert(some != firstToken);
@@ -2776,7 +2775,7 @@ fn parseEnumSpec(p: *Parser) Error!QualType {
         // can be specified after the closing rbrace, which we haven't encountered yet.
         const enumTy: Type.Enum = .{
             .name = internedName,
-            .tag = fixedQt orelse .int,
+            .tag = fixedQt orelse undefined,
             .incomplete = true,
             .fixed = fixedQt != null,
             .fields = &.{},
@@ -3183,7 +3182,7 @@ const Declarator = struct {
                 const childRes = try validateExtra(p, elemQt, sourceToken);
                 if (childRes != .Normal) return childRes;
 
-                if (elemQt.sizeofOrNull(p.comp) == null) {
+                if (elemQt.hasIncompleteSize(p.comp)) {
                     try p.errStr(.array_incomplete_elem, sourceToken, try p.typeStr(elemQt));
                     return .NestedInvalid;
                 }
@@ -3482,6 +3481,10 @@ fn directDeclarator(
 
             funcType.kind = if (p.comp.langOpts.standard.atLeast(.c23)) .Variadic else .Normal;
             funcType.returnType = try p.directDeclarator(baseDeclarator, kind);
+
+            // Set after call to `directDeclarator` since we will return
+            // a function type from here.
+            baseDeclarator.declaratorType = .func;
             return p.comp.typeStore.put(p.gpa, .{ .func = funcType });
         }
 
@@ -3490,7 +3493,7 @@ fn directDeclarator(
         const paramBufferTop = p.paramBuffer.items.len;
         defer p.paramBuffer.items.len = paramBufferTop;
 
-        if (try p.parseParamDecls(baseDeclarator)) |params| {
+        if (try p.parseParamDecls()) |params| {
             funcType.kind = .Normal;
             funcType.params = params;
             if (p.eat(.Ellipsis)) |_| funcType.kind = .Variadic;
@@ -3539,7 +3542,7 @@ fn directDeclarator(
 
 /// param-decls : param-decl (',' param-decl)* (',' '...')
 /// paramDecl : decl-specifier (declarator | abstract-declarator)
-fn parseParamDecls(p: *Parser, d: *Declarator) Error!?[]Type.Func.Param {
+fn parseParamDecls(p: *Parser) Error!?[]Type.Func.Param {
     const paramBufferTop = p.paramBuffer.items.len;
 
     try p.symStack.pushScope();
@@ -3561,9 +3564,6 @@ fn parseParamDecls(p: *Parser, d: *Declarator) Error!?[]Type.Func.Param {
             // handle deprecated K&R style parameters
             const identifier = try p.expectIdentifier();
             try p.errStr(.unknown_type_name, identifier, p.getTokenText(identifier));
-
-            if (d.oldTypeFunc == null)
-                d.oldTypeFunc = identifier;
 
             try p.paramBuffer.append(.{
                 .name = try p.comp.internString(p.getTokenText(identifier)),
@@ -4284,11 +4284,11 @@ fn coerceInit(p: *Parser, item: *Result, token: TokenIndex, target: QualType) !v
     if (target.is(p.comp, .void)) return;
 
     const node = item.node;
-    try item.lvalConversion(p, token);
     if (target.isAutoType() or target.isC23Auto()) {
         if (p.getNode(node, .memberAccessExpr) orelse p.getNode(node, .memberAccessPtrExpr)) |access| {
             if (access.isBitFieldWidth(&p.tree) != null) try p.errToken(.auto_type_from_bitfield, token);
         }
+        try item.lvalConversion(p, token);
         return;
     }
 
@@ -5040,7 +5040,10 @@ fn parseGotoStmt(p: *Parser, gotoToken: TokenIndex) Error!Node.Index {
 
         const scalarKind = gotoExpr.qt.scalarKind(p.comp);
         if (!scalarKind.isPointer()) {
-            const resultQt: QualType = .{ .@"const" = true, ._index = .VoidPointer };
+            const resultQt = try p.comp.typeStore.put(p.gpa, .{ .pointer = .{
+                .child = .{ .@"const" = true, ._index = .Void },
+                .decayed = null,
+            } });
 
             if (!scalarKind.isInt()) {
                 try p.errStr(.incompatible_arg, exprToken, try p.typePairStrExtra(gotoExpr.qt, " to parameter of incompatible type ", resultQt));
@@ -5118,7 +5121,7 @@ fn parseCaseStmt(p: *Parser, caseToken: u32) Error!?Node.Index {
     _ = try p.expectToken(.Colon);
 
     if (p.@"switch") |some| check: {
-        if (some.qt.sizeofOrNull(p.comp) == null) // error already reported for incomplete size
+        if (some.qt.hasIncompleteSize(p.comp)) // error already reported for incomplete size
             break :check;
 
         const first = firstItem.value;
@@ -5385,7 +5388,6 @@ fn parseReturnStmt(p: *Parser) Error!?Node.Index {
         if (retQtIsVoid) {
             try p.errStr(.void_func_returns_value, eToken, p.getTokenText(p.func.name));
         } else {
-            try some.lvalConversion(p, eToken);
             try some.coerce(p, returnQt, eToken, .ret);
             try some.saveValue(p);
         }
@@ -5617,12 +5619,11 @@ fn parseAssignExpr(p: *Parser) Error!?Result {
         p.eatTag(.PipeEqual) orelse return lhs;
 
     var rhs = try p.expect(parseAssignExpr);
-    try rhs.lvalConversion(p, token);
 
     var isConst: bool = undefined;
     if (!p.tree.isLValueExtra(lhs.node, &isConst) or isConst) {
         try p.errToken(.not_assignable, token);
-        return error.ParsingFailed;
+        lhs.qt = .invalid;
     }
 
     // adjustTypes will do do lvalue conversion but we do not want that
@@ -5634,6 +5635,7 @@ fn parseAssignExpr(p: *Parser) Error!?Result {
         .divAssignExpr,
         .modAssignExpr,
         => {
+            try rhs.lvalConversion(p, token);
             if (rhs.value.isZero(p.comp) and lhs.qt.isInt(p.comp) and rhs.qt.isInt(p.comp)) {
                 switch (tag) {
                     .divAssignExpr => try p.errStr(.division_by_zero, token, "division"),
@@ -5649,6 +5651,7 @@ fn parseAssignExpr(p: *Parser) Error!?Result {
         .subAssignExpr,
         .addAssignExpr,
         => {
+            try rhs.lvalConversion(p, token);
             if (lhs.qt.isPointer(p.comp) and rhs.qt.isInt(p.comp)) {
                 try rhs.castToPointer(p, lhs.qt, token);
             } else {
@@ -5664,6 +5667,7 @@ fn parseAssignExpr(p: *Parser) Error!?Result {
         .bitXorAssignExpr,
         .bitOrAssignExpr,
         => {
+            try rhs.lvalConversion(p, token);
             _ = try lhsCopy.adjustTypes(token, &rhs, p, .integer);
             try lhs.bin(p, tag, rhs, token);
             return lhs;
@@ -5974,7 +5978,7 @@ fn parseAddExpr(p: *Parser) Error!?Result {
             }
         } else if (!lhs.qt.isInvalid()) {
             const lhsSK = lhs.qt.scalarKind(p.comp);
-            if (lhsSK == .Pointer and lhs.qt.childType(p.comp).sizeofOrNull(p.comp) == null) {
+            if (lhsSK.isPointer() and lhsSK != .VoidPointer and lhs.qt.childType(p.comp).hasIncompleteSize(p.comp)) {
                 try p.errStr(.ptr_arithmetic_incomplete, tok, try p.typeStr(lhs.qt.childType(p.comp)));
                 lhs.qt = .invalid;
             }
@@ -6445,7 +6449,7 @@ fn parseUnaryExpr(p: *Parser) Error!?Result {
                 },
             }
 
-            if (operand.qt.sizeofOrNull(p.comp) == null and !operand.qt.is(p.comp, .void))
+            if (operand.qt.hasIncompleteSize(p.comp) and !operand.qt.is(p.comp, .void))
                 try p.errStr(.deref_incomplete_ty_ptr, token, try p.typeStr(operand.qt));
 
             operand.qt = operand.qt.unqualified();
@@ -6642,8 +6646,12 @@ fn parseUnaryExpr(p: *Parser) Error!?Result {
                     res.qt = p.comp.typeStore.size;
                 } else {
                     res.value = .{};
-                    try p.errStr(.invalid_sizeof, expectedParen - 1, try p.typeStr(res.qt));
-                    res.qt = .invalid;
+                    if (res.qt.hasIncompleteSize(p.comp)) {
+                        try p.errStr(.invalid_sizeof, expectedParen - 1, try p.typeStr(res.qt));
+                        res.qt = .invalid;
+                    } else {
+                        res.qt = p.comp.typeStore.size;
+                    }
                 }
             }
 
@@ -6814,7 +6822,7 @@ fn parseCompoundLiteral(p: *Parser) Error!?Result {
     switch (qt.base(p.comp).type) {
         .func => try p.err(.func_init),
         .array => |arrayTy| if (arrayTy.len == .variable) try p.err(.vla_init),
-        else => if (qt.sizeofOrNull(p.comp) == null) {
+        else => if (qt.hasIncompleteSize(p.comp)) {
             try p.errStr(.variable_incomplete_ty, p.tokenIdx, try p.typeStr(qt));
             return error.ParsingFailed;
         },
@@ -7374,7 +7382,7 @@ fn parseCallExpr(p: *Parser, lhs: Result) Error!Result {
         if (callExpr.shouldPerformLvalConversion(argCount))
             try arg.lvalConversion(p, paramToken);
 
-        if (arg.qt.sizeofOrNull(p.comp) == null and !arg.qt.is(p.comp, .void))
+        if (arg.qt.hasIncompleteSize(p.comp) and !arg.qt.is(p.comp, .void))
             return error.ParsingFailed;
 
         if (argCount >= paramsLen) {

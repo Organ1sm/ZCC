@@ -527,7 +527,7 @@ pub const QualType = packed struct(u32) {
                 return layout.sizeBits / 8;
             },
             .@"enum" => |enumTy| {
-                if (enumTy.incomplete) return null;
+                if (enumTy.incomplete and !enumTy.fixed) return null;
                 continue :loop enumTy.tag.base(comp).type;
             },
             .typeof => unreachable,
@@ -558,6 +558,17 @@ pub const QualType = packed struct(u32) {
         };
     }
 
+    pub fn hasIncompleteSize(qt: QualType, comp: *const Compilation) bool {
+        if (qt.isInvalid()) return false;
+        return switch (qt.base(comp).type) {
+            .void => true,
+            .array => |array| array.len == .incomplete,
+            .@"enum" => |enumTy| enumTy.incomplete and !enumTy.fixed,
+            .@"struct", .@"union" => |record| record.layout == null,
+            else => false,
+        };
+    }
+
     pub fn signedness(qt: QualType, comp: *const Compilation) std.builtin.Signedness {
         return loop: switch (qt.base(comp).type) {
             .complex => |complex| continue :loop complex.base(comp).type,
@@ -571,7 +582,7 @@ pub const QualType = packed struct(u32) {
             },
             // Pointer values are signed.
             .pointer, .nullptrTy => .signed,
-            .@"enum" => |enumTy| continue :loop enumTy.tag.base(comp).type,
+            .@"enum" => .signed,
             else => unreachable,
         };
     }
@@ -652,7 +663,7 @@ pub const QualType = packed struct(u32) {
                 return layout.fieldAlignmentBits / 8;
             },
             .@"enum" => |enumTy| {
-                if (enumTy.incomplete) return 0;
+                if (enumTy.incomplete and !enumTy.fixed) return 0;
                 continue :loop enumTy.tag.base(comp).type;
             },
             .typeof => unreachable,
@@ -750,13 +761,12 @@ pub const QualType = packed struct(u32) {
     pub fn decay(qt: QualType, comp: *Compilation) !QualType {
         switch (qt.base(comp).type) {
             .array => |arrayTy| {
-                if (arrayTy.elem.isInvalid()) return .invalid;
 
                 // Copy qualifiers
                 var elemQt = arrayTy.elem;
-                elemQt.@"const" = qt.@"const";
-                elemQt.@"volatile" = qt.@"volatile";
-                elemQt.restrict = qt.restrict;
+                elemQt.@"const" = qt.@"const" or elemQt.@"const";
+                elemQt.@"volatile" = qt.@"volatile" or elemQt.@"volatile";
+                elemQt.restrict = qt.restrict or elemQt.restrict;
 
                 return try comp.typeStore.put(comp.gpa, .{ .pointer = .{
                     .child = elemQt,
@@ -847,6 +857,7 @@ pub const QualType = packed struct(u32) {
     /// Returns true if `lhs` and `rhs` are integer types that differ only in sign
     pub fn sameRankDifferentSign(lhs: QualType, rhs: QualType, comp: *const Compilation) bool {
         if (!lhs.isInt(comp) or !rhs.isInt(comp)) return false;
+        if (lhs.hasIncompleteSize(comp) or rhs.hasIncompleteSize(comp)) return false;
         if (lhs.intRank(comp) != rhs.intRank(comp)) return false;
         return lhs.signedness(comp) != rhs.signedness(comp);
     }
@@ -982,8 +993,17 @@ pub const QualType = packed struct(u32) {
         if (aQualTy.isInvalid() or bQualTy.isInvalid()) return false;
         if (aQualTy._index == bQualTy._index) return true;
 
-        const aType = aQualTy.base(comp).type;
-        const bType = bQualTy.base(comp).type;
+        const aTypeQt = aQualTy.base(comp);
+        const bTypeQt = bQualTy.base(comp);
+        const aType = aTypeQt.type;
+        const bType = bTypeQt.type;
+
+        if (aType == .@"enum" and bType != .@"enum") {
+            return aType.@"enum".tag.eql(bQualTy, comp);
+        } else if (aType != .@"enum" and bType == .@"enum") {
+            return bType.@"enum".tag.eql(aQualTy, comp);
+        }
+
         if (std.meta.activeTag(aType) != bType) return false;
 
         switch (aType) {
@@ -1064,7 +1084,7 @@ pub const QualType = packed struct(u32) {
                 // Vector elemnent qualifiers are checked.
                 return aVector.elem.eqlQualified(bVector.elem, comp);
             },
-            .@"struct", .@"union", .@"enum" => return false, // Should have matched in the _index check above.
+            .@"struct", .@"union", .@"enum" => return aTypeQt.qt._index == bTypeQt.qt._index,
 
             .typeof => unreachable, // Never returned from base()
             .typedef => unreachable, // Never returned from base()
@@ -1092,12 +1112,12 @@ pub const QualType = packed struct(u32) {
     }
 
     pub fn alignable(qt: QualType, comp: *const Compilation) bool {
-        if (qt.isInvalid()) return false;
+        if (qt.isInvalid()) return true; // avoid redunant error.
         const baseType = qt.base(comp);
-        switch (baseType.type) {
-            .array, .void => return false,
-            else => return baseType.qt.sizeofOrNull(comp) != null,
-        }
+        return switch (baseType.type) {
+            .array, .void => false,
+            else => !baseType.qt.hasIncompleteSize(comp),
+        };
     }
 
     pub fn requestedAlignment(qt: QualType, comp: *const Compilation) ?u32 {
@@ -2041,6 +2061,7 @@ pub const Builder = struct {
     parser: *Parser,
 
     @"const": ?TokenIndex = null,
+    /// _Atomic
     atomic: ?TokenIndex = null,
     @"volatile": ?TokenIndex = null,
     restrict: ?TokenIndex = null,
@@ -2049,6 +2070,8 @@ pub const Builder = struct {
     bitIntToken: ?TokenIndex = null,
     typedef: bool = false,
     typeof: bool = false,
+    /// _Atomic(type)
+    atomicType: ?TokenIndex = null,
 
     type: Specifier = .None,
     /// When true an error is returned instead of adding a diagnostic message.
@@ -2381,13 +2404,13 @@ pub const Builder = struct {
         if (qt.isInvalid()) return .invalid;
 
         var resultQt = qt;
-        if (b.atomic) |atomicToken| {
+        if (b.atomicType orelse b.atomic) |atomicToken| {
             if (resultQt.isAutoType()) return b.parser.todo("_Atomic __auto_type");
             if (resultQt.isC23Auto()) {
                 try b.parser.errToken(.atomic_auto, atomicToken);
                 return .invalid;
             }
-            if (resultQt.sizeofOrNull(b.parser.comp) == null) {
+            if (resultQt.hasIncompleteSize(b.parser.comp)) {
                 try b.parser.errStr(.atomic_incomplete, atomicToken, try b.parser.typeStr(qt));
                 return .invalid;
             }
@@ -2440,10 +2463,19 @@ pub const Builder = struct {
     }
 
     pub fn combineFromTypeof(b: *Builder, new: QualType, sourceToken: TokenIndex) Compilation.Error!void {
+        if (b.atomicType != null) return b.parser.errStr(.cannot_combine_spec, sourceToken, "_Atomic");
         if (b.typedef) return b.parser.errStr(.cannot_combine_spec, sourceToken, "type-name");
         if (b.typeof) return b.parser.errStr(.cannot_combine_spec, sourceToken, "typeof");
         if (b.type != .None) return b.parser.errStr(.cannot_combine_with_typeof, sourceToken, @tagName(b.type));
         b.type = .{ .other = new };
+    }
+
+    pub fn combineAtomic(b: *Builder, baseQt: QualType, sourceToken: TokenIndex) Compilation.Error!void {
+        if (b.atomicType != null) return b.parser.errStr(.cannot_combine_spec, sourceToken, "_Atomic");
+        if (b.typedef) return b.parser.errStr(.cannot_combine_spec, sourceToken, "type-name");
+        if (b.typeof) return b.parser.errStr(.cannot_combine_spec, sourceToken, "typeof");
+        b.atomicType = sourceToken;
+        b.type = .{ .other = baseQt };
     }
 
     /// Try to combine type from typedef, returns true if successful.
@@ -2457,10 +2489,13 @@ pub const Builder = struct {
 
     pub fn combine(b: *Builder, new: Builder.Specifier, sourceToken: TokenIndex) !void {
         if (b.typeof)
-            try b.parser.errStr(.cannot_combine_with_typeof, sourceToken, @tagName(new));
+            return b.parser.errStr(.cannot_combine_with_typeof, sourceToken, @tagName(new));
+
+        if (b.atomicType != null)
+            return b.parser.errStr(.cannot_combine_spec, sourceToken, "_Atomic");
 
         if (b.typedef)
-            try b.parser.errStr(.cannot_combine_spec, sourceToken, "type-name");
+            return b.parser.errStr(.cannot_combine_spec, sourceToken, "type-name");
 
         if (b.type == .other and b.type.other.isInvalid()) return;
 

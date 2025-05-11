@@ -211,13 +211,10 @@ fn createType(
         switch (suffix) {
             .@"*" => |addressSpace| {
                 _ = addressSpace; // TODO: handle address space
-                var pointerQt = try comp.typeStore.put(comp.gpa, .{ .pointer = .{
+                const pointerQt = try comp.typeStore.put(comp.gpa, .{ .pointer = .{
                     .child = builder.finish() catch unreachable,
                     .decayed = null,
                 } });
-                pointerQt.@"const" = builder.@"const" != null;
-                pointerQt.@"volatile" = builder.@"volatile" != null;
-                pointerQt.restrict = builder.restrict != null;
 
                 builder.@"const" = null;
                 builder.@"volatile" = null;
