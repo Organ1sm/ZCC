@@ -641,6 +641,7 @@ pub fn nullToPointer(res: *Result, p: *Parser, ptrTy: QualType, token: TokenInde
 /// Returns:
 ///   - The cast value if the cast was successful. Otherwise, an error.
 pub fn usualUnaryConversion(res: *Result, p: *Parser, token: TokenIndex) Error!void {
+    if (res.qt.isInvalid()) return;
     if (!p.comp.langOpts.useNativeHalfType) {
         if (res.qt.get(p.comp, .float)) |floatTy| {
             if (floatTy == .FP16) {

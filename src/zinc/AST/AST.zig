@@ -573,6 +573,7 @@ pub const Node = union(enum) {
 
         pub fn isBitFieldWidth(access: MemberAccess, tree: *const Tree) ?u32 {
             var qt = access.base.qt(tree);
+            if (qt.isInvalid()) return null;
             if (qt.get(tree.comp, .pointer)) |pointer| qt = pointer.child;
             const recordTy = switch (qt.base(tree.comp).type) {
                 .@"struct", .@"union" => |record| record,

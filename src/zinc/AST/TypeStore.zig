@@ -816,8 +816,8 @@ pub const QualType = packed struct(u32) {
     /// Asserts that ty is an integer type
     pub fn intRank(qt: QualType, comp: *const Compilation) usize {
         return loop: switch (qt.base(comp).type) {
-            .bitInt => |bitInt| @as(u64, bitInt.bits) * 8,
-            .bool => 1 + (QualType.bool.bitSizeof(comp) * 8),
+            .bitInt => |bitInt| @as(usize, bitInt.bits) * 8,
+            .bool => 1 + @as(usize, (QualType.bool.bitSizeof(comp) * 8)),
             .int => |intTy| switch (intTy) {
                 .Char, .SChar, .UChar => 2 + (intTy.bits(comp) * 8),
                 .Short, .UShort => 3 + (intTy.bits(comp) * 8),
@@ -2470,12 +2470,15 @@ pub const Builder = struct {
         b.type = .{ .other = new };
     }
 
-    pub fn combineAtomic(b: *Builder, baseQt: QualType, sourceToken: TokenIndex) Compilation.Error!void {
+    pub fn combineAtomic(b: *Builder, baseQt: QualType, sourceToken: TokenIndex) !void {
         if (b.atomicType != null) return b.parser.errStr(.cannot_combine_spec, sourceToken, "_Atomic");
         if (b.typedef) return b.parser.errStr(.cannot_combine_spec, sourceToken, "type-name");
         if (b.typeof) return b.parser.errStr(.cannot_combine_spec, sourceToken, "typeof");
+
+        const newSpec = TypeStore.Builder.fromType(b.parser.comp, baseQt);
+        try b.combine(newSpec, sourceToken);
+
         b.atomicType = sourceToken;
-        b.type = .{ .other = baseQt };
     }
 
     /// Try to combine type from typedef, returns true if successful.
@@ -2882,11 +2885,11 @@ pub const Builder = struct {
                 },
                 .float => |float| switch (float) {
                     .FP16 => unreachable,
-                    .Float16 => .Float16,
-                    .Float => .Float,
-                    .Double => .Double,
-                    .LongDouble => .LongDouble,
-                    .Float128 => .Float128,
+                    .Float16 => .ComplexFloat16,
+                    .Float => .ComplexFloat,
+                    .Double => .ComplexDouble,
+                    .LongDouble => .ComplexLongDouble,
+                    .Float128 => .ComplexFloat128,
                 },
                 else => unreachable,
             },
