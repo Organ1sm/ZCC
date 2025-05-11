@@ -743,6 +743,8 @@ fn genExpr(c: *CodeGen, nodeIdx: Node.Index) Error!IR.Ref {
             .NullToPointer,
             .UnionCast,
             .VectorSplat,
+            .NonAtomicToAtomic,
+            .AtomicToNonAtomic,
             => return c.fail("TODO CodeGen gen CastKind {}\n", .{cast.kind}),
         },
 

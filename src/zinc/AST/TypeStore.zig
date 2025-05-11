@@ -88,6 +88,8 @@ const Index = enum(u29) {
     VoidPointer = std.math.maxInt(u29) - 25,
     CharPointer = std.math.maxInt(u29) - 26,
     IntPointer = std.math.maxInt(u29) - 27,
+    /// Special type used when combining declarators.
+    DeclaratorCombine = std.math.maxInt(u29) - 28,
     _,
 };
 
@@ -163,6 +165,7 @@ pub const QualType = packed struct(u32) {
             .Invalid => unreachable,
             .AutoType => unreachable,
             .C23Auto => unreachable,
+            .DeclaratorCombine => unreachable,
             .Void => return .void,
             .Bool => return .bool,
             .NullptrTy => return .nullptrTy,
@@ -859,6 +862,7 @@ pub const QualType = packed struct(u32) {
                 .UShort => if (Type.IntType.UChar.bits(comp) == Type.IntType.Int.bits(comp)) .uint else .int,
                 else => return qt,
             },
+            .atomic => |atomic| continue :loop atomic.base(comp).type,
             else => unreachable, // Not an integer type
         };
     }
@@ -2374,7 +2378,42 @@ pub const Builder = struct {
     }
 
     pub fn finishQuals(b: Builder, qt: QualType) !QualType {
+        if (qt.isInvalid()) return .invalid;
+
         var resultQt = qt;
+        if (b.atomic) |atomicToken| {
+            if (resultQt.isAutoType()) return b.parser.todo("_Atomic __auto_type");
+            if (resultQt.isC23Auto()) {
+                try b.parser.errToken(.atomic_auto, atomicToken);
+                return .invalid;
+            }
+            if (resultQt.sizeofOrNull(b.parser.comp) == null) {
+                try b.parser.errStr(.atomic_incomplete, atomicToken, try b.parser.typeStr(qt));
+                return .invalid;
+            }
+            switch (resultQt.base(b.parser.comp).type) {
+                .array => {
+                    try b.parser.errStr(.atomic_array, atomicToken, try b.parser.typeStr(qt));
+                    return .invalid;
+                },
+                .func => {
+                    try b.parser.errStr(.atomic_func, atomicToken, try b.parser.typeStr(qt));
+                    return .invalid;
+                },
+                .atomic => {
+                    try b.parser.errStr(.atomic_atomic, atomicToken, try b.parser.typeStr(qt));
+                    return .invalid;
+                },
+                .complex => {
+                    try b.parser.errStr(.atomic_complex, atomicToken, try b.parser.typeStr(qt));
+                    return .invalid;
+                },
+                else => {
+                    resultQt = try b.parser.comp.typeStore.put(b.parser.gpa, .{ .atomic = resultQt });
+                },
+            }
+        }
+
         if (b.@"const" != null) resultQt.@"const" = true;
         if (b.@"volatile" != null) resultQt.@"volatile" = true;
 
@@ -2387,14 +2426,6 @@ pub const Builder = struct {
             }
         }
 
-        if (b.atomic) |atomicToken| {
-            _ = atomicToken;
-            // if (qt.isArray()) try b.parser.errStr(.atomic_array, atomic_tok, try b.parser.typeStr(qt));
-            // if (qt.isFunc()) try b.parser.errStr(.atomic_func, atomic_tok, try b.parser.typeStr(qt));
-            // if (qt.hasIncompleteSize()) try b.parser.errStr(.atomic_incomplete, atomic_tok, try b.parser.typeStr(qt));
-            // TODO erro if quals
-            // TODO make atomic
-        }
         return resultQt;
     }
 
@@ -2430,6 +2461,8 @@ pub const Builder = struct {
 
         if (b.typedef)
             try b.parser.errStr(.cannot_combine_spec, sourceToken, "type-name");
+
+        if (b.type == .other and b.type.other.isInvalid()) return;
 
         switch (new) {
             .Complex => b.complexToken = sourceToken,

@@ -613,8 +613,8 @@ fn castToVoid(res: *Result, p: *Parser, tok: TokenIndex) Error!void {
 }
 
 pub fn nullToPointer(res: *Result, p: *Parser, ptrTy: QualType, token: TokenIndex) Error!void {
-    res.value = .{};
     if (!res.qt.is(p.comp, .nullptrTy) and !res.value.isZero(p.comp)) return;
+    res.value = .{};
     res.qt = ptrTy;
     try res.implicitCast(p, .NullToPointer, token);
 }

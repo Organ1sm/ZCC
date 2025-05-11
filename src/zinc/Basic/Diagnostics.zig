@@ -213,6 +213,7 @@ pub const Options = struct {
     @"duplicate-embed-param": Kind = .default,
     @"unsupported-embed-param": Kind = .default,
     @"unused-result": Kind = .default,
+    @"atomic-access": Kind = .default,
 };
 
 list: std.ArrayListUnmanaged(Message) = .{},
