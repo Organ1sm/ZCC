@@ -1914,7 +1914,7 @@ fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec, attrBufferTop: usize, de
             if (ID.d.qt.isInvalid()) break :incomplete;
             if (ID.d.qt.isC23Auto()) break :incomplete;
             if (ID.d.qt.isAutoType()) break :incomplete;
-            if (ID.d.qt.hasIncompleteSize(p.comp)) break :incomplete;
+            if (!ID.d.qt.hasIncompleteSize(p.comp)) break :incomplete;
             if (ID.d.qt.get(p.comp, .array)) |arrayTy| {
                 if (arrayTy.len == .incomplete) break :incomplete;
             }
@@ -1971,9 +1971,9 @@ fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec, attrBufferTop: usize, de
         ID.d.qt = try Attribute.applyVariableAttributes(p, ID.d.qt, attrBufferTop, null);
 
     incomplete: {
-        if (declSpec.storageClass != .typedef) break :incomplete;
+        if (declSpec.storageClass == .typedef) break :incomplete;
         if (ID.d.qt.isInvalid()) break :incomplete;
-        if (ID.d.qt.hasIncompleteSize(p.comp)) break :incomplete;
+        if (!ID.d.qt.hasIncompleteSize(p.comp)) break :incomplete;
 
         const initType = ID.d.qt.base(p.comp).type;
         if (declSpec.storageClass == .@"extern") switch (initType) {
@@ -2272,7 +2272,6 @@ fn parseRecordSpec(p: *Parser) Error!QualType {
             return prev.qt;
         } else {
             // this is a forward declaration, create a new record type.
-            // this is a forward declaration, create a new record type.
             const recordTy: Type.Record = .{
                 .name = internedName,
                 .layout = null,
@@ -2392,6 +2391,30 @@ fn parseRecordSpec(p: *Parser) Error!QualType {
     done = true;
     try p.parseAttrSpec();
 
+    const anyIncomplete = blk: {
+        for (fields) |field| {
+            if (field.qt.hasIncompleteSize(p.comp) and !field.qt.is(p.comp, .array)) break :blk true;
+        }
+        // Set fields and a dummy layout before addign attributes.
+        recordType.fields = fields;
+        recordType.layout = .{
+            .sizeBits = 8,
+            .fieldAlignmentBits = 8,
+            .pointerAlignmentBits = 8,
+            .requiredAlignmentBits = 8,
+        };
+
+        const baseType = qt.base(p.comp);
+        if (isStruct) {
+            std.debug.assert(baseType.type.@"struct".name == recordType.name);
+            try p.comp.typeStore.set(p.gpa, .{ .@"struct" = recordType }, @intFromEnum(baseType.qt._index));
+        } else {
+            std.debug.assert(baseType.type.@"union".name == recordType.name);
+            try p.comp.typeStore.set(p.gpa, .{ .@"union" = recordType }, @intFromEnum(baseType.qt._index));
+        }
+        break :blk false;
+    };
+
     const attributedQt = try Attribute.applyTypeAttributes(p, qt, attrBufferTop, null);
 
     // Make sure the symbol for this record points to the attributed type.
@@ -2402,10 +2425,7 @@ fn parseRecordSpec(p: *Parser) Error!QualType {
         ptr.qt = attributedQt;
     }
 
-    for (fields) |field| {
-        if (field.qt.hasIncompleteSize(p.comp) and !field.qt.is(p.comp, .array))
-            break;
-    } else {
+    if (!anyIncomplete) {
         const pragmaPackValue = switch (p.comp.langOpts.emulate) {
             .clang => startingPragmaPack,
             .gcc => p.pragmaPack,
@@ -2419,14 +2439,25 @@ fn parseRecordSpec(p: *Parser) Error!QualType {
             error.Overflow => try p.errStr(.record_too_large, maybeIdent orelse kindToken, try p.typeStr(qt)),
         }
 
-        // Override previous incomplete type.
-        const baseType = attributedQt.base(p.comp);
-        if (isStruct) {
-            std.debug.assert(baseType.type.@"struct".name == recordType.name);
-            try p.comp.typeStore.set(p.gpa, .{ .@"struct" = recordType }, @intFromEnum(baseType.qt._index));
-        } else {
-            std.debug.assert(baseType.type.@"union".name == recordType.name);
-            try p.comp.typeStore.set(p.gpa, .{ .@"union" = recordType }, @intFromEnum(baseType.qt._index));
+        // Override previous incomplete layout and fields.
+        const baseQt = qt.base(p.comp).qt;
+        const ts = &p.comp.typeStore;
+        var extraIndex = ts.types.items(.data)[@intFromEnum(baseQt._index)][1];
+
+        const layoutSize = 5;
+        comptime std.debug.assert(@sizeOf(Type.Record.Layout) == @sizeOf(u32) * layoutSize);
+        const fieldSize = 10;
+        comptime std.debug.assert(@sizeOf(Type.Record.Field) == @sizeOf(u32) * fieldSize);
+
+        const castedLayout: *const [layoutSize]u32 = @ptrCast(&recordType.layout);
+        ts.extra.items[extraIndex..][0..layoutSize].* = castedLayout.*;
+        extraIndex += layoutSize;
+        extraIndex += 1; // For field length
+
+        for (recordType.fields) |*field| {
+            const casted: *const [fieldSize]u32 = @ptrCast(field);
+            ts.extra.items[extraIndex..][0..fieldSize].* = casted.*;
+            extraIndex += fieldSize;
         }
     }
 
@@ -3214,11 +3245,13 @@ const Declarator = struct {
                     return .NestedInvalid;
                 }
 
-                if (arrayTy.len == .static and elemQt.is(p.comp, .array))
-                    try p.errToken(.static_non_outermost_array, sourceToken);
+                if (elemQt.get(p.comp, .array)) |elemArrayTy| {
+                    if (elemArrayTy.len == .static)
+                        try p.errToken(.static_non_outermost_array, sourceToken);
 
-                if (cur.isQualified() and elemQt.is(p.comp, .array))
-                    try p.errToken(.qualifier_non_outermost_array, sourceToken);
+                    if (elemQt.isQualified())
+                        try p.errToken(.qualifier_non_outermost_array, sourceToken);
+                }
 
                 return .Normal;
             },
@@ -3465,7 +3498,7 @@ fn directDeclarator(
                     return error.ParsingFailed;
                 }
 
-                var len = size.value.toInt(u64, p.comp) orelse std.math.maxInt(u64);
+                const len = size.value.toInt(u64, p.comp) orelse std.math.maxInt(u64);
 
                 // `outer` is validated later so it may be invalid here
                 if (!outer.isInvalid() and !outer.isAutoType() and !outer.isC23Auto()) {
@@ -3473,7 +3506,7 @@ fn directDeclarator(
                     const maxElems = p.comp.maxArrayBytes() / @max(1, outSize);
                     if (len > maxElems) {
                         try p.errToken(.array_too_large, lb);
-                        len = maxElems;
+                        return .invalid;
                     }
                 }
 
@@ -3879,6 +3912,7 @@ pub fn initializerItem(p: *Parser, il: *InitList, initQt: QualType) Error!bool {
                 const indexRes = try p.parseIntegerConstExpr(.GNUFoldingExtension);
                 try p.expectClosing(lbr, .RBracket);
 
+                designation = true;
                 if (curQt.isInvalid()) continue;
 
                 if (indexRes.value.isNone()) {
@@ -3902,9 +3936,9 @@ pub fn initializerItem(p: *Parser, il: *InitList, initQt: QualType) Error!bool {
                 curIndexHint = curIndexHint orelse indexInt;
                 curIL = try curIL.find(p.gpa, indexInt);
                 curQt = arrayTy.elem;
-                designation = true;
             } else if (p.eat(.Period)) |period| {
                 const fieldToken = try p.expectIdentifier();
+                designation = true;
                 if (curQt.isInvalid()) continue;
 
                 const fieldStr = p.getTokenText(fieldToken);
@@ -3940,8 +3974,6 @@ pub fn initializerItem(p: *Parser, il: *InitList, initQt: QualType) Error!bool {
                         break;
                     }
                 }
-
-                designation = true;
             } else break;
         }
 

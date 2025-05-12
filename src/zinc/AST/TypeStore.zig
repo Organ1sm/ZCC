@@ -761,17 +761,19 @@ pub const QualType = packed struct(u32) {
     pub fn decay(qt: QualType, comp: *Compilation) !QualType {
         switch (qt.base(comp).type) {
             .array => |arrayTy| {
-
-                // Copy qualifiers
+                // Copy const and volatile to the element
                 var elemQt = arrayTy.elem;
                 elemQt.@"const" = qt.@"const" or elemQt.@"const";
                 elemQt.@"volatile" = qt.@"volatile" or elemQt.@"volatile";
-                elemQt.restrict = qt.restrict or elemQt.restrict;
 
-                return try comp.typeStore.put(comp.gpa, .{ .pointer = .{
+                var pointerTy = try comp.typeStore.put(comp.gpa, .{ .pointer = .{
                     .child = elemQt,
                     .decayed = qt,
                 } });
+
+                // .. and restrict to the pointer.
+                pointerTy.restrict = qt.restrict or arrayTy.elem.restrict;
+                return pointerTy;
             },
             .func => |funcTy| {
                 if (funcTy.returnType.isInvalid())
@@ -998,6 +1000,8 @@ pub const QualType = packed struct(u32) {
         const aType = aTypeQt.type;
         const bType = bTypeQt.type;
 
+        // Alignment check also guards against comparing incomplete enums to ints.
+        if (aTypeQt.qt.alignof(comp) != bTypeQt.qt.alignof(comp)) return false;
         if (aType == .@"enum" and bType != .@"enum") {
             return aType.@"enum".tag.eql(bQualTy, comp);
         } else if (aType != .@"enum" and bType == .@"enum") {
@@ -1033,6 +1037,12 @@ pub const QualType = packed struct(u32) {
             .func => |aFunc| {
                 const bFunc = bType.func;
 
+                // Function return type cannot be qualified.
+                if (!aFunc.returnType.eql(bFunc.returnType, comp)) return false;
+
+                if (aFunc.params.len == 0 and bFunc.params.len == 0)
+                    return (aFunc.kind == .Variadic) == (bFunc.kind == .Variadic);
+
                 if (aFunc.params.len != bFunc.params.len) {
                     if (aFunc.kind == .OldStyle and bFunc.kind == .OldStyle) return true;
                     if (aFunc.kind == .OldStyle or bFunc.kind == .OldStyle) {
@@ -1061,9 +1071,6 @@ pub const QualType = packed struct(u32) {
 
                 if ((aFunc.kind == .Normal) != (bFunc.kind == .Normal)) return false;
 
-                // Function return type cannot be qualified.
-                if (!aFunc.returnType.eql(bFunc.returnType, comp)) return false;
-
                 for (aFunc.params, bFunc.params) |aParam, bParam| {
                     // Function parameters cannot be qualified.
                     if (!aParam.qt.eql(bParam.qt, comp)) return false;
@@ -1076,11 +1083,25 @@ pub const QualType = packed struct(u32) {
             },
             .array => |aArray| {
                 const bArray = bType.array;
+                const aLen = switch (aArray.len) {
+                    .fixed, .static => |len| len,
+                    else => null,
+                };
+                const bLen = switch (bArray.len) {
+                    .fixed, .static => |len| len,
+                    else => null,
+                };
+                if (aLen != null and bLen != null) {
+                    return aLen.? == bLen.?;
+                }
+
                 // Array element qualifiers are ignored.
                 return aArray.elem.eql(bArray.elem, comp);
             },
             .vector => |aVector| {
                 const bVector = bType.vector;
+                if (aVector.len != bVector.len) return false;
+
                 // Vector elemnent qualifiers are checked.
                 return aVector.elem.eqlQualified(bVector.elem, comp);
             },
