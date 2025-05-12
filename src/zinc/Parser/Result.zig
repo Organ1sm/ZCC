@@ -287,11 +287,18 @@ pub fn adjustTypes(lhs: *Result, token: TokenIndex, rhs: *Result, p: *Parser, ki
                 return lhs.invalidBinTy(token, rhs, p);
             }
 
+            if (lhsSK == .NullptrTy or rhsSK == .NullptrTy) return lhs.invalidBinTy(token, rhs, p);
+
             if ((lhsSK.isInt() or rhsSK.isInt()) and !(lhs.value.isZero(p.comp) or rhs.value.isZero(p.comp))) {
                 try p.errStr(.comparison_ptr_int, token, try p.typePairStr(lhs.qt, rhs.qt));
             } else if (lhsSK.isPointer() and rhsSK.isPointer()) {
-                if (lhsSK != .VoidPointer and rhsSK != .VoidPointer and !lhs.qt.eql(rhs.qt, p.comp))
-                    try p.errStr(.comparison_distinct_ptr, token, try p.typePairStr(lhs.qt, rhs.qt));
+                if (lhsSK != .VoidPointer and rhsSK != .VoidPointer) {
+                    const lhsElem = lhs.qt.childType(p.comp);
+                    const rhsElem = rhs.qt.childType(p.comp);
+                    if (!lhsElem.eql(rhsElem, p.comp)) {
+                        try p.errStr(.comparison_distinct_ptr, token, try p.typePairStr(lhs.qt, rhs.qt));
+                    }
+                }
             } else if (lhsSK.isPointer()) {
                 try rhs.castToPointer(p, lhs.qt, token);
             } else {
@@ -624,7 +631,7 @@ fn castToVoid(res: *Result, p: *Parser, tok: TokenIndex) Error!void {
 
 pub fn nullToPointer(res: *Result, p: *Parser, ptrTy: QualType, token: TokenIndex) Error!void {
     if (!res.qt.is(p.comp, .nullptrTy) and !res.value.isZero(p.comp)) return;
-    res.value = .{};
+    res.value = .null;
     res.qt = ptrTy;
     try res.implicitCast(p, .NullToPointer, token);
 }

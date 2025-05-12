@@ -326,7 +326,8 @@ test "All builtins" {
     var comp = Compilation.init(std.testing.allocator, std.fs.cwd());
     defer comp.deinit();
 
-    _ = try comp.generateBuiltinMacros(.IncludeSystemDefines);
+    try comp.typeStore.initNamedTypes(&comp);
+    comp.typeStore.vaList = try comp.typeStore.vaList.decay(&comp);
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

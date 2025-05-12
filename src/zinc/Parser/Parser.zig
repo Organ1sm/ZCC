@@ -139,7 +139,7 @@ record: struct {
 
     fn addFieldsFromAnonymous(r: @This(), p: *Parser, recordTy: Type.Record) Error!void {
         for (recordTy.fields) |f| {
-            if (f.name == .empty) {
+            if (f.nameToken == 0) {
                 if (f.qt.getRecord(p.comp)) |rec| {
                     try r.addFieldsFromAnonymous(p, rec);
                 }
@@ -981,7 +981,17 @@ fn parseDeclaration(p: *Parser) Error!bool {
         }
 
         switch (p.tokenIds[firstToken]) {
-            .Asterisk, .LParen, .Identifier => {},
+            .Asterisk, .LParen => {},
+            .Identifier, .ExtendedIdentifier => switch (p.tokenIds[firstToken + 1]) {
+                .Identifier, .ExtendedIdentifier => {
+                    // The most likely reason for `identifier identifier` is
+                    // an unknown type name.
+                    try p.errStr(.unknown_type_name, p.tokenIdx, p.getTokenText(p.tokenIdx));
+                    p.tokenIdx += 1;
+                    break :blk DeclSpec{ .qt = .invalid };
+                },
+                else => {},
+            },
             else => if (p.tokenIdx != firstToken) {
                 try p.err(.expected_ident_or_l_paren);
                 return error.ParsingFailed;
@@ -1065,8 +1075,9 @@ fn parseDeclaration(p: *Parser) Error!bool {
 
         if (internedDeclaratorName == p.stringsIds.mainId) {
             const funcTy = initDeclarator.d.qt.get(p.comp, .func).?;
-            if (funcTy.returnType.get(p.comp, .int)) |intTy| {
-                if (intTy == .Int) try p.errToken(.main_return_type, declaratorName);
+            const intTy = funcTy.returnType.get(p.comp, .int);
+            if (intTy == null or intTy.? == .Int) {
+                try p.errToken(.main_return_type, declaratorName);
             }
         }
 
@@ -1944,7 +1955,7 @@ fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec, attrBufferTop: usize, de
     const name = ID.d.name;
     if (ID.d.qt.isAutoType() or ID.d.qt.isC23Auto()) {
         if (ID.initializer) |some| {
-            ID.d.qt = some.qt;
+            ID.d.qt = some.qt.withQualifiers(ID.d.qt);
         } else {
             try p.errStr(
                 if (ID.d.qt.isC23Auto()) .c23_auto_requires_initializer else .auto_type_requires_initializer,
@@ -2666,17 +2677,17 @@ fn parseSpecQuals(p: *Parser) Error!?QualType {
     return null;
 }
 
-fn checkEnumFixedTy(p: *Parser, fixedTy: ?QualType, identToken: TokenIndex, prev: Symbol) !void {
+fn checkEnumFixedTy(p: *Parser, fixedQt: ?QualType, identToken: TokenIndex, prev: Symbol) !void {
     const enumTy = prev.qt.get(p.comp, .@"enum").?;
-    if (fixedTy) |some| {
+    if (fixedQt) |some| {
         if (!enumTy.fixed) {
             try p.errToken(.enum_prev_nonfixed, identToken);
             try p.errToken(.previous_definition, prev.token);
             return error.ParsingFailed;
         }
 
-        if (!enumTy.tag.?.eql(some, p.comp)) {
-            const str = try p.typePairStrExtra(some, " (was ", enumTy.tag.?);
+        if (!enumTy.tag.eql(some, p.comp)) {
+            const str = try p.typePairStrExtra(some, " (was ", enumTy.tag);
             try p.errStr(.enum_different_explicit_ty, identToken, str);
             try p.errToken(.previous_definition, prev.token);
             return error.ParsingFailed;
@@ -2725,6 +2736,8 @@ fn parseEnumSpec(p: *Parser) Error!QualType {
         // check if this is a reference to a previous type
         const internedName = try p.getInternString(ident);
         if (try p.symStack.findTag(internedName, p.tokenIds[enumToken], ident, p.currToken())) |prev| {
+            // only check fixed underlying type in forward declarations and not in references.
+            if (p.currToken() == .Semicolon) try p.checkEnumFixedTy(fixedQt, ident, prev);
             return prev.qt;
         } else {
             // this is a forward declaration
@@ -2772,6 +2785,7 @@ fn parseEnumSpec(p: *Parser) Error!QualType {
                     try p.errStr(.redefinition, ident, identStr);
                     try p.errToken(.previous_definition, prev.token);
                 } else {
+                    try p.checkEnumFixedTy(fixedQt, ident, prev);
                     defined = true;
                     break :blk .{ enumTy, prev.qt };
                 }
@@ -3274,6 +3288,7 @@ fn declarator(p: *Parser, baseQt: QualType, kind: Declarator.Kind) Error!?Declar
         // If res.qt is the special marker there was no inner type.
         if (res.qt._index == .DeclaratorCombine) {
             res.qt = outer;
+            res.declaratorType = d.declaratorType;
         } else if (outer.isInvalid() or res.qt.isInvalid()) {
             res.qt = outer;
         } else {
@@ -3893,40 +3908,37 @@ pub fn initializerItem(p: *Parser, il: *InitList, initQt: QualType) Error!bool {
                 if (curQt.isInvalid()) continue;
 
                 const fieldStr = p.getTokenText(fieldToken);
-                const fieldName = try p.comp.internString(fieldStr);
+                const targetName = try p.comp.internString(fieldStr);
 
                 const recordTy = curQt.getRecord(p.comp) orelse {
                     try p.errStr(.invalid_field_designator, period, try p.typeStr(curQt));
                     return error.ParsingFailed;
                 };
-                if (!recordTy.hasField(p.comp, fieldName)) {
+                if (!recordTy.hasField(p.comp, targetName)) {
                     try p.errStr(.no_such_field_designator, period, fieldStr);
                     return error.ParsingFailed;
                 }
 
                 // TODO check if union already has field set
-                outer: while (true) {
-                    for (recordTy.fields, 0..) |f, i| {
-                        if (f.name == .empty) {
-                            if (f.qt.getRecord(p.comp)) |rec| {
-                                // Recurse into anonymous field if it has a field by the name.
-                                if (!rec.hasField(p.comp, fieldName)) continue;
+                for (recordTy.fields, 0..) |f, fieldIndex| {
+                    if (f.nameToken == 0) {
+                        if (f.qt.getRecord(p.comp)) |rec| {
+                            // Recurse into anonymous field if it has a field by the name.
+                            if (!rec.hasField(p.comp, targetName)) continue;
 
-                                curQt = f.qt;
-                                curIL = try il.find(p.gpa, i);
-                                curIndexHint = curIndexHint orelse i;
-                                continue :outer;
-                            }
-                        }
-
-                        if (fieldName == f.name) {
-                            curIL = try curIL.find(p.gpa, i);
                             curQt = f.qt;
-                            curIndexHint = curIndexHint orelse i;
-                            break :outer;
+                            curIL = try il.find(p.gpa, fieldIndex);
+                            curIndexHint = curIndexHint orelse fieldIndex;
+                            break;
                         }
                     }
-                    unreachable; // we already checked that the starting type has this field
+
+                    if (f.name == targetName) {
+                        curIL = try curIL.find(p.gpa, fieldIndex);
+                        curQt = f.qt;
+                        curIndexHint = curIndexHint orelse fieldIndex;
+                        break;
+                    }
                 }
 
                 designation = true;
@@ -5656,7 +5668,7 @@ fn parseAssignExpr(p: *Parser) Error!?Result {
         .modAssignExpr,
         => {
             try rhs.lvalConversion(p, token);
-            if (rhs.value.isZero(p.comp) and lhs.qt.isInt(p.comp) and rhs.qt.isInt(p.comp)) {
+            if (!lhs.qt.isInvalid() and rhs.value.isZero(p.comp) and lhs.qt.isInt(p.comp) and rhs.qt.isInt(p.comp)) {
                 switch (tag) {
                     .divAssignExpr => try p.errStr(.division_by_zero, token, "division"),
                     .modAssignExpr => try p.errStr(.division_by_zero, token, "remainder"),
@@ -5672,7 +5684,7 @@ fn parseAssignExpr(p: *Parser) Error!?Result {
         .addAssignExpr,
         => {
             try rhs.lvalConversion(p, token);
-            if (lhs.qt.isPointer(p.comp) and rhs.qt.isInt(p.comp)) {
+            if (!lhs.qt.isInvalid() and lhs.qt.isPointer(p.comp) and rhs.qt.isInt(p.comp)) {
                 try rhs.castToPointer(p, lhs.qt, token);
             } else {
                 _ = try lhsCopy.adjustTypes(token, &rhs, p, .arithmetic);
@@ -5988,6 +6000,9 @@ fn parseAddExpr(p: *Parser) Error!?Result {
             p.eatTag(.Minus) orelse break;
         var rhs = try p.expect(parseMulExpr);
 
+        // We'll want to check this for invalid pointer arithmetic.
+        const originalLhsQt = lhs.qt;
+
         if (try lhs.adjustTypes(tok, &rhs, p, if (tag == .addExpr) .add else .sub)) {
             if (tag == .addExpr) {
                 if (try lhs.value.add(lhs.value, rhs.value, lhs.qt, p.comp) and
@@ -5996,10 +6011,12 @@ fn parseAddExpr(p: *Parser) Error!?Result {
                 if (try lhs.value.sub(lhs.value, rhs.value, lhs.qt, p.comp) and
                     lhs.qt.signedness(p.comp) != .unsigned) try p.errOverflow(tok, lhs);
             }
-        } else if (!lhs.qt.isInvalid()) {
-            const lhsSK = lhs.qt.scalarKind(p.comp);
-            if (lhsSK.isPointer() and lhsSK != .VoidPointer and lhs.qt.childType(p.comp).hasIncompleteSize(p.comp)) {
-                try p.errStr(.ptr_arithmetic_incomplete, tok, try p.typeStr(lhs.qt.childType(p.comp)));
+        }
+
+        if (!lhs.qt.isInvalid()) {
+            const lhsSK = originalLhsQt.scalarKind(p.comp);
+            if (lhsSK == .Pointer and originalLhsQt.childType(p.comp).hasIncompleteSize(p.comp)) {
+                try p.errStr(.ptr_arithmetic_incomplete, tok, try p.typeStr(originalLhsQt.childType(p.comp)));
                 lhs.qt = .invalid;
             }
         }
@@ -7019,8 +7036,8 @@ fn fieldAccess(
     const exprQt = lhs.qt;
     const isPtr = exprQt.isPointer(p.comp);
     const exprBaseQt = if (isPtr) exprQt.childType(p.comp) else exprQt;
-    const nonAtomicBaseQt = if (exprBaseQt.get(p.comp, .atomic)) |atomic| atomic else exprBaseQt;
-    const recordType = nonAtomicBaseQt.getRecord(p.comp) orelse {
+    const recordQt = if (exprBaseQt.get(p.comp, .atomic)) |atomic| atomic else exprBaseQt;
+    const recordType = recordQt.getRecord(p.comp) orelse {
         try p.errStr(.expected_record_ty, fieldNameToken, try p.typeStr(exprQt));
         return error.ParsingFailed;
     };
@@ -7032,13 +7049,13 @@ fn fieldAccess(
     }
 
     if (exprQt != lhs.qt) try p.errStr(.member_expr_atomic, fieldNameToken, try p.typeStr(lhs.qt));
-    if (exprBaseQt != nonAtomicBaseQt) try p.errStr(.member_expr_atomic, fieldNameToken, try p.typeStr(exprBaseQt));
+    if (exprBaseQt != recordQt) try p.errStr(.member_expr_atomic, fieldNameToken, try p.typeStr(exprBaseQt));
 
     if (isArrow and !isPtr) try p.errStr(.member_expr_not_ptr, fieldNameToken, try p.typeStr(exprQt));
     if (!isArrow and isPtr) try p.errStr(.member_expr_ptr, fieldNameToken, try p.typeStr(exprQt));
 
     const fieldName = try p.getInternString(fieldNameToken);
-    try p.validateFieldAccess(recordType, exprQt, fieldNameToken, fieldName);
+    try p.validateFieldAccess(recordType, recordQt, fieldNameToken, fieldName);
     var discard: u64 = 0;
     return p.fieldAccessExtra(lhs.node, recordType, fieldName, isArrow, accessToken, &discard);
 }
@@ -7046,7 +7063,7 @@ fn fieldAccess(
 fn validateFieldAccess(
     p: *Parser,
     recordType: Type.Record,
-    exprType: QualType,
+    recordQt: QualType,
     fieldNameToken: TokenIndex,
     fieldName: StringId,
 ) Error!void {
@@ -7055,7 +7072,7 @@ fn validateFieldAccess(
     p.strings.items.len = 0;
 
     try p.strings.writer().print("'{s}' in '", .{p.getTokenText(fieldNameToken)});
-    try exprType.print(p.comp, p.strings.writer());
+    try recordQt.print(p.comp, p.strings.writer());
     try p.strings.append('\'');
 
     const duped = try p.comp.diagnostics.arena.allocator().dupe(u8, p.strings.items);
@@ -7073,7 +7090,7 @@ fn fieldAccessExtra(
     offsetBits: *u64,
 ) Error!Result {
     for (recordType.fields, 0..) |field, fieldIndex| {
-        if (field.name == .empty) {
+        if (field.nameToken == 0) {
             if (field.qt.getRecord(p.comp)) |fieldRecordTy| {
                 if (!fieldRecordTy.hasField(p.comp, targetName)) continue;
 

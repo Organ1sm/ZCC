@@ -1558,10 +1558,6 @@ pub const Type = union(enum) {
                 return comp.typeStore.attributes.items[field._attr_index..][0..field._attr_len];
             }
 
-            pub fn isAnonymousRecord(field: Field) bool {
-                return field.name and field.qt.isRecord();
-            }
-
             pub const Layout = extern struct {
                 /// `offset_bits` and `size_bits` should both be INVALID if and only if the field
                 /// is an unnamed bitfield. There is no way to reference an unnamed bitfield in C, so
@@ -1615,7 +1611,7 @@ pub const Type = union(enum) {
             std.debug.assert(name != .empty);
             for (record.fields) |field| {
                 if (name == field.name) return true;
-                if (field.name == .empty) if (field.qt.getRecord(comp)) |fieldRecordTy| {
+                if (field.nameToken == 0) if (field.qt.getRecord(comp)) |fieldRecordTy| {
                     if (fieldRecordTy.hasField(comp, name)) return true;
                 };
             }
@@ -2467,6 +2463,7 @@ pub const Builder = struct {
         if (b.typedef) return b.parser.errStr(.cannot_combine_spec, sourceToken, "type-name");
         if (b.typeof) return b.parser.errStr(.cannot_combine_spec, sourceToken, "typeof");
         if (b.type != .None) return b.parser.errStr(.cannot_combine_with_typeof, sourceToken, @tagName(b.type));
+        b.typeof = true;
         b.type = .{ .other = new };
     }
 
