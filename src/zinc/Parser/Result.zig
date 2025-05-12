@@ -486,6 +486,18 @@ pub fn castToInt(res: *Result, p: *Parser, intQt: QualType, token: TokenIndex) E
             try res.implicitCast(p, .RealToComplexInt, token);
         }
     }
+
+    // Cast from pointer to integer
+    else if (srcSK.isPointer()) {
+        res.value = .{};
+        res.qt = intQt.toReal(p.comp);
+        try res.implicitCast(p, .PointerToInt, token);
+        if (!destSK.isReal()) {
+            res.qt = intQt;
+            try res.implicitCast(p, .RealToComplexInt, token);
+        }
+    }
+
     // Cast from floating point to integer.
     else if (res.qt.isFloat(p.comp)) {
         const oldValue = res.value;
@@ -510,7 +522,10 @@ pub fn castToInt(res: *Result, p: *Parser, intQt: QualType, token: TokenIndex) E
             res.qt = intQt;
             try res.implicitCast(p, .ComplexFloatToComplexInt, token);
         }
-    } else if (!res.qt.eql(intQt, p.comp)) {
+    }
+
+    // Cast from integer to integer
+    else if (!res.qt.eql(intQt, p.comp)) {
         try res.value.intCast(intQt, p.comp);
         if (srcSK.isReal() and destSK.isReal()) {
             res.qt = intQt;
@@ -564,7 +579,9 @@ pub fn castToFloat(res: *Result, p: *Parser, floatQt: QualType, token: TokenInde
             res.qt = floatQt;
             try res.implicitCast(p, .RealToComplexFloat, token);
         }
-    } else if (srcSK.isInt()) {
+    }
+    // from int to float
+    else if (srcSK.isInt()) {
         try res.value.intToFloat(floatQt, p.comp);
         if (srcSK.isReal() and destSK.isReal()) {
             res.qt = floatQt;
@@ -583,7 +600,9 @@ pub fn castToFloat(res: *Result, p: *Parser, floatQt: QualType, token: TokenInde
             res.qt = floatQt;
             try res.implicitCast(p, .ComplexIntToComplexFloat, token);
         }
-    } else if (!res.qt.eql(floatQt, p.comp)) {
+    }
+    // from float to float
+    else if (!res.qt.eql(floatQt, p.comp)) {
         try res.value.floatCast(floatQt, p.comp);
         if (srcSK.isReal() and destSK.isReal()) {
             res.qt = floatQt;
@@ -610,14 +629,14 @@ pub fn castToFloat(res: *Result, p: *Parser, floatQt: QualType, token: TokenInde
 }
 
 /// converts a bool or integer to a pointer
-pub fn castToPointer(res: *Result, p: *Parser, ptrTy: QualType, token: TokenIndex) Error!void {
-    const resSK = res.qt.scalarKind(p.comp);
-    if (resSK == .Bool) {
-        res.qt = ptrTy;
+pub fn castToPointer(res: *Result, p: *Parser, ptrQt: QualType, token: TokenIndex) Error!void {
+    const srcSK = res.qt.scalarKind(p.comp);
+    if (srcSK == .Bool) {
+        res.qt = ptrQt;
         try res.implicitCast(p, .BoolToPointer, token);
-    } else if (resSK.isInt()) {
-        _ = try res.value.intCast(ptrTy, p.comp);
-        res.qt = ptrTy;
+    } else if (srcSK.isInt()) {
+        _ = try res.value.intCast(ptrQt, p.comp);
+        res.qt = ptrQt;
         try res.implicitCast(p, .IntToPointer, token);
     }
 }
@@ -629,10 +648,10 @@ fn castToVoid(res: *Result, p: *Parser, tok: TokenIndex) Error!void {
     }
 }
 
-pub fn nullToPointer(res: *Result, p: *Parser, ptrTy: QualType, token: TokenIndex) Error!void {
+pub fn nullToPointer(res: *Result, p: *Parser, ptrQt: QualType, token: TokenIndex) Error!void {
     if (!res.qt.is(p.comp, .nullptrTy) and !res.value.isZero(p.comp)) return;
     res.value = .null;
-    res.qt = ptrTy;
+    res.qt = ptrQt;
     try res.implicitCast(p, .NullToPointer, token);
 }
 
@@ -704,8 +723,8 @@ fn usualArithmeticConversion(lhs: *Result, rhs: *Result, p: *Parser, token: Toke
     const rhsReal = rhs.qt.toReal(p.comp);
 
     const typeOrder = lhs.qt.intRankOrder(rhs.qt, p.comp);
-    const lhsIsSigned = lhs.qt.isUnsignedInt(p.comp);
-    const rhsIsSigned = rhs.qt.isUnsignedInt(p.comp);
+    const lhsIsSigned = lhs.qt.signedness(p.comp) == .signed;
+    const rhsIsSigned = rhs.qt.signedness(p.comp) == .signed;
 
     var targetQt: QualType = .invalid;
     if (lhsIsSigned == rhsIsSigned) {
@@ -799,6 +818,7 @@ pub fn castType(res: *Result, p: *Parser, destQt: QualType, operandToken: TokenI
         explicitCK = .ToVoid;
         res.value = .{};
     } else if (destSK == .NullptrTy) {
+        res.value = .{};
         if (srcSK == .NullptrTy) {
             explicitCK = .NoOP;
         } else {
@@ -806,7 +826,6 @@ pub fn castType(res: *Result, p: *Parser, destQt: QualType, operandToken: TokenI
             return error.ParsingFailed;
         }
     } else if (srcSK == .NullptrTy) {
-        res.value = .{};
         if (destSK == .Bool) {
             try res.nullToPointer(p, res.qt, lparen);
             res.value.boolCast(p.comp);
@@ -1005,7 +1024,7 @@ pub fn castType(res: *Result, p: *Parser, destQt: QualType, operandToken: TokenI
     if (destSK.isInt() and srcSK.isPointer() and destQt.sizeCompare(res.qt, p.comp) == .lt)
         try p.errStr(.cast_to_smaller_int, lparen, try p.typePairStrExtra(destQt, " from ", res.qt));
 
-    res.qt = destQt;
+    res.qt = destQt.unqualified();
     res.node = try p.addNode(.{
         .cast = .{
             .lparen = lparen,
@@ -1029,7 +1048,7 @@ pub fn intFitsInType(res: Result, p: *Parser, ty: QualType) !bool {
     const minInt = try Value.minInt(ty, p.comp);
 
     return res.value.compare(.lte, maxInt, p.comp) and
-        (res.qt.isUnsignedInt(p.comp) or res.value.compare(.gte, minInt, p.comp));
+        (res.qt.isUnsigned(p.comp) or res.value.compare(.gte, minInt, p.comp));
 }
 
 const CoerceContext = union(enum) {

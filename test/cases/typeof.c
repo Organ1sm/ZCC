@@ -1,4 +1,4 @@
-//std=gnu17
+//zinc-args -std=gnu17
 int foo(void) {
     return 42.0;
 }

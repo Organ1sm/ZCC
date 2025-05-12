@@ -1150,7 +1150,7 @@ fn applyTransparentUnion(attr: Attribute, p: *Parser, token: TokenIndex, qt: Qua
 fn applyVectorSize(attr: Attribute, p: *Parser, tok: TokenIndex, qt: *QualType) !void {
     if (qt.isInvalid()) return;
     const scalarKind = qt.scalarKind(p.comp);
-    if (!scalarKind.isArithmetic() or !scalarKind.isReal()) {
+    if (!scalarKind.isArithmetic() or !scalarKind.isReal() or scalarKind == .Enum) {
         if (qt.get(p.comp, .@"enum")) |enumTy| {
             if (p.comp.langOpts.emulate == .clang and enumTy.incomplete) {
                 return; // Clang silently ignores vector_size on incomplete enums.

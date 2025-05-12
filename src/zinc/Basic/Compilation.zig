@@ -757,7 +757,7 @@ fn generateExactWidthTypes(comp: *Compilation, w: anytype) !void {
 }
 
 fn generateFmt(comp: *const Compilation, prefix: []const u8, w: anytype, qt: QualType) !void {
-    const unsigned = qt.isUnsignedInt(comp);
+    const unsigned = qt.isUnsigned(comp);
     const modifier = qt.formatModifier(comp);
     const formats = if (unsigned) "ouxX" else "di";
     for (formats) |c|
@@ -775,7 +775,7 @@ fn generateSuffixMacro(comp: *const Compilation, prefix: []const u8, w: anytype,
 fn generateExactWidthType(comp: *Compilation, w: anytype, originalQt: QualType) !void {
     var qt = originalQt;
     const width = qt.sizeof(comp) * 8;
-    const unsigned = qt.isUnsignedInt(comp);
+    const unsigned = qt.isUnsigned(comp);
 
     if (width == 16) {
         qt = if (unsigned) try comp.typeStore.int16.makeIntUnsigned(comp) else comp.typeStore.int16;
@@ -798,7 +798,7 @@ fn generateExactWidthType(comp: *Compilation, w: anytype, originalQt: QualType) 
 }
 
 fn generateIntMax(comp: *const Compilation, w: anytype, name: []const u8, qt: QualType) !void {
-    const unsigned = qt.isUnsignedInt(comp);
+    const unsigned = qt.isUnsigned(comp);
     const max: u128 = switch (qt.bitSizeof(comp)) {
         8 => if (unsigned) std.math.maxInt(u8) else std.math.maxInt(i8),
         16 => if (unsigned) std.math.maxInt(u16) else std.math.maxInt(i16),
@@ -824,7 +824,7 @@ pub fn wcharMax(comp: *const Compilation) u32 {
 fn generateExactWidthIntMax(comp: *Compilation, w: anytype, orginalQt: QualType) !void {
     var qt = orginalQt;
     const bitCount: u8 = @intCast(qt.sizeof(comp) * 8);
-    const unsigned = qt.isUnsignedInt(comp);
+    const unsigned = qt.isUnsigned(comp);
 
     if (bitCount == 64)
         qt = if (unsigned) try comp.typeStore.int64.makeIntUnsigned(comp) else comp.typeStore.int64;
@@ -852,7 +852,7 @@ fn generateSizeofType(comp: *Compilation, w: anytype, name: []const u8, qt: Qual
 
 pub fn nextLargestIntSameSign(comp: *const Compilation, qt: QualType) ?QualType {
     assert(qt.isInt(comp));
-    const candidates: [4]QualType = if (qt.isUnsignedInt(comp))
+    const candidates: [4]QualType = if (qt.isUnsigned(comp))
         .{ .short, .int, .long, .longlong }
     else
         .{ .ushort, .uint, .ulong, .ulonglong };

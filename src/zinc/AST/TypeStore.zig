@@ -433,7 +433,7 @@ pub const QualType = packed struct(u32) {
         return qt.get(comp, tag) != null;
     }
 
-    pub fn isUnsignedInt(qt: QualType, comp: *const Compilation) bool {
+    pub fn isUnsigned(qt: QualType, comp: *const Compilation) bool {
         return qt.signedness(comp) == .unsigned;
     }
 
@@ -589,17 +589,17 @@ pub const QualType = packed struct(u32) {
 
     /// Size of a type as reported by the alignof operator.
     pub fn alignof(qt: QualType, comp: *const Compilation) u32 {
-        // don't return the attribute for records
-        // layout has already accounted for requested alignment
         if (qt.requestedAlignment(comp)) |requested| request: {
-            // gcc does not respect alignment on enums
             if (qt.is(comp, .@"enum")) {
                 if (comp.langOpts.emulate == .gcc) {
+                    // gcc does not respect alignment on enums
                     break :request;
                 }
             } else if (qt.getRecord(comp)) |recordTy| {
                 const layout = recordTy.layout orelse return 0;
 
+                // don't return the attribute for records
+                // layout has already accounted for requested alignment
                 const computed = @divExact(layout.fieldAlignmentBits, 8);
                 return @max(requested, computed);
             } else if (comp.langOpts.emulate == .msvc) {
@@ -1046,7 +1046,6 @@ pub const QualType = packed struct(u32) {
                 if (aFunc.params.len != bFunc.params.len) {
                     if (aFunc.kind == .OldStyle and bFunc.kind == .OldStyle) return true;
                     if (aFunc.kind == .OldStyle or bFunc.kind == .OldStyle) {
-                        // TODO: is this correct?
                         const maybeHasParams = if (aFunc.kind == .OldStyle) bFunc else aFunc;
 
                         // Check if any args undergo default argument promotion.
@@ -1270,7 +1269,8 @@ pub const QualType = packed struct(u32) {
             },
             .atomic => |atomic| {
                 try w.writeAll("_Atomic(");
-                try atomic.print(comp, w);
+                _ = try atomic.printPrologue(comp, w);
+                try atomic.printEpilogue(comp, w);
                 try w.writeAll(")");
             },
 
@@ -1592,10 +1592,6 @@ pub const Type = union(enum) {
                 ///
                 /// For bit-fields, this is the width of the field.
                 sizeBits: u64 align(4) = INVALID,
-
-                pub fn isUnnamed(self: Field.Layout) bool {
-                    return self.offsetBits == INVALID and self.sizeBits == INVALID;
-                }
             };
         };
 

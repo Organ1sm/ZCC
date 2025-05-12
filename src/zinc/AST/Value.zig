@@ -189,7 +189,7 @@ pub fn floatToInt(v: *Value, destTy: QualType, comp: *Compilation) !FloatToIntCh
         v.* = fromBool(!wasZero);
         if (wasZero or wasOne) return .none;
         return .valueChanged;
-    } else if (destTy.isUnsignedInt(comp) and floatVal < 0) {
+    } else if (destTy.isUnsigned(comp) and floatVal < 0) {
         v.* = zero;
         return .outOfRange;
     }

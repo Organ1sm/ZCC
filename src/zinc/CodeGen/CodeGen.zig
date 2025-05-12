@@ -119,7 +119,7 @@ fn genType(c: *CodeGen, qt: QualType) !Interner.Ref {
         .void => return .void,
         .bool => return .i1,
         .@"struct" => |record| {
-            if (c.recordCache.get(base.qt)) |some| return some;
+            if (c.recordCache.get(base.qt.unqualified())) |some| return some;
 
             const elemBufferTop = c.recordElemBuffer.items.len;
             defer c.recordElemBuffer.items.len = elemBufferTop;
@@ -133,9 +133,11 @@ fn genType(c: *CodeGen, qt: QualType) !Interner.Ref {
                 try c.recordElemBuffer.append(c.builder.gpa, fieldRef);
             }
 
-            return c.builder.interner.put(c.builder.gpa, .{
+            const recordTy = try c.builder.interner.put(c.builder.gpa, .{
                 .recordTy = c.recordElemBuffer.items[elemBufferTop..],
             });
+            try c.recordCache.put(c.comp.gpa, base.qt.unqualified(), recordTy);
+            return recordTy;
         },
 
         .@"union" => {
@@ -704,7 +706,7 @@ fn genExpr(c: *CodeGen, nodeIdx: Node.Index) Error!IR.Ref {
                 if (srcBits == destBits) {
                     return operand;
                 } else if (srcBits < destBits) {
-                    if (srcTy.isUnsignedInt(c.comp))
+                    if (srcTy.isUnsigned(c.comp))
                         return c.addUn(.Zext, operand, cast.qt)
                     else
                         return c.addUn(.Sext, operand, cast.qt);
