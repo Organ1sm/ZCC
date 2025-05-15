@@ -4005,11 +4005,11 @@ pub fn initializerItem(p: *Parser, il: *InitList, initQt: QualType) Error!bool {
             try p.err(.designated_init_needed);
 
         var saw = false;
-        if (isStrInit and p.isStringInit()) {
+        if (isStrInit and p.isStringInit(initQt)) {
             var tempIL: InitList = .{};
             defer tempIL.deinit(p.gpa);
             saw = try p.initializerItem(&tempIL, .void);
-        } else if (count == 0 and p.isStringInit()) {
+        } else if (count == 0 and p.isStringInit(initQt)) {
             isStrInit = true;
             saw = try p.initializerItem(il, initQt);
         } else if (isScalar and count >= scalarInitsNeeds) {
@@ -4393,7 +4393,10 @@ fn coerceInit(p: *Parser, item: *Result, token: TokenIndex, target: QualType) !v
     return item.saveValue(p);
 }
 
-fn isStringInit(p: *Parser) bool {
+fn isStringInit(p: *Parser, initQt: QualType) bool {
+    const initArrayTy = initQt.get(p.comp, .array) orelse return false;
+    if (!initArrayTy.elem.is(p.comp, .int)) return false;
+
     var i = p.tokenIdx;
     while (true) : (i += 1) {
         switch (p.tokenIds[i]) {
