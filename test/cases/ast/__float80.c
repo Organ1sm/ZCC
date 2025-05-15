@@ -19,15 +19,15 @@ implicit typedef: 'long double'
 fnDef: 'fn () void'
  name: foo
  body:
-  compoundStmt: 'void'
-    variable: '__float80': 'long double'
+  compoundStmt
+    variable: '__float80: long double'
      name: x
      init:
       floatLiteral: 'long double' (value: 1)
 
-    assignExpr: '__float80': 'long double'
+    assignExpr: '__float80: long double'
      lhs:
-      declRefExpr: '__float80': 'long double' lvalue
+      declRefExpr: '__float80: long double' lvalue
        name: x
      rhs:
       floatLiteral: 'long double' (value: 1)
@@ -40,20 +40,18 @@ fnDef: 'fn () void'
       declRefExpr: '_Complex long double' lvalue
        name: z
      rhs:
-      implicit cast: (ComplexFloatCast) '_Complex long double'
-        imaginaryLiteral: '_Complex double' (value: 0 + 1i)
-         operand:
-          floatLiteral: 'long double'
+      imaginaryLiteral: '_Complex long double' (value: 0 + 1i)
+       operand:
+        floatLiteral: 'long double'
 
     assignExpr: '_Complex long double'
      lhs:
       declRefExpr: '_Complex long double' lvalue
        name: z
      rhs:
-      implicit cast: (ComplexFloatCast) '_Complex long double'
-        imaginaryLiteral: '_Complex double' (value: 0 + 1i)
-         operand:
-          floatLiteral: 'long double'
+      imaginaryLiteral: '_Complex long double' (value: 0 + 1i)
+       operand:
+        floatLiteral: 'long double'
 
     implicit returnStmt: 'void'
 

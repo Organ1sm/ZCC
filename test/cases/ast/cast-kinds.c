@@ -26,7 +26,7 @@ unionDecl: 'union U'
 fnDef: 'fn () int'
  name: bar
  body:
-  compoundStmt: 'void'
+  compoundStmt
     returnStmt: 'int'
      expr:
       intLiteral: 'int' (value: 42)
@@ -34,7 +34,7 @@ fnDef: 'fn () int'
 fnDef: 'fn () void'
  name: foo
  body:
-  compoundStmt: 'void'
+  compoundStmt
     variable: 'int'
      name: x
 
@@ -66,7 +66,7 @@ fnDef: 'fn () void'
       declRefExpr: '*int' lvalue
        name: p
      rhs:
-      implicit cast: (ArrayToPointer) '*d[2]int'
+      implicit cast: (ArrayToPointer) 'decayed *[2]int'
         declRefExpr: '[2]int' lvalue
          name: arr
 

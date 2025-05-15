@@ -19,9 +19,9 @@ implicit typedef: 'struct __NSConstantString_tag'
 variable: 'const int'
  name: a
 
-variable: 'typeof(<expr>: const int)'
+variable: 'const typeof(<expr>: const int)'
  name: b
 
-variable: 'typeof(<expr>: int)'
+variable: 'typeof(<expr>: const int)'
  name: c
 

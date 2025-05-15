@@ -692,7 +692,7 @@ fn usualArithmeticConversion(lhs: *Result, rhs: *Result, p: *Parser, token: Toke
     // if either is a float cast to that type
     const lhsIsFloat = lhs.qt.isFloat(p.comp);
     const rhsIsFloat = rhs.qt.isFloat(p.comp);
-    if (lhsIsFloat or rhsIsFloat) {
+    if (lhsIsFloat and rhsIsFloat) {
         const lhsIsComplex = lhs.qt.is(p.comp, .complex);
         const rhsIsComplex = rhs.qt.is(p.comp, .complex);
 
@@ -862,6 +862,7 @@ pub fn castType(res: *Result, p: *Parser, destQt: QualType, operandToken: TokenI
                     res.qt = res.qt.toReal(p.comp);
                     try res.implicitCast(p, .ComplexIntToReal, lparen);
                 }
+                explicitCK = .IntToBool;
             } else if (srcSK.isFloat()) {
                 if (!srcSK.isReal()) {
                     res.qt = res.qt.toReal(p.comp);

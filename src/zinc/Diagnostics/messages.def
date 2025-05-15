@@ -2525,3 +2525,8 @@ complex_conj
 constexpr_requires_const
     .msg = "constexpr variable must be initialized by a constant expression"
     .kind = .@"error"
+
+invalid_type_underlying_enum
+    .msg = "non-integral type '{s}' is an invalid underlying type"
+    .extra = .str
+    .kind = .@"error"

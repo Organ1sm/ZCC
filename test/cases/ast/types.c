@@ -31,7 +31,7 @@ variable: 'const volatile int'
 fnProto: 'fn (a: restrict *int, b: restrict *int, c: restrict *int) int'
  name: foo
 
-fnProto: 'fn (n: int, bar: *d[<expr>]int) int'
+fnProto: 'fn (n: int, bar: decayed *[<expr>]int) int'
  name: bar
 
 typedef: 'void'
@@ -44,36 +44,36 @@ fnProto: 'attributed(fn () void)'
 typedef: 'int'
  name: A
 
-typedef: 'A': 'int'
+typedef: 'A: int'
  name: B
 
-typedef: 'A': 'int'
+typedef: 'A: int'
  name: C
 
-typedef: 'C': 'int'
+typedef: 'C: A: int'
  name: B
 
 typedef: '[2]int'
  name: I
 
-fnDef: 'fn (a: *d[2]const int, b: *d[2]const int) void'
+fnDef: 'fn (a: decayed *const I: [2]int, b: decayed *const I: [2]int) void'
  name: qux
  body:
-  compoundStmt: 'void'
-    addAssignExpr: 'I': '*d[2]const int'
+  compoundStmt
+    addAssignExpr: 'decayed *const I: [2]int'
      lhs:
-      declRefExpr: 'I': '*d[2]const int' lvalue
+      declRefExpr: 'decayed *const I: [2]int' lvalue
        name: b
      rhs:
-      implicit cast: (IntToPointer) 'I': '*d[2]const int'
+      implicit cast: (IntToPointer) 'decayed *const I: [2]int'
         intLiteral: 'int' (value: 1)
 
-    addAssignExpr: 'I': '*d[2]const int'
+    addAssignExpr: 'decayed *const I: [2]int'
      lhs:
-      declRefExpr: 'I': '*d[2]const int' lvalue
+      declRefExpr: 'decayed *const I: [2]int' lvalue
        name: a
      rhs:
-      implicit cast: (IntToPointer) 'I': '*d[2]const int'
+      implicit cast: (IntToPointer) 'decayed *const I: [2]int'
         intLiteral: 'int' (value: 1)
 
     implicit returnStmt: 'void'

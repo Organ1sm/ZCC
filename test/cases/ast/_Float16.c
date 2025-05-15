@@ -16,16 +16,16 @@ implicit typedef: 'struct __NSConstantString_tag'
 implicit typedef: 'long double'
  name: __float80
 
-typedef: '__builtin_va_list': '[1]struct __va_list_tag'
+typedef: '__builtin_va_list: [1]struct __va_list_tag'
  name: va_list
 
-typedef: '__builtin_va_list': '[1]struct __va_list_tag'
+typedef: '__builtin_va_list: [1]struct __va_list_tag'
  name: __gnuc_va_list
 
 fnDef: 'fn (x: _Float16, y: _Float16) _Float16'
  name: foo
  body:
-  compoundStmt: 'void'
+  compoundStmt
     returnStmt: '_Float16'
      expr:
       addExpr: '_Float16'
@@ -38,18 +38,18 @@ fnDef: 'fn (x: _Float16, y: _Float16) _Float16'
           declRefExpr: '_Float16' lvalue
            name: y
 
-fnDef: 'fn (x: int) void'
+fnDef: 'fn (x: int, ...) void'
  name: bar
  body:
-  compoundStmt: 'void'
-    variable: 'va_list': '[1]struct __va_list_tag'
+  compoundStmt
+    variable: 'va_list: __builtin_va_list: [1]struct __va_list_tag'
      name: va
 
     builtinCallExpr: 'void'
      name: __builtin_va_start
      args:
-      implicit cast: (ArrayToPointer) 'va_list': '*d[1]struct __va_list_tag'
-        declRefExpr: 'va_list': '[1]struct __va_list_tag' lvalue
+      implicit cast: (ArrayToPointer) 'decayed *va_list: __builtin_va_list: [1]struct __va_list_tag'
+        declRefExpr: 'va_list: __builtin_va_list: [1]struct __va_list_tag' lvalue
          name: va
       declRefExpr: 'int' lvalue
        name: x
@@ -57,8 +57,8 @@ fnDef: 'fn (x: int) void'
     builtinCallExpr: 'void'
      name: __builtin_va_end
      args:
-      implicit cast: (ArrayToPointer) 'va_list': '*d[1]struct __va_list_tag'
-        declRefExpr: 'va_list': '[1]struct __va_list_tag' lvalue
+      implicit cast: (ArrayToPointer) 'decayed *va_list: __builtin_va_list: [1]struct __va_list_tag'
+        declRefExpr: 'va_list: __builtin_va_list: [1]struct __va_list_tag' lvalue
          name: va
 
     implicit returnStmt: 'void'
@@ -66,7 +66,7 @@ fnDef: 'fn (x: int) void'
 fnDef: 'fn () void'
  name: quux
  body:
-  compoundStmt: 'void'
+  compoundStmt
     variable: '_Float16'
      name: f
      init:
@@ -74,8 +74,8 @@ fnDef: 'fn () void'
 
     callExpr: 'void'
      callee:
-      implicit cast: (FunctionToPointer) '*fn (x: int) void'
-        declRefExpr: 'fn (x: int) void' lvalue
+      implicit cast: (FunctionToPointer) '*fn (x: int, ...) void'
+        declRefExpr: 'fn (x: int, ...) void' lvalue
          name: bar
      args:
       intLiteral: 'int' (value: 1)
@@ -88,7 +88,7 @@ fnDef: 'fn () void'
 fnDef: 'fn () void'
  name: conversions
  body:
-  compoundStmt: 'void'
+  compoundStmt
     variable: 'double'
      name: d
      init:

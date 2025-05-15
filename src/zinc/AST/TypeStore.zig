@@ -759,6 +759,7 @@ pub const QualType = packed struct(u32) {
     }
 
     pub fn decay(qt: QualType, comp: *Compilation) !QualType {
+        if (qt.isInvalid()) return .invalid;
         switch (qt.base(comp).type) {
             .array => |arrayTy| {
                 // Copy const and volatile to the element
@@ -2479,7 +2480,11 @@ pub const Builder = struct {
         if (b.atomicType != null) return b.parser.errStr(.cannot_combine_spec, sourceToken, "_Atomic");
         if (b.typedef) return b.parser.errStr(.cannot_combine_spec, sourceToken, "type-name");
         if (b.typeof) return b.parser.errStr(.cannot_combine_spec, sourceToken, "typeof");
-        if (b.type != .None) return b.parser.errStr(.cannot_combine_with_typeof, sourceToken, @tagName(b.type));
+        if (b.type != .None) return b.parser.errStr(
+            .cannot_combine_with_typeof,
+            sourceToken,
+            if (b.type.toString(b.parser.comp.langOpts)) |str| str else @tagName(b.type),
+        );
         b.typeof = true;
         b.type = .{ .other = new };
     }
@@ -2506,7 +2511,11 @@ pub const Builder = struct {
 
     pub fn combine(b: *Builder, new: Builder.Specifier, sourceToken: TokenIndex) !void {
         if (b.typeof)
-            return b.parser.errStr(.cannot_combine_with_typeof, sourceToken, @tagName(new));
+            return b.parser.errStr(
+                .cannot_combine_with_typeof,
+                sourceToken,
+                if (new.toString(b.parser.comp.langOpts)) |str| str else @tagName(new),
+            );
 
         if (b.atomicType != null)
             return b.parser.errStr(.cannot_combine_spec, sourceToken, "_Atomic");
@@ -2634,8 +2643,8 @@ pub const Builder = struct {
 
             .Char => switch (b.type) {
                 .None => .Char,
-                .Unsigned => .SChar,
-                .Signed => .Char,
+                .Unsigned => .UChar,
+                .Signed => .SChar,
                 .Complex => .ComplexChar,
                 .ComplexSigned => .SChar,
                 .ComplexUnsigned => .UChar,

@@ -1437,7 +1437,10 @@ fn parseStaticAssert(p: *Parser) Error!bool {
         try p.errStr(.pre_c23_compat, staticAssert, "'_Static_assert' with no message");
     }
 
+    const isIntExpr = res.qt.isInvalid() or res.qt.isInt(p.comp);
     try res.castToBool(p, .bool, resToken);
+    if (!isIntExpr) res.value = .{};
+
     if (res.value.isNone()) {
         if (!res.qt.isInvalid())
             try p.errToken(.static_assert_not_constant, resToken);
@@ -1884,7 +1887,7 @@ fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec, attrBufferTop: usize, de
                 ID.d.qt = .invalid;
             }
         },
-        .other => {
+        .other => if (declSpec.storageClass == .typedef) {
             if (declSpec.autoType) |tokenIdx| {
                 try p.errStr(.auto_type_not_allowed, tokenIdx, "typedef");
                 ID.d.qt = .invalid;
@@ -1905,7 +1908,7 @@ fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec, attrBufferTop: usize, de
     }
 
     if (p.eat(.Equal)) |eq| {
-        if (declSpec.storageClass == .typedef or (ID.d.declaratorType != .func and ID.d.qt.is(p.comp, .func)))
+        if (declSpec.storageClass == .typedef or (ID.d.declaratorType == .func and ID.d.qt.is(p.comp, .func)))
             try p.errToken(.illegal_initializer, eq)
         else if (ID.d.qt.get(p.comp, .array)) |arrayTy| {
             if (arrayTy.len == .variable) try p.errToken(.vla_init, eq);
@@ -2755,7 +2758,8 @@ fn parseEnumSpec(p: *Parser) Error!QualType {
 
     const maybeIdent = try p.eatIdentifier();
     const fixedQt = if (p.eat(.Colon)) |colon| fixed: {
-        const fixed = (try p.parseTypeName()) orelse {
+        const tyStart = p.tokenIdx;
+        const fixed = (try p.parseSpecQuals()) orelse {
             if (p.record.kind != .Invalid) {
                 // This is a bit field.
                 p.tokenIdx -= 1;
@@ -2765,6 +2769,13 @@ fn parseEnumSpec(p: *Parser) Error!QualType {
             try p.errToken(.enum_fixed, colon);
             break :fixed null;
         };
+
+        const fixedSK = fixed.scalarKind(p.comp);
+        if (fixedSK == .Enum or !fixedSK.isInt()) {
+            try p.errStr(.invalid_type_underlying_enum, tyStart, try p.typeStr(fixed));
+            break :fixed null;
+        }
+
         try p.errToken(.enum_fixed, colon);
         break :fixed fixed;
     } else null;
@@ -3022,8 +3033,8 @@ const Enumerator = struct {
     fn getTypeSpecifier(e: *const Enumerator, p: *Parser, isPacked: bool, token: TokenIndex) !QualType {
         if (p.comp.fixedEnumTagType()) |tagSpecifier| return tagSpecifier;
 
-        const charWidth = Type.IntType.Int.bits(p.comp);
-        const shortWidth = Type.IntType.Int.bits(p.comp);
+        const charWidth = Type.IntType.SChar.bits(p.comp);
+        const shortWidth = Type.IntType.Short.bits(p.comp);
         const intWidth = Type.IntType.Int.bits(p.comp);
         if (e.numNegativeBits > 0) {
             if (isPacked and e.numNegativeBits <= charWidth and e.numPositiveBits < charWidth)
@@ -3618,10 +3629,10 @@ fn directDeclarator(
 /// param-decls : param-decl (',' param-decl)* (',' '...')
 /// paramDecl : decl-specifier (declarator | abstract-declarator)
 fn parseParamDecls(p: *Parser) Error!?[]Type.Func.Param {
-    const paramBufferTop = p.paramBuffer.items.len;
-
     try p.symStack.pushScope();
     defer p.symStack.popScope();
+
+    const paramBufferTop = p.paramBuffer.items.len;
 
     while (true) {
         const attrBufferTop = p.attrBuffer.len;

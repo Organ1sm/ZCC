@@ -11,4 +11,4 @@ void foo(void) {
 
 #define EXPECTED_ERRORS "vectors.c:1:40: error: invalid vector element type 'float *'" \
     "vectors.c:2:39: error: vector size not an integral multiple of component size" \
-    "vectors.c:9:5: error: cannot cast to non arithmetic or pointer type '__attribute__((__vector_size__(2 * sizeof(float)))) float (vector of 2 'float' values)'" \
+    "vectors.c:9:5: error: cannot cast to non arithmetic or pointer type 'f2v'" \
