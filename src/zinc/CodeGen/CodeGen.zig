@@ -9,7 +9,7 @@ const Interner = backend.Interner;
 const Compilation = @import("../Basic/Compilation.zig");
 const Tree = @import("../AST/AST.zig");
 const Node = Tree.Node;
-const Type = @import("../AST/Type.zig");
+const QualType = @import("../AST/TypeStore.zig").QualType;
 const Value = @import("../AST/Value.zig");
 const StringId = @import("../Basic/StringInterner.zig").StringId;
 const Builtins = @import("../Builtins.zig");
@@ -43,7 +43,7 @@ symbols: std.ArrayListUnmanaged(Symbol) = .{},
 retNodes: std.ArrayListUnmanaged(Inst.Phi.Input) = .{},
 phiNodes: std.ArrayListUnmanaged(Inst.Phi.Input) = .{},
 recordElemBuffer: std.ArrayListUnmanaged(Interner.Ref) = .{},
-recordCache: std.AutoHashMapUnmanaged(*Type.Record, Interner.Ref) = .{},
+recordCache: std.AutoHashMapUnmanaged(QualType, Interner.Ref) = .{},
 
 condDummyTy: ?Interner.Ref = null,
 boolInvert: bool = false,
@@ -113,81 +113,83 @@ pub fn generateIR(tree: *const Tree) Compilation.Error!IR {
     return c.builder.finish();
 }
 
-fn genType(c: *CodeGen, baseTy: Type) !Interner.Ref {
-    var key: Interner.Key = undefined;
-    const ty = baseTy.canonicalize(.standard);
-    switch (ty.specifier) {
-        .Void => return .void,
-        .Bool => return .i1,
-        .Struct => {
-            if (c.recordCache.get(ty.data.record)) |some| return some;
+fn genType(c: *CodeGen, qt: QualType) !Interner.Ref {
+    const base = qt.base(c.comp);
+    const key: Interner.Key = switch (base.type) {
+        .void => return .void,
+        .bool => return .i1,
+        .@"struct" => |record| {
+            if (c.recordCache.get(base.qt.unqualified())) |some| return some;
 
             const elemBufferTop = c.recordElemBuffer.items.len;
             defer c.recordElemBuffer.items.len = elemBufferTop;
 
-            for (ty.data.record.fields) |field| {
-                if (!field.isRegularField())
+            for (record.fields) |field| {
+                if (field.bitWidth != .null)
                     return c.fail("TODO lower struct bitfields", .{});
 
                 // TODO handle padding bits
-                const fieldRef = try c.genType(field.ty);
+                const fieldRef = try c.genType(field.qt);
                 try c.recordElemBuffer.append(c.builder.gpa, fieldRef);
             }
 
-            return c.builder.interner.put(c.builder.gpa, .{
+            const recordTy = try c.builder.interner.put(c.builder.gpa, .{
                 .recordTy = c.recordElemBuffer.items[elemBufferTop..],
             });
+            try c.recordCache.put(c.comp.gpa, base.qt.unqualified(), recordTy);
+            return recordTy;
         },
 
-        .Union => {
+        .@"union" => {
             return c.fail("TODO lower union types", .{});
         },
 
-        else => {},
-    }
+        .pointer => return .ptr,
+        .func => return .func,
 
-    if (ty.isPointer())
-        return .ptr;
-
-    if (ty.isFunc())
-        return .func;
-
-    if (!ty.isReal())
-        return c.fail("TODO lower complex types", .{});
-
-    if (ty.isInt()) {
-        const bits = ty.bitSizeof(c.comp).?;
-        key = .{ .intTy = @intCast(bits) };
-    } else if (ty.isFloat()) {
-        const bits = ty.bitSizeof(c.comp).?;
-        key = .{ .floatTy = @intCast(bits) };
-    } else if (ty.isArray()) {
-        const elem = try c.genType(ty.getElemType());
-        key = .{ .arrayTy = .{ .child = elem, .len = ty.arrayLen().? } };
-    } else if (ty.isVector()) {
-        const elem = try c.genType(ty.getElemType());
-        key = .{ .vectorTy = .{ .child = elem, .len = @intCast(ty.data.array.len) } };
-    } else if (ty.is(.NullPtrTy)) {
-        return c.fail("TODO lower nullptr_t", .{});
-    }
+        .complex => return c.fail("TODO lower complex types", .{}),
+        .atomic => return c.fail("TODO lower atomic types", .{}),
+        .@"enum" => |@"enum"| return c.genType(@"enum".tag),
+        .int => |int| .{ .intTy = int.bits(c.comp) },
+        .bitInt => |bitInt| .{ .intTy = bitInt.bits },
+        .float => |float| .{ .floatTy = float.bits(c.comp) },
+        .array => |array| blk: {
+            switch (array.len) {
+                .fixed, .static => |len| {
+                    const elem = try c.genType(array.elem);
+                    break :blk .{ .arrayTy = .{ .child = elem, .len = len } };
+                },
+                .variable, .unspecifiedVariable => return c.fail("TODO VLAs", .{}),
+                .incomplete => unreachable,
+            }
+        },
+        .vector => |vector| blk: {
+            const elem = try c.genType(vector.elem);
+            break :blk .{ .vectorTy = .{ .child = elem, .len = vector.len } };
+        },
+        .nullptrTy => {
+            return c.fail("TODO lower nullptr_t", .{});
+        },
+        .attributed, .typeof, .typedef => unreachable,
+    };
 
     return c.builder.interner.put(c.builder.gpa, key);
 }
 
 fn genFn(c: *CodeGen, def: Node.FnDef) Error!void {
     const name = c.tree.tokenSlice(def.nameToken);
-    const funcTy = def.type.canonicalize(.standard);
+    const funcTy = def.qt.base(c.comp).type.func;
     c.retNodes.items.len = 0;
 
     try c.builder.startFn();
 
-    const params = funcTy.getParams();
     // Generate parameters
-    for (params) |param| {
+    for (funcTy.params) |param| {
         // TODO handle calling convention here
-        const arg = try c.builder.addArg(try c.genType(param.ty));
-        const size: u32 = @intCast(param.ty.sizeof(c.comp).?); // TODO add error in parser
-        const @"align" = param.ty.alignof(c.comp);
+        const paramQt = param.qt;
+        const arg = try c.builder.addArg(try c.genType(paramQt));
+        const size: u32 = @intCast(paramQt.sizeof(c.comp)); // TODO add error in parser
+        const @"align" = paramQt.alignof(c.comp);
         const alloc = try c.builder.addAlloc(size, @"align");
 
         try c.builder.addStore(alloc, arg);
@@ -208,18 +210,18 @@ fn genFn(c: *CodeGen, def: Node.FnDef) Error!void {
         c.builder.body.items.len -= 1;
         _ = try c.builder.addInst(.Ret, .{ .un = c.retNodes.items[0].value }, .noreturn);
     } else {
-        const phi = try c.builder.addPhi(c.retNodes.items, try c.genType(funcTy.getReturnType()));
+        const phi = try c.builder.addPhi(c.retNodes.items, try c.genType(funcTy.returnType));
         _ = try c.builder.addInst(.Ret, .{ .un = phi }, .noreturn);
     }
     try c.builder.finishFn(name);
 }
 
-fn addUn(c: *CodeGen, tag: Inst.Tag, operand: IR.Ref, ty: Type) !IR.Ref {
-    return c.builder.addInst(tag, .{ .un = operand }, try c.genType(ty));
+fn addUn(c: *CodeGen, tag: Inst.Tag, operand: IR.Ref, qt: QualType) !IR.Ref {
+    return c.builder.addInst(tag, .{ .un = operand }, try c.genType(qt));
 }
 
-fn addBin(c: *CodeGen, tag: Inst.Tag, lhs: IR.Ref, rhs: IR.Ref, ty: Type) !IR.Ref {
-    return c.builder.addInst(tag, .{ .bin = .{ .lhs = lhs, .rhs = rhs } }, try c.genType(ty));
+fn addBin(c: *CodeGen, tag: Inst.Tag, lhs: IR.Ref, rhs: IR.Ref, qt: QualType) !IR.Ref {
+    return c.builder.addInst(tag, .{ .bin = .{ .lhs = lhs, .rhs = rhs } }, try c.genType(qt));
 }
 
 fn addBranch(c: *CodeGen, cond: IR.Ref, trueLabel: IR.Ref, falseLabel: IR.Ref) !void {
@@ -248,7 +250,7 @@ fn genStmt(c: *CodeGen, node: Node.Index) Error!void {
 
 fn genExpr(c: *CodeGen, nodeIdx: Node.Index) Error!IR.Ref {
     if (c.tree.valueMap.get(nodeIdx)) |val|
-        return c.builder.addConstant(val.ref(), try c.genType(nodeIdx.type(c.tree)));
+        return c.builder.addConstant(val.ref(), try c.genType(nodeIdx.qt(c.tree)));
 
     const node = nodeIdx.get(c.tree);
     switch (node) {
@@ -282,15 +284,17 @@ fn genExpr(c: *CodeGen, nodeIdx: Node.Index) Error!IR.Ref {
                 try c.genVar(variable);
                 return .none;
             }
-            const size: u32 = @intCast(variable.type.sizeof(c.comp).?);
-            const @"align" = variable.type.alignof(c.comp);
+
+            const varQt = variable.qt;
+            const size: u32 = @intCast(varQt.sizeof(c.comp));
+            const @"align" = varQt.alignof(c.comp);
             const alloc = try c.builder.addAlloc(size, @"align");
             const name = try c.comp.internString(c.tree.tokenSlice(variable.nameToken));
 
             try c.symbols.append(c.comp.gpa, .{ .name = name, .value = alloc });
 
             if (variable.initializer) |init|
-                try c.genInitializer(alloc, variable.type, init);
+                try c.genInitializer(alloc, varQt, init);
         },
 
         .labeledStmt => |labeled| {
@@ -336,7 +340,7 @@ fn genExpr(c: *CodeGen, nodeIdx: Node.Index) Error!IR.Ref {
 
         .switchStmt => |@"switch"| {
             var wipSwitch: WipSwitch = .{
-                .size = @"switch".cond.type(c.tree).sizeof(c.comp).?,
+                .size = @"switch".cond.qt(c.tree).sizeof(c.comp),
             };
             defer wipSwitch.cases.deinit(c.builder.gpa);
 
@@ -510,7 +514,7 @@ fn genExpr(c: *CodeGen, nodeIdx: Node.Index) Error!IR.Ref {
                 .none => {},
                 .implicit => |zeroes| {
                     if (zeroes) {
-                        const operand = try c.builder.addConstant(.zero, try c.genType(@"return".returnType));
+                        const operand = try c.builder.addConstant(.zero, try c.genType(@"return".returnQt));
                         try c.retNodes.append(c.comp.gpa, .{ .value = operand, .label = c.builder.currentLabel });
                     }
                     // No need to emit a jump since an implicit return_stmt is always the last statement.
@@ -554,59 +558,59 @@ fn genExpr(c: *CodeGen, nodeIdx: Node.Index) Error!IR.Ref {
 
         .equalExpr => |bin| {
             const cmp = try c.genComparison(bin, .CmpEQ);
-            return c.addUn(.Zext, cmp, bin.type);
+            return c.addUn(.Zext, cmp, bin.qt);
         },
 
         .notEqualExpr => |bin| {
             const cmp = try c.genComparison(bin, .CmpNE);
-            return c.addUn(.Zext, cmp, bin.type);
+            return c.addUn(.Zext, cmp, bin.qt);
         },
 
         .lessThanExpr => |bin| {
             const cmp = try c.genComparison(bin, .CmpLT);
-            return c.addUn(.Zext, cmp, bin.type);
+            return c.addUn(.Zext, cmp, bin.qt);
         },
 
         .lessThanEqualExpr => |bin| {
             const cmp = try c.genComparison(bin, .CmpLTE);
-            return c.addUn(.Zext, cmp, bin.type);
+            return c.addUn(.Zext, cmp, bin.qt);
         },
 
         .greaterThanExpr => |bin| {
             const cmp = try c.genComparison(bin, .CmpGT);
-            return c.addUn(.Zext, cmp, bin.type);
+            return c.addUn(.Zext, cmp, bin.qt);
         },
 
         .greaterThanEqualExpr => |bin| {
             const cmp = try c.genComparison(bin, .CmpGTE);
-            return c.addUn(.Zext, cmp, bin.type);
+            return c.addUn(.Zext, cmp, bin.qt);
         },
 
         .shlExpr => |bin| return c.genBinOp(bin, .BitShl),
         .shrExpr => |bin| return c.genBinOp(bin, .BitShr),
 
         .addExpr => |bin| {
-            if (bin.type.isPointer()) {
-                const lhsTy = bin.lhs.type(c.tree);
-                if (lhsTy.isPointer()) {
+            if (bin.qt.is(c.comp, .pointer)) {
+                const lhsTy = bin.lhs.qt(c.tree);
+                if (lhsTy.is(c.comp, .pointer)) {
                     const ptr = try c.genExpr(bin.lhs);
                     const offset = try c.genExpr(bin.rhs);
-                    return c.genPtrArithmetic(ptr, offset, bin.rhs.type(c.tree), bin.type);
+                    return c.genPtrArithmetic(ptr, offset, bin.rhs.qt(c.tree), bin.qt);
                 } else {
                     const offset = try c.genExpr(bin.lhs);
                     const ptr = try c.genExpr(bin.rhs);
                     const offsetTy = lhsTy;
-                    return c.genPtrArithmetic(ptr, offset, offsetTy, bin.type);
+                    return c.genPtrArithmetic(ptr, offset, offsetTy, bin.qt);
                 }
             }
             return c.genBinOp(bin, .Add);
         },
 
         .subExpr => |bin| {
-            if (bin.type.isPointer()) {
+            if (bin.qt.is(c.comp, .pointer)) {
                 const ptr = try c.genExpr(bin.lhs);
                 const offset = try c.genExpr(bin.rhs);
-                return c.genPtrArithmetic(ptr, offset, bin.rhs.type(c.tree), bin.type);
+                return c.genPtrArithmetic(ptr, offset, bin.rhs.qt(c.tree), bin.qt);
             }
             return c.genBinOp(bin, .Sub);
         },
@@ -622,56 +626,56 @@ fn genExpr(c: *CodeGen, nodeIdx: Node.Index) Error!IR.Ref {
                 return c.genExpr(un.operand);
 
             const operand = try c.genLval(un.operand);
-            return c.addUn(.Load, operand, un.type);
+            return c.addUn(.Load, operand, un.qt);
         },
 
         .plusExpr => |un| return c.genExpr(un.operand),
         .negateExpr => |un| {
-            const zero = try c.builder.addConstant(.zero, try c.genType(un.type));
+            const zero = try c.builder.addConstant(.zero, try c.genType(un.qt));
             const operand = try c.genExpr(un.operand);
-            return c.addBin(.Sub, zero, operand, un.type);
+            return c.addBin(.Sub, zero, operand, un.qt);
         },
 
         .bitNotExpr => |un| {
             const operand = try c.genExpr(un.operand);
-            return c.addUn(.BitNot, operand, un.type);
+            return c.addUn(.BitNot, operand, un.qt);
         },
         .boolNotExpr => |un| {
-            const zero = try c.builder.addConstant(.zero, try c.genType(un.type));
+            const zero = try c.builder.addConstant(.zero, try c.genType(un.qt));
             const operand = try c.genExpr(un.operand);
-            return c.addBin(.CmpNE, zero, operand, un.type);
+            return c.addBin(.CmpNE, zero, operand, un.qt);
         },
 
         .preIncExpr => |un| {
             const operand = try c.genLval(un.operand);
-            const val = try c.addUn(.Load, operand, un.type);
-            const one = try c.builder.addConstant(.one, try c.genType(un.type));
-            const plusOne = try c.addBin(.Add, val, one, un.type);
+            const val = try c.addUn(.Load, operand, un.qt);
+            const one = try c.builder.addConstant(.one, try c.genType(un.qt));
+            const plusOne = try c.addBin(.Add, val, one, un.qt);
             try c.builder.addStore(operand, plusOne);
             return plusOne;
         },
         .preDecExpr => |un| {
             const operand = try c.genLval(un.operand);
-            const val = try c.addUn(.Load, operand, un.type);
-            const one = try c.builder.addConstant(.one, try c.genType(un.type));
-            const decOne = try c.addBin(.Sub, val, one, un.type);
+            const val = try c.addUn(.Load, operand, un.qt);
+            const one = try c.builder.addConstant(.one, try c.genType(un.qt));
+            const decOne = try c.addBin(.Sub, val, one, un.qt);
             try c.builder.addStore(operand, decOne);
             return decOne;
         },
 
         .postIncExpr => |un| {
             const operand = try c.genLval(un.operand);
-            const val = try c.addUn(.Load, operand, un.type);
-            const one = try c.builder.addConstant(.one, try c.genType(un.type));
-            const plusOne = try c.addBin(.Add, val, one, un.type);
+            const val = try c.addUn(.Load, operand, un.qt);
+            const one = try c.builder.addConstant(.one, try c.genType(un.qt));
+            const plusOne = try c.addBin(.Add, val, one, un.qt);
             try c.builder.addStore(operand, plusOne);
             return val;
         },
         .postDecExpr => |un| {
             const operand = try c.genLval(un.operand);
-            const val = try c.addUn(.Load, operand, un.type);
-            const one = try c.builder.addConstant(.one, try c.genType(un.type));
-            const decOne = try c.addBin(.Sub, val, one, un.type);
+            const val = try c.addUn(.Load, operand, un.qt);
+            const one = try c.builder.addConstant(.one, try c.genType(un.qt));
+            const decOne = try c.addBin(.Sub, val, one, un.qt);
             try c.builder.addStore(operand, decOne);
             return val;
         },
@@ -687,7 +691,7 @@ fn genExpr(c: *CodeGen, nodeIdx: Node.Index) Error!IR.Ref {
 
             .LValToRVal => {
                 const operand = try c.genLval(cast.operand);
-                return c.addUn(.Load, operand, cast.type);
+                return c.addUn(.Load, operand, cast.qt);
             },
 
             .FunctionToPointer, .ArrayToPointer => {
@@ -696,29 +700,29 @@ fn genExpr(c: *CodeGen, nodeIdx: Node.Index) Error!IR.Ref {
 
             .IntCast => {
                 const operand = try c.genExpr(cast.operand);
-                const srcTy = cast.operand.type(c.tree);
-                const srcBits = srcTy.bitSizeof(c.comp).?;
-                const destBits = cast.type.bitSizeof(c.comp).?;
+                const srcTy = cast.operand.qt(c.tree);
+                const srcBits = srcTy.bitSizeof(c.comp);
+                const destBits = cast.qt.bitSizeof(c.comp);
                 if (srcBits == destBits) {
                     return operand;
                 } else if (srcBits < destBits) {
-                    if (srcTy.isUnsignedInt(c.comp))
-                        return c.addUn(.Zext, operand, cast.type)
+                    if (srcTy.isUnsigned(c.comp))
+                        return c.addUn(.Zext, operand, cast.qt)
                     else
-                        return c.addUn(.Sext, operand, cast.type);
+                        return c.addUn(.Sext, operand, cast.qt);
                 } else {
-                    return c.addUn(.Trunc, operand, cast.type);
+                    return c.addUn(.Trunc, operand, cast.qt);
                 }
             },
 
             .BoolToInt => {
                 const operand = try c.genExpr(cast.operand);
-                return c.addUn(.Zext, operand, cast.type);
+                return c.addUn(.Zext, operand, cast.qt);
             },
 
             .PointerToBool, .IntToBool, .FloatToBool => {
                 const lhs = try c.genExpr(cast.operand);
-                const rhs = try c.builder.addConstant(.zero, try c.genType(cast.type));
+                const rhs = try c.builder.addConstant(.zero, try c.genType(cast.qt));
                 return c.builder.addInst(.CmpNE, .{ .bin = .{ .lhs = lhs, .rhs = rhs } }, .i1);
             },
 
@@ -741,6 +745,8 @@ fn genExpr(c: *CodeGen, nodeIdx: Node.Index) Error!IR.Ref {
             .NullToPointer,
             .UnionCast,
             .VectorSplat,
+            .NonAtomicToAtomic,
+            .AtomicToNonAtomic,
             => return c.fail("TODO CodeGen gen CastKind {}\n", .{cast.kind}),
         },
 
@@ -757,7 +763,7 @@ fn genExpr(c: *CodeGen, nodeIdx: Node.Index) Error!IR.Ref {
             const thenLabel = try c.builder.makeLabel("ternary.then");
             const elseLabel = try c.builder.makeLabel("ternary.else");
             const endLabel = try c.builder.makeLabel("ternary.end");
-            const condTy = conditional.cond.type(c.tree);
+            const condTy = conditional.cond.qt(c.tree);
             {
                 const oldCondDummyTy = c.condDummyTy;
                 defer c.condDummyTy = oldCondDummyTy;
@@ -784,7 +790,7 @@ fn genExpr(c: *CodeGen, nodeIdx: Node.Index) Error!IR.Ref {
                 .{ .value = thenVal, .label = thenExit },
                 .{ .value = elseVal, .label = elseExit },
             };
-            return c.builder.addPhi(&phiBuffer, try c.genType(conditional.type));
+            return c.builder.addPhi(&phiBuffer, try c.genType(conditional.qt));
         },
 
         .condDummyExpr => return c.condDummyRef,
@@ -819,7 +825,7 @@ fn genExpr(c: *CodeGen, nodeIdx: Node.Index) Error!IR.Ref {
                 .{ .value = thenVal, .label = thenExit },
                 .{ .value = elseVal, .label = elseExit },
             };
-            return c.builder.addPhi(&phiBuffer, try c.genType(conditional.type));
+            return c.builder.addPhi(&phiBuffer, try c.genType(conditional.qt));
         },
 
         .callExpr => |call| return c.genCall(call),
@@ -827,7 +833,7 @@ fn genExpr(c: *CodeGen, nodeIdx: Node.Index) Error!IR.Ref {
         .boolOrExpr => |bin| {
             if (c.tree.valueMap.get(bin.lhs)) |lhs| {
                 if (!lhs.toBool(c.comp))
-                    return c.builder.addConstant(.zero, try c.genType(bin.type));
+                    return c.builder.addConstant(.zero, try c.genType(bin.qt));
 
                 return c.genExpr(bin.rhs);
             }
@@ -850,13 +856,13 @@ fn genExpr(c: *CodeGen, nodeIdx: Node.Index) Error!IR.Ref {
             try c.builder.startBlock(exitLabel);
 
             const phi = try c.builder.addPhi(c.phiNodes.items[phiNodesTop..], .i1);
-            return c.addUn(.Zext, phi, bin.type);
+            return c.addUn(.Zext, phi, bin.qt);
         },
 
         .boolAndExpr => |bin| {
             if (c.tree.valueMap.get(bin.lhs)) |lhs| {
                 if (!lhs.toBool(c.comp))
-                    return c.builder.addConstant(.zero, try c.genType(bin.type));
+                    return c.builder.addConstant(.zero, try c.genType(bin.qt));
 
                 return c.genExpr(bin.rhs);
             }
@@ -878,7 +884,7 @@ fn genExpr(c: *CodeGen, nodeIdx: Node.Index) Error!IR.Ref {
             try c.builder.startBlock(exitLabel);
 
             const phi = try c.builder.addPhi(c.phiNodes.items[phiNodesTop..], .i1);
-            return c.addUn(.Zext, phi, bin.type);
+            return c.addUn(.Zext, phi, bin.qt);
         },
 
         .builtinChooseExpr => |conditional| {
@@ -966,10 +972,10 @@ fn genLval(c: *CodeGen, nodeIndex: Node.Index) Error!IR.Ref {
             if (literal.storageClass == .static or literal.threadLocal) {
                 return c.fail("TODO CodeGen.compound_literal_expr static or thread_local\n", .{});
             }
-            const size: u32 = @intCast(literal.type.sizeof(c.comp).?); // TODO add error in parser
-            const @"align" = literal.type.alignof(c.comp);
+            const size: u32 = @intCast(literal.qt.sizeof(c.comp)); // TODO add error in parser
+            const @"align" = literal.qt.alignof(c.comp);
             const alloc = try c.builder.addAlloc(size, @"align");
-            try c.genInitializer(alloc, literal.type, literal.initializer);
+            try c.genInitializer(alloc, literal.qt, literal.initializer);
             return alloc;
         },
 
@@ -1148,13 +1154,13 @@ fn genBoolExpr(c: *CodeGen, base: Node.Index, trueLabel: IR.Ref, falseLabel: IR.
 
     // Assume int operand.
     const lhs = try c.genExpr(node);
-    const rhs = try c.builder.addConstant(.zero, try c.genType(node.type(c.tree)));
+    const rhs = try c.builder.addConstant(.zero, try c.genType(node.qt(c.tree)));
     const cmp = try c.builder.addInst(.CmpNE, .{ .bin = .{ .lhs = lhs, .rhs = rhs } }, .i1);
     if (c.condDummyTy != null) c.condDummyRef = cmp;
     try c.addBranch(cmp, trueLabel, falseLabel);
 }
 
-fn genBuiltinCall(c: *CodeGen, builtin: Builtin, arg_nodes: []const Node.Index, ty: Type) Error!IR.Ref {
+fn genBuiltinCall(c: *CodeGen, builtin: Builtin, arg_nodes: []const Node.Index, ty: QualType) Error!IR.Ref {
     _ = arg_nodes;
     _ = ty;
     return c.fail("TODO CodeGen.genBuiltinCall {s}\n", .{Builtin.nameFromTag(builtin.tag).span()});
@@ -1214,13 +1220,13 @@ fn genCall(c: *CodeGen, call: Node.Call) Error!IR.Ref {
         .argsLen = @intCast(args.len),
         .argsPtr = args.ptr,
     };
-    return c.builder.addInst(.Call, .{ .call = callInst }, try c.genType(call.type));
+    return c.builder.addInst(.Call, .{ .call = callInst }, try c.genType(call.qt));
 }
 
 fn genCompoundAssign(c: *CodeGen, bin: Node.Binary, tag: Inst.Tag) Error!IR.Ref {
     const rhs = try c.genExpr(bin.rhs);
     const lhs = try c.genLval(bin.lhs);
-    const res = try c.addBin(tag, lhs, rhs, bin.type);
+    const res = try c.addBin(tag, lhs, rhs, bin.qt);
 
     try c.builder.addStore(lhs, res);
     return res;
@@ -1229,7 +1235,7 @@ fn genCompoundAssign(c: *CodeGen, bin: Node.Binary, tag: Inst.Tag) Error!IR.Ref 
 fn genBinOp(c: *CodeGen, bin: Node.Binary, tag: Inst.Tag) Error!IR.Ref {
     const lhs = try c.genExpr(bin.lhs);
     const rhs = try c.genExpr(bin.rhs);
-    return c.addBin(tag, lhs, rhs, bin.type);
+    return c.addBin(tag, lhs, rhs, bin.qt);
 }
 
 fn genComparison(c: *CodeGen, bin: Node.Binary, tag: Inst.Tag) Error!IR.Ref {
@@ -1239,9 +1245,9 @@ fn genComparison(c: *CodeGen, bin: Node.Binary, tag: Inst.Tag) Error!IR.Ref {
     return c.builder.addInst(tag, .{ .bin = .{ .lhs = lhs, .rhs = rhs } }, .i1);
 }
 
-fn genPtrArithmetic(c: *CodeGen, ptr: IR.Ref, offset: IR.Ref, offsetTy: Type, ty: Type) Error!IR.Ref {
+fn genPtrArithmetic(c: *CodeGen, ptr: IR.Ref, offset: IR.Ref, offsetTy: QualType, ty: QualType) Error!IR.Ref {
     // TODO consider adding a getelemptr instruction
-    const size = ty.getElemType().sizeof(c.comp).?;
+    const size = ty.childType(c.comp).sizeof(c.comp);
     if (size == 1)
         return c.builder.addInst(.Add, .{ .bin = .{ .lhs = ptr, .rhs = offset } }, try c.genType(ty));
 
@@ -1250,7 +1256,7 @@ fn genPtrArithmetic(c: *CodeGen, ptr: IR.Ref, offset: IR.Ref, offsetTy: Type, ty
     return c.addBin(.Add, ptr, offsetInst, offsetTy);
 }
 
-fn genInitializer(c: *CodeGen, ptr: IR.Ref, destTy: Type, initializer: Node.Index) Error!void {
+fn genInitializer(c: *CodeGen, ptr: IR.Ref, destTy: QualType, initializer: Node.Index) Error!void {
     const node = initializer.get(c.tree);
     switch (node) {
         .arrayInitExpr,
@@ -1263,7 +1269,7 @@ fn genInitializer(c: *CodeGen, ptr: IR.Ref, destTy: Type, initializer: Node.Inde
         .stringLiteralExpr => {
             const val = c.tree.valueMap.get(initializer).?;
             const strPtr = try c.builder.addConstant(val.ref(), .ptr);
-            if (destTy.isArray()) {
+            if (destTy.is(c.comp, .array)) {
                 return c.fail("TODO memcpy\n", .{});
             } else {
                 try c.builder.addStore(ptr, strPtr);

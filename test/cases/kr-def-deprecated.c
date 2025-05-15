@@ -12,6 +12,8 @@ int baz() {
 
 #define EXPECTED_ERRORS "kr-def-deprecated.c:2:9: error: unknown type name 'a'" \
     "kr-def-deprecated.c:2:27: error: unknown type name 'd'" \
+    "kr-def-deprecated.c:2:28: error: expected function body after function declaration" \
+    "kr-def-deprecated.c:4:1: error: expected external declaration" \
     "kr-def-deprecated.c:9:12: error: use of undeclared identifier 'bar'" \
     "kr-def-deprecated.c:11:1: warning: non-void function 'baz' does not return a value [-Wreturn-type]" \
 

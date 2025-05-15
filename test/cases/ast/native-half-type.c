@@ -19,7 +19,7 @@ implicit typedef: 'long double'
 fnDef: 'fn () void'
  name: foo
  body:
-  compoundStmt: 'void'
+  compoundStmt
     variable: '__fp16'
      name: x
      init:

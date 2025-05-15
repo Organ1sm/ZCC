@@ -1,10 +1,10 @@
 const std = @import("std");
+const mem = std.mem;
+
 const Compilation = @import("../Basic/Compilation.zig");
 const Diagnostics = @import("../Basic/Diagnostics.zig");
 const TokenType = @import("../Basic//TokenType.zig").TokenType;
-const Type = @import("../AST/Type.zig");
-const LangOpts = @import("../Basic/LangOpts.zig");
-const mem = std.mem;
+const QualType = @import("../AST/TypeStore.zig").QualType;
 
 pub const Item = union(enum) {
     /// decoded hex or character escape
@@ -97,13 +97,13 @@ pub const Kind = enum {
     }
 
     /// The C type of a character literal of this kind
-    pub fn charLiteralType(kind: Kind, comp: *const Compilation) Type {
+    pub fn charLiteralType(kind: Kind, comp: *const Compilation) QualType {
         return switch (kind) {
-            .char => Type.Int,
-            .wide => comp.types.wchar,
-            .utf8 => Type.UChar,
-            .utf16 => comp.types.uintLeast16Ty,
-            .utf32 => comp.types.uintLeast32Ty,
+            .char => .int,
+            .wide => comp.typeStore.wchar,
+            .utf8 => .uchar,
+            .utf16 => comp.typeStore.uintLeast16Ty,
+            .utf32 => comp.typeStore.uintLeast32Ty,
             .unterminated => unreachable,
         };
     }
@@ -112,7 +112,7 @@ pub const Kind = enum {
     pub fn charUnitSize(kind: Kind, comp: *const Compilation) Compilation.CharUnitSize {
         return switch (kind) {
             .char => .@"1",
-            .wide => switch (comp.types.wchar.sizeof(comp).?) {
+            .wide => switch (comp.typeStore.wchar.sizeof(comp)) {
                 2 => .@"2",
                 4 => .@"4",
                 else => unreachable,
@@ -131,11 +131,11 @@ pub const Kind = enum {
         };
     }
 
-    pub fn elementType(kind: Kind, comp: *const Compilation) Type {
+    pub fn elementType(kind: Kind, comp: *const Compilation) QualType {
         return switch (kind) {
             .unterminated => unreachable,
-            .char => Type.Char,
-            .utf8 => if (comp.langOpts.hasChar8_t()) Type.UChar else Type.Char,
+            .char => .char,
+            .utf8 => if (comp.langOpts.hasChar8_t()) .uchar else .char,
             else => kind.charLiteralType(comp),
         };
     }

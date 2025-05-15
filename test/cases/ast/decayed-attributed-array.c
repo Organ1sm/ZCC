@@ -23,8 +23,7 @@ variable: 'attributed([1]int)'
 variable: '*int'
  name: ptr
  init:
-  implicit cast: (ArrayToPointer) '*d:attributed([1]int)'
-   attr: aligned alignment: null
+  implicit cast: (ArrayToPointer) 'decayed *attributed([1]int)'
     declRefExpr: 'attributed([1]int)' lvalue
      attr: aligned alignment: null
      name: arr
@@ -32,7 +31,7 @@ variable: '*int'
 fnDef: 'fn () void'
  name: foo
  body:
-  compoundStmt: 'void'
+  compoundStmt
     variable: 'attributed([64]char)'
      attr: aligned alignment: zinc.Lexer.Attribute.Alignment{ .node = zinc.AST.AST.Node.OptIndex(13), .requested = 8 }
      name: x
@@ -44,8 +43,7 @@ fnDef: 'fn () void'
        operand:
         arrayAccessExpr: 'char' lvalue
          lhs:
-          implicit cast: (ArrayToPointer) '*d:attributed([64]char)'
-           attr: aligned alignment: zinc.Lexer.Attribute.Alignment{ .node = zinc.AST.AST.Node.OptIndex(13), .requested = 8 }
+          implicit cast: (ArrayToPointer) 'decayed *attributed([64]char)'
             parenExpr: 'attributed([64]char)' lvalue
              attr: aligned alignment: zinc.Lexer.Attribute.Alignment{ .node = zinc.AST.AST.Node.OptIndex(13), .requested = 8 }
              operand:

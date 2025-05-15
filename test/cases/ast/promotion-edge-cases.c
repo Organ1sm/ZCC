@@ -30,7 +30,7 @@ structDecl: 'struct S'
 fnDef: 'fn () void'
  name: foo
  body:
-  compoundStmt: 'void'
+  compoundStmt
     variable: 'char'
      name: c
      init:

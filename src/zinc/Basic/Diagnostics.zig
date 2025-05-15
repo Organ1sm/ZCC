@@ -50,7 +50,7 @@ pub const Message = struct {
         },
         ignoredRecordAttr: struct {
             tag: Attribute.Tag,
-            specifier: enum { @"struct", @"union", @"enum" },
+            tagKind: enum { @"struct", @"union", @"enum" },
         },
         builtinWithHeader: struct {
             builtin: Builtin.Tag,
@@ -213,6 +213,7 @@ pub const Options = struct {
     @"duplicate-embed-param": Kind = .default,
     @"unsupported-embed-param": Kind = .default,
     @"unused-result": Kind = .default,
+    @"atomic-access": Kind = .default,
 };
 
 list: std.ArrayListUnmanaged(Message) = .{},
@@ -436,7 +437,7 @@ pub fn renderMessage(comp: *Compilation, m: anytype, msg: Message) void {
         }),
         .ignoredRecordAttr => printRt(m, prop.msg, .{ "{s}", "{s}" }, .{
             @tagName(msg.extra.ignoredRecordAttr.tag),
-            @tagName(msg.extra.ignoredRecordAttr.specifier),
+            @tagName(msg.extra.ignoredRecordAttr.tagKind),
         }),
         .builtinWithHeader => printRt(m, prop.msg, .{ "{s}", "{s}" }, .{
             @tagName(msg.extra.builtinWithHeader.header),

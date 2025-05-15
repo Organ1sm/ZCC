@@ -13,28 +13,28 @@ implicit typedef: '[1]struct __va_list_tag'
 implicit typedef: 'struct __NSConstantString_tag'
  name: __NSConstantString
 
-typedef: 'invalid'
+typedef: '*float'
  name: invalid1
 
 typedef: 'float'
  name: invalid2
 
-typedef: 'vector((2, float)'
+typedef: 'vector(2, float)'
  name: f2v
 
 fnDef: 'fn () void'
  name: foo
  body:
-  compoundStmt: 'void'
-    variable: 'f2v': 'vector((2, float)'
+  compoundStmt
+    variable: 'f2v: vector(2, float)'
      name: a
 
-    variable: 'f2v': 'vector((2, float)'
+    variable: 'f2v: vector(2, float)'
      name: b
 
-    mulAssignExpr: 'f2v': 'vector((2, float)'
+    mulAssignExpr: 'f2v: vector(2, float)'
      lhs:
-      declRefExpr: 'f2v': 'vector((2, float)' lvalue
+      declRefExpr: 'f2v: vector(2, float)' lvalue
        name: a
      rhs:
       implicit cast: (VectorSplat) 'float'

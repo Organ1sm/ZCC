@@ -494,6 +494,7 @@ fn checkExpectedErrors(pp: *zinc.Preprocessor, buf: *std.ArrayList(u8)) !?bool {
         std.debug.print("invalid EXPECTED_ERRORS {}\n", .{macro});
         return false;
     }
+    buf.items.len = 0;
 
     var count: usize = 0;
     for (macro.tokens) |str| {
@@ -505,11 +506,11 @@ fn checkExpectedErrors(pp: *zinc.Preprocessor, buf: *std.ArrayList(u8)) !?bool {
         defer count += 1;
         if (count >= expectedCount) continue;
 
-        defer buf.items.len = 0;
+        const start = buf.items.len;
         // realistically the strings will only contain \" if any escapes so we can use Zig's string parsing
         assert((try std.zig.string_literal.parseWrite(buf.writer(), pp.getTokenSlice(str))) == .success);
         try buf.append('\n');
-        const expectedError = buf.items;
+        const expectedError = buf.items[start..];
 
         const index = std.mem.indexOf(u8, m.buf.items, expectedError);
         if (index == null) {
@@ -530,11 +531,24 @@ fn checkExpectedErrors(pp: *zinc.Preprocessor, buf: *std.ArrayList(u8)) !?bool {
     if (count != expectedCount) {
         std.debug.print(
             \\EXPECTED_ERRORS missing errors, expected {d} found {d},
-            \\=== actual output ===
-            \\{s}
             \\
-            \\
-        , .{ count, expectedCount, m.buf.items });
+        , .{ count, expectedCount });
+        var it = std.mem.tokenizeScalar(u8, m.buf.items, '\n');
+        while (it.next()) |msg| {
+            const start = std.mem.indexOf(u8, msg, ".c:") orelse continue;
+            const index = std.mem.indexOf(u8, buf.items, msg[start..]);
+            if (index == null) {
+                std.debug.print(
+                    \\
+                    \\========= new error ==========
+                    \\{s}
+                    \\
+                    \\=== not in EXPECTED_ERRORS ===
+                    \\
+                    \\
+                , .{msg});
+            }
+        }
         return false;
     }
     return true;
@@ -605,8 +619,8 @@ const StmtTypeDumper = struct {
         const maybeRet = node.get(tree);
         if (maybeRet == .returnStmt and maybeRet.returnStmt.operand == .implicit) return;
 
-        const ty = node.type(tree);
-        ty.dump(tree.comp.stringInterner, tree.comp.langOpts, m.buf.writer()) catch {};
+        node.qt(tree)
+            .dump(tree.comp, m.buf.writer()) catch {};
 
         const owned = try m.buf.toOwnedSlice();
         errdefer m.buf.allocator.free(owned);
