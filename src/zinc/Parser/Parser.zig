@@ -4325,12 +4325,14 @@ fn coerceArrayInitExtra(p: *Parser, item: *Result, token: TokenIndex, target: Qu
 
     const targetElem: QualType = targetArrayTy.elem;
     const itemElem: QualType = maybeItemArrayTy.?.elem;
-    const targetInt = targetElem.get(p.comp, .int);
-    const itemInt = itemElem.get(p.comp, .int);
+
+    // not int; string compat checks below will fail by design
+    const targetInt = targetElem.get(p.comp, .int) orelse .Int;
+    const itemInt = itemElem.get(p.comp, .int) orelse .Int;
 
     const compatible = targetElem.eql(itemElem, p.comp) or
-        (isStrLiteral and itemInt.? == .Char and (targetInt.? == .UChar or targetInt.? == .SChar)) or
-        (isStrLiteral and itemInt.? == .UChar and (targetInt.? == .UChar or targetInt.? == .SChar or targetInt.? == .Char));
+        (isStrLiteral and itemInt == .Char and (targetInt == .UChar or targetInt == .SChar)) or
+        (isStrLiteral and itemInt == .UChar and (targetInt == .UChar or targetInt == .SChar or targetInt == .Char));
 
     if (!compatible) {
         if (!reportError) return false;
