@@ -94,9 +94,10 @@ pub const Token = struct {
         .{ "enum", .KeywordEnum },
         .{ "union", .KeywordUnion },
         .{ "struct", .KeywordStruct },
-
         .{ "unsigned", .KeywordUnsigned },
         .{ "signed", .KeywordSigned },
+        .{ "__signed", .KeywordSigned1 },
+        .{ "__signed__", .KeywordSigned2 },
         .{ "void", .KeywordVoid },
         .{ "char", .KeywordChar },
         .{ "short", .KeywordShort },
