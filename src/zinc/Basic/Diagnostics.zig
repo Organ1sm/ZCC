@@ -48,6 +48,10 @@ pub const Message = struct {
         attrEnum: struct {
             tag: Attribute.Tag,
         },
+        attributeTodo: struct {
+            tag: Attribute.Tag,
+            kind: enum { variables, fields, types, functions },
+        },
         ignoredRecordAttr: struct {
             tag: Attribute.Tag,
             tagKind: enum { @"struct", @"union", @"enum" },
@@ -434,6 +438,10 @@ pub fn renderMessage(comp: *Compilation, m: anytype, msg: Message) void {
         .attrEnum => printRt(m, prop.msg, .{ "{s}", "{s}" }, .{
             @tagName(msg.extra.attrEnum.tag),
             Attribute.Formatting.choices(msg.extra.attrEnum.tag),
+        }),
+        .attributeTodo => printRt(m, prop.msg, .{ "{s}", "{s}" }, .{
+            @tagName(msg.extra.attributeTodo.tag),
+            @tagName(msg.extra.attributeTodo.kind),
         }),
         .ignoredRecordAttr => printRt(m, prop.msg, .{ "{s}", "{s}" }, .{
             @tagName(msg.extra.ignoredRecordAttr.tag),

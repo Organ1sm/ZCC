@@ -883,7 +883,7 @@ pub fn applyVariableAttributes(p: *Parser, qt: QualType, attrBufferStart: usize,
         .copy,
         .tls_model,
         .visibility,
-        => std.debug.panic("apply variable attribute {s}", .{@tagName(attr.tag)}),
+        => |t| try p.errExtra(.attribute_todo, tok, .{ .attributeTodo = .{ .tag = t, .kind = .variables } }),
         else => try ignoredAttrErr(p, tok, attr.tag, "variables"),
     };
 
@@ -939,7 +939,7 @@ pub fn applyTypeAttributes(p: *Parser, qt: QualType, attrBufferStart: usize, tag
         .copy,
         .scalar_storage_order,
         .nonstring,
-        => std.debug.panic("apply type attribute {s}", .{@tagName(attr.tag)}),
+        => |t| try p.errExtra(.attribute_todo, tok, .{ .attributeTodo = .{ .tag = t, .kind = .types } }),
 
         else => try ignoredAttrErr(p, tok, attr.tag, "types"),
     };
@@ -1050,7 +1050,7 @@ pub fn applyFunctionAttributes(p: *Parser, qt: QualType, attrBufferStart: usize)
         .visibility,
         .weakref,
         .zero_call_used_regs,
-        => std.debug.panic("apply type attribute {s}", .{@tagName(attr.tag)}),
+        => |t| try p.errExtra(.attribute_todo, tok, .{ .attributeTodo = .{ .tag = t, .kind = .functions } }),
         else => try ignoredAttrErr(p, tok, attr.tag, "functions"),
     };
     return applySelected(qt, p);
