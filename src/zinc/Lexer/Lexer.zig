@@ -764,7 +764,7 @@ pub fn nextNoSpecificTokens(self: *Lexer, skipTokens: std.EnumSet(TokenType)) To
 /// Try to tokenize a '::' even if not supported by the current language standard.
 pub fn colonColon(self: *Lexer) Token {
     var tok = self.nextNoWhiteSpace();
-    if (tok.id == .Colon and self.buffer[self.index] == ':') {
+    if (tok.id == .Colon and self.index < self.buffer.len and self.buffer[self.index] == ':') {
         self.index += 1;
         tok.id = .ColonColon;
     }
