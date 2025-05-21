@@ -13,8 +13,8 @@ implicit typedef: '[1]struct __va_list_tag'
 implicit typedef: 'struct __NSConstantString_tag'
  name: __NSConstantString
 
-typedef: '*float'
- name: invalid1
+implicit typedef: 'long double'
+ name: __float80
 
 typedef: 'float'
  name: invalid2

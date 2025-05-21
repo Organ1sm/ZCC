@@ -1157,7 +1157,8 @@ fn applyVectorSize(attr: Attribute, p: *Parser, tok: TokenIndex, qt: *QualType) 
             }
         }
         const originTy = try p.typeStr(qt.*);
-        return p.errStr(.invalid_vec_elem_ty, tok, originTy);
+        try p.errStr(.invalid_vec_elem_ty, tok, originTy);
+        return error.ParsingFailed;
     }
 
     const vecBytes = attr.args.vector_size.bytes;
