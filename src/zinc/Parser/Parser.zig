@@ -5897,6 +5897,8 @@ fn logicalOrExpr(p: *Parser) Error!?Result {
         if (try lhs.adjustTypes(token, &rhs, p, .booleanLogic)) {
             const res = lhs.value.toBool(p.comp) or rhs.value.toBool(p.comp);
             lhs.value = Value.fromBool(res);
+        } else {
+            lhs.value.boolCast(p.comp);
         }
 
         try lhs.boolRes(p, .boolOrExpr, rhs, token);

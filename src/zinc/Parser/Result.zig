@@ -97,15 +97,15 @@ pub fn bin(lhs: *Result, p: *Parser, rtTag: std.meta.Tag(Node), rhs: Result, tok
     };
     switch (rtTag) {
         // zig fmt: off
-            inline .commaExpr, .assignExpr, .mulAssignExpr, .divAssignExpr,
-            .modAssignExpr, .addAssignExpr, .subAssignExpr, .shlAssignExpr,
-            .shrAssignExpr, .bitAndAssignExpr, .bitXorAssignExpr,
-            .bitOrAssignExpr, .boolOrExpr, .boolAndExpr, .bitOrExpr,
-            .bitXorExpr, .bitAndExpr, .equalExpr, .notEqualExpr,
-            .lessThanExpr, .lessThanEqualExpr, .greaterThanExpr,
-            .greaterThanEqualExpr, .shlExpr, .shrExpr, .addExpr,
-            .subExpr, .mulExpr, .divExpr, .modExpr,
-            // zig fmt: on
+        inline .commaExpr, .assignExpr, .mulAssignExpr, .divAssignExpr,
+        .modAssignExpr, .addAssignExpr, .subAssignExpr, .shlAssignExpr,
+        .shrAssignExpr, .bitAndAssignExpr, .bitXorAssignExpr,
+        .bitOrAssignExpr, .boolOrExpr, .boolAndExpr, .bitOrExpr,
+        .bitXorExpr, .bitAndExpr, .equalExpr, .notEqualExpr,
+        .lessThanExpr, .lessThanEqualExpr, .greaterThanExpr,
+        .greaterThanEqualExpr, .shlExpr, .shrExpr, .addExpr,
+        .subExpr, .mulExpr, .divExpr, .modExpr,
+        // zig fmt: on
         => |tag| lhs.node = try p.addNode(@unionInit(Node, @tagName(tag), binData)),
         else => unreachable,
     }
