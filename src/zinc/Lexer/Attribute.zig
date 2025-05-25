@@ -93,6 +93,7 @@ pub const ArgumentType = enum {
     int,
     alignment,
     float,
+    complexFloat,
     expression,
     nullptrTy,
 
@@ -103,6 +104,7 @@ pub const ArgumentType = enum {
             .int, .alignment => "an integer constant",
             .nullptrTy => "nullptr",
             .float => "a floating point number",
+            .complexFloat => "a complex floating point number",
             .expression => "an expression",
         };
     }
@@ -351,8 +353,20 @@ fn diagnoseField(
         .int => .int,
         .bytes => .string,
         .float => .float,
+        .complex => .complexFloat,
         .null => .nullptrTy,
-        else => unreachable,
+
+        .intTy,
+        .floatTy,
+        .complexTy,
+        .ptrTy,
+        .noreturnTy,
+        .voidTy,
+        .funcTy,
+        .arrayTy,
+        .vectorTy,
+        .recordTy,
+        => unreachable,
     });
 }
 

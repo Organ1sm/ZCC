@@ -29,6 +29,8 @@ struct S {
 };
 
 int __thiscall bar(int);
+int big __attribute__((vector_size(4294967296)));
+typedef float f2v __attribute__((vector_size(8.0i)));
 
 #define EXPECTED_ERRORS "attribute-errors.c:4:24: error: 'access' attribute takes at least 2 argument(s)" \
     "attribute-errors.c:5:31: error: Unknown `access` argument. Possible values are: 'read_only', 'read_write', 'write_only', 'none'" \
@@ -50,4 +52,6 @@ int __thiscall bar(int);
     "attribute-errors.c:24:49: error: 'deprecated' attribute takes at most 1 argument(s)" \
     "attribute-errors.c:28:24: warning: attribute 'cold' ignored on fields [-Wignored-attributes]" \
     "attribute-errors.c:31:5: warning: '__thiscall' calling convention is not supported for this target [-Wignored-attributes]" \
+    "attribute-errors.c:32:36: error: attribute value '4294967296' out of range" \
+    "attribute-errors.c:33:46: error: Attribute argument is invalid, expected an integer constant but got a complex floating point number" \
 
