@@ -25,6 +25,11 @@ const OngoingBitfield = struct {
 
 pub const Error = error{Overflow};
 
+fn alignForward(addr: u64, alignment: u64) !u64 {
+    const forward_addr = try std.math.add(u64, addr, alignment - 1);
+    return std.mem.alignBackward(u64, forward_addr, alignment);
+}
+
 const SysVContext = struct {
     /// Does the record has an __attribute__((packed)) annotation.
     attrPacked: bool,
@@ -64,7 +69,7 @@ const SysVContext = struct {
             const attributes = field.attributes(self.comp);
 
             if (self.comp.target.isMinGW()) {
-                field.layout = self.layoutMinGWField(field, attributes, typeLayout);
+                field.layout = try self.layoutMinGWField(field, attributes, typeLayout);
             } else {
                 if (field.bitWidth.unpack()) |bitWidth|
                     field.layout = try self.layoutBitField(attributes, typeLayout, field.nameToken != 0, bitWidth)
@@ -102,8 +107,8 @@ const SysVContext = struct {
         field: *const Field,
         fieldAttrs: []const Attribute,
         fieldLayout: RecordLayout,
-    ) FieldLayout {
-        const annotationAlignmentBits = BITS_PER_BYTE * (QualType.annotationAlignment(self.comp, Attribute.Iterator.initSlice(fieldAttrs)) orelse 1);
+    ) !FieldLayout {
+        const annotationAlignmentBits = BITS_PER_BYTE * @as(u32, (QualType.annotationAlignment(self.comp, Attribute.Iterator.initSlice(fieldAttrs)) orelse 1));
         const isAttrPacked = self.attrPacked or isPacked(fieldAttrs);
         const ignoreTypeAlign = ignoreTypeAlignment(isAttrPacked, field.bitWidth.unpack(), self.ongoingBitfield, fieldLayout);
 
@@ -158,7 +163,7 @@ const SysVContext = struct {
         fieldAlignmentBits: u64,
         isNamed: bool,
         width: u64,
-    ) FieldLayout {
+    ) !FieldLayout {
         assert(width <= tySizeBits); // validated in parser
 
         // In a union, the size of the underlying type does not affect the size of the union.
@@ -196,7 +201,7 @@ const SysVContext = struct {
             };
         }
 
-        const offsetBits = std.mem.alignForward(u64, self.sizeBits, fieldAlignmentBits);
+        const offsetBits = try alignForward(self.sizeBits, fieldAlignmentBits);
         self.sizeBits = if (width == 0) offsetBits else offsetBits + tySizeBits;
         if (!isNamed) return .{};
         return .{
@@ -209,16 +214,16 @@ const SysVContext = struct {
         self: *SysVContext,
         tySizeBits: u64,
         fieldAlignmentBits: u64,
-    ) FieldLayout {
+    ) !FieldLayout {
         self.ongoingBitfield = null;
         // A struct field starts at the next offset in the struct that is properly
         // aligned with respect to the start of the struct. See test case 0033.
         // A union field always starts at offset 0.
-        const offsetBits = if (self.isUnion) 0 else std.mem.alignForward(u64, self.sizeBits, fieldAlignmentBits);
+        const offsetBits = if (self.isUnion) 0 else try alignForward(self.sizeBits, fieldAlignmentBits);
 
         // Set the size of the record to the maximum of the current size and the end of
         // the field. See test case 0034.
-        self.sizeBits = @max(self.sizeBits, offsetBits + tySizeBits);
+        self.sizeBits = @max(self.sizeBits, try std.math.add(u64, offsetBits, tySizeBits));
 
         return .{
             .offsetBits = offsetBits,
@@ -241,7 +246,7 @@ const SysVContext = struct {
         // The field alignment can be increased by __attribute__((aligned)) annotations on the
         // field. See test case 0085.
         if (QualType.annotationAlignment(self.comp, Attribute.Iterator.initSlice(fieldAttrs))) |anno|
-            fieldAlignBits = @max(fieldAlignBits, anno * BITS_PER_BYTE);
+            fieldAlignBits = @max(fieldAlignBits, @as(u32, anno) * BITS_PER_BYTE);
 
         // #pragma pack takes precedence over all other attributes. See test cases 0084 and
         // 0085.
@@ -250,12 +255,12 @@ const SysVContext = struct {
 
         // A struct field starts at the next offset in the struct that is properly
         // aligned with respect to the start of the struct.
-        const offsetBits = if (self.isUnion) 0 else std.mem.alignForward(u64, self.sizeBits, fieldAlignBits);
+        const offsetBits = if (self.isUnion) 0 else try alignForward(self.sizeBits, fieldAlignBits);
         const sizeBits = fieldLayout.sizeBits;
 
         // The alignment of a record is the maximum of its field alignments. See test cases
         // 0084, 0085, 0086.
-        self.sizeBits = @max(self.sizeBits, offsetBits + sizeBits);
+        self.sizeBits = @max(self.sizeBits, try std.math.add(u64, offsetBits, sizeBits));
         self.alignedBits = @max(self.alignedBits, fieldAlignBits);
 
         return FieldLayout{ .offsetBits = offsetBits, .sizeBits = sizeBits };
@@ -294,7 +299,7 @@ const SysVContext = struct {
         // field. See test case 0067.
         const attrPacked = self.attrPacked or isPacked(fieldAttrs);
         const hasPackingAnnotation = attrPacked or self.maxFieldAlignBits != null;
-        const annotationAlignment: u32 = if (QualType.annotationAlignment(self.comp, Attribute.Iterator.initSlice(fieldAttrs))) |anno| anno * BITS_PER_BYTE else 1;
+        const annotationAlignment = if (QualType.annotationAlignment(self.comp, Attribute.Iterator.initSlice(fieldAttrs))) |anno| @as(u32, anno) * BITS_PER_BYTE else 1;
         const firstUnusedBit: u64 = if (self.isUnion) 0 else self.sizeBits;
 
         var fieldAlignBits: u64 = 1;
@@ -313,7 +318,7 @@ const SysVContext = struct {
             // - the alignment of the type is larger than its size,
             // then it is aligned to the type's field alignment. See test case 0083.
             if (!hasPackingAnnotation) {
-                const startBit = std.mem.alignForward(u64, firstUnusedBit, fieldAlignBits);
+                const startBit = try alignForward(firstUnusedBit, fieldAlignBits);
                 const doesFieldCrossBoundary = startBit % tyFieldAlignBits + bitWidth > tySizeBits;
 
                 if (tyFieldAlignBits > tySizeBits or doesFieldCrossBoundary)
@@ -337,8 +342,8 @@ const SysVContext = struct {
             }
         }
 
-        const offsetBits = std.mem.alignForward(u64, firstUnusedBit, fieldAlignBits);
-        self.sizeBits = @max(self.sizeBits, offsetBits + bitWidth);
+        const offsetBits = try alignForward(firstUnusedBit, fieldAlignBits);
+        self.sizeBits = @max(self.sizeBits, try std.math.add(u64, offsetBits, bitWidth));
 
         // Unnamed fields do not contribute to the record alignment except on a few targets.
         // See test case 0079.
@@ -428,7 +433,7 @@ const MsvcContext = struct {
         // See test case 0028.
         var reqAlign = typeLayout.requiredAlignmentBits;
         if (QualType.annotationAlignment(self.comp, Attribute.Iterator.initSlice(fieldAttrs))) |anno|
-            reqAlign = @max(anno * BITS_PER_BYTE, reqAlign);
+            reqAlign = @max(@as(u32, anno) * BITS_PER_BYTE, reqAlign);
 
         // The required alignment of a record is the maximum of the required alignments of its
         // fields except that the required alignment of bitfields is ignored.
@@ -467,7 +472,7 @@ const MsvcContext = struct {
         tySizeBits: u64,
         fieldAlign: u32,
         bitWidth: u32,
-    ) FieldLayout {
+    ) !FieldLayout {
         if (bitWidth == 0) {
             // A zero-sized bit-field that does not follow a non-zero-sized bit-field does not affect
             // the overall layout of the record. Even in a union where the order would otherwise
@@ -510,7 +515,7 @@ const MsvcContext = struct {
             self.pointerAlignBits = @max(self.pointerAlignBits, pAlign);
             self.fieldAlignBits = @max(self.fieldAlignBits, fieldAlign);
 
-            const offsetBits = std.mem.alignForward(u64, self.sizeBits, fieldAlign);
+            const offsetBits = try alignForward(self.sizeBits, fieldAlign);
             self.sizeBits = if (bitWidth == 0) offsetBits else offsetBits + tySizeBits;
 
             break :bits offsetBits;
@@ -527,7 +532,7 @@ const MsvcContext = struct {
         self: *MsvcContext,
         sizeBits: u64,
         fieldAlign: u32,
-    ) FieldLayout {
+    ) !FieldLayout {
         self.containsNonBitField = true;
         self.ongoingBitField = null;
         // The alignment of the field affects both the pointer alignment and the field
@@ -536,7 +541,7 @@ const MsvcContext = struct {
         self.fieldAlignBits = @max(self.fieldAlignBits, fieldAlign);
         const offsetBits = switch (self.isUnion) {
             true => 0,
-            false => std.mem.alignForward(u64, self.sizeBits, fieldAlign),
+            false => try alignForward(self.sizeBits, fieldAlign),
         };
         self.sizeBits = @max(self.sizeBits, offsetBits + sizeBits);
         return FieldLayout{ .offsetBits = offsetBits, .sizeBits = sizeBits };
@@ -567,7 +572,7 @@ pub fn compute(fields: []Type.Record.Field, qt: QualType, comp: *const Compilati
             var context = SysVContext.init(qt, comp, pragmaPack);
             try context.layoutFields(fields);
 
-            context.sizeBits = std.mem.alignForward(u64, context.sizeBits, context.alignedBits);
+            context.sizeBits = try alignForward(context.sizeBits, context.alignedBits);
 
             return .{
                 .sizeBits = context.sizeBits,
@@ -590,8 +595,7 @@ pub fn compute(fields: []Type.Record.Field, qt: QualType, comp: *const Compilati
                 context.handleZeroSizedRecord();
             }
 
-            context.sizeBits = std.mem.alignForward(u64, context.sizeBits, context.pointerAlignBits);
-
+            context.sizeBits = try alignForward(context.sizeBits, context.pointerAlignBits);
             return .{
                 .sizeBits = context.sizeBits,
                 .fieldAlignmentBits = context.fieldAlignBits,
