@@ -274,7 +274,7 @@ pub fn main() !void {
         }
 
         if (onlyPreprocess) {
-            if (try checkExpectedErrors(&pp, &buffer)) |some| {
+            if (try checkExpectedErrors(&pp, &buffer, case)) |some| {
                 if (!some) {
                     failCount += 1;
                     continue;
@@ -315,7 +315,7 @@ pub fn main() !void {
 
         var tree = zinc.Parser.parse(&pp) catch |err| switch (err) {
             error.FatalError => {
-                if (try checkExpectedErrors(&pp, &buffer)) |some| {
+                if (try checkExpectedErrors(&pp, &buffer, case)) |some| {
                     if (some) passCount += 1 else failCount += 1;
                 }
                 continue;
@@ -388,7 +388,7 @@ pub fn main() !void {
             }
         }
 
-        if (try checkExpectedErrors(&pp, &buffer)) |some| {
+        if (try checkExpectedErrors(&pp, &buffer, case)) |some| {
             if (some) passCount += 1 else failCount += 1;
             continue;
         }
@@ -481,7 +481,7 @@ pub fn main() !void {
 }
 
 // returns true if passed
-fn checkExpectedErrors(pp: *zinc.Preprocessor, buf: *std.ArrayList(u8)) !?bool {
+fn checkExpectedErrors(pp: *zinc.Preprocessor, buf: *std.ArrayList(u8), case: []const u8) !?bool {
     const macro = pp.defines.get("EXPECTED_ERRORS") orelse return null;
     const expectedCount = pp.comp.diagnostics.list.items.len;
 
@@ -530,9 +530,9 @@ fn checkExpectedErrors(pp: *zinc.Preprocessor, buf: *std.ArrayList(u8)) !?bool {
 
     if (count != expectedCount) {
         std.debug.print(
-            \\EXPECTED_ERRORS missing errors, expected {d} found {d},
+            \\{s}: EXPECTED_ERRORS missing errors, expected {d} found {d},
             \\
-        , .{ count, expectedCount });
+        , .{ case, count, expectedCount });
         var it = std.mem.tokenizeScalar(u8, m.buf.items, '\n');
         while (it.next()) |msg| {
             const start = std.mem.indexOf(u8, msg, ".c:") orelse continue;

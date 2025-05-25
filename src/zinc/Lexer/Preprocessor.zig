@@ -771,7 +771,7 @@ pub fn getTokenSlice(pp: *Preprocessor, token: anytype) []const u8 {
     return source.buffer[token.start..token.end];
 }
 
-/// Convert a token from the Tokenizer into a token used by the parser.
+/// Convert a token from the Lexer into a token used by the parser.
 fn tokenFromRaw(raw: RawToken) TokenWithExpansionLocs {
     return .{
         .id = raw.id,
@@ -1390,16 +1390,33 @@ fn stringify(pp: *Preprocessor, tokens: []const TokenWithExpansionLocs) !void {
                 try pp.charBuffer.append(c);
         }
     }
-    if (pp.charBuffer.items[pp.charBuffer.items.len - 1] == '\\') {
+
+    try pp.charBuffer.ensureUnusedCapacity(2);
+    if (pp.charBuffer.items[pp.charBuffer.items.len - 1] != '\\') {
+        pp.charBuffer.appendSliceAssumeCapacity("\"\n");
+        return;
+    }
+    pp.charBuffer.appendAssumeCapacity('"');
+    var lexer: Lexer = .{
+        .buffer = pp.charBuffer.items,
+        .index = 0,
+        .source = .generated,
+        .langOpts = pp.comp.langOpts,
+        .line = 0,
+    };
+
+    const item = lexer.next();
+    if (item.id == .UnterminatedStringLiteral) {
         const tok = tokens[tokens.len - 1];
         try pp.comp.addDiagnostic(.{
             .tag = .invalid_pp_stringify_escape,
             .loc = tok.loc,
         }, tok.expansionSlice());
-        pp.charBuffer.items.len -= 1; // remove `\`
+        pp.charBuffer.items.len -= 2; // erase unpaired backslash and appended end quote
+        pp.charBuffer.appendAssumeCapacity('"');
     }
 
-    try pp.charBuffer.appendSlice("\"\n");
+    pp.charBuffer.appendAssumeCapacity('\n');
 }
 
 fn reconstructIncludeString(
@@ -2470,8 +2487,7 @@ fn expandMacroExhaustive(
                 advanceIdx += 1;
             }
         } // end of replacement phase
-    }
-    // end of scanning phase
+    } // end of scanning phase
 
     // trim excess buffer
     for (buf.items[movingEndIdx..]) |item|
@@ -2479,7 +2495,7 @@ fn expandMacroExhaustive(
     buf.items.len = movingEndIdx;
 }
 
-/// Try to expand a macro after a possible candidate has been read from the `tokenizer`
+/// Try to expand a macro after a possible candidate has been read from the `lexer`
 /// into the `raw` token passed as argument
 fn expandMacro(pp: *Preprocessor, lexer: *Lexer, raw: RawToken) MacroError!void {
     var sourceToken = tokenFromRaw(raw);

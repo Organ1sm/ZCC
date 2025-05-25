@@ -8188,7 +8188,7 @@ fn bitInt(p: *Parser, base: u8, buf: []const u8, suffix: NumberSuffix, tokenIdx:
 
     managed.setString(base, buf) catch |e| switch (e) {
         error.InvalidBase => unreachable, // `base` is one of 2, 8, 10, 16
-        error.InvalidCharacter => unreachable, // digits validated by Tokenizer
+        error.InvalidCharacter => unreachable, // digits validated by Lexer
         else => |er| return er,
     };
 
