@@ -8442,7 +8442,8 @@ fn parseStringLiteral(p: *Parser) Error!Result {
         }
     }
 
-    assert(stringEnd > p.tokenIdx);
+    const count = stringEnd - p.tokenIdx;
+    assert(count > 0);
 
     const charWidth = stringKind.charUnitSize(p.comp);
 
@@ -8488,7 +8489,13 @@ fn parseStringLiteral(p: *Parser) Error!Result {
                     },
                 }
             },
-            .improperlyEncoded => |bytes| p.strings.appendSliceAssumeCapacity(bytes),
+            .improperlyEncoded => |bytes| {
+                if (count > 1) {
+                    try p.errToken(.illegal_char_encoding_error, p.tokenIdx);
+                    return error.ParsingFailed;
+                }
+                p.strings.appendSliceAssumeCapacity(bytes);
+            },
             .utf8Text => |view| {
                 switch (charWidth) {
                     .@"1" => p.strings.appendSliceAssumeCapacity(view.bytes),
