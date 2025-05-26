@@ -5922,6 +5922,8 @@ fn logicalAndExpr(p: *Parser) Error!?Result {
         if (try lhs.adjustTypes(token, &rhs, p, .booleanLogic)) {
             const res = lhs.value.toBool(p.comp) and rhs.value.toBool(p.comp);
             lhs.value = Value.fromBool(res);
+        } else {
+            lhs.value.boolCast(p.comp);
         }
 
         try lhs.boolRes(p, .boolAndExpr, rhs, token);
@@ -5985,6 +5987,8 @@ fn parseEqExpr(p: *Parser) Error!?Result {
             const op: std.math.CompareOperator = if (tag == .equalExpr) .eq else .neq;
             const res = lhs.value.compare(op, rhs.value, p.comp);
             lhs.value = Value.fromBool(res);
+        } else {
+            lhs.value.boolCast(p.comp);
         }
 
         try lhs.boolRes(p, tag, rhs, tok);
@@ -6016,6 +6020,8 @@ fn parseCompExpr(p: *Parser) Error!?Result {
 
             const res = lhs.value.compare(op, rhs.value, p.comp);
             lhs.value = Value.fromBool(res);
+        } else {
+            lhs.value.boolCast(p.comp);
         }
         try lhs.boolRes(p, tag, rhs, tok);
     }
