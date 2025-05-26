@@ -41,10 +41,13 @@ fn preprocessorHandler(pragma: *Pragma, pp: *Preprocessor, startIdx: TokenIndex)
     const nameToken = pp.tokens.get(startIdx);
     const next = pp.tokens.get(startIdx + 1);
     if (next.isNot(.NewLine)) {
-        try pp.comp.addDiagnostic(.{
-            .tag = .extra_tokens_directive_end,
-            .loc = nameToken.loc,
-        }, pp.expansionSlice(startIdx + 1));
+        const diagnostic: Preprocessor.Diagnostic = .extra_tokens_directive_end;
+        return pp.diagnostics.addWithLocation(pp.comp, .{
+            .text = diagnostic.fmt,
+            .kind = diagnostic.kind,
+            .opt = diagnostic.opt,
+            .location = nameToken.loc.expand(pp.comp),
+        }, pp.expansionSlice(startIdx + 1), true);
     }
     const seen = self.preprocessCount == pp.preprocessCount;
     const prev = try self.pragmaOnce.fetchPut(nameToken.loc.id, {});

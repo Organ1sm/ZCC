@@ -1,7 +1,11 @@
 const std = @import("std");
+const assert = std.debug.assert;
+const Allocator = std.mem.Allocator;
+
 const RawToken = @import("../Lexer/Token.zig").Token;
 const TokenType = @import("../Basic/TokenType.zig").TokenType;
 const Compilation = @import("../Basic/Compilation.zig");
+const Error = Compilation.Error;
 const Source = @import("../Basic/Source.zig");
 const Lexer = @import("Lexer.zig");
 const Parser = @import("../Parser/Parser.zig");
@@ -13,11 +17,6 @@ const Attribute = @import("Attribute.zig");
 const Features = @import("Features.zig");
 const HideSet = @import("HideSet.zig");
 
-const Allocator = std.mem.Allocator;
-const Error = Compilation.Error;
-const assert = std.debug.assert;
-
-const Preprocessor = @This();
 const DefineMap = std.StringHashMapUnmanaged(Macro);
 const RawTokenList = std.ArrayList(RawToken);
 const MaxIncludeDepth = 200;
@@ -112,8 +111,12 @@ const Macro = struct {
     }
 };
 
+const Preprocessor = @This();
+
 comp: *Compilation,
+diagnostics: *Diagnostics,
 gpa: std.mem.Allocator,
+
 arena: std.heap.ArenaAllocator,
 defines: DefineMap = .{},
 /// Do not directly mutate this; must be kept in sync with `tokens`
@@ -213,6 +216,7 @@ pub fn addBuiltinMacros(pp: *Preprocessor) !void {
 pub fn init(comp: *Compilation) Preprocessor {
     const pp = Preprocessor{
         .comp = comp,
+        .diagnostics = comp.diagnostics,
         .gpa = comp.gpa,
         .arena = std.heap.ArenaAllocator.init(comp.gpa),
         .tokenBuffer = RawTokenList.init(comp.gpa),
@@ -321,7 +325,7 @@ pub fn addIncludeResume(pp: *Preprocessor, source: Source.ID, offset: u32, line:
     });
 }
 
-fn invalidTokenDiagnostic(tokType: TokenType) Diagnostics.Tag {
+fn invalidTokenDiagnostic(tokType: TokenType) Diagnostic {
     return switch (tokType) {
         .UnterminatedStringLiteral => .unterminated_string_literal_warning,
         .UnterminatedCharLiteral => .unterminated_char_literal_warning,
@@ -348,7 +352,7 @@ pub fn preprocessSources(pp: *Preprocessor, sources: []const Source) Error!void 
 
 /// Preprocess a source file, returns eof token.
 pub fn preprocess(pp: *Preprocessor, source: Source) Error!TokenWithExpansionLocs {
-    const eof = pp.preprocessExtra(source) catch |err| switch (err) {
+    const eof = pp.preprocessExtra(source) catch |er| switch (er) {
         // This cannot occur in the main file and is handled in `include`.
         error.StopPreprocessing => unreachable,
         else => |e| return e,
@@ -379,6 +383,7 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!TokenWithExpans
         switch (token.id) {
             .Hash => if (!startOfLine) try pp.addToken(tokenFromRaw(token)) else {
                 const directive = lexer.nextNoWhiteSpace();
+                const directiveLoc: Source.Location = .{ .id = token.source, .byteOffset = directive.start, .line = directive.line };
                 switch (directive.id) {
                     .KeywordError, .KeywordWarning => {
                         pp.topExpansionBuffer.items.len = 0;
@@ -395,13 +400,12 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!TokenWithExpans
 
                         try pp.stringify(pp.topExpansionBuffer.items);
                         const slice = pp.charBuffer.items[charTop + 1 .. pp.charBuffer.items.len - 2];
-                        const message = try pp.comp.diagnostics.arena.allocator().dupe(u8, slice);
 
-                        try pp.comp.addDiagnostic(.{
-                            .tag = if (directive.is(.KeywordError)) .error_directive else .warning_directive,
-                            .loc = .{ .id = token.source, .byteOffset = directive.start, .line = directive.line },
-                            .extra = .{ .str = message },
-                        }, &.{});
+                        try pp.err(
+                            directiveLoc,
+                            if (directive.is(.KeywordError)) .error_directive else .warning_directive,
+                            .{slice},
+                        );
                     },
 
                     .KeywordIf => {
@@ -465,7 +469,7 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!TokenWithExpans
 
                     .KeywordElIf => {
                         if (ifContext.level == 0) {
-                            try pp.addError(directive, .elif_without_if);
+                            try pp.err(directive, .elif_without_if, .{});
                             _ = ifContext.increment();
                             ifContext.set(.untilElse);
                         } else if (ifContext.level == 1) {
@@ -485,7 +489,7 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!TokenWithExpans
 
                             .untilEndIf => try pp.skip(&lexer, .untilEndIf),
                             .untilEndIfSeenElse => {
-                                try pp.addError(directive, .elif_after_else);
+                                try pp.err(directive, .elif_after_else, .{});
                                 skipToNewLine(&lexer);
                             },
                         }
@@ -493,7 +497,7 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!TokenWithExpans
 
                     .KeywordElifdef => {
                         if (ifContext.level == 0) {
-                            try pp.addError(directive, .elifdef_without_if);
+                            try pp.err(directive, .elifdef_without_if, .{});
                             _ = ifContext.increment();
                             ifContext.set(.untilElse);
                         } else if (ifContext.level == 1) {
@@ -525,7 +529,7 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!TokenWithExpans
 
                             .untilEndIf => try pp.skip(&lexer, .untilEndIf),
                             .untilEndIfSeenElse => {
-                                try pp.addError(directive, .elifdef_after_else);
+                                try pp.err(directive, .elifdef_after_else, .{});
                                 skipToNewLine(&lexer);
                             },
                         }
@@ -533,7 +537,7 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!TokenWithExpans
 
                     .KeywordElifndef => {
                         if (ifContext.level == 0) {
-                            try pp.addError(directive, .elifndef_without_if);
+                            try pp.err(directive, .elifndef_without_if, .{});
                             _ = ifContext.increment();
                             ifContext.set(.untilElse);
                         } else if (ifContext.level == 1) {
@@ -564,7 +568,7 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!TokenWithExpans
                             },
                             .untilEndIf => try pp.skip(&lexer, .untilEndIf),
                             .untilEndIfSeenElse => {
-                                try pp.addError(directive, .elifndef_after_else);
+                                try pp.err(directive, .elifndef_after_else, .{});
                                 skipToNewLine(&lexer);
                             },
                         }
@@ -574,7 +578,7 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!TokenWithExpans
                         try pp.expectNewLine(&lexer);
 
                         if (ifContext.level == 0) {
-                            try pp.addError(directive, .else_without_if);
+                            try pp.err(directive, .else_without_if, .{});
                             continue;
                         } else if (ifContext.level == 1) {
                             guardName = null;
@@ -588,7 +592,7 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!TokenWithExpans
                             },
                             .untilEndIf => try pp.skip(&lexer, .untilEndIfSeenElse),
                             .untilEndIfSeenElse => {
-                                try pp.addError(directive, .else_after_else);
+                                try pp.err(directive, .else_after_else, .{});
                                 skipToNewLine(&lexer);
                             },
                         }
@@ -598,7 +602,7 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!TokenWithExpans
                         try pp.expectNewLine(&lexer);
                         if (ifContext.level == 0) {
                             guardName = null;
-                            try pp.addError(directive, .else_without_if);
+                            try pp.err(directive, .else_without_if, .{});
                             continue;
                         } else if (ifContext.level == 1) {
                             const savedLexer = lexer;
@@ -617,15 +621,9 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!TokenWithExpans
                         continue;
                     },
                     .KeywordIncludeNext => {
-                        try pp.comp.addDiagnostic(.{
-                            .tag = .include_next,
-                            .loc = .{ .id = token.source, .byteOffset = directive.start, .line = directive.line },
-                        }, &.{});
+                        try pp.err(directiveLoc, .include_next, .{});
                         if (pp.includeDepth == 0) {
-                            try pp.comp.addDiagnostic(.{
-                                .tag = .include_next_outside_header,
-                                .loc = .{ .id = token.source, .byteOffset = directive.start, .line = directive.line },
-                            }, &.{});
+                            try pp.err(directiveLoc, .include_next_outside_header, .{});
                             try pp.include(&lexer, .First);
                         } else {
                             try pp.include(&lexer, .Next);
@@ -641,7 +639,7 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!TokenWithExpans
                     .KeywordLine => {
                         const digits = lexer.nextNoWhiteSpace();
                         if (digits.isNot(.PPNumber))
-                            try pp.addError(digits, .line_simple_digit);
+                            try pp.err(digits, .line_simple_digit, .{});
 
                         if (digits.isOneOf(.{ .Eof, .NewLine }))
                             continue;
@@ -651,7 +649,7 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!TokenWithExpans
                             continue;
 
                         if (name.isNot(.StringLiteral))
-                            try pp.addError(name, .line_invalid_filename);
+                            try pp.err(name, .line_invalid_filename, .{});
 
                         try pp.expectNewLine(&lexer);
                     },
@@ -662,7 +660,7 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!TokenWithExpans
                         // if not, emit `GNU line marker directive requires a simple digit sequence`
                         const name = lexer.nextNoWhiteSpace();
                         if (name.isOneOf(.{ .Eof, .NewLine })) continue;
-                        if (name.isNot(.NewLine)) try pp.addError(name, .line_invalid_filename);
+                        if (name.isNot(.NewLine)) try pp.err(name, .line_invalid_filename, .{});
 
                         const flag1 = lexer.nextNoWhiteSpace();
                         if (flag1.isOneOf(.{ .Eof, .NewLine })) continue;
@@ -677,11 +675,11 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!TokenWithExpans
                     .NewLine => {},
                     .Eof => {
                         if (ifContext.level != 0)
-                            try pp.addError(directive, .unterminated_conditional_directive);
+                            try pp.err(directive, .unterminated_conditional_directive, .{});
                         return tokenFromRaw(directive);
                     },
                     else => {
-                        try pp.addError(token, .invalid_preprocessing_directive);
+                        try pp.err(token, .invalid_preprocessing_directive, .{});
                         skipToNewLine(&lexer);
                     },
                 }
@@ -700,9 +698,9 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!TokenWithExpans
 
             .Eof => {
                 if (ifContext.level != 0)
-                    try pp.addError(token, .unterminated_conditional_directive);
+                    try pp.err(token, .unterminated_conditional_directive, .{});
                 if (source.buffer.len > 0 and source.buffer[source.buffer.len - 1] != '\n')
-                    try pp.addError(token, .newline_eof);
+                    try pp.err(token, .newline_eof, .{});
                 if (guardName) |name| {
                     if (try pp.includeGuards.fetchPut(pp.gpa, source.id, name)) |prev| {
                         assert(std.mem.eql(u8, name, prev.value));
@@ -713,15 +711,15 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!TokenWithExpans
 
             .UnterminatedStringLiteral, .UnterminatedCharLiteral, .EmptyCharLiteral => |tag| {
                 startOfLine = false;
-                try pp.addError(token, invalidTokenDiagnostic(tag));
+                try pp.err(token, invalidTokenDiagnostic(tag), .{});
                 try pp.expandMacro(&lexer, token);
             },
 
-            .UnterminatedComment => try pp.addError(token, .unterminated_comment),
+            .UnterminatedComment => try pp.err(token, .unterminated_comment, .{}),
 
             else => {
                 if (token.id.isMacroIdentifier() and pp.poisonedIdentifiers.get(pp.getTokenSlice(token)) != null)
-                    try pp.addError(token, .poisoned_identifier);
+                    try pp.err(token, .poisoned_identifier, .{});
 
                 if (std.mem.eql(u8, lexer.buffer[token.start..token.end], "__has_include")) {
                     token.id.simplifyMacroKeyword();
@@ -783,48 +781,73 @@ fn tokenFromRaw(raw: RawToken) TokenWithExpansionLocs {
     };
 }
 
-fn addError(pp: *Preprocessor, raw: RawToken, tag: Diagnostics.Tag) !void {
-    try pp.comp.addDiagnostic(.{
-        .tag = tag,
-        .loc = .{
-            .id = raw.source,
-            .byteOffset = raw.start,
-            .line = raw.line,
-        },
-    }, &.{});
-}
+pub const Diagnostic = @import("Diagnostic.zig");
 
-fn errStr(pp: *Preprocessor, tok: TokenWithExpansionLocs, tag: Diagnostics.Tag, str: []const u8) !void {
-    try pp.comp.addDiagnostic(.{
-        .tag = tag,
-        .loc = tok.loc,
-        .extra = .{ .str = str },
-    }, tok.expansionSlice());
+fn err(pp: *Preprocessor, location: anytype, diagnostic: Diagnostic, args: anytype) !void {
+    if (pp.diagnostics.effectiveKind(diagnostic) == .off) return;
+
+    var sf = std.heap.stackFallback(1024, pp.gpa);
+    var buf = std.ArrayList(u8).init(sf.get());
+    defer buf.deinit();
+
+    try Diagnostics.formatArgs(buf.writer(), diagnostic.fmt, args);
+    try pp.diagnostics.addWithLocation(pp.comp, .{
+        .kind = .@"fatal error",
+        .text = buf.items,
+        .opt = diagnostic.opt,
+        .extension = diagnostic.extension,
+        .location = switch (@TypeOf(location)) {
+            RawToken => (Source.Location{
+                .id = location.source,
+                .byteOffset = location.start,
+                .line = location.line,
+            }).expand(pp.comp),
+            TokenWithExpansionLocs, *TokenWithExpansionLocs => location.loc.expand(pp.comp),
+            Source.Location => location.expand(pp.comp),
+            else => @compileError("invalid token type " ++ @typeName(@TypeOf(location))),
+        },
+    }, switch (@TypeOf(location)) {
+        RawToken => &.{},
+        TokenWithExpansionLocs, *TokenWithExpansionLocs => location.expansionSlice(),
+        Source.Location => &.{},
+        else => @compileError("invalid token type"),
+    }, true);
+    unreachable;
 }
 
 fn fatal(pp: *Preprocessor, raw: RawToken, comptime fmt: []const u8, args: anytype) Compilation.Error {
-    try pp.comp.diagnostics.list.append(pp.gpa, .{
-        .tag = .cli_error,
+    var sf = std.heap.stackFallback(1024, pp.gpa);
+    var buf = std.ArrayList(u8).init(sf.get());
+    defer buf.deinit();
+
+    try Diagnostics.formatArgs(buf.writer(), fmt, args);
+    try pp.diagnostics.add(.{
         .kind = .@"fatal error",
-        .extra = .{ .str = try std.fmt.allocPrint(pp.comp.diagnostics.arena.allocator(), fmt, args) },
-        .loc = .{
+        .text = buf.items,
+        .location = (Source.Location{
             .id = raw.source,
             .byteOffset = raw.start,
             .line = raw.line,
-        },
+        }).expand(pp.comp),
     });
-    return error.FatalError;
 }
 
 fn fatalNotFound(pp: *Preprocessor, tok: TokenWithExpansionLocs, filename: []const u8) Compilation.Error {
-    const old = pp.comp.diagnostics.fatalErrors;
-    pp.comp.diagnostics.fatalErrors = true;
-    defer pp.comp.diagnostics.fatalErrors = old;
+    const old = pp.diagnostics.state.fatal_errors;
+    pp.diagnostics.state.fatal_errors = true;
+    defer pp.diagnostics.state.fatal_errors = old;
 
-    try pp.comp.diagnostics.addExtra(pp.comp.langOpts, .{ .tag = .cli_error, .loc = tok.loc, .extra = .{
-        .str = try std.fmt.allocPrint(pp.comp.diagnostics.arena.allocator(), "'{s}' not found", .{filename}),
-    } }, tok.expansionSlice(), false);
-    unreachable; // addExtra should've returned FatalError
+    var sf = std.heap.stackFallback(1024, pp.gpa);
+    var buf = std.ArrayList(u8).init(sf.get());
+    defer buf.deinit();
+
+    try Diagnostics.formatArgs(buf.writer(), "'{s}' not found", .{filename});
+    try pp.diagnostics.addWithLocation(pp.comp, .{
+        .kind = .@"fatal error",
+        .text = buf.items,
+        .location = tok.loc.expand(pp.comp),
+    }, tok.expansionSlice(), true);
+    unreachable; // should've returned FatalError
 }
 
 fn verboseLog(pp: *Preprocessor, raw: RawToken, comptime fmt: []const u8, args: anytype) void {
@@ -846,7 +869,7 @@ fn verboseLog(pp: *Preprocessor, raw: RawToken, comptime fmt: []const u8, args: 
 fn expectMacroName(pp: *Preprocessor, lexer: *Lexer) Error!?[]const u8 {
     const macroName = lexer.nextNoWhiteSpace();
     if (!macroName.id.isMacroIdentifier()) {
-        try pp.addError(macroName, .macro_name_missing);
+        try pp.err(macroName, .macro_name_missing, .{});
         skipToNewLine(lexer);
         return null;
     }
@@ -866,7 +889,7 @@ fn expectNewLine(pp: *Preprocessor, lexer: *Lexer) Error!void {
 
         if (!sentErr) {
             sentErr = true;
-            try pp.addError(token, .extra_tokens_directive_end);
+            try pp.err(token, .extra_tokens_directive_end, .{});
         }
     }
 }
@@ -913,16 +936,13 @@ fn expr(pp: *Preprocessor, lexer: *Lexer) MacroError!bool {
     for (pp.topExpansionBuffer.items) |token| {
         if (token.is(.MacroWS)) continue;
         if (!token.id.validPreprocessorExprStart()) {
-            try pp.comp.addDiagnostic(.{
-                .tag = .invalid_preproc_expr_start,
-                .loc = token.loc,
-            }, token.expansionSlice());
+            try pp.err(token, .invalid_preproc_expr_start, .{});
 
             return false;
         }
         break;
     } else {
-        try pp.addError(eof, .expected_value_in_expr);
+        try pp.err(eof, .expected_value_in_expr, .{});
         return false;
     }
 
@@ -939,10 +959,7 @@ fn expr(pp: *Preprocessor, lexer: *Lexer) MacroError!bool {
             .StringLiteralUTF_32,
             .StringLiteralWide,
             => {
-                try pp.comp.addDiagnostic(.{
-                    .tag = .string_literal_in_pp_expr,
-                    .loc = token.loc,
-                }, token.expansionSlice());
+                try pp.err(token, .string_literal_in_pp_expr, .{});
                 return false;
             },
 
@@ -970,10 +987,7 @@ fn expr(pp: *Preprocessor, lexer: *Lexer) MacroError!bool {
             .Arrow,
             .Period,
             => {
-                try pp.comp.addDiagnostic(.{
-                    .tag = .invalid_preproc_operator,
-                    .loc = token.loc,
-                }, token.expansionSlice());
+                try pp.err(token, .invalid_preproc_operator, .{});
                 return false;
             },
 
@@ -987,12 +1001,12 @@ fn expr(pp: *Preprocessor, lexer: *Lexer) MacroError!bool {
                     const tokenConsumed = try pp.handleKeywordDefined(&token, items[i + 1 ..], eof);
                     i += tokenConsumed;
                 } else {
-                    try pp.errStr(token, .undefined_macro, pp.expandedSlice(token));
+                    try pp.err(token, .undefined_macro, .{pp.expandedSlice(token)});
 
                     if (i + 1 < pp.topExpansionBuffer.items.len and
                         pp.topExpansionBuffer.items[i + 1].is(.LParen))
                     {
-                        try pp.errStr(token, .fn_macro_undefined, pp.expandedSlice(token));
+                        try pp.err(token, .fn_macro_undefined, .{pp.expandedSlice(token)});
                         return false;
                     }
 
@@ -1011,6 +1025,7 @@ fn expr(pp: *Preprocessor, lexer: *Lexer) MacroError!bool {
     var parser: Parser = .{
         .pp = pp,
         .comp = pp.comp,
+        .diagnostics = pp.diagnostics,
         .gpa = pp.gpa,
         .tokenIds = pp.tokens.items(.id),
         .tokenIdx = @intCast(tokenState.tokensLen),
@@ -1043,27 +1058,24 @@ fn handleKeywordDefined(
     assert(macroToken.is(.KeywordDefined));
     var it = TokenIterator.init(tokens);
     const first = it.nextNoWS() orelse {
-        try pp.addError(eof, .macro_name_missing);
+        try pp.err(eof, .macro_name_missing, .{});
         return it.i;
     };
     switch (first.id) {
         .LParen => {},
         else => {
             if (!first.id.isMacroIdentifier())
-                try pp.errStr(first, .macro_name_must_be_identifier, pp.expandedSlice(first));
+                try pp.err(first, .macro_name_must_be_identifier, .{});
             macroToken.id = if (pp.defines.contains(pp.expandedSlice(first))) .One else .Zero;
             return it.i;
         },
     }
     const second = it.nextNoWS() orelse {
-        try pp.addError(eof, .macro_name_missing);
+        try pp.err(eof, .macro_name_missing, .{});
         return it.i;
     };
     if (!second.id.isMacroIdentifier()) {
-        try pp.comp.addDiagnostic(.{
-            .tag = .macro_name_must_be_identifier,
-            .loc = second.loc,
-        }, second.expansionSlice());
+        try pp.err(second, .macro_name_must_be_identifier, .{});
         return it.i;
     }
     macroToken.id = if (pp.defines.contains(pp.expandedSlice(second))) .One else .Zero;
@@ -1071,14 +1083,8 @@ fn handleKeywordDefined(
     const last = it.nextNoWS();
     if (last == null or last.?.isNot(.RParen)) {
         const tok = last orelse tokenFromRaw(eof);
-        try pp.comp.addDiagnostic(.{
-            .tag = .closing_paren,
-            .loc = tok.loc,
-        }, tok.expansionSlice());
-        try pp.comp.addDiagnostic(.{
-            .tag = .to_match_paren,
-            .loc = first.loc,
-        }, first.expansionSlice());
+        try pp.err(tok, .closing_paren, .{});
+        try pp.err(first, .to_match_paren, .{});
     }
 
     return it.i;
@@ -1110,7 +1116,7 @@ fn skip(
                 .KeywordElse => {
                     if (ifsSeen != 0) continue;
                     if (cont == .untilEndIfSeenElse) {
-                        try pp.addError(directive, .else_after_else);
+                        try pp.err(directive, .else_after_else, .{});
                         continue;
                     }
                     lexer.* = savedLexer;
@@ -1120,7 +1126,7 @@ fn skip(
                 .KeywordElIf => {
                     if (ifsSeen != 0 or cont == .untilEndIf) continue;
                     if (cont == .untilEndIfSeenElse) {
-                        try pp.addError(directive, .elif_after_else);
+                        try pp.err(directive, .elif_after_else, .{});
                         continue;
                     }
                     lexer.* = savedLexer;
@@ -1130,7 +1136,7 @@ fn skip(
                 .KeywordElifdef => {
                     if (ifsSeen != 0 or cont == .untilEndIf) continue;
                     if (cont == .untilEndIfSeenElse) {
-                        try pp.addError(directive, .elifdef_after_else);
+                        try pp.err(directive, .elifdef_after_else, .{});
                         continue;
                     }
                     lexer.* = savedLexer;
@@ -1140,7 +1146,7 @@ fn skip(
                 .KeywordElifndef => {
                     if (ifsSeen != 0 or cont == .untilEndIf) continue;
                     if (cont == .untilEndIfSeenElse) {
-                        try pp.addError(directive, .elifndef_after_else);
+                        try pp.err(directive, .elifndef_after_else, .{});
                         continue;
                     }
                     lexer.* = savedLexer;
@@ -1173,7 +1179,7 @@ fn skip(
         }
     } else {
         const eof = lexer.next();
-        return pp.addError(eof, .unterminated_conditional_directive);
+        return pp.err(eof, .unterminated_conditional_directive, .{});
     }
 }
 
@@ -1408,10 +1414,7 @@ fn stringify(pp: *Preprocessor, tokens: []const TokenWithExpansionLocs) !void {
     const item = lexer.next();
     if (item.id == .UnterminatedStringLiteral) {
         const tok = tokens[tokens.len - 1];
-        try pp.comp.addDiagnostic(.{
-            .tag = .invalid_pp_stringify_escape,
-            .loc = tok.loc,
-        }, tok.expansionSlice());
+        try pp.err(tok, .invalid_pp_stringify_escape, .{});
         pp.charBuffer.items.len -= 2; // erase unpaired backslash and appended end quote
         pp.charBuffer.appendAssumeCapacity('"');
     }
@@ -1426,10 +1429,7 @@ fn reconstructIncludeString(
     first: TokenWithExpansionLocs,
 ) !?[]const u8 {
     if (paramTokens.len == 0) {
-        try pp.comp.addDiagnostic(.{
-            .tag = .expected_filename,
-            .loc = first.loc,
-        }, first.expansionSlice());
+        try pp.err(first, .expected_filename, .{});
         return null;
     }
 
@@ -1444,19 +1444,13 @@ fn reconstructIncludeString(
     const params = paramTokens[begin..end];
 
     if (params.len == 0) {
-        try pp.comp.addDiagnostic(.{
-            .tag = .expected_filename,
-            .loc = first.loc,
-        }, first.expansionSlice());
+        try pp.err(first, .expected_filename, .{});
         return null;
     }
 
     // no string pasting
     if (embedArgs == null and params[0].is(.StringLiteral) and params.len > 1) {
-        try pp.comp.addDiagnostic(.{
-            .tag = .closing_paren,
-            .loc = params[1].loc,
-        }, params[1].expansionSlice());
+        try pp.err(params[1], .closing_paren, .{});
         return null;
     }
 
@@ -1474,16 +1468,10 @@ fn reconstructIncludeString(
     const includeStr = pp.charBuffer.items[charTop..];
     if (includeStr.len < 3) {
         if (includeStr.len == 0) {
-            try pp.comp.addDiagnostic(.{
-                .tag = .expected_filename,
-                .loc = first.loc,
-            }, first.expansionSlice());
+            try pp.err(first, .expected_filename, .{});
             return null;
         }
-        try pp.comp.addDiagnostic(.{
-            .tag = .empty_filename,
-            .loc = params[0].loc,
-        }, params[0].expansionSlice());
+        try pp.err(params[0], .empty_filename, .{});
         return null;
     }
 
@@ -1491,16 +1479,11 @@ fn reconstructIncludeString(
         '<' => {
             if (includeStr[includeStr.len - 1] != '>') {
                 // Ugly hack to find out where the '>' should go, since we don't have the closing ')' location
-                const start = params[0].loc;
-                try pp.comp.addDiagnostic(.{
-                    .tag = .header_str_closing,
-                    .loc = .{ .id = start.id, .byteOffset = start.byteOffset + @as(u32, @intCast(includeStr.len)) + 1, .line = start.line },
-                }, params[0].expansionSlice());
+                var closing = params[0];
+                closing.loc.byte_offset += @as(u32, @intCast(includeStr.len)) + 1;
+                try pp.err(closing, .header_str_closing, .{});
 
-                try pp.comp.addDiagnostic(.{
-                    .tag = .header_str_match,
-                    .loc = params[0].loc,
-                }, params[0].expansionSlice());
+                try pp.err(params[0], .header_str_match, .{});
                 return null;
             }
             return includeStr;
@@ -1509,10 +1492,7 @@ fn reconstructIncludeString(
         '"' => return includeStr,
 
         else => {
-            try pp.comp.addDiagnostic(.{
-                .tag = .expected_filename,
-                .loc = params[0].loc,
-            }, params[0].expansionSlice());
+            try pp.err(params[0], .expected_filename, .{});
             return null;
         },
     }
@@ -1545,10 +1525,7 @@ fn handleBuiltinMacro(
 
             if (identifier == null and invalid == null) invalid = .{ .id = .Eof, .loc = srcLoc };
             if (invalid) |some| {
-                try pp.comp.addDiagnostic(
-                    .{ .tag = .feature_check_requires_identifier, .loc = some.loc },
-                    some.expansionSlice(),
-                );
+                try pp.err(some, .feature_check_requires_identifier, .{});
                 return false;
             }
 
@@ -1572,14 +1549,14 @@ fn handleBuiltinMacro(
         .MacroParamHasWarning => {
             const actualParam = pp.pasteStringsUnsafe(paramTokens) catch |er| switch (er) {
                 error.ExpectedStringLiteral => {
-                    try pp.errStr(paramTokens[0], .expected_str_literal_in, "__has_warning");
+                    try pp.err(paramTokens[0], .expected_str_literal_in, .{"__has_warning"});
                     return false;
                 },
                 else => |e| return e,
             };
 
             if (!std.mem.startsWith(u8, actualParam, "-W")) {
-                try pp.errStr(paramTokens[0], .malformed_warning_check, "__has_warning");
+                try pp.err(paramTokens[0], .malformed_warning_check, .{"__has_warning"});
                 return false;
             }
 
@@ -1599,11 +1576,7 @@ fn handleBuiltinMacro(
             };
             if (identifier == null and invalid == null) invalid = .{ .id = .Eof, .loc = srcLoc };
             if (invalid) |some| {
-                try pp.comp.addDiagnostic(.{
-                    .tag = .missing_tok_builtin,
-                    .loc = some.loc,
-                    .extra = .{ .expectedTokenId = .RParen },
-                }, some.expansionSlice());
+                try pp.err(some, .builtin_missing_r_paren, .{});
                 return false;
             }
 
@@ -1621,12 +1594,8 @@ fn handleBuiltinMacro(
             const filename = includeStr[1 .. includeStr.len - 1];
 
             if (builtin == .MacroParamHasInclude or pp.includeDepth == 0) {
-                if (builtin == .MacroParamHasIncludeNext) {
-                    try pp.comp.addDiagnostic(.{
-                        .tag = .include_next_outside_header,
-                        .loc = srcLoc,
-                    }, &.{});
-                }
+                if (builtin == .MacroParamHasIncludeNext)
+                    try pp.err(srcLoc, .include_next_outside_header, .{});
                 return pp.comp.hasInclude(filename, srcLoc.id, includeType, .First);
             }
             return pp.comp.hasInclude(filename, srcLoc.id, includeType, .Next);
@@ -1649,11 +1618,14 @@ fn getPasteArgs(args: []const TokenWithExpansionLocs) []const TokenWithExpansion
 
 fn expandFuncMacro(
     pp: *Preprocessor,
+    macroToken: TokenWithExpansionLocs,
     loc: Source.Location,
     funcMacro: *const Macro,
     args: *const MacroArguments,
     expandedArgs: *const MacroArguments,
+    hideSetArg: HideSet.Index,
 ) MacroError!ExpandBuffer {
+    var hideset = hideSetArg;
     var buf = ExpandBuffer.init(pp.gpa);
     try buf.ensureTotalCapacity(funcMacro.tokens.len);
     errdefer buf.deinit();
@@ -1717,12 +1689,18 @@ fn expandFuncMacro(
             },
 
             .MacroParamNoExpand => {
+                if (tokenIdx + 1 < funcMacro.tokens.len and funcMacro.tokens[tokenIdx + 1].id == .HashHash)
+                    hideset = pp.hideSet.get(tokenFromRaw(funcMacro.tokens[tokenIdx + 1]).loc);
+
                 const slice = getPasteArgs(args.items[raw.end]);
                 const rawLoc = Source.Location{ .id = raw.source, .byteOffset = raw.start, .line = raw.line };
                 try bufCopyTokens(&buf, slice, &.{rawLoc});
             },
 
             .MacroParam => {
+                if (tokenIdx + 1 < funcMacro.tokens.len and funcMacro.tokens[tokenIdx + 1].id == .HashHash)
+                    hideset = pp.hideSet.get(tokenFromRaw(funcMacro.tokens[tokenIdx + 1]).loc);
+
                 const arg = expandedArgs.items[raw.end];
                 const rawLoc = Source.Location{ .id = raw.source, .byteOffset = raw.start, .line = raw.line };
                 try bufCopyTokens(&buf, arg, &.{rawLoc});
@@ -1764,11 +1742,10 @@ fn expandFuncMacro(
             => {
                 const arg = expandedArgs.items[0];
                 const result = if (arg.len == 0) blk: {
-                    const extra = Diagnostics.Message.Extra{ .arguments = .{ .expected = 1, .actual = 0 } };
-                    try pp.comp.addDiagnostic(.{ .tag = .expected_arguments, .loc = loc, .extra = extra }, &.{});
+                    try pp.err(macroToken, .expected_arguments, .{ 1, 0 });
                     try buf.append(.{ .id = .Zero, .loc = loc });
                     break :blk false;
-                } else try pp.handleBuiltinMacro(raw.id, arg, loc);
+                } else try pp.handleBuiltinMacro(raw.id, arg, macroToken.loc);
 
                 const start = pp.comp.generatedBuffer.items.len;
                 const w = pp.comp.generatedBuffer.writer(pp.gpa);
@@ -1781,8 +1758,7 @@ fn expandFuncMacro(
                 const arg = expandedArgs.items[0];
                 const notFound = "0\n";
                 const result = if (arg.len == 0) blk: {
-                    const extra = Diagnostics.Message.Extra{ .arguments = .{ .expected = 1, .actual = 0 } };
-                    try pp.comp.addDiagnostic(.{ .tag = .expected_arguments, .loc = loc, .extra = extra }, &.{});
+                    try pp.err(macroToken, .expected_arguments, .{ 1, 0 });
                     break :blk notFound;
                 } else res: {
                     var invalid: ?TokenWithExpansionLocs = null;
@@ -1814,14 +1790,11 @@ fn expandFuncMacro(
                     if (vendorIdent != null and attrIdent == null) {
                         invalid = vendorIdent;
                     } else if (attrIdent == null and invalid == null) {
-                        invalid = .{ .id = .Eof, .loc = loc };
+                        invalid = .{ .id = .Eof, .loc = macroToken.loc };
                     }
 
                     if (invalid) |some| {
-                        try pp.comp.addDiagnostic(
-                            .{ .tag = .feature_check_requires_identifier, .loc = some.loc },
-                            some.expansionSlice(),
-                        );
+                        try pp.err(some, .feature_check_requires_identifier, .{});
                         break :res notFound;
                     }
 
@@ -1861,8 +1834,7 @@ fn expandFuncMacro(
                 const arg = expandedArgs.items[0];
                 const notFound = "0\n";
                 const result = if (arg.len == 0) blk: {
-                    const extra = Diagnostics.Message.Extra{ .arguments = .{ .expected = 1, .actual = 0 } };
-                    try pp.comp.addDiagnostic(.{ .tag = .expected_arguments, .loc = loc, .extra = extra }, &.{});
+                    try pp.err(macroToken, .expected_arguments, .{ 1, 0 });
                     break :blk notFound;
                 } else res: {
                     var embedArgs: []const TokenWithExpansionLocs = &.{};
@@ -1892,10 +1864,7 @@ fn expandFuncMacro(
                         const paramFirst = it.next();
                         if (paramFirst.is(.Eof)) break;
                         if (paramFirst.isNot(.Identifier)) {
-                            try pp.comp.addDiagnostic(
-                                .{ .tag = .malformed_embed_param, .loc = paramFirst.loc },
-                                paramFirst.expansionSlice(),
-                            );
+                            try pp.err(paramFirst, .malformed_embed_param, .{});
                             continue;
                         }
 
@@ -1908,29 +1877,20 @@ fn expandFuncMacro(
                                 // vendor::param
                                 const param = it.next();
                                 if (param.isNot(.Identifier)) {
-                                    try pp.comp.addDiagnostic(
-                                        .{ .tag = .malformed_embed_param, .loc = param.loc },
-                                        param.expansionSlice(),
-                                    );
+                                    try pp.err(param, .malformed_embed_param, .{});
                                     continue;
                                 }
 
                                 const lparen = it.next();
                                 if (lparen.isNot(.LParen)) {
-                                    try pp.comp.addDiagnostic(
-                                        .{ .tag = .malformed_embed_param, .loc = lparen.loc },
-                                        lparen.expansionSlice(),
-                                    );
+                                    try pp.err(lparen, .malformed_embed_param, .{});
                                     continue;
                                 }
                                 break :blk "doesn't exist";
                             },
                             .LParen => Attribute.normalize(pp.expandedSlice(paramFirst)),
                             else => {
-                                try pp.comp.addDiagnostic(
-                                    .{ .tag = .malformed_embed_param, .loc = maybeColon.loc },
-                                    maybeColon.expansionSlice(),
-                                );
+                                try pp.err(maybeColon, .malformed_embed_param, .{});
                                 continue;
                             },
                         };
@@ -1940,10 +1900,7 @@ fn expandFuncMacro(
                         while (true) {
                             const next = it.next();
                             if (next.is(.Eof)) {
-                                try pp.comp.addDiagnostic(
-                                    .{ .tag = .malformed_embed_limit, .loc = paramFirst.loc },
-                                    paramFirst.expansionSlice(),
-                                );
+                                try pp.err(paramFirst, .malformed_embed_limit, .{});
                                 break;
                             }
                             if (next.is(.RParen)) break;
@@ -1954,17 +1911,11 @@ fn expandFuncMacro(
 
                         if (std.mem.eql(u8, param, "limit")) {
                             if (argCount != 1) {
-                                try pp.comp.addDiagnostic(
-                                    .{ .tag = .malformed_embed_limit, .loc = paramFirst.loc },
-                                    paramFirst.expansionSlice(),
-                                );
+                                try pp.err(paramFirst, .malformed_embed_limit, .{});
                                 continue;
                             }
                             if (firstArg.isNot(.PPNumber)) {
-                                try pp.comp.addDiagnostic(
-                                    .{ .tag = .malformed_embed_limit, .loc = paramFirst.loc },
-                                    paramFirst.expansionSlice(),
-                                );
+                                try pp.err(paramFirst, .malformed_embed_limit, .{});
                                 continue;
                             }
                             _ = std.fmt.parseInt(u32, pp.expandedSlice(firstArg), 10) catch {
@@ -2013,11 +1964,11 @@ fn expandFuncMacro(
                         break;
                     },
                 };
-                if (string == null and invalid == null) invalid = .{ .loc = loc, .id = .Eof };
-                if (invalid) |some| try pp.comp.addDiagnostic(
-                    .{ .tag = .pragma_operator_string_literal, .loc = some.loc },
-                    some.expansionSlice(),
-                ) else try pp.pragmaOperator(string.?, loc);
+                if (string == null and invalid == null) invalid = .{ .loc = macroToken.loc, .id = .Eof };
+                if (invalid) |some|
+                    try pp.err(some, .pragma_operator_string_literal, .{})
+                else
+                    try pp.pragmaOperator(string.?, macroToken.loc);
             },
 
             // GNU extension
@@ -2036,12 +1987,12 @@ fn expandFuncMacro(
                         tokenIdx += consumed;
                         if (funcMacro.params.len == expandedArgs.items.len) {
                             // Empty __VA_ARGS__, drop the comma
-                            try pp.addError(hashhash, .comma_deletion_va_args);
+                            try pp.err(hashhash, .comma_deletion_va_args, .{});
                         } else if (funcMacro.params.len == 0 and expandedArgs.items.len == 1 and expandedArgs.items[0].len == 0) {
                             // Ambiguous whether this is "empty __VA_ARGS__" or "__VA_ARGS__ omitted"
                             if (pp.comp.langOpts.standard.isGNU()) {
                                 // GNU standard, drop the comma
-                                try pp.addError(hashhash, .comma_deletion_va_args);
+                                try pp.err(hashhash, .comma_deletion_va_args, .{});
                             } else {
                                 // C standard, retain the comma
                                 try buf.append(tokenFromRaw(raw));
@@ -2049,7 +2000,7 @@ fn expandFuncMacro(
                         } else {
                             try buf.append(tokenFromRaw(raw));
                             if (expandedVarArguments.items.len > 0 or varArguments.items.len == funcMacro.params.len) {
-                                try pp.addError(hashhash, .comma_deletion_va_args);
+                                try pp.err(hashhash, .comma_deletion_va_args, .{});
                             }
                             const rawLoc = Source.Location{
                                 .id = maybeVaArgs.source,
@@ -2068,6 +2019,15 @@ fn expandFuncMacro(
         }
     }
     removePlaceMarkers(&buf);
+
+    const macroExpansionLocs = macroToken.expansionSlice();
+    for (buf.items) |*tok| {
+        try tok.addExpansionLocation(pp.gpa, &.{macroToken.loc});
+        try tok.addExpansionLocation(pp.gpa, macroExpansionLocs);
+        const tokenHideList = pp.hideSet.get(tok.loc);
+        const newHideList = try pp.hideSet.@"union"(tokenHideList, hideset);
+        try pp.hideSet.put(tok.loc, newHideList);
+    }
 
     return buf;
 }
@@ -2117,7 +2077,7 @@ fn nextBufToken(
         if (extendbuffer) {
             const rawToken = lexer.next();
             if (rawToken.id.isMacroIdentifier() and pp.poisonedIdentifiers.get(pp.getTokenSlice(rawToken)) != null)
-                try pp.addError(rawToken, .poisoned_identifier);
+                try pp.err(rawToken, .poisoned_identifier, .{});
 
             if (rawToken.is(.NewLine))
                 pp.addExpansionNL += 1;
@@ -2156,7 +2116,7 @@ fn collectMacroFuncArguments(
             .LParen => break,
             else => {
                 if (isBuiltin)
-                    try pp.errStr(nameToken, .missing_lparen_after_builtin, pp.expandedSlice(nameToken));
+                    try pp.err(nameToken, .missing_lparen_after_builtin, .{pp.expandedSlice(nameToken)});
                 // Not a macro function call, go over normal identifier, rewind
                 lexer.* = savedLexer;
                 endIdx.* = oldEnd;
@@ -2219,10 +2179,7 @@ fn collectMacroFuncArguments(
                 }
 
                 lexer.* = savedLexer;
-                try pp.comp.addDiagnostic(
-                    .{ .tag = .unterminated_macro_arg_list, .loc = nameToken.loc },
-                    nameToken.expansionSlice(),
-                );
+                try pp.err(nameToken, .unterminated_macro_arg_list, .{});
 
                 return error.Unterminated;
             },
@@ -2352,7 +2309,7 @@ fn expandMacroExhaustive(
                         extendBuffer,
                         macro.isBuiltin,
                         &rparen,
-                    ) catch |err| switch (err) {
+                    ) catch |er| switch (er) {
                         error.MissLParen => {
                             if (!buf.items[idx].flags.isMacroArg)
                                 buf.items[idx].flags.expansionDisabled = true;
@@ -2392,27 +2349,15 @@ fn expandMacroExhaustive(
                     }
 
                     // Validate argument count.
-                    const extra = Diagnostics.Message.Extra{
-                        .arguments = .{
-                            .expected = @intCast(macro.params.len),
-                            .actual = argsCount,
-                        },
-                    };
                     if (macro.varArgs and argsCount < macro.params.len) {
-                        try pp.comp.addDiagnostic(
-                            .{ .tag = .expected_at_least_arguments, .loc = buf.items[idx].loc, .extra = extra },
-                            buf.items[idx].expansionSlice(),
-                        );
+                        try pp.err(buf.items[idx], .expected_at_least_arguments, .{ macro.params.len, argsCount });
                         idx += 1;
                         try pp.removeExpandedTokens(buf, idx, macroScanIdx - idx + 1, &movingEndIdx);
                         continue;
                     }
 
                     if (!macro.varArgs and argsCount != macro.params.len) {
-                        try pp.comp.addDiagnostic(
-                            .{ .tag = .expected_arguments, .loc = buf.items[idx].loc, .extra = extra },
-                            buf.items[idx].expansionSlice(),
-                        );
+                        try pp.err(buf.items[idx], .expected_arguments, .{ macro.params.len, argsCount });
                         idx += 1;
                         try pp.removeExpandedTokens(buf, idx, macroScanIdx - idx + 1, &movingEndIdx);
                         continue;
@@ -2431,18 +2376,9 @@ fn expandMacroExhaustive(
                         expandedArgs.appendAssumeCapacity(try expandBuffer.toOwnedSlice());
                     }
 
-                    var res = try pp.expandFuncMacro(macroToken.loc, macro, &args, &expandedArgs);
+                    var res = try pp.expandFuncMacro(macroToken, macro, &args, &expandedArgs, hs);
                     defer res.deinit();
                     const tokensAdded = res.items.len;
-
-                    const macroExpansionLocs = macroToken.expansionSlice();
-                    for (res.items) |*tok| {
-                        try tok.addExpansionLocation(pp.gpa, &.{macroToken.loc});
-                        try tok.addExpansionLocation(pp.gpa, macroExpansionLocs);
-                        const tokenHideList = pp.hideSet.get(tok.loc);
-                        const newHideList = try pp.hideSet.@"union"(tokenHideList, hs);
-                        try pp.hideSet.put(tok.loc, newHideList);
-                    }
 
                     const tokensRemoved = macroScanIdx - idx + 1;
                     for (buf.items[idx .. idx + tokensRemoved]) |tok| TokenWithExpansionLocs.free(tok.expansionLocs, pp.gpa);
@@ -2471,10 +2407,7 @@ fn expandMacroExhaustive(
                         try pp.hideSet.put(tok.loc, newHideList);
 
                         if (tok.is(.KeywordDefined) and evalCtx == .Expr) {
-                            try pp.comp.addDiagnostic(.{
-                                .tag = .expansion_to_defined,
-                                .loc = tok.loc,
-                            }, tok.expansionSlice());
+                            try pp.err(tok, .expansion_to_defined, .{});
                         }
                         if (i < incrementIdxBy and (tok.is(.KeywordDefined) or pp.defines.contains(pp.expandedSlice(tok.*)))) {
                             incrementIdxBy = i;
@@ -2622,11 +2555,7 @@ fn pasteTokens(pp: *Preprocessor, lhsTokens: *ExpandBuffer, rhsTokens: []const T
         pastedToken.id;
     try lhsTokens.append(try pp.makeGeneratedToken(start, pastedId, lhs));
     if (!next.isOneOf(.{ .NewLine, .Eof })) {
-        try pp.errStr(
-            lhs,
-            .pasting_formed_invalid,
-            try pp.comp.diagnostics.arena.allocator().dupe(u8, pp.comp.generatedBuffer.items[start..end]),
-        );
+        try pp.err(lhs, .pasting_formed_invalid, .{pp.comp.generatedBuffer.items[start..end]});
         try lhsTokens.append(tokenFromRaw(next));
     }
     try bufCopyTokens(lhsTokens, rhsTokens[rhsRest..], &.{});
@@ -2652,19 +2581,12 @@ fn defineMacro(pp: *Preprocessor, nameToken: RawToken, macro: Macro) Error!void 
     const name = pp.getTokenSlice(nameToken);
     const gop = try pp.defines.getOrPut(pp.gpa, name);
     if (gop.found_existing and !gop.value_ptr.eql(macro, pp)) {
-        const tag: Diagnostics.Tag = if (gop.value_ptr.isBuiltin) .builtin_macro_redefined else .macro_redefined;
-        const start = pp.comp.diagnostics.list.items.len;
-        try pp.comp.addDiagnostic(.{
-            .tag = tag,
-            .loc = .{ .id = nameToken.source, .byteOffset = nameToken.start, .line = nameToken.line },
-            .extra = .{ .str = name },
-        }, &.{});
+        const loc: Source.Location = .{ .id = nameToken.source, .byteOffset = nameToken.start, .line = nameToken.line };
+        const prevTotal = pp.diagnostics.total;
+        try pp.err(loc, if (gop.value_ptr.is_builtin) .builtin_macro_redefined else .macro_redefined, .{name});
 
-        if (!gop.value_ptr.isBuiltin and pp.comp.diagnostics.list.items.len != start) {
-            try pp.comp.addDiagnostic(.{
-                .tag = .previous_definition,
-                .loc = gop.value_ptr.loc,
-            }, &.{});
+        if (!gop.value_ptr.is_builtin and pp.diagnostics.total != prevTotal) {
+            try pp.err(gop.value_ptr.loc, .previous_definition, .{});
         }
     }
 
@@ -2679,12 +2601,12 @@ fn define(pp: *Preprocessor, lexer: *Lexer) Error!void {
     // get the macro name and validate.
     const macroName = lexer.nextNoWhiteSpace();
     if (macroName.is(.KeywordDefined)) {
-        try pp.addError(macroName, .defined_as_macro_name);
+        try pp.err(macroName, .defined_as_macro_name, .{});
         return skipToNewLine(lexer);
     }
 
     if (!macroName.id.isMacroIdentifier()) {
-        try pp.addError(macroName, .macro_name_must_be_identifier);
+        try pp.err(macroName, .macro_name_must_be_identifier, .{});
         return skipToNewLine(lexer);
     }
 
@@ -2693,7 +2615,7 @@ fn define(pp: *Preprocessor, lexer: *Lexer) Error!void {
     switch (macroNameTokenID) {
         .Identifier, .ExtendedIdentifier => {},
         else => if (macroNameTokenID.isMacroIdentifier()) {
-            try pp.addError(macroName, .keyword_macro);
+            try pp.err(macroName, .keyword_macro, .{});
         },
     }
 
@@ -2708,11 +2630,11 @@ fn define(pp: *Preprocessor, lexer: *Lexer) Error!void {
         }),
         .WhiteSpace => first = lexer.next(),
         .LParen => return pp.defineFunc(lexer, macroName, first),
-        else => try pp.addError(first, .whitespace_after_macro_name),
+        else => try pp.err(first, .whitespace_after_macro_name, .{}),
     }
 
     if (first.is(.HashHash)) {
-        try pp.addError(first, .hash_hash_at_start);
+        try pp.err(first, .hash_hash_at_start, .{});
         return skipToNewLine(lexer);
     }
     first.id.simplifyMacroKeyword();
@@ -2731,11 +2653,11 @@ fn define(pp: *Preprocessor, lexer: *Lexer) Error!void {
                 const next = lexer.nextNoWhiteSpaceComments();
                 switch (next.id) {
                     .NewLine, .Eof => {
-                        try pp.addError(token, .hash_hash_at_end);
+                        try pp.err(token, .hash_hash_at_end, .{});
                         return;
                     },
                     .HashHash => {
-                        try pp.addError(next, .hash_hash_at_end);
+                        try pp.err(next, .hash_hash_at_end, .{});
                         return;
                     },
                     else => {},
@@ -2753,10 +2675,10 @@ fn define(pp: *Preprocessor, lexer: *Lexer) Error!void {
             },
             .WhiteSpace => needWS = true,
             .UnterminatedStringLiteral, .UnterminatedCharLiteral, .EmptyCharLiteral => |tag| {
-                try pp.addError(token, invalidTokenDiagnostic(tag));
+                try pp.err(token, invalidTokenDiagnostic(tag), .{});
                 try pp.tokenBuffer.append(token);
             },
-            .UnterminatedComment => try pp.addError(token, .unterminated_comment),
+            .UnterminatedComment => try pp.err(token, .unterminated_comment, .{}),
 
             else => {
                 if (token.id != .WhiteSpace and needWS) {
@@ -2793,7 +2715,7 @@ fn embed(pp: *Preprocessor, lexer: *Lexer) MacroError!void {
     // Check for empty filename.
     const tokSlice = pp.expandedSliceExtra(fileNameToken, .SingleMacroWS);
     if (tokSlice.len < 3) {
-        try pp.addError(first, .empty_filename);
+        try pp.err(first, .empty_filename, .{});
         return;
     }
 
@@ -2828,7 +2750,7 @@ fn embed(pp: *Preprocessor, lexer: *Lexer) MacroError!void {
             .NewLine, .Eof => break,
             .Identifier => {},
             else => {
-                try pp.addError(paramFirst, .malformed_embed_param);
+                try pp.err(paramFirst, .malformed_embed_param, .{});
                 continue;
             },
         }
@@ -2842,12 +2764,12 @@ fn embed(pp: *Preprocessor, lexer: *Lexer) MacroError!void {
                 // vendor::param
                 const param = lexer.nextNoWhiteSpace();
                 if (param.id != .Identifier) {
-                    try pp.addError(param, .malformed_embed_param);
+                    try pp.err(param, .malformed_embed_param, .{});
                     continue;
                 }
                 const lparen = lexer.nextNoWhiteSpace();
                 if (lparen.id != .LParen) {
-                    try pp.addError(lparen, .malformed_embed_param);
+                    try pp.err(lparen, .malformed_embed_param, .{});
                     continue;
                 }
                 try pp.charBuffer.appendSlice(Attribute.normalize(pp.getTokenSlice(paramFirst)));
@@ -2857,7 +2779,7 @@ fn embed(pp: *Preprocessor, lexer: *Lexer) MacroError!void {
             },
             .LParen => Attribute.normalize(pp.getTokenSlice(paramFirst)),
             else => {
-                try pp.addError(maybeColon, .malformed_embed_param);
+                try pp.err(maybeColon, .malformed_embed_param, .{});
                 continue;
             },
         };
@@ -2872,50 +2794,46 @@ fn embed(pp: *Preprocessor, lexer: *Lexer) MacroError!void {
 
         if (std.mem.eql(u8, param, "limit")) {
             if (limit != null) {
-                try pp.errStr(tokenFromRaw(paramFirst), .duplicate_embed_param, "limit");
+                try pp.err(tokenFromRaw(paramFirst), .duplicate_embed_param, .{"limit"});
                 continue;
             }
 
             if (start + 1 != end) {
-                try pp.addError(paramFirst, .malformed_embed_limit);
+                try pp.err(paramFirst, .malformed_embed_limit, .{});
                 continue;
             }
 
             const limitToken = pp.tokenBuffer.items[start];
             if (limitToken.id != .PPNumber) {
-                try pp.addError(paramFirst, .malformed_embed_limit);
+                try pp.err(paramFirst, .malformed_embed_limit, .{});
                 continue;
             }
 
             limit = std.fmt.parseInt(u32, pp.getTokenSlice(limitToken), 10) catch {
-                try pp.addError(limitToken, .malformed_embed_limit);
+                try pp.err(limitToken, .malformed_embed_limit, .{});
                 continue;
             };
             pp.tokenBuffer.items.len = start;
         } else if (std.mem.eql(u8, param, "prefix")) {
             if (prefix != null) {
-                try pp.errStr(tokenFromRaw(paramFirst), .duplicate_embed_param, "prefix");
+                try pp.err(tokenFromRaw(paramFirst), .duplicate_embed_param, .{"prefix"});
                 continue;
             }
             prefix = .{ .start = start, .end = end };
         } else if (std.mem.eql(u8, param, "suffix")) {
             if (suffix != null) {
-                try pp.errStr(tokenFromRaw(paramFirst), .duplicate_embed_param, "suffix");
+                try pp.err(tokenFromRaw(paramFirst), .duplicate_embed_param, .{"suffix"});
                 continue;
             }
             suffix = .{ .start = start, .end = end };
         } else if (std.mem.eql(u8, param, "if_empty")) {
             if (ifEmpty != null) {
-                try pp.errStr(tokenFromRaw(paramFirst), .duplicate_embed_param, "if_empty");
+                try pp.err(tokenFromRaw(paramFirst), .duplicate_embed_param, .{"if_empty"});
                 continue;
             }
             ifEmpty = .{ .start = start, .end = end };
         } else {
-            try pp.errStr(
-                tokenFromRaw(paramFirst),
-                .unsupported_embed_param,
-                try pp.comp.diagnostics.arena.allocator().dupe(u8, param),
-            );
+            try pp.err(tokenFromRaw(paramFirst), .unsupported_embed_param, .{param});
             pp.tokenBuffer.items.len = start;
         }
     }
@@ -2970,14 +2888,14 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: RawToken, lParen: Raw
         if (token.is(.RParen)) break;
 
         if (token.is(.Eof))
-            return pp.addError(token, .unterminated_macro_param_list);
+            return pp.err(token, .unterminated_macro_param_list, .{});
 
         if (token.is(.Ellipsis)) {
             varArgs = true;
             const rParen = lexer.nextNoWhiteSpace();
             if (rParen.isNot(.RParen)) {
-                try pp.addError(rParen, .missing_paren_param_list);
-                try pp.addError(lParen, .to_match_paren);
+                try pp.err(rParen, .missing_paren_param_list, .{});
+                try pp.err(lParen, .to_match_paren, .{});
                 return skipToNewLine(lexer);
             }
 
@@ -2985,7 +2903,7 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: RawToken, lParen: Raw
         }
 
         if (!token.id.isMacroIdentifier()) {
-            try pp.addError(token, .invalid_token_param_list);
+            try pp.err(token, .invalid_token_param_list, .{});
             return skipToNewLine(lexer);
         }
 
@@ -2993,19 +2911,19 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: RawToken, lParen: Raw
 
         token = lexer.nextNoWhiteSpace();
         if (token.is(.Ellipsis)) {
-            try pp.addError(token, .gnu_va_macro);
+            try pp.err(token, .gnu_va_macro, .{});
             gnuVarArgs = params.pop().?;
             const rParen = lexer.nextNoWhiteSpace();
             if (rParen.id != .RParen) {
-                try pp.addError(lParen, .missing_paren_param_list);
-                try pp.addError(lParen, .to_match_paren);
+                try pp.err(lParen, .missing_paren_param_list, .{});
+                try pp.err(lParen, .to_match_paren, .{});
                 return skipToNewLine(lexer);
             }
             break;
         } else if (token.is(.RParen)) {
             break;
         } else if (token.isNot(.Comma)) {
-            try pp.addError(token, .expected_comma_param_list);
+            try pp.err(token, .expected_comma_param_list, .{});
             return skipToNewLine(lexer);
         }
     } else unreachable;
@@ -3060,7 +2978,7 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: RawToken, lParen: Raw
                     }
                 }
 
-                try pp.addError(param, .hash_not_followed_param);
+                try pp.err(param, .hash_not_followed_param, .{});
                 return skipToNewLine(lexer);
             },
 
@@ -3069,14 +2987,14 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: RawToken, lParen: Raw
                 // if "##" appear at the beginning, the token buffer is still empty in this case
                 // emit error
                 if (pp.tokenBuffer.items.len == 0) {
-                    try pp.addError(token, .hash_hash_at_start);
+                    try pp.err(token, .hash_hash_at_start, .{});
                     return skipToNewLine(lexer);
                 }
 
                 const savedLexer = lexer.*;
                 const next = lexer.nextNoWhiteSpaceComments();
                 if (next.isOneOf(.{ .NewLine, .Eof })) {
-                    try pp.addError(token, .hash_hash_at_end);
+                    try pp.err(token, .hash_hash_at_end, .{});
                     return;
                 }
 
@@ -3089,11 +3007,11 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: RawToken, lParen: Raw
             },
 
             .UnterminatedStringLiteral, .UnterminatedCharLiteral, .EmptyCharLiteral => |tag| {
-                try pp.addError(token, invalidTokenDiagnostic(tag));
+                try pp.err(token, invalidTokenDiagnostic(tag), .{});
                 try pp.tokenBuffer.append(token);
             },
 
-            .UnterminatedComment => try pp.addError(token, .unterminated_comment),
+            .UnterminatedComment => try pp.err(token, .unterminated_comment, .{}),
 
             else => {
                 if (token.id != .WhiteSpace and needWS) {
@@ -3106,7 +3024,7 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: RawToken, lParen: Raw
                 } else if (varArgs and token.is(.KeywordVarOpt)) {
                     const optLparen = lexer.next();
                     if (!optLparen.is(.LParen)) {
-                        try pp.addError(optLparen, .va_opt_lparen);
+                        try pp.err(optLparen, .va_opt_lparen, .{});
                         return skipToNewLine(lexer);
                     }
                     token.start = optLparen.end;
@@ -3122,8 +3040,8 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: RawToken, lParen: Raw
                                 parens -= 1;
                             },
                             .NewLine, .Eof => {
-                                try pp.addError(optToken, .va_opt_rparen);
-                                try pp.addError(optLparen, .to_match_paren);
+                                try pp.err(optToken, .va_opt_rparen, .{});
+                                try pp.err(optLparen, .to_match_paren, .{});
                                 return skipToNewLine(lexer);
                             },
                             .WhiteSpace => {},
@@ -3175,10 +3093,8 @@ fn include(pp: *Preprocessor, lexer: *Lexer, which: Compilation.WhichInclude) Ma
     pp.includeDepth += 1;
     defer pp.includeDepth -= 1;
     if (pp.includeDepth > MaxIncludeDepth) {
-        try pp.comp.addDiagnostic(.{
-            .tag = .too_many_includes,
-            .loc = .{ .id = first.source, .byteOffset = first.start, .line = first.line },
-        }, &.{});
+        const loc: Source.Location = .{ .id = first.source, .byteOffset = first.start, .line = first.line };
+        try pp.err(loc, .too_many_includes, .{});
         return error.StopPreprocessing;
     }
 
@@ -3192,7 +3108,7 @@ fn include(pp: *Preprocessor, lexer: *Lexer, which: Compilation.WhichInclude) Ma
 
     const tokenState = pp.getTokenState();
     try pp.addIncludeStart(newSource);
-    const eof = pp.preprocessExtra(newSource) catch |err| switch (err) {
+    const eof = pp.preprocessExtra(newSource) catch |er| switch (er) {
         error.StopPreprocessing => {
             for (pp.expansionEntries.items(.locs)[tokenState.expansionEntriesLen..]) |loc|
                 TokenWithExpansionLocs.free(loc, pp.gpa);
@@ -3299,15 +3215,13 @@ fn pragma(
     }
 
     if (pp.comp.getPragma(name)) |prag| unknown: {
-        return prag.preprocessorCB(pp, pragmaStart) catch |err| switch (err) {
+        return prag.preprocessorCB(pp, pragmaStart) catch |er| switch (er) {
             error.UnknownPragma => break :unknown,
             else => |e| return e,
         };
     }
-    return pp.comp.addDiagnostic(.{
-        .tag = .unknown_pragma,
-        .loc = pragmaNameToken.loc,
-    }, pragmaNameToken.expansionSlice());
+
+    try pp.err(pragmaNameToken, .unknown_pragma, .{});
 }
 
 fn findIncludeFilenameToken(
@@ -3331,15 +3245,9 @@ fn findIncludeFilenameToken(
             }
         }
 
-        try pp.comp.addDiagnostic(.{
-            .tag = .header_str_closing,
-            .loc = .{
-                .id = first.source,
-                .byteOffset = lexer.index,
-                .line = first.line,
-            },
-        }, &.{});
-        try pp.addError(first, .header_str_match);
+        const loc: Source.Location = .{ .id = first.source, .byteOffset = lexer.index, .line = first.line };
+        try pp.err(loc, .header_str_closing, .{});
+        try pp.err(first, .header_str_match, .{});
     }
 
     const sourceToken = tokenFromRaw(first);
@@ -3375,17 +3283,11 @@ fn findIncludeFilenameToken(
             const newLine = lexer.nextNoWhiteSpace();
             if ((newLine.id != .NewLine and newLine.id != .Eof) or expandedTrailing) {
                 skipToNewLine(lexer);
-                try pp.comp.diagnostics.addExtra(pp.comp.langOpts, .{
-                    .tag = .extra_tokens_directive_end,
-                    .loc = filenameToken.loc,
-                }, filenameToken.expansionSlice(), false);
+                try pp.err(filenameToken, .extra_tokens_directive_end, .{});
             }
         },
         .IgnoreTrailingTokens => if (expandedTrailing) {
-            try pp.comp.diagnostics.addExtra(pp.comp.langOpts, .{
-                .tag = .extra_tokens_directive_end,
-                .loc = filenameToken.loc,
-            }, filenameToken.expansionSlice(), false);
+            try pp.err(filenameToken, .extra_tokens_directive_end, .{});
         },
     }
 
@@ -3404,7 +3306,7 @@ fn findIncludeSource(
     // check for empty filename
     const tkSlice = pp.expandedSliceExtra(filenameToken, .SingleMacroWS);
     if (tkSlice.len < 3) {
-        try pp.addError(first, .empty_filename);
+        try pp.err(first, .empty_filename, .{});
         return error.InvalidInclude;
     }
 

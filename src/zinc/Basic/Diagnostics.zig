@@ -12,6 +12,7 @@ pub const Message = struct {
     text: []const u8,
     opt: ?Option = null,
     extension: bool = false,
+    location: ?Source.ExpandedLocation,
 
     pub const Kind = enum {
         off,
@@ -354,8 +355,8 @@ pub fn addWithLocation(
     if (expansionLocs.len != 0) {
         // Add macro backtrace notes in reverse order omitting from the middle if needed.
         var i = expansionLocs.len - 1;
-        const half = d.macro_backtrace_limit / 2;
-        const limit = if (i < d.macro_backtrace_limit) 0 else i - half;
+        const half = d.macroBacktraceLimit / 2;
+        const limit = if (i < d.macroBacktraceLimit) 0 else i - half;
         while (i > limit) {
             i -= 1;
             try d.addMessage(.{
@@ -473,9 +474,9 @@ fn addMessage(d: *Diagnostics, msg: Message) Compilation.Error!void {
                     .path = try arena.dupe(u8, some.path),
                     .line = try arena.dupe(u8, some.line),
                     .col = some.col,
-                    .line_no = some.line_no,
+                    .lineNo = some.lineNo,
                     .width = some.width,
-                    .end_with_splice = some.end_with_splice,
+                    .endWithSplice = some.endWithSplice,
                 } else null,
             });
         },
