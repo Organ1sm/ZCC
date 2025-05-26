@@ -721,14 +721,15 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!TokenWithExpans
                 if (token.id.isMacroIdentifier() and pp.poisonedIdentifiers.get(pp.getTokenSlice(token)) != null)
                     try pp.err(token, .poisoned_identifier, .{});
 
-                if (std.mem.eql(u8, lexer.buffer[token.start..token.end], "__has_include")) {
-                    token.id.simplifyMacroKeyword();
-                    try pp.comp.addDiagnostic(.{
-                        .tag = .preprocessing_directive_only,
-                        .loc = .{ .id = token.source, .byteOffset = token.start, .line = token.line },
-                        .extra = .{ .str = lexer.buffer[token.start..token.end] },
-                    }, &.{});
-                }
+                // if (std.mem.eql(u8, lexer.buffer[token.start..token.end], "__has_include")) {
+                //     token.id.simplifyMacroKeyword();
+                //     try pp.err(token, .preprocessing, args: anytype)
+                //     try pp.comp.addDiagnostic(.{
+                //         .tag = .preprocessing_directive_only,
+                //         .loc = .{ .id = token.source, .byteOffset = token.start, .line = token.line },
+                //         .extra = .{ .str = lexer.buffer[token.start..token.end] },
+                //     }, &.{});
+                // }
 
                 // add the token to the buffer do any necessary expansions
                 startOfLine = false;
@@ -830,12 +831,13 @@ fn fatal(pp: *Preprocessor, raw: RawToken, comptime fmt: []const u8, args: anyty
             .line = raw.line,
         }).expand(pp.comp),
     });
+    unreachable;
 }
 
 fn fatalNotFound(pp: *Preprocessor, tok: TokenWithExpansionLocs, filename: []const u8) Compilation.Error {
-    const old = pp.diagnostics.state.fatal_errors;
-    pp.diagnostics.state.fatal_errors = true;
-    defer pp.diagnostics.state.fatal_errors = old;
+    const old = pp.comp.diagnostics.state.fatalErrors;
+    pp.comp.diagnostics.state.fatalErrors = true;
+    defer pp.comp.diagnostics.state.fatalErrors = old;
 
     var sf = std.heap.stackFallback(1024, pp.gpa);
     var buf = std.ArrayList(u8).init(sf.get());
@@ -858,7 +860,7 @@ fn verboseLog(pp: *Preprocessor, raw: RawToken, comptime fmt: []const u8, args: 
     var buffWriter = std.io.bufferedWriter(stderr);
     const writer = buffWriter.writer();
     defer buffWriter.flush() catch {};
-    writer.print("{s}:{d}:{d}: ", .{ source.path, lineCol.lineNO, lineCol.col }) catch return;
+    writer.print("{s}:{d}:{d}: ", .{ source.path, lineCol.lineNo, lineCol.col }) catch return;
     writer.print(fmt, args) catch return;
     writer.writeByte('\n') catch return;
     writer.writeAll(lineCol.line) catch return;
@@ -1480,7 +1482,7 @@ fn reconstructIncludeString(
             if (includeStr[includeStr.len - 1] != '>') {
                 // Ugly hack to find out where the '>' should go, since we don't have the closing ')' location
                 var closing = params[0];
-                closing.loc.byte_offset += @as(u32, @intCast(includeStr.len)) + 1;
+                closing.loc.byteOffset += @as(u32, @intCast(includeStr.len)) + 1;
                 try pp.err(closing, .header_str_closing, .{});
 
                 try pp.err(params[0], .header_str_match, .{});
@@ -1619,7 +1621,6 @@ fn getPasteArgs(args: []const TokenWithExpansionLocs) []const TokenWithExpansion
 fn expandFuncMacro(
     pp: *Preprocessor,
     macroToken: TokenWithExpansionLocs,
-    loc: Source.Location,
     funcMacro: *const Macro,
     args: *const MacroArguments,
     expandedArgs: *const MacroArguments,
@@ -1743,7 +1744,7 @@ fn expandFuncMacro(
                 const arg = expandedArgs.items[0];
                 const result = if (arg.len == 0) blk: {
                     try pp.err(macroToken, .expected_arguments, .{ 1, 0 });
-                    try buf.append(.{ .id = .Zero, .loc = loc });
+                    try buf.append(.{ .id = .Zero, .loc = macroToken.loc });
                     break :blk false;
                 } else try pp.handleBuiltinMacro(raw.id, arg, macroToken.loc);
 
@@ -2583,9 +2584,9 @@ fn defineMacro(pp: *Preprocessor, nameToken: RawToken, macro: Macro) Error!void 
     if (gop.found_existing and !gop.value_ptr.eql(macro, pp)) {
         const loc: Source.Location = .{ .id = nameToken.source, .byteOffset = nameToken.start, .line = nameToken.line };
         const prevTotal = pp.diagnostics.total;
-        try pp.err(loc, if (gop.value_ptr.is_builtin) .builtin_macro_redefined else .macro_redefined, .{name});
+        try pp.err(loc, if (gop.value_ptr.isBuiltin) .builtin_macro_redefined else .macro_redefined, .{name});
 
-        if (!gop.value_ptr.is_builtin and pp.diagnostics.total != prevTotal) {
+        if (!gop.value_ptr.isBuiltin and pp.diagnostics.total != prevTotal) {
             try pp.err(gop.value_ptr.loc, .previous_definition, .{});
         }
     }
@@ -3402,7 +3403,7 @@ pub fn prettyPrintTokens(pp: *Preprocessor, w: anytype) !void {
                             const next = pp.tokens.get(i);
                             const source = pp.comp.getSource(next.loc.id);
                             const lineCol = source.getLineCol(next.loc);
-                            try printLinemarker(pp, w, lineCol.lineNO, source, .none);
+                            try printLinemarker(pp, w, lineCol.lineNo, source, .none);
                             lastNewline = true;
                         }
                         continue :outer;
@@ -3462,7 +3463,7 @@ pub fn prettyPrintTokens(pp: *Preprocessor, w: anytype) !void {
                 const lineCol = source.getLineCol(cur.loc);
                 if (!lastNewline) try w.writeAll("\n");
 
-                try pp.printLinemarker(w, lineCol.lineNO, source, .@"resume");
+                try pp.printLinemarker(w, lineCol.lineNo, source, .@"resume");
                 lastNewline = true;
             },
 

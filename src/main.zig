@@ -3,6 +3,7 @@ const process = std.process;
 const builtin = @import("builtin");
 const zinc = @import("zinc");
 const Compilation = zinc.Compilation;
+const Diagnostics = zinc.Diagnostics;
 const Driver = zinc.Driver;
 const Toolchain = zinc.ToolChain;
 const Target = zinc.TargetUtil;
@@ -33,7 +34,17 @@ pub fn main() u8 {
     };
     defer gpa.free(zincName);
 
-    var comp = Compilation.initDefault(gpa, std.fs.cwd()) catch |er| switch (er) {
+    const stderrFile = std.io.getStdErr();
+    var diagnostics: Diagnostics = .{
+        .output = .{
+            .to_file = .{
+                .config = std.io.tty.detectConfig(stderrFile),
+                .file = stderrFile,
+            },
+        },
+    };
+
+    var comp = Compilation.initDefault(gpa, &diagnostics, std.fs.cwd()) catch |er| switch (er) {
         error.OutOfMemory => {
             std.debug.print("Out of Memory\n", .{});
             if (fastExit) process.exit(1);
@@ -42,7 +53,7 @@ pub fn main() u8 {
     };
     defer comp.deinit();
 
-    var driver = Driver{ .comp = &comp, .zincName = zincName };
+    var driver = Driver{ .comp = &comp, .zincName = zincName, .diagnostics = &diagnostics };
     defer driver.deinit();
 
     var toolChain: Toolchain = .{ .driver = &driver, .arena = arena, .filesystem = .{ .real = comp.cwd } };
@@ -60,7 +71,7 @@ pub fn main() u8 {
             return 1;
         },
         error.FatalError => {
-            driver.renderErrors();
+            driver.printDiagnosticsStats();
             if (fastExit) process.exit(1);
             return 1;
         },
@@ -73,5 +84,5 @@ pub fn main() u8 {
     };
 
     if (fastExit) process.exit(@intFromBool(comp.diagnostics.errors != 0));
-    return @intFromBool(comp.diagnostics.errors != 0);
+    return @intFromBool(diagnostics.errors != 0);
 }

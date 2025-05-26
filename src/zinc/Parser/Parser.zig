@@ -385,6 +385,13 @@ pub fn errStr(p: *Parser, tag: Diagnostics.Tag, index: TokenIndex, str: []const 
 
 pub fn errExtra(p: *Parser, tag: Diagnostics.Tag, tokIdx: TokenIndex, extra: Diagnostics.Message.Extra) Compilation.Error!void {
     @branchHint(.cold);
+
+    // Suppress pedantic diagnostics inside __extension__ blocks.
+    if (p.extensionSuppressd) {
+        const prop = tag.property();
+        if (prop.extension and prop.kind == .off) return;
+    }
+
     const token = p.pp.tokens.get(tokIdx);
     var loc = token.loc;
 

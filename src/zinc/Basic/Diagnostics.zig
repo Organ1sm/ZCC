@@ -216,9 +216,9 @@ pub const Option = enum {
 
 pub const State = struct {
     // Treat all errors as fatal, set by -Wfatal-errors
-    fatal_errors: bool = false,
+    fatalErrors: bool = false,
     // Treat all warnings as errors, set by -Werror
-    error_warnings: bool = false,
+    errorWarnings: bool = false,
     /// Enable all warnings, set by -Weverything
     enable_all_warnings: bool = false,
     /// Ignore all warnings, set by -w
@@ -323,10 +323,10 @@ pub fn effectiveKind(d: *Diagnostics, message: anytype) Message.Kind {
     if (kind == .off and d.state.enable_all_warnings) kind = .warning;
 
     // Upgrade warnigns to errors if -Werror is set
-    if (kind == .warning and d.state.error_warnings) kind = .@"error";
+    if (kind == .warning and d.state.errorWarnings) kind = .@"error";
 
     // Upgrade errors to fatal errors if -Wfatal-errors is set
-    if (kind == .@"error" and d.state.fatal_errors) kind = .@"fatal error";
+    if (kind == .@"error" and d.state.fatalErrors) kind = .@"fatal error";
 
     return kind;
 }
