@@ -393,7 +393,13 @@ pub fn main() !void {
             continue;
         }
 
-        if (pp.defines.contains("NO_ERROR_VALIDATION")) continue;
+        if (pp.defines.contains("NO_ERROR_VALIDATION")) {
+            var m = MsgWriter.init(pp.comp.gpa);
+            defer m.deinit();
+
+            zinc.Diagnostics.renderMessages(pp.comp, &m);
+            continue;
+        }
 
         zinc.Diagnostics.render(&comp, std.io.tty.detectConfig(std.io.getStdErr()));
 
