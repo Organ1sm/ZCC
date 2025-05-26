@@ -1425,7 +1425,13 @@ fn reconstructIncludeString(
     embedArgs: ?*[]const TokenWithExpansionLocs,
     first: TokenWithExpansionLocs,
 ) !?[]const u8 {
-    assert(paramTokens.len != 0);
+    if (paramTokens.len == 0) {
+        try pp.comp.addDiagnostic(.{
+            .tag = .expected_filename,
+            .loc = first.loc,
+        }, first.expansionSlice());
+        return null;
+    }
 
     const charTop = pp.charBuffer.items.len;
     defer pp.charBuffer.items.len = charTop;
