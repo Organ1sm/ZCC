@@ -1015,7 +1015,7 @@ fn expr(pp: *Preprocessor, lexer: *Lexer) MacroError!bool {
         .tokenIds = pp.tokens.items(.id),
         .tokenIdx = @intCast(tokenState.tokensLen),
         .inMacro = true,
-        .strings = std.ArrayList(u8).init(pp.comp.gpa),
+        .strings = .init(pp.comp.gpa),
 
         .tree = undefined,
         .labels = undefined,

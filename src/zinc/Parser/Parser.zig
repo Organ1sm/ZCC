@@ -72,7 +72,7 @@ tree: AST,
 
 // buffers used during compilation
 symStack: SymbolStack = .{},
-strings: std.ArrayList(u8),
+strings: std.ArrayListAligned(u8, 4),
 labels: std.ArrayList(Label),
 listBuffer: NodeList,
 declBuffer: NodeList,
@@ -8456,6 +8456,9 @@ fn parseStringLiteral(p: *Parser) Error!Result {
     const stringsTop = p.strings.items.len;
     defer p.strings.items.len = stringsTop;
 
+    const literalStart = std.mem.alignForward(usize, stringsTop, @intFromEnum(charWidth));
+    try p.strings.resize(literalStart);
+
     while (p.tokenIdx < stringEnd) : (p.tokenIdx += 1) {
         const thisKind = TextLiteral.Kind.classify(p.currToken(), .StringLiteral).?;
         const slice = thisKind.contentSlice(p.getTokenText(p.tokenIdx));
@@ -8506,7 +8509,7 @@ fn parseStringLiteral(p: *Parser) Error!Result {
                 switch (charWidth) {
                     .@"1" => p.strings.appendSliceAssumeCapacity(view.bytes),
                     .@"2" => {
-                        var capacitySlice: []align(@alignOf(u16)) u8 = @alignCast(p.strings.unusedCapacitySlice());
+                        const capacitySlice: []align(@alignOf(u16)) u8 = @alignCast(p.strings.allocatedSlice()[literalStart..]);
                         const destLen = std.mem.alignBackward(usize, capacitySlice.len, 2);
                         const dest = std.mem.bytesAsSlice(u16, capacitySlice[0..destLen]);
                         const wordsWritten = std.unicode.utf8ToUtf16Le(dest, view.bytes) catch unreachable;
@@ -8528,7 +8531,7 @@ fn parseStringLiteral(p: *Parser) Error!Result {
     }
 
     p.strings.appendNTimesAssumeCapacity(0, @intFromEnum(charWidth));
-    const slice = p.strings.items[stringsTop..];
+    const slice = p.strings.items[literalStart..];
 
     const internedAlign = std.mem.alignForward(
         usize,
