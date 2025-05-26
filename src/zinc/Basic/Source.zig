@@ -111,6 +111,10 @@ pub fn getLineCol(source: Source, loc: Location) LineCol {
             i += 1; // Skip invalid UTF-8 sequence and continue.
             continue;
         };
+
+        const slice = source.buffer[i..];
+        if (len > slice.len) break;
+
         const cp = std.unicode.utf8Decode(source.buffer[i..][0..len]) catch {
             i += 1;
             continue;
