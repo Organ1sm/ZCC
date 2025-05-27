@@ -25,24 +25,25 @@ fn deinit(pragma: *Pragma, comp: *Compilation) void {
 }
 
 fn preprocessorHandler(_: *Pragma, pp: *Preprocessor, startIdx: TokenIndex) Pragma.Error!void {
-    const messageToken = pp.tokens.get(startIdx);
-    const messageExpansionLocs = pp.expansionSlice(startIdx);
-
     const str = Pragma.pasteTokens(pp, startIdx + 1) catch |err| switch (err) {
         error.ExpectedStringLiteral => {
-            return pp.comp.addDiagnostic(.{
-                .tag = .pragma_requires_string_literal,
-                .loc = messageToken.loc,
-                .extra = .{ .str = "message" },
-            }, messageExpansionLocs);
+            return Pragma.err(pp, startIdx, .pragma_requires_string_literal, .{});
         },
         else => |e| return e,
     };
 
+    const messageToken = pp.tokens.get(startIdx);
+    const messageExpansionLocs = pp.expansionSlice(startIdx);
     const loc = if (messageExpansionLocs.len != 0)
         messageExpansionLocs[messageExpansionLocs.len - 1]
     else
         messageToken.loc;
-    const extra = Diagnostics.Message.Extra{ .str = try pp.arena.allocator().dupe(u8, str) };
-    return pp.comp.addDiagnostic(.{ .tag = .pragma_message, .loc = loc, .extra = extra }, &.{});
+
+    const diagnostic: Pragma.Diagnostic = .pragma_message;
+    try pp.diagnostics.add(.{
+        .text = str,
+        .kind = diagnostic.kind,
+        .opt = diagnostic.opt,
+        .location = loc.expand(pp.comp),
+    });
 }

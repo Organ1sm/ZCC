@@ -109,12 +109,12 @@ pub fn findTypedef(
         .typedef => return prev,
         .@"struct", .@"union", .@"enum" => {
             if (noTypeYet) return null;
-            try self.p.errStr(switch (prev.kind) {
+            try self.p.err(switch (prev.kind) {
                 .@"struct" => .must_use_struct,
                 .@"union" => .must_use_union,
                 .@"enum" => .must_use_enum,
                 else => unreachable,
-            }, nameToken, self.p.getTokenText(nameToken));
+            }, nameToken, .{self.p.getTokenText(nameToken)});
             return prev;
         },
         else => return null,
@@ -151,8 +151,8 @@ pub fn findTag(
     }
 
     if (self.get(name, .tags) == null) return null;
-    try self.p.errStr(.wrong_tag, nameToken, self.p.getTokenText(nameToken));
-    try self.p.errToken(.previous_definition, prev.token);
+    try self.p.err(.wrong_tag, nameToken, .{self.p.getTokenText(nameToken)});
+    try self.p.err(.previous_definition, prev.token, .{});
 
     return null;
 }
@@ -213,15 +213,15 @@ pub fn defineTypedef(
                     if (qt.isInvalid()) return;
                     const nonTypedefQt = qt.type(self.p.comp).typedef.base;
                     const nonTypedefPrevQt = prev.qt.type(self.p.comp).typedef.base;
-                    try self.p.errStr(.redefinition_of_typedef, token, try self.p.typePairStrExtra(nonTypedefQt, " vs ", nonTypedefPrevQt));
+                    try self.p.err(.redefinition_of_typedef, token, .{ nonTypedefQt, nonTypedefPrevQt });
                     if (prev.token != 0)
-                        try self.p.errToken(.previous_definition, prev.token);
+                        try self.p.err(.previous_definition, prev.token, .{});
                 }
             },
 
             .enumeration, .declaration, .definition, .constexpr => {
-                try self.p.errStr(.redefinition_different_sym, token, self.p.getTokenText(token));
-                try self.p.errToken(.previous_definition, prev.token);
+                try self.p.err(.redefinition_different_sym, token, .{self.p.getTokenText(token)});
+                try self.p.err(.previous_definition, prev.token, .{});
             },
 
             else => unreachable,
@@ -243,15 +243,6 @@ pub fn defineTypedef(
 /// and if it does, it reports appropriate redefinition errors.
 /// The symbol is then appended to the symbol stack with its type, token, and associated value.
 ///
-/// If it's a constexpr, it's marked as such.
-/// @param self The SymbolStack instance.
-/// @param name The symbol's name.
-/// @param ty The Type of the symbol.
-/// @param token The TokenIndex representing the symbol.
-/// @param node The NodeIndex in the AST (Abstract Syntax Tree) that represents this symbol.
-/// @param val The Value of the symbol, if it has one.
-/// @param constexpr Indicates whether the symbol is a compile-time constant.
-/// @return An error if any symbol redefinition is detected or if appending the symbol fails.
 pub fn defineSymbol(
     self: *SymbolStack,
     name: StringId,
@@ -265,25 +256,25 @@ pub fn defineSymbol(
         switch (prev.kind) {
             .enumeration => {
                 if (qt.isInvalid()) return;
-                try self.p.errStr(.redefinition_different_sym, token, self.p.getTokenText(token));
-                try self.p.errToken(.previous_definition, prev.token);
+                try self.p.err(.redefinition_different_sym, token, .{self.p.getTokenText(token)});
+                try self.p.err(.previous_definition, prev.token, .{});
             },
             .declaration => {
                 if (!prev.qt.isInvalid() and !qt.eqlQualified(prev.qt, self.p.comp)) {
                     if (qt.isInvalid()) return;
-                    try self.p.errStr(.redefinition_incompatible, token, self.p.getTokenText(token));
-                    try self.p.errToken(.previous_definition, prev.token);
+                    try self.p.err(.redefinition_incompatible, token, .{self.p.getTokenText(token)});
+                    try self.p.err(.previous_definition, prev.token, .{});
                 }
             },
             .definition, .constexpr => if (!prev.qt.isInvalid()) {
                 if (qt.isInvalid()) return;
-                try self.p.errStr(.redefinition, token, self.p.getTokenText(token));
-                try self.p.errToken(.previous_definition, prev.token);
+                try self.p.err(.redefinition, token, .{self.p.getTokenText(token)});
+                try self.p.err(.previous_definition, prev.token, .{});
             },
             .typedef => {
                 if (qt.isInvalid()) return;
-                try self.p.errStr(.redefinition_different_sym, token, self.p.getTokenText(token));
-                try self.p.errToken(.previous_definition, prev.token);
+                try self.p.err(.redefinition_different_sym, token, .{self.p.getTokenText(token)});
+                try self.p.err(.previous_definition, prev.token, .{});
             },
             else => unreachable,
         }
@@ -318,29 +309,29 @@ pub fn declareSymbol(
         switch (prev.kind) {
             .enumeration => {
                 if (qt.isInvalid()) return;
-                try self.p.errStr(.redefinition_different_sym, token, self.p.getTokenText(token));
-                try self.p.errToken(.previous_definition, prev.token);
+                try self.p.err(.redefinition_different_sym, token, .{self.p.getTokenText(token)});
+                try self.p.err(.previous_definition, prev.token, .{});
             },
             .declaration => {
                 if (!prev.qt.isInvalid() and !qt.eqlQualified(prev.qt, self.p.comp)) {
                     if (qt.isInvalid()) return;
-                    try self.p.errStr(.redefinition_incompatible, token, self.p.getTokenText(token));
-                    try self.p.errToken(.previous_definition, prev.token);
+                    try self.p.err(.redefinition_incompatible, token, .{self.p.getTokenText(token)});
+                    try self.p.err(.previous_definition, prev.token, .{});
                 }
             },
             .definition, .constexpr => {
                 if (!prev.qt.isInvalid() and !qt.eqlQualified(prev.qt, self.p.comp)) {
                     if (qt.isInvalid()) return;
-                    try self.p.errStr(.redefinition_incompatible, token, self.p.getTokenText(token));
-                    try self.p.errToken(.previous_definition, prev.token);
+                    try self.p.err(.redefinition_incompatible, token, .{self.p.getTokenText(token)});
+                    try self.p.err(.previous_definition, prev.token, .{});
                 } else {
                     return;
                 }
             },
             .typedef => {
                 if (qt.isInvalid()) return;
-                try self.p.errStr(.redefinition_different_sym, token, self.p.getTokenText(token));
-                try self.p.errToken(.previous_definition, prev.token);
+                try self.p.err(.redefinition_different_sym, token, .{self.p.getTokenText(token)});
+                try self.p.err(.previous_definition, prev.token, .{});
             },
             else => unreachable,
         }
@@ -366,13 +357,13 @@ pub fn defineParam(
         switch (prev.kind) {
             .enumeration, .declaration, .definition, .constexpr => if (!prev.qt.isInvalid()) {
                 if (qt.isInvalid()) return;
-                try self.p.errStr(.redefinition_of_parameter, token, self.p.getTokenText(token));
-                try self.p.errToken(.previous_definition, prev.token);
+                try self.p.err(.redefinition_of_parameter, token, .{self.p.getTokenText(token)});
+                try self.p.err(.previous_definition, prev.token, .{});
             },
             .typedef => {
                 if (qt.isInvalid()) return;
-                try self.p.errStr(.redefinition_different_sym, token, self.p.getTokenText(token));
-                try self.p.errToken(.previous_definition, prev.token);
+                try self.p.err(.redefinition_different_sym, token, .{self.p.getTokenText(token)});
+                try self.p.err(.previous_definition, prev.token, .{});
             },
             else => unreachable,
         }
@@ -398,20 +389,20 @@ pub fn defineTag(
     switch (prev.kind) {
         .@"enum" => {
             if (kind == .KeywordEnum) return prev;
-            try self.p.errStr(.wrong_tag, token, self.p.getTokenText(token));
-            try self.p.errToken(.previous_definition, prev.token);
+            try self.p.err(.wrong_tag, token, .{self.p.getTokenText(token)});
+            try self.p.err(.previous_definition, prev.token, .{});
             return null;
         },
         .@"struct" => {
             if (kind == .KeywordStruct) return prev;
-            try self.p.errStr(.wrong_tag, token, self.p.getTokenText(token));
-            try self.p.errToken(.previous_definition, prev.token);
+            try self.p.err(.wrong_tag, token, .{self.p.getTokenText(token)});
+            try self.p.err(.previous_definition, prev.token, .{});
             return null;
         },
         .@"union" => {
             if (kind == .KeywordUnion) return prev;
-            try self.p.errStr(.wrong_tag, token, self.p.getTokenText(token));
-            try self.p.errToken(.previous_definition, prev.token);
+            try self.p.err(.wrong_tag, token, .{self.p.getTokenText(token)});
+            try self.p.err(.previous_definition, prev.token, .{});
             return null;
         },
         else => unreachable,
@@ -430,20 +421,20 @@ pub fn defineEnumeration(
         switch (prev.kind) {
             .enumeration => if (!prev.qt.isInvalid()) {
                 if (qt.isInvalid()) return;
-                try self.p.errStr(.redefinition, token, self.p.getTokenText(token));
-                try self.p.errToken(.previous_definition, prev.token);
+                try self.p.err(.redefinition, token, .{self.p.getTokenText(token)});
+                try self.p.err(.previous_definition, prev.token, .{});
                 return;
             },
             .declaration, .definition, .constexpr => {
                 if (qt.isInvalid()) return;
-                try self.p.errStr(.redefinition_different_sym, token, self.p.getTokenText(token));
-                try self.p.errToken(.previous_definition, prev.token);
+                try self.p.err(.redefinition_different_sym, token, .{self.p.getTokenText(token)});
+                try self.p.err(.previous_definition, prev.token, .{});
                 return;
             },
             .typedef => {
                 if (qt.isInvalid()) return;
-                try self.p.errStr(.redefinition_different_sym, token, self.p.getTokenText(token));
-                try self.p.errToken(.previous_definition, prev.token);
+                try self.p.err(.redefinition_different_sym, token, .{self.p.getTokenText(token)});
+                try self.p.err(.previous_definition, prev.token, .{});
                 return;
             },
             else => unreachable,

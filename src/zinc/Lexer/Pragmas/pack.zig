@@ -33,12 +33,9 @@ fn parserHandler(pragma: *Pragma, p: *Parser, startIdx: TokenIndex) Compilation.
     var pack: *Pack = @fieldParentPtr("pragma", pragma);
     var idx = startIdx + 1;
     const lparen = p.pp.tokens.get(idx);
-    if (lparen.isNot(.LParen)) {
-        return p.comp.addDiagnostic(.{
-            .tag = .pragma_pack_lparen,
-            .loc = lparen.loc,
-        }, p.pp.expansionSlice(idx));
-    }
+    if (lparen.isNot(.LParen))
+        return Pragma.err(p.pp, idx, .pragma_pack_lparen, .{});
+
     idx += 1;
 
     // TODO -fapple-pragma-pack -fxl-pragma-pack
@@ -54,10 +51,10 @@ fn parserHandler(pragma: *Pragma, p: *Parser, startIdx: TokenIndex) Compilation.
                 pop,
             };
             const action = std.meta.stringToEnum(Action, p.getTokenText(arg)) orelse {
-                return p.errToken(.pragma_pack_unknown_action, arg);
+                return Pragma.err(p.pp, arg, .pragma_pack_unknown_action, .{});
             };
             switch (action) {
-                .show => try p.errExtra(.pragma_pack_show, arg, .{ .unsigned = p.pragmaPack orelse 8 }),
+                .show => return Pragma.err(p.pp, arg, .pragma_pack_show, .{p.pragmaPack orelse 8}),
 
                 .push, .pop => {
                     var newVal: ?u8 = null;
@@ -75,12 +72,12 @@ fn parserHandler(pragma: *Pragma, p: *Parser, startIdx: TokenIndex) Compilation.
                                     const int = idx;
                                     idx += 1;
                                     if (tokenIds[int] != .PPNumber)
-                                        return p.errToken(.pragma_pack_int_ident, int);
+                                        return Pragma.err(p.pp, int, .pragma_pack_int_ident, .{});
 
                                     newVal = (try packInt(p, int)) orelse return;
                                 }
                             },
-                            else => return p.errToken(.pragma_pack_int_ident, next),
+                            else => return Pragma.err(p.pp, next, .pragma_pack_int_ident, .{}),
                         }
                     }
                     if (action == .push) {
@@ -88,9 +85,9 @@ fn parserHandler(pragma: *Pragma, p: *Parser, startIdx: TokenIndex) Compilation.
                     } else {
                         pack.pop(p, label);
                         if (newVal != null) {
-                            try p.errToken(.pragma_pack_undefined_pop, arg);
+                            try Pragma.err(p.pp, arg, .pragma_pack_undefined_pop, .{});
                         } else if (pack.stack.items.len == 0) {
-                            try p.errToken(.pragma_pack_empty_stack, arg);
+                            try Pragma.err(p.pp, arg, .pragma_pack_empty_stack, .{});
                         }
                     }
                     if (newVal) |some| {
@@ -118,13 +115,13 @@ fn parserHandler(pragma: *Pragma, p: *Parser, startIdx: TokenIndex) Compilation.
     }
 
     if (tokenIds[idx] != .RParen)
-        return p.errToken(.pragma_pack_rparen, idx);
+        return Pragma.err(p.pp, idx, .pragma_pack_rparen, .{});
 }
 
 fn packInt(p: *Parser, tokenIdx: TokenIndex) Compilation.Error!?u8 {
     const res = p.parseNumberToken(tokenIdx) catch |err| switch (err) {
         error.ParsingFailed => {
-            try p.errToken(.pragma_pack_int, tokenIdx);
+            try Pragma.err(p.pp, tokenIdx, .pragma_pack_int, .{});
             return null;
         },
         else => |e| return e,
@@ -134,7 +131,7 @@ fn packInt(p: *Parser, tokenIdx: TokenIndex) Compilation.Error!?u8 {
     switch (int) {
         1, 2, 4, 8, 16 => return @intCast(int),
         else => {
-            try p.errToken(.pragma_pack_int, tokenIdx);
+            try Pragma.err(p.pp, tokenIdx, .pragma_pack_int, .{});
             return null;
         },
     }

@@ -1,6 +1,8 @@
 const std = @import("std");
 const assert = std.debug.assert;
+
 const Compilation = @import("../Basic/Compilation.zig");
+const Diagnostics = @import("../Basic/Diagnostics.zig");
 const Preprocessor = @import("Preprocessor.zig");
 const Parser = @import("../Parser/Parser.zig");
 const TokenIndex = @import("../AST/AST.zig").TokenIndex;
@@ -88,4 +90,125 @@ pub fn parserCB(self: *Pragma, p: *Parser, startIdx: TokenIndex) Compilation.Err
     const tokenIdx = p.tokenIdx;
     defer assert(tokenIdx == p.tokenIdx);
     if (self.parserHandler) |func| return func(self, p, startIdx);
+}
+
+pub const Diagnostic = struct {
+    fmt: []const u8,
+    kind: Diagnostics.Message.Kind,
+    opt: ?Diagnostics.Option = null,
+
+    pub const pragma_warning_message: Diagnostic = .{
+        .fmt = "{s}",
+        .kind = .warning,
+        .opt = .@"#pragma-messages",
+    };
+
+    pub const pragma_error_message: Diagnostic = .{
+        .fmt = "{s}",
+        .kind = .@"error",
+    };
+
+    pub const pragma_message: Diagnostic = .{
+        .fmt = "#pragma message: {s}",
+        .kind = .note,
+    };
+
+    pub const pragma_requires_string_literal: Diagnostic = .{
+        .fmt = "pragma {s} requires string literal",
+        .kind = .@"error",
+    };
+
+    pub const poisoned_identifier: Diagnostic = .{
+        .fmt = "attempt to use a poisoned identifier",
+        .kind = .@"error",
+    };
+
+    pub const pragma_poison_identifier: Diagnostic = .{
+        .fmt = "can only poison identifier tokens",
+        .kind = .@"error",
+    };
+
+    pub const pragma_poison_macro: Diagnostic = .{
+        .fmt = "poisoning existing macro",
+        .kind = .warning,
+    };
+
+    pub const unknown_gcc_pragma: Diagnostic = .{
+        .fmt = "pragma GCC expected 'error', 'warning', 'diagnostic', 'poison'",
+        .kind = .off,
+        .opt = .@"unknown-pragmas",
+    };
+
+    pub const unknown_gcc_pragma_directive: Diagnostic = .{
+        .fmt = "pragma GCC diagnostic expected 'error', 'warning', 'ignored', 'fatal', 'push', or 'pop'",
+        .kind = .warning,
+        .opt = .@"unknown-pragmas",
+    };
+
+    pub const malformed_warning_check: Diagnostic = .{
+        .fmt = "{s} expected option name (e.g. \"-Wundef\")",
+        .opt = .@"malformed-warning-check",
+        .kind = .warning,
+    };
+
+    pub const pragma_pack_lparen: Diagnostic = .{
+        .fmt = "missing '(' after '#pragma pack' - ignoring",
+        .kind = .warning,
+        .opt = .@"ignored-pragmas",
+    };
+
+    pub const pragma_pack_rparen: Diagnostic = .{
+        .fmt = "missing ')' after '#pragma pack' - ignoring",
+        .kind = .warning,
+        .opt = .@"ignored-pragmas",
+    };
+
+    pub const pragma_pack_unknown_action: Diagnostic = .{
+        .fmt = "unknown action for '#pragma pack' - ignoring",
+        .kind = .warning,
+        .opt = .@"ignored-pragmas",
+    };
+
+    pub const pragma_pack_show: Diagnostic = .{
+        .fmt = "value of #pragma pack(show) == {d}",
+        .kind = .warning,
+    };
+
+    pub const pragma_pack_int_ident: Diagnostic = .{
+        .fmt = "expected integer or identifier in '#pragma pack' - ignored",
+        .kind = .warning,
+        .opt = .@"ignored-pragmas",
+    };
+
+    pub const pragma_pack_int: Diagnostic = .{
+        .fmt = "expected #pragma pack parameter to be '1', '2', '4', '8', or '16'",
+        .opt = .@"ignored-pragmas",
+        .kind = .warning,
+    };
+
+    pub const pragma_pack_undefined_pop: Diagnostic = .{
+        .fmt = "specifying both a name and alignment to 'pop' is undefined",
+        .kind = .warning,
+    };
+
+    pub const pragma_pack_empty_stack: Diagnostic = .{
+        .fmt = "#pragma pack(pop, ...) failed: stack empty",
+        .opt = .@"ignored-pragmas",
+        .kind = .warning,
+    };
+};
+
+pub fn err(pp: *Preprocessor, tokenIdx: TokenIndex, diagnostic: Diagnostic, args: anytype) Compilation.Error!void {
+    var sf = std.heap.stackFallback(1024, pp.gpa);
+    var buf = std.ArrayList(u8).init(sf.get());
+    defer buf.deinit();
+
+    try Diagnostics.formatArgs(buf.writer(), diagnostic.fmt, args);
+
+    try pp.diagnostics.addWithLocation(pp.comp, .{
+        .kind = diagnostic.kind,
+        .opt = diagnostic.opt,
+        .text = buf.items,
+        .location = pp.tokens.items(.loc)[tokenIdx].expand(pp.comp),
+    }, pp.expansionSlice(tokenIdx), true);
 }

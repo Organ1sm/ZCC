@@ -13,6 +13,20 @@ pub const Location = struct {
     pub fn eql(a: Location, b: Location) bool {
         return (a.id == b.id) and (a.byteOffset == b.byteOffset) and (a.line == b.line);
     }
+
+    pub fn expand(loc: Location, comp: *const @import("Compilation.zig")) ExpandedLocation {
+        const source = comp.getSource(loc.id);
+        return source.getLineCol(loc);
+    }
+};
+
+pub const ExpandedLocation = struct {
+    path: []const u8,
+    line: []const u8,
+    lineNo: u32,
+    col: u32,
+    width: u32,
+    endWithSplice: bool,
 };
 
 /// Enumeration ID represents the state of a source code file.
@@ -63,20 +77,6 @@ pub fn physicalLine(source: Source, loc: Location) u32 {
     return loc.line + source.numSplicesBefore(loc.byteOffset);
 }
 
-/// Definition of the LineCol structure(corresponding to the byte offset).
-const LineCol = struct {
-    /// The content of the source code line as a byte slice.
-    line: []const u8,
-    /// The number of the line within the source code, starting from 1.
-    lineNO: u32,
-    /// The column number within the line, starting from 1.
-    col: u32,
-    /// The visual width of the line, taking into account Unicode full-width and half-width characters.
-    width: u32,
-    /// True if the line ends with a line splice (backslash followed by newline), false otherwise.
-    endWithSplic: bool,
-};
-
 /// Calculates line and column information for a given location within a Source.
 /// This includes finding the start and end of the line, and computing visual width and column number.
 /// Handles newline splices within the source buffer.
@@ -84,7 +84,7 @@ const LineCol = struct {
 /// @param source: The Source containing the text buffer and splice locations.
 /// @param loc: The Location indicating the byte offset within the source buffer.
 /// @return A LineCol struct containing the extracted line information.
-pub fn getLineCol(source: Source, loc: Location) LineCol {
+pub fn getLineCol(source: Source, loc: Location) ExpandedLocation {
     var start: usize = 0;
     // The start of the line is after the last newline before the byte offset, or at the beginning of the buffer.
     if (std.mem.lastIndexOfScalar(u8, source.buffer[0..loc.byteOffset], '\n')) |some|
@@ -138,11 +138,12 @@ pub fn getLineCol(source: Source, loc: Location) LineCol {
     }
 
     return .{
+        .path = source.path,
         .line = source.buffer[start..nl],
-        .lineNO = loc.line + spliceIndex,
+        .lineNo = loc.line + spliceIndex,
         .col = col,
         .width = width,
-        .endWithSplic = endWithSplice,
+        .endWithSplice = endWithSplice,
     };
 }
 

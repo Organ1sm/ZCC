@@ -110,7 +110,6 @@ pub fn build(b: *std.Build) !void {
             },
             GenerateDef.create(b, .{ .name = "Attribute/names.def" }),
             GenerateDef.create(b, .{ .name = "Builtins/Builtin.def", .needs_large_dafsa_node = true }),
-            GenerateDef.create(b, .{ .name = "Diagnostics/messages.def", .kind = .named }),
         },
     });
 

@@ -138,7 +138,7 @@ fn getPIE(self: *const Linux, d: *const Driver) bool {
 fn getStaticPIE(self: *const Linux, d: *Driver) !bool {
     _ = self;
     if (d.staticPie and d.pie != null)
-        try d.err("cannot specify 'nopie' along with 'static-pie'");
+        try d.err("cannot specify 'nopie' along with 'static-pie'", .{});
     return d.staticPie;
 }
 
@@ -181,7 +181,7 @@ pub fn buildLinkerArgs(self: *const Linux, tc: *const Toolchain, argv: *std.Arra
     if (TargetUtil.ldEmulationOption(target, null)) |emulation| {
         try argv.appendSlice(&.{ "-m", emulation });
     } else {
-        try d.err("Unknown target triple");
+        try d.err("Unknown target triple", .{});
         return;
     }
 
@@ -203,7 +203,7 @@ pub fn buildLinkerArgs(self: *const Linux, tc: *const Toolchain, argv: *std.Arra
             if (dynamicLinker.get()) |path| {
                 try argv.appendSlice(&.{ "-dynamic-linker", try tc.arena.dupe(u8, path) });
             } else {
-                try d.err("Could not find dynamic linker path");
+                try d.err("Could not find dynamic linker path", .{});
             }
         }
     }
@@ -417,7 +417,7 @@ test Linux {
 
     const arena = arenaInstance.allocator();
 
-    var comp = Compilation.init(std.testing.allocator, std.fs.cwd());
+    var comp = Compilation.init(std.testing.allocator, undefined, std.fs.cwd());
     defer comp.deinit();
 
     comp.environment = .{
@@ -430,7 +430,7 @@ test Linux {
     comp.target = try std.zig.system.resolveTargetQuery(targetQuery);
     comp.langOpts.setEmulatedCompiler(.gcc);
 
-    var driver: Driver = .{ .comp = &comp };
+    var driver: Driver = .{ .comp = &comp, .diagnostics = undefined };
     defer driver.deinit();
     driver.rawTargetTriple = rawTriple;
 

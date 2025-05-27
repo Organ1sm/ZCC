@@ -7,7 +7,7 @@ const IR = backend.Ir;
 const Object = backend.Object;
 const CodeGen = @import("CodeGen/CodeGen.zig");
 const Compilation = @import("Basic/Compilation.zig");
-const Diagnostic = @import("Basic/Diagnostics.zig");
+const Diagnostics = @import("Basic/Diagnostics.zig");
 const LangOpts = @import("Basic/LangOpts.zig");
 const Lexer = @import("Lexer/Lexer.zig");
 const Preprocessor = @import("Lexer/Preprocessor.zig");
@@ -15,8 +15,6 @@ const Source = @import("Basic/Source.zig");
 const Toolchain = @import("Toolchain.zig");
 const Target = @import("Basic/Target.zig");
 const GCCVersion = @import("Driver/GCCVersion.zig");
-
-const Driver = @This();
 
 pub const Linker = enum {
     ld,
@@ -26,7 +24,11 @@ pub const Linker = enum {
     mold,
 };
 
+const Driver = @This();
+
 comp: *Compilation,
+diagnostics: *Diagnostics,
+
 inputs: std.ArrayListUnmanaged(Source) = .{},
 linkObjects: std.ArrayListUnmanaged([]const u8) = .{},
 outputName: ?[]const u8 = null,
@@ -145,12 +147,14 @@ const usage =
     \\  -o <file>               Write output to <file>
     \\  -P, --no-line-commands  Disable linemarker output in -E mode
     \\  -pedantic               Warn on language extensions
+    \\  -pedantic-errors        Error on language extensions
     \\  --rtlib=<arg>           Compiler runtime library to use (libgcc or compiler-rt)
     \\  -std=<standard>         Specify language standard
     \\  -S, --assemble          Only run preprocess and compilation step
     \\ --target=<value>         Generate code for the given target
     \\  -U <macro>              Undefine <macro>
     \\  -undef                  Do not predefine any system-specific macros. Standard predefined macros remain defined.
+    \\  -w                      Ignore all warnings
     \\  -Wall                   Enable all warnings
     \\  -Werror                 Treat all warnings as errors
     \\  -Werror=<warning>       Treat warning as error
@@ -220,7 +224,7 @@ pub fn parseArgs(
                 if (macro.len == 0) {
                     i += 1;
                     if (i >= args.len) {
-                        try d.err("expected argument after -D");
+                        try d.err("expected argument after -D", .{});
                         continue;
                     }
                     macro = args[i];
@@ -237,7 +241,7 @@ pub fn parseArgs(
                 if (macro.len == 0) {
                     i += 1;
                     if (i >= args.len) {
-                        try d.err("expected argument after -U");
+                        try d.err("expected argument after -U", .{});
                         continue;
                     }
                     macro = args[i];
@@ -289,19 +293,21 @@ pub fn parseArgs(
                 hosted = true;
             } else if (std.mem.eql(u8, arg, "-fms-extensions")) {
                 d.comp.langOpts.enableMSExtensions();
+                try d.diagnostics.set("microsoft", .off);
             } else if (std.mem.eql(u8, arg, "-fno-ms-extensions")) {
                 d.comp.langOpts.disableMSExtensions();
+                try d.diagnostics.set("microsoft", .warning);
             } else if (std.mem.eql(u8, arg, "-fdollars-in-identifiers")) {
                 d.comp.langOpts.dollarsInIdentifiers = true;
             } else if (std.mem.eql(u8, arg, "-fno-dollars-in-identifiers")) {
                 d.comp.langOpts.dollarsInIdentifiers = false;
             } else if (option(arg, "-fmacro-backtrace-limit=")) |limitStr| {
                 var limit = std.fmt.parseInt(u32, limitStr, 10) catch {
-                    try d.err("-fmacro-backtrace-limit takes a number argument");
+                    try d.err("-fmacro-backtrace-limit takes a number argument", .{});
                     continue;
                 };
                 if (limit == 0) limit = std.math.maxInt(u32);
-                d.comp.diagnostics.macroBacktraceLimit = limit;
+                d.diagnostics.macroBacktraceLimit = limit;
             } else if (std.mem.eql(u8, arg, "-fnative-half-type")) {
                 d.comp.langOpts.useNativeHalfType = true;
             } else if (std.mem.eql(u8, arg, "-fnative-half-arguments-and-returns")) {
@@ -311,7 +317,7 @@ pub fn parseArgs(
                 if (path.len == 0) {
                     i += 1;
                     if (i >= args.len) {
-                        try d.err("expected argument after -I");
+                        try d.err("expected argument after -I", .{});
                         continue;
                     }
                     path = args[i];
@@ -330,7 +336,7 @@ pub fn parseArgs(
                 if (path.len == 0) {
                     i += 1;
                     if (i >= args.len) {
-                        try d.err("expected argument after -isystem");
+                        try d.err("expected argument after -isystem", .{});
                         continue;
                     }
                     path = args[i];
@@ -340,14 +346,19 @@ pub fn parseArgs(
                 try d.comp.systemIncludeDirs.append(d.comp.gpa, duped);
             } else if (option(arg, "--emulate=")) |compilerStr| {
                 const compiler = std.meta.stringToEnum(LangOpts.Compiler, compilerStr) orelse {
-                    try d.comp.addDiagnostic(.{ .tag = .cli_invalid_emulate, .extra = .{ .str = arg } }, &.{});
+                    try d.err("invalid compiler '{s}'", .{arg});
                     continue;
                 };
                 d.comp.langOpts.setEmulatedCompiler(compiler);
+                switch (d.comp.langOpts.emulate) {
+                    .clang => try d.diagnostics.set("clang", .off),
+                    .gcc => try d.diagnostics.set("gnu", .off),
+                    .msvc => try d.diagnostics.set("microsoft", .off),
+                }
             } else if (option(arg, "-ffp-eval-method=")) |fpMethodStr| {
                 const fpEvalMethod = std.meta.stringToEnum(LangOpts.FPEvalMethod, fpMethodStr) orelse .indeterminate;
                 if (fpEvalMethod == .indeterminate) {
-                    try d.comp.addDiagnostic(.{ .tag = .cli_invalid_fp_eval_method, .extra = .{ .str = fpMethodStr } }, &.{});
+                    try d.err("unsupported argument '{s}' to option '-ffp-eval-method='; expected 'source', 'double', or 'extended'", .{fpMethodStr});
                     continue;
                 }
                 d.comp.langOpts.setFpEvalMethod(fpEvalMethod);
@@ -356,7 +367,7 @@ pub fn parseArgs(
                 if (filename.len == 0) {
                     i += 1;
                     if (i >= args.len) {
-                        try d.err("expected argument after -o");
+                        try d.err("expected argument after -o", .{});
                         continue;
                     }
                     filename = args[i];
@@ -365,35 +376,48 @@ pub fn parseArgs(
             } else if (option(arg, "--sysroot=")) |sysroot| {
                 d.sysroot = sysroot;
             } else if (std.mem.eql(u8, arg, "-pedantic")) {
-                d.comp.diagnostics.options.pedantic = .warning;
+                d.diagnostics.state.extensions = .warning;
+            } else if (mem.eql(u8, arg, "-pedantic-errors")) {
+                d.diagnostics.state.extensions = .@"error";
+            } else if (mem.eql(u8, arg, "-w")) {
+                d.diagnostics.state.ignore_warnings = true;
             } else if (option(arg, "--rtlib=")) |rtlib| {
                 if (mem.eql(u8, rtlib, "compiler-rt") or mem.eql(u8, rtlib, "libgcc") or mem.eql(u8, rtlib, "platform")) {
                     d.rtlib = rtlib;
                 } else {
-                    try d.comp.addDiagnostic(.{ .tag = .invalid_rtlib, .extra = .{ .str = rtlib } }, &.{});
+                    try d.err("invalid runtime library name '{s}'", .{rtlib});
                 }
+            } else if (mem.eql(u8, arg, "-Wno-fatal-errors")) {
+                d.diagnostics.state.fatalErrors = false;
+            } else if (mem.eql(u8, arg, "-Wfatal-errors")) {
+                d.diagnostics.state.fatalErrors = true;
+            } else if (mem.eql(u8, arg, "-Wno-everything")) {
+                d.diagnostics.state.enable_all_warnings = false;
+            } else if (mem.eql(u8, arg, "-Weverything")) {
+                d.diagnostics.state.enable_all_warnings = true;
+            } else if (mem.eql(u8, arg, "-Werror")) {
+                d.diagnostics.state.errorWarnings = true;
+            } else if (mem.eql(u8, arg, "-Wno-error")) {
+                d.diagnostics.state.errorWarnings = false;
             } else if (std.mem.eql(u8, arg, "-Wall")) {
-                d.comp.diagnostics.setAll(.warning);
-            } else if (std.mem.eql(u8, arg, "-Werror")) {
-                d.comp.diagnostics.setAll(.@"error");
-            } else if (std.mem.eql(u8, arg, "-Wfatal-errors")) {
-                d.comp.diagnostics.fatalErrors = true;
-            } else if (std.mem.eql(u8, arg, "-Wno-fatal-errors")) {
-                d.comp.diagnostics.fatalErrors = false;
+                // d.diagnostics.setAll(.warning);
             } else if (option(arg, "-Werror=")) |errName| {
-                try d.comp.diagnostics.set(errName, .@"error");
+                try d.diagnostics.set(errName, .@"error");
+            } else if (option(arg, "-Wno-error=")) |errName| {
+                // TODO this should not set to warning if the option has not been specified.
+                try d.diagnostics.set(errName, .warning);
             } else if (option(arg, "-Wno-")) |errName| {
-                try d.comp.diagnostics.set(errName, .off);
+                try d.diagnostics.set(errName, .off);
             } else if (option(arg, "-W")) |errName| {
-                try d.comp.diagnostics.set(errName, .warning);
+                try d.diagnostics.set(errName, .warning);
             } else if (option(arg, "-std=")) |standard| {
                 d.comp.langOpts.setStandard(standard) catch
-                    try d.comp.addDiagnostic(.{ .tag = .cli_invalid_standard, .extra = .{ .str = arg } }, &.{});
+                    try d.err("invalid standard '{s}'", .{arg});
             } else if (std.mem.eql(u8, arg, "-S") or std.mem.eql(u8, arg, "--assemble")) {
                 d.onlyPreprocessAndCompile = true;
             } else if (option(arg, "--target=")) |triple| {
                 const query = std.Target.Query.parse(.{ .arch_os_abi = triple }) catch {
-                    try d.comp.addDiagnostic(.{ .tag = .cli_invalid_target, .extra = .{ .str = arg } }, &.{});
+                    try d.err("invalid target '{s}'", .{arg});
                     continue;
                 };
                 const target = std.zig.system.resolveTargetQuery(query) catch |e| {
@@ -401,6 +425,11 @@ pub fn parseArgs(
                 };
                 d.comp.target = target;
                 d.comp.langOpts.setEmulatedCompiler(Target.systemCompiler(d.comp.target));
+                switch (d.comp.langOpts.emulate) {
+                    .clang => try d.diagnostics.set("clang", .off),
+                    .gcc => try d.diagnostics.set("gnu", .off),
+                    .msvc => try d.diagnostics.set("microsoft", .off),
+                }
                 d.rawTargetTriple = triple;
             } else if (std.mem.eql(u8, arg, "-dump-pp")) {
                 d.dumpPP = true;
@@ -469,10 +498,10 @@ pub fn parseArgs(
                         break;
                     }
                 } else {
-                    try d.comp.addDiagnostic(.{ .tag = .invalid_unwindlib, .extra = .{ .str = unwindlib } }, &.{});
+                    try d.err("invalid unwind library name  '{s}'", .{unwindlib});
                 }
             } else {
-                try d.comp.addDiagnostic(.{ .tag = .cli_unknown_arg, .extra = .{ .str = arg } }, &.{});
+                try d.warn("unknown argument '{s}'", .{arg});
             }
         } else if (std.mem.endsWith(u8, arg, ".o") or std.mem.endsWith(u8, arg, ".obj")) {
             try d.linkObjects.append(d.comp.gpa, arg);
@@ -516,21 +545,47 @@ fn addSource(d: *Driver, path: []const u8) !Source {
     return d.comp.addSourceFromPath(path);
 }
 
-pub fn err(d: *Driver, msg: []const u8) !void {
-    try d.comp.addDiagnostic(.{ .tag = .cli_error, .extra = .{ .str = msg } }, &.{});
+pub fn err(d: *Driver, fmt: []const u8, args: anytype) Compilation.Error!void {
+    var sf = std.heap.stackFallback(1024, d.comp.gpa);
+    var buf = std.ArrayList(u8).init(sf.get());
+    defer buf.deinit();
+
+    try Diagnostics.formatArgs(buf.writer(), fmt, args);
+    try d.diagnostics.add(.{ .kind = .@"error", .text = buf.items, .location = null });
+}
+
+pub fn warn(d: *Driver, fmt: []const u8, args: anytype) Compilation.Error!void {
+    var sf = std.heap.stackFallback(1024, d.comp.gpa);
+    var buf = std.ArrayList(u8).init(sf.get());
+    defer buf.deinit();
+
+    try Diagnostics.formatArgs(buf.writer(), fmt, args);
+    try d.diagnostics.add(.{ .kind = .warning, .text = buf.items, .location = null });
 }
 
 pub fn fatal(d: *Driver, comptime fmt: []const u8, args: anytype) error{ FatalError, OutOfMemory } {
-    try d.comp.diagnostics.list.append(d.comp.gpa, .{
-        .tag = .cli_error,
-        .kind = .@"fatal error",
-        .extra = .{ .str = try std.fmt.allocPrint(d.comp.diagnostics.arena.allocator(), fmt, args) },
-    });
-    return error.FatalError;
+    var sf = std.heap.stackFallback(1024, d.comp.gpa);
+    var buf = std.ArrayList(u8).init(sf.get());
+    defer buf.deinit();
+
+    try Diagnostics.formatArgs(buf.writer(), fmt, args);
+    try d.diagnostics.add(.{ .kind = .@"fatal error", .text = buf.items, .location = null });
+    unreachable;
 }
 
-pub fn renderErrors(d: *Driver) void {
-    Diagnostic.render(d.comp, d.detectConfig(std.io.getStdErr()));
+pub fn printDiagnosticsStats(d: *Driver) void {
+    const warnings = d.diagnostics.warnings;
+    const errors = d.diagnostics.errors;
+
+    const ws: []const u8 = if (warnings == 1) "" else "s";
+    const es: []const u8 = if (errors == 1) "" else "s";
+    if (errors != 0 and warnings != 0) {
+        std.debug.print("{d} warning{s} and {d} error{s} generated.\n", .{ warnings, ws, errors, es });
+    } else if (warnings != 0) {
+        std.debug.print("{d} warning{s} generated.\n", .{ warnings, ws });
+    } else if (errors != 0) {
+        std.debug.print("{d} error{s} generated.\n", .{ errors, es });
+    }
 }
 
 pub fn detectConfig(d: *Driver, file: std.fs.File) std.io.tty.Config {
@@ -595,7 +650,7 @@ pub fn main(d: *Driver, tc: *Toolchain, args: []const []const u8, comptime fastE
 
     if (!linking)
         for (d.linkObjects.items) |obj|
-            try d.comp.addDiagnostic(.{ .tag = .cli_unused_link_object, .extra = .{ .str = obj } }, &.{});
+            try d.err("{s}: linker input file unused because linking not done", .{obj});
 
     try tc.discover();
     tc.defineSystemIncludes() catch |er| switch (er) {
@@ -619,12 +674,12 @@ pub fn main(d: *Driver, tc: *Toolchain, args: []const []const u8, comptime fastE
 
     for (d.inputs.items) |source| {
         d.processSource(tc, source, builtinMacros, userDefinedMacros, fastExit) catch |e| switch (e) {
-            error.FatalError => d.renderErrors(),
+            error.FatalError => d.printDiagnosticsStats(),
             else => |er| return er,
         };
     }
 
-    if (d.comp.diagnostics.errors != 0) {
+    if (d.diagnostics.errors != 0) {
         if (fastExit) d.exitWithCleanup(1);
         return;
     }
@@ -645,6 +700,8 @@ fn processSource(
     comptime fastExit: bool,
 ) !void {
     d.comp.generatedBuffer.items.len = 0;
+    const prevErrors = d.comp.diagnostics.errors;
+
     var pp = try Preprocessor.initDefault(d.comp);
     defer pp.deinit();
 
@@ -664,9 +721,9 @@ fn processSource(
         try pp.preprocessSources(&.{ source, builtinMacro, userDefinedMacros });
 
     if (d.onlyPreprocess) {
-        d.renderErrors();
+        d.printDiagnosticsStats();
 
-        if (d.comp.diagnostics.errors != 0) {
+        if (d.diagnostics.errors != prevErrors) {
             if (fastExit) std.process.exit(1); // not linking, no need for cleanup
             return;
         }
@@ -730,11 +787,10 @@ fn processSource(
         buffWriter.flush() catch {};
     }
 
-    const prevErrors = d.comp.diagnostics.errors;
-    d.renderErrors();
+    d.printDiagnosticsStats();
 
     // do not compile if there were errors
-    if (d.comp.diagnostics.errors != prevErrors) {
+    if (d.diagnostics.errors != prevErrors) {
         if (fastExit) exitWithCleanup(1);
         return; // Don't compile if there were errors
     }
