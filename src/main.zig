@@ -37,7 +37,7 @@ pub fn main() u8 {
     const stderrFile = std.io.getStdErr();
     var diagnostics: Diagnostics = .{
         .output = .{
-            .to_file = .{
+            .toFile = .{
                 .config = std.io.tty.detectConfig(stderrFile),
                 .file = stderrFile,
             },

@@ -171,7 +171,7 @@ pub const extern_initializer: Diagnostic = .{
 pub const param_before_var_args: Diagnostic = .{
     .fmt = "ISO C requires a named parameter before '...'",
     .kind = .@"error",
-    .suppress_version = .c23,
+    .suppressVersion = .c23,
 };
 
 pub const void_only_param: Diagnostic = .{
@@ -890,14 +890,14 @@ pub const static_assert_missing_message: Diagnostic = .{
     .fmt = "'_Static_assert' with no message is a C23 extension",
     .opt = .@"c23-extensions",
     .kind = .warning,
-    .suppress_version = .c23,
+    .suppressVersion = .c23,
     .extension = true,
 };
 
 pub const pre_c23_compat: Diagnostic = .{
     .fmt = "{s} is incompatible with C standards before C23",
     .kind = .off,
-    .suppress_unless_version = .c23,
+    .suppressUnlessVersion = .c23,
     .opt = .@"pre-c23-compat",
 };
 
@@ -1170,7 +1170,7 @@ pub const omitting_parameter_name: Diagnostic = .{
     .fmt = "omitting the parameter name in a function definition is a C23 extension",
     .opt = .@"c23-extensions",
     .kind = .warning,
-    .suppress_version = .c23,
+    .suppressVersion = .c23,
     .extension = true,
 };
 
@@ -1863,7 +1863,7 @@ pub const bit_int: Diagnostic = .{
     .fmt = "'_BitInt' in C17 and earlier is a Clang extension",
     .kind = .off,
     .opt = .@"bit-int-extension",
-    .suppress_version = .c23,
+    .suppressVersion = .c23,
     .extension = true,
 };
 
@@ -1941,7 +1941,7 @@ pub const bitint_suffix: Diagnostic = .{
     .fmt = "'_BitInt' suffix for literals is a C23 extension",
     .opt = .@"c23-extensions",
     .kind = .warning,
-    .suppress_version = .c23,
+    .suppressVersion = .c23,
 };
 
 pub const auto_type_extension: Diagnostic = .{
@@ -2107,7 +2107,7 @@ pub const label_compound_end: Diagnostic = .{
     .fmt = "label at end of compound statement is a C23 extension",
     .opt = .@"c23-extensions",
     .kind = .warning,
-    .suppress_version = .c23,
+    .suppressVersion = .c23,
     .extension = true,
 };
 
@@ -2115,7 +2115,7 @@ pub const u8_char_lit: Diagnostic = .{
     .fmt = "UTF-8 character literal is a C23 extension",
     .opt = .@"c23-extensions",
     .kind = .warning,
-    .suppress_version = .c23,
+    .suppressVersion = .c23,
     .extension = true,
 };
 
