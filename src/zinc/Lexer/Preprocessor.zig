@@ -3508,7 +3508,8 @@ test "Preserve pragma tokens sometimes" {
             var buf = std.ArrayList(u8).init(allocator);
             defer buf.deinit();
 
-            var comp = Compilation.init(allocator, std.fs.cwd());
+            var diagnostics: Diagnostics = .{ .output = .ignore };
+            var comp = Compilation.init(allocator, &diagnostics, std.fs.cwd());
             defer comp.deinit();
 
             try comp.addDefaultPragmaHandlers();
@@ -3570,7 +3571,8 @@ test "destringify" {
         }
     };
 
-    var comp = Compilation.init(allocator, std.fs.cwd());
+    var diagnostics: Diagnostics = .{ .output = .ignore };
+    var comp = Compilation.init(allocator, &diagnostics, std.fs.cwd());
     defer comp.deinit();
 
     var pp = Preprocessor.init(&comp);
@@ -3634,7 +3636,8 @@ test "Include guards" {
             tokenID: TokenType,
             expectedGuards: u32,
         ) !void {
-            var comp = Compilation.init(allocator, std.fs.cwd());
+            var diagnostics: Diagnostics = .{ .output = .ignore };
+            var comp = Compilation.init(allocator, &diagnostics, std.fs.cwd());
             defer comp.deinit();
 
             var pp = Preprocessor.init(&comp);

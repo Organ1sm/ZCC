@@ -417,7 +417,7 @@ test Linux {
 
     const arena = arenaInstance.allocator();
 
-    var comp = Compilation.init(std.testing.allocator, std.fs.cwd());
+    var comp = Compilation.init(std.testing.allocator, undefined, std.fs.cwd());
     defer comp.deinit();
 
     comp.environment = .{
@@ -430,7 +430,7 @@ test Linux {
     comp.target = try std.zig.system.resolveTargetQuery(targetQuery);
     comp.langOpts.setEmulatedCompiler(.gcc);
 
-    var driver: Driver = .{ .comp = &comp };
+    var driver: Driver = .{ .comp = &comp, .diagnostics = undefined };
     defer driver.deinit();
     driver.rawTargetTriple = rawTriple;
 
