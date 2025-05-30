@@ -87,29 +87,6 @@ pub const Iterator = struct {
     }
 };
 
-pub const ArgumentType = enum {
-    string,
-    identifier,
-    int,
-    alignment,
-    float,
-    complexFloat,
-    expression,
-    nullptrTy,
-
-    pub fn toString(self: ArgumentType) []const u8 {
-        return switch (self) {
-            .string => "a string",
-            .identifier => "an identifier",
-            .int, .alignment => "an integer constant",
-            .nullptrTy => "nullptr",
-            .float => "a floating point number",
-            .complexFloat => "a complex floating point number",
-            .expression => "an expression",
-        };
-    }
-};
-
 /// number of required arguments
 pub fn requiredArgCount(attr: Tag) u32 {
     switch (attr) {
@@ -311,12 +288,33 @@ fn diagnoseField(
     node: Tree.Node,
     p: *Parser,
 ) !bool {
+    const string = "a string";
+    const identifier = "an identifier";
+    const int = "an integer constant";
+    const alignment = "an integer constant";
+    const nullptrTy = "nullptr";
+    const float = "a floating point number";
+    const complexFloat = "a complex floating point number";
+    const expression = "an expression";
+
+    const expected: []const u8 = switch (Wanted) {
+        Value => string,
+        Identifier => identifier,
+        u32 => int,
+        Alignment => alignment,
+        CallingConvention => identifier,
+        else => switch (@typeInfo(Wanted)) {
+            .@"enum" => if (Wanted.opts.enum_kind == .string) string else identifier,
+            else => unreachable,
+        },
+    };
+
     if (res.value.isNone()) {
         if (Wanted == Identifier and node == .declRefExpr) {
             @field(@field(arguments, decl.name), field.name) = .{ .tok = node.declRefExpr.nameToken };
             return false;
         }
-        try p.err(.attribute_arg_invalid, argStart, .{ expectedArgType(Wanted), "expression" });
+        try p.err(.attribute_arg_invalid, argStart, .{ expected, expression });
         return true;
     }
 
@@ -344,6 +342,7 @@ fn diagnoseField(
                     return false;
                 }
                 try p.err(.attribute_requires_string, argStart, .{decl.name});
+                return true;
             } else if (@typeInfo(Wanted) == .@"enum" and @hasDecl(Wanted, "opts") and Wanted.opts.enum_kind == .string) {
                 const str = bytes[0 .. bytes.len - 1];
                 if (std.meta.stringToEnum(Wanted, str)) |enum_val| {
@@ -358,29 +357,15 @@ fn diagnoseField(
         else => {},
     }
 
-    try p.err(.attribute_arg_invalid, argStart, .{ expectedArgType(Wanted), switch (key) {
-        .int => "int",
-        .bytes => "string",
-        .float => "float",
-        .complex => "complex_float",
-        .null => "nullptr_t",
+    try p.err(.attribute_arg_invalid, argStart, .{ expected, switch (key) {
+        .int => int,
+        .bytes => string,
+        .float => float,
+        .complex => complexFloat,
+        .null => nullptrTy,
         else => unreachable,
     } });
     return true;
-}
-
-fn expectedArgType(comptime Expected: type) []const u8 {
-    return switch (Expected) {
-        Value => "string",
-        Identifier => "identifier",
-        u32 => "int",
-        Alignment => "alignment",
-        CallingConvention => "identifier",
-        else => switch (@typeInfo(Expected)) {
-            .@"enum" => if (Expected.opts.enum_kind == .string) "string" else "identifier",
-            else => unreachable,
-        },
-    };
 }
 
 pub fn diagnose(

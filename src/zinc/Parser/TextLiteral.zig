@@ -150,7 +150,8 @@ pub const Ascii = struct {
     }
 
     pub fn format(ctx: Ascii, w: anytype, fmtStr: []const u8) !usize {
-        const i = std.mem.indexOf(u8, fmtStr, "{c}").?;
+        const template = "{c}";
+        const i = std.mem.indexOf(u8, fmtStr, template).?;
         try w.writeAll(fmtStr[0..i]);
 
         if (std.ascii.isPrint(ctx.value)) {
@@ -160,20 +161,25 @@ pub const Ascii = struct {
             const str = std.fmt.bufPrint(&buf, "x{x}", .{std.fmt.fmtSliceHexLower(&.{ctx.value})}) catch unreachable;
             try w.writeAll(str);
         }
-        return i;
+        return i + template.len;
     }
 };
 
 pub const Parser = struct {
     comp: *const Compilation,
     literal: []const u8,
-    i: usize = 0,
+    idx: usize = 0,
     kind: Kind,
     maxCodepoint: u21,
     loc: Source.Location,
+    /// Offset added to `loc.byteOffset` when emitting an error.
+    offset: u32 = 0,
     expansionLocs: []const Source.Location,
     /// We only want to issue a max of 1 error per char literal
     errored: bool = false,
+    /// Makes incorrect encoding always an error.
+    /// Used when concatenating string literals.
+    incorrectEncodingIsError: bool = false,
 
     fn prefixLen(self: *const Parser) usize {
         return switch (self.kind) {
@@ -295,12 +301,14 @@ pub const Parser = struct {
     };
 
     pub fn err(p: *Parser, diagnostic: Diagnostic, args: anytype) !void {
+        defer p.offset = 0;
         if (p.errored) return;
         defer p.errored = true;
         try p.warn(diagnostic, args);
     }
 
     pub fn warn(p: *Parser, diagnostic: Diagnostic, args: anytype) !void {
+        defer p.offset = 0;
         if (p.errored) return;
         if (p.comp.diagnostics.effectiveKind(diagnostic) == .off) return;
 
@@ -310,12 +318,14 @@ pub const Parser = struct {
 
         try formatArgs(buf.writer(), diagnostic.fmt, args);
 
+        var offsetLocation = p.loc;
+        offsetLocation.byteOffset += p.offset;
         try p.comp.diagnostics.addWithLocation(p.comp, .{
             .kind = diagnostic.kind,
             .text = buf.items,
             .opt = diagnostic.opt,
             .extension = diagnostic.extension,
-            .location = p.loc.expand(p.comp),
+            .location = offsetLocation.expand(p.comp),
         }, p.expansionLocs, true);
     }
 
@@ -337,20 +347,24 @@ pub const Parser = struct {
     }
 
     pub fn next(p: *Parser) !?Item {
-        if (p.i >= p.literal.len) return null;
+        if (p.idx >= p.literal.len) return null;
 
-        const start = p.i;
+        const start = p.idx;
         if (p.literal[start] != '\\') {
-            p.i = mem.indexOfScalarPos(u8, p.literal, start + 1, '\\') orelse p.literal.len;
-            const unescapedSlice = p.literal[start..p.i];
+            p.idx = mem.indexOfScalarPos(u8, p.literal, start + 1, '\\') orelse p.literal.len;
+            const unescapedSlice = p.literal[start..p.idx];
 
             const view = std.unicode.Utf8View.init(unescapedSlice) catch {
+                if (p.incorrectEncodingIsError) {
+                    try p.warn(.illegal_char_encoding_error, .{});
+                    return .{ .improperlyEncoded = p.literal[start..p.idx] };
+                }
                 if (p.kind != .char) {
                     try p.err(.illegal_char_encoding_error, .{});
                     return null;
                 }
                 try p.warn(.illegal_char_encoding_warning, .{});
-                return .{ .improperlyEncoded = p.literal[start..p.i] };
+                return .{ .improperlyEncoded = p.literal[start..p.idx] };
             };
             return .{ .utf8Text = view };
         }
@@ -362,15 +376,15 @@ pub const Parser = struct {
     }
 
     fn parseUnicodeEscape(p: *Parser) !?Item {
-        const start = p.i;
+        const start = p.idx;
 
-        std.debug.assert(p.literal[p.i] == '\\');
+        std.debug.assert(p.literal[p.idx] == '\\');
 
-        const kind = p.literal[p.i + 1];
+        const kind = p.literal[p.idx + 1];
         std.debug.assert(kind == 'u' or kind == 'U');
 
-        p.i += 2;
-        if (p.i >= p.literal.len or !std.ascii.isHex(p.literal[p.i])) {
+        p.idx += 2;
+        if (p.idx >= p.literal.len or !std.ascii.isHex(p.literal[p.idx])) {
             try p.err(.missing_hex_escape, .{Ascii.init(kind)});
             return null;
         }
@@ -379,7 +393,7 @@ pub const Parser = struct {
         var count: usize = 0;
         var value: u32 = 0;
 
-        for (p.literal[p.i..], 0..) |c, i| {
+        for (p.literal[p.idx..], 0..) |c, i| {
             if (i == expected_len) break;
 
             const char = std.fmt.charToDigit(c, 16) catch break;
@@ -389,10 +403,10 @@ pub const Parser = struct {
             value |= char;
             count += 1;
         }
-        p.i += expected_len;
+        p.idx += expected_len;
 
         if (overflowed) {
-            p.loc.byteOffset += @intCast(start + p.prefixLen());
+            p.offset += @intCast(start + p.prefixLen());
             try p.err(.escape_sequence_overflow, .{});
             return null;
         }
@@ -403,7 +417,7 @@ pub const Parser = struct {
         }
 
         if (value > std.math.maxInt(u21) or !std.unicode.utf8ValidCodepoint(@intCast(value))) {
-            p.loc.byteOffset += @intCast(start + p.prefixLen());
+            p.offset += @intCast(start + p.prefixLen());
             try p.err(.invalid_universal_character, .{});
             return null;
         }
@@ -437,10 +451,10 @@ pub const Parser = struct {
     }
 
     fn parseEscapedChar(p: *Parser) !Item {
-        p.i += 1;
-        const c = p.literal[p.i];
+        p.idx += 1;
+        const c = p.literal[p.idx];
         defer if (c != 'x' and (c < '0' or c > '7')) {
-            p.i += 1;
+            p.idx += 1;
         };
 
         switch (c) {
@@ -453,7 +467,7 @@ pub const Parser = struct {
             'a' => return .{ .value = 0x07 },
             'b' => return .{ .value = 0x08 },
             'e', 'E' => {
-                p.loc.byteOffset += @intCast(p.i);
+                p.offset += @intCast(p.idx);
                 try p.warn(.non_standard_escape_char, .{Ascii.init(c)});
                 return .{ .value = 0x1B };
             },
@@ -463,12 +477,12 @@ pub const Parser = struct {
             '0'...'7' => return .{ .value = try p.parseNumberEscape(.octal) },
             'u', 'U' => unreachable, // handled by parseUnicodeEscape
             '(', '{', '[', '%' => {
-                p.loc.byteOffset += @intCast(p.i);
+                p.offset += @intCast(p.idx);
                 try p.warn(.non_standard_escape_char, .{Ascii.init(c)});
                 return .{ .value = c };
             },
             else => {
-                p.loc.byteOffset += @intCast(p.i);
+                p.offset += @intCast(p.idx);
                 try p.warn(.unknown_escape_sequence, .{Ascii.init(c)});
                 return .{ .value = c };
             },
@@ -479,14 +493,14 @@ pub const Parser = struct {
         var val: u32 = 0;
         var count: usize = 0;
         var overflowed = false;
-        const start = p.i;
-        defer p.i += count;
+        const start = p.idx;
+        defer p.idx += count;
 
         const slice = switch (base) {
-            .octal => p.literal[p.i..@min(p.literal.len, p.i + 3)], // max 3 chars
+            .octal => p.literal[p.idx..@min(p.literal.len, p.idx + 3)], // max 3 chars
             .hex => blk: {
-                p.i += 1;
-                break :blk p.literal[p.i..];
+                p.idx += 1;
+                break :blk p.literal[p.idx..];
             },
         };
 
@@ -499,14 +513,14 @@ pub const Parser = struct {
         }
 
         if (overflowed or val > p.kind.maxInt(p.comp)) {
-            p.loc.byteOffset += @intCast(start + p.prefixLen());
+            p.offset += @intCast(start + p.prefixLen());
             try p.err(.escape_sequence_overflow, .{});
             return 0;
         }
 
         if (count == 0) {
             std.debug.assert(base == .hex);
-            try p.err(.missing_hex_escape, .{Ascii.init('c')});
+            try p.err(.missing_hex_escape, .{Ascii.init('x')});
         }
 
         return val;

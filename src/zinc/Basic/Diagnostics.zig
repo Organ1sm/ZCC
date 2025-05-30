@@ -240,6 +240,7 @@ output: union(enum) {
         messages: std.ArrayListUnmanaged(Message) = .empty,
         arena: std.heap.ArenaAllocator,
     },
+    toBuffer: std.ArrayList(u8),
     ignore,
 },
 
@@ -260,6 +261,7 @@ pub fn deinit(d: *Diagnostics) void {
             list.messages.deinit(list.arena.child_allocator);
             list.arena.deinit();
         },
+        .toBuffer => |*buf| buf.deinit(),
     }
 }
 
@@ -288,6 +290,7 @@ pub fn set(d: *Diagnostics, name: []const u8, to: Message.Kind) !void {
                 d.state.options.put(option, to);
             }
         }
+        return;
     }
 
     var buf: [256]u8 = undefined;
@@ -419,17 +422,19 @@ pub fn formatArgs(w: anytype, fmt: []const u8, args: anytype) !void {
 }
 
 pub fn formatString(w: anytype, fmt: []const u8, str: []const u8) !usize {
-    const i = std.mem.indexOf(u8, fmt, "{s}").?;
+    const template = "{s}";
+    const i = std.mem.indexOf(u8, fmt, template).?;
     try w.writeAll(fmt[0..i]);
     try w.writeAll(str);
-    return i;
+    return i + template.len;
 }
 
 pub fn formatInt(w: anytype, fmt: []const u8, int: anytype) !usize {
-    const i = std.mem.indexOf(u8, fmt, "{d}").?;
+    const template = "{d}";
+    const i = std.mem.indexOf(u8, fmt, template).?;
     try w.writeAll(fmt[0..i]);
     try std.fmt.formatInt(int, 10, .lower, .{}, w);
-    return i;
+    return i + template.len;
 }
 
 fn addMessage(d: *Diagnostics, msg: Message) Compilation.Error!void {
@@ -444,13 +449,13 @@ fn addMessage(d: *Diagnostics, msg: Message) Compilation.Error!void {
     switch (d.output) {
         .ignore => {},
         .toFile => |toFile| {
-            d.writeToFile(msg, toFile.file, toFile.config) catch {
+            d.writeToWriter(msg, toFile.file.writer(), toFile.config) catch {
                 return error.FatalError;
             };
         },
-        .toList => |*toList| {
-            const arena = toList.arena.allocator();
-            try toList.messages.append(toList.arena.child_allocator, .{
+        .toList => |*list| {
+            const arena = list.arena.allocator();
+            try list.messages.append(list.arena.child_allocator, .{
                 .kind = msg.kind,
                 .text = try arena.dupe(u8, msg.text),
                 .opt = msg.opt,
@@ -458,12 +463,11 @@ fn addMessage(d: *Diagnostics, msg: Message) Compilation.Error!void {
                 .location = msg.location,
             });
         },
+        .toBuffer => |*buf| d.writeToWriter(msg, buf.writer(), .no_color) catch return error.OutOfMemory,
     }
 }
 
-fn writeToFile(d: *Diagnostics, msg: Message, file: std.fs.File, config: std.io.tty.Config) !void {
-    const w = file.writer();
-
+fn writeToWriter(d: *Diagnostics, msg: Message, w: anytype, config: std.io.tty.Config) !void {
     try config.setColor(w, .bold);
     if (msg.location) |loc| {
         try w.print("{s}:{d}:{d}: ", .{ loc.path, loc.lineNo, loc.col });

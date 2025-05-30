@@ -721,15 +721,11 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!TokenWithExpans
                 if (token.id.isMacroIdentifier() and pp.poisonedIdentifiers.get(pp.getTokenSlice(token)) != null)
                     try pp.err(token, .poisoned_identifier, .{});
 
-                // if (std.mem.eql(u8, lexer.buffer[token.start..token.end], "__has_include")) {
-                //     token.id.simplifyMacroKeyword();
-                //     try pp.err(token, .preprocessing, args: anytype)
-                //     try pp.comp.addDiagnostic(.{
-                //         .tag = .preprocessing_directive_only,
-                //         .loc = .{ .id = token.source, .byteOffset = token.start, .line = token.line },
-                //         .extra = .{ .str = lexer.buffer[token.start..token.end] },
-                //     }, &.{});
-                // }
+                const tokenStr = lexer.buffer[token.start..token.end];
+                if (std.mem.eql(u8, tokenStr, "__has_include")) {
+                    token.id.simplifyMacroKeyword();
+                    try pp.err(token, .preprocessing_directive_only, .{tokenStr});
+                }
 
                 // add the token to the buffer do any necessary expansions
                 startOfLine = false;
@@ -2583,7 +2579,11 @@ fn defineMacro(pp: *Preprocessor, nameToken: RawToken, macro: Macro) Error!void 
     if (gop.found_existing and !gop.value_ptr.eql(macro, pp)) {
         const loc: Source.Location = .{ .id = nameToken.source, .byteOffset = nameToken.start, .line = nameToken.line };
         const prevTotal = pp.diagnostics.total;
-        try pp.err(loc, if (gop.value_ptr.isBuiltin) .builtin_macro_redefined else .macro_redefined, .{name});
+        if (gop.value_ptr.isBuiltin) {
+            try pp.err(loc, .builtin_macro_redefined, .{});
+        } else {
+            try pp.err(loc, .macro_redefined, .{name});
+        }
 
         if (!gop.value_ptr.isBuiltin and pp.diagnostics.total != prevTotal) {
             try pp.err(gop.value_ptr.loc, .previous_definition, .{});

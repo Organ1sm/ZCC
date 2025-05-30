@@ -257,11 +257,10 @@ pub const fn_macro_undefined: Diagnostic = .{
     .kind = .@"error",
 };
 
-// pub const preprocessing_directive_only: Diagnostic = .{
-//     .fmt = "'{s}' must be used within a preprocessing directive",
-//     .extra = .tok_id_expected,
-//     .kind = .@"error",
-// };
+pub const preprocessing_directive_only: Diagnostic = .{
+    .fmt = "'{s}' must be used within a preprocessing directive",
+    .kind = .@"error",
+};
 
 pub const missing_lparen_after_builtin: Diagnostic = .{
     .fmt = "Missing '(' after built-in macro '{s}'",

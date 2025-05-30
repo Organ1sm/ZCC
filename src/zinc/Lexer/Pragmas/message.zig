@@ -27,7 +27,7 @@ fn deinit(pragma: *Pragma, comp: *Compilation) void {
 fn preprocessorHandler(_: *Pragma, pp: *Preprocessor, startIdx: TokenIndex) Pragma.Error!void {
     const str = Pragma.pasteTokens(pp, startIdx + 1) catch |err| switch (err) {
         error.ExpectedStringLiteral => {
-            return Pragma.err(pp, startIdx, .pragma_requires_string_literal, .{});
+            return Pragma.err(pp, startIdx, .pragma_requires_string_literal, .{"message"});
         },
         else => |e| return e,
     };
@@ -40,8 +40,13 @@ fn preprocessorHandler(_: *Pragma, pp: *Preprocessor, startIdx: TokenIndex) Prag
         messageToken.loc;
 
     const diagnostic: Pragma.Diagnostic = .pragma_message;
+    var sf = std.heap.stackFallback(1024, pp.gpa);
+    var buf = std.ArrayList(u8).init(sf.get());
+    defer buf.deinit();
+
+    try Diagnostics.formatArgs(buf.writer(), diagnostic.fmt, .{str});
     try pp.diagnostics.add(.{
-        .text = str,
+        .text = buf.items,
         .kind = diagnostic.kind,
         .opt = diagnostic.opt,
         .location = loc.expand(pp.comp),

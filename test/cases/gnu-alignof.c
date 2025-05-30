@@ -1,4 +1,4 @@
-//zinc-args -std=gnu17
+//zinc-args --emulate=gcc
 void foo(void) {
 	(void) _Alignof 2;
 	(void) _Alignof(2);

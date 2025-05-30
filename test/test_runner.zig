@@ -31,7 +31,7 @@ fn addCommandLineArgs(
         var it = std.mem.tokenizeScalar(u8, file.buffer[0..nl], ' ');
         while (it.next()) |some| try testArgs.append(some);
 
-        var driver = zinc.Driver{ .comp = comp };
+        var driver = zinc.Driver{ .comp = comp, .diagnostics = comp.diagnostics };
         defer driver.deinit();
 
         _ = try driver.parseArgs(std.io.null_writer, macroBuffer, testArgs.items);
@@ -71,7 +71,7 @@ fn testOne(allocator: std.mem.Allocator, path: []const u8, testDir: []const u8) 
     defer comp.deinit();
 
     try comp.addDefaultPragmaHandlers();
-    try comp.defineSystemIncludes(testDir);
+    try comp.addBuiltinIncludeDir(testDir);
 
     const file = try comp.addSourceFromPath(path);
     var macroBuffer = std.ArrayList(u8).init(comp.gpa);
@@ -178,8 +178,11 @@ pub fn main() !void {
         .estimated_total_items = cases.items.len,
     });
 
+    var diagnostics: zinc.Diagnostics = .{ .output = .{ .toBuffer = .init(gpa) } };
+    defer diagnostics.deinit();
+
     // prepare compiler
-    var initialComp = zinc.Compilation.init(gpa, std.fs.cwd());
+    var initialComp = zinc.Compilation.init(gpa, &diagnostics, std.fs.cwd());
     defer initialComp.deinit();
 
     const casesIncludeDir = try std.fs.path.join(gpa, &.{ args[1], "include" });
@@ -208,6 +211,10 @@ pub fn main() !void {
     var failCount: u32 = 0;
     var skipCount: u32 = 0;
     next_test: for (cases.items) |path| {
+        const diagBuffer = diagnostics.output.toBuffer;
+        diagnostics = .{ .output = .{ .toBuffer = diagBuffer } };
+        diagnostics.output.toBuffer.items.len = 0;
+
         var comp = initialComp;
         defer {
             comp.includeDirs = .{};
@@ -237,7 +244,6 @@ pub fn main() !void {
 
         const builtinMacros = try comp.generateBuiltinMacros(systemDefines);
 
-        comp.diagnostics.errors = 0;
         var pp = zinc.Preprocessor.init(&comp);
         defer pp.deinit();
 
@@ -280,7 +286,9 @@ pub fn main() !void {
                     continue;
                 }
             } else {
-                zinc.Diagnostics.render(&comp, std.io.tty.detectConfig(std.io.getStdErr()));
+                const stderr = std.io.getStdErr();
+                try stderr.writeAll(pp.diagnostics.output.toBuffer.items);
+
                 if (comp.diagnostics.errors != 0) {
                     failCount += 1;
                     continue;
@@ -353,7 +361,7 @@ pub fn main() !void {
             var actual = StmtTypeDumper.init(gpa);
             defer actual.deinit(gpa);
 
-            try actual.dump(&tree, testFn.body, gpa);
+            try actual.dump(&tree, testFn.body);
 
             var i: usize = 0;
             for (types.tokens) |str| {
@@ -393,15 +401,9 @@ pub fn main() !void {
             continue;
         }
 
-        if (pp.defines.contains("NO_ERROR_VALIDATION")) {
-            var m = MsgWriter.init(pp.comp.gpa);
-            defer m.deinit();
-
-            zinc.Diagnostics.renderMessages(pp.comp, &m);
-            continue;
-        }
-
-        zinc.Diagnostics.render(&comp, std.io.tty.detectConfig(std.io.getStdErr()));
+        if (pp.defines.contains("NO_ERROR_VALIDATION")) continue;
+        const stderr = std.io.getStdErr();
+        try stderr.writeAll(pp.diagnostics.output.toBuffer.items);
 
         if (pp.defines.get("EXPECTED_OUTPUT")) |macro| blk: {
             if (comp.diagnostics.errors != 0) break :blk;
@@ -489,12 +491,9 @@ pub fn main() !void {
 // returns true if passed
 fn checkExpectedErrors(pp: *zinc.Preprocessor, buf: *std.ArrayList(u8), case: []const u8) !?bool {
     const macro = pp.defines.get("EXPECTED_ERRORS") orelse return null;
-    const expectedCount = pp.comp.diagnostics.list.items.len;
 
-    var m = MsgWriter.init(pp.comp.gpa);
-    defer m.deinit();
-
-    zinc.Diagnostics.renderMessages(pp.comp, &m);
+    const expectedCount = pp.diagnostics.total;
+    const errors = pp.diagnostics.output.toBuffer.items;
 
     if (macro.isFunc) {
         std.debug.print("invalid EXPECTED_ERRORS {}\n", .{macro});
@@ -518,7 +517,7 @@ fn checkExpectedErrors(pp: *zinc.Preprocessor, buf: *std.ArrayList(u8), case: []
         try buf.append('\n');
         const expectedError = buf.items[start..];
 
-        const index = std.mem.indexOf(u8, m.buf.items, expectedError);
+        const index = std.mem.indexOf(u8, errors, expectedError);
         if (index == null) {
             std.debug.print(
                 \\
@@ -529,7 +528,7 @@ fn checkExpectedErrors(pp: *zinc.Preprocessor, buf: *std.ArrayList(u8), case: []
                 \\{s}
                 \\
                 \\
-            , .{ expectedError, m.buf.items });
+            , .{ expectedError, errors });
             return false;
         }
     }
@@ -539,7 +538,7 @@ fn checkExpectedErrors(pp: *zinc.Preprocessor, buf: *std.ArrayList(u8), case: []
             \\{s}: EXPECTED_ERRORS missing errors, expected {d} found {d},
             \\
         , .{ case, count, expectedCount });
-        var it = std.mem.tokenizeScalar(u8, m.buf.items, '\n');
+        var it = std.mem.tokenizeScalar(u8, errors, '\n');
         while (it.next()) |msg| {
             const start = std.mem.indexOf(u8, msg, ".c:") orelse continue;
             const index = std.mem.indexOf(u8, buf.items, msg[start..]);
@@ -560,46 +559,6 @@ fn checkExpectedErrors(pp: *zinc.Preprocessor, buf: *std.ArrayList(u8), case: []
     return true;
 }
 
-const MsgWriter = struct {
-    buf: std.ArrayList(u8),
-
-    fn init(gpa: std.mem.Allocator) MsgWriter {
-        return .{
-            .buf = std.ArrayList(u8).init(gpa),
-        };
-    }
-
-    fn deinit(m: *MsgWriter) void {
-        m.buf.deinit();
-    }
-
-    pub fn print(m: *MsgWriter, comptime fmt: []const u8, args: anytype) void {
-        m.buf.writer().print(fmt, args) catch {};
-    }
-
-    pub fn write(m: *MsgWriter, msg: []const u8) void {
-        m.buf.writer().writeAll(msg) catch {};
-    }
-
-    pub fn location(m: *MsgWriter, path: []const u8, line: u32, col: u32) void {
-        m.print("{s}:{d}:{d}: ", .{ path, line, col });
-    }
-
-    pub fn start(m: *MsgWriter, kind: zinc.Diagnostics.Kind) void {
-        m.print("{s}: ", .{@tagName(kind)});
-    }
-
-    pub fn end(m: *MsgWriter, maybeLine: ?[]const u8, col: u32, endWithSplice: bool) void {
-        const line = maybeLine orelse {
-            m.write("\n");
-            return;
-        };
-        const trailer = if (endWithSplice) "\\ " else "";
-        m.print("\n{s}{s}\n", .{ line, trailer });
-        m.print("{s: >[1]}^\n", .{ "", col });
-    }
-};
-
 const StmtTypeDumper = struct {
     types: std.ArrayList([]const u8),
 
@@ -616,36 +575,25 @@ const StmtTypeDumper = struct {
         };
     }
 
-    fn dumpNode(
-        self: *StmtTypeDumper,
-        tree: *const Tree,
-        node: Node.Index,
-        m: *MsgWriter,
-    ) AllocatorError!void {
+    fn dumpNode(self: *StmtTypeDumper, tree: *const Tree, node: Node.Index) AllocatorError!void {
         const maybeRet = node.get(tree);
         if (maybeRet == .returnStmt and maybeRet.returnStmt.operand == .implicit) return;
 
-        node.qt(tree)
-            .dump(tree.comp, m.buf.writer()) catch {};
+        var buf = std.ArrayList(u8).init(self.types.allocator);
+        defer buf.deinit();
 
-        const owned = try m.buf.toOwnedSlice();
-        errdefer m.buf.allocator.free(owned);
+        node.qt(tree)
+            .dump(tree.comp, buf.writer()) catch {};
+        const owned = try buf.toOwnedSlice();
+        errdefer buf.allocator.free(owned);
 
         try self.types.append(owned);
     }
 
-    fn dump(
-        self: *StmtTypeDumper,
-        tree: *const Tree,
-        body: Node.Index,
-        allocator: std.mem.Allocator,
-    ) AllocatorError!void {
-        var m = MsgWriter.init(allocator);
-        defer m.deinit();
-
+    fn dump(self: *StmtTypeDumper, tree: *const Tree, body: Node.Index) AllocatorError!void {
         const compound = body.get(tree).compoundStmt;
         for (compound.body) |stmt| {
-            try self.dumpNode(tree, stmt, &m);
+            try self.dumpNode(tree, stmt);
         }
     }
 };

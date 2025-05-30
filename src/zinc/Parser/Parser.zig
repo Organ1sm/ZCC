@@ -376,11 +376,23 @@ pub fn err(p: *Parser, diagnostic: Diagnostic, tokenIdx: TokenIndex, args: anyty
     if (p.extensionSuppressd) {
         if (diagnostic.extension and diagnostic.kind == .off) return;
     }
+
+    if (diagnostic.suppressVersion) |some| if (p.comp.langOpts.standard.atLeast(some)) return;
+    if (diagnostic.suppressUnlessVersion) |some| if (!p.comp.langOpts.standard.atLeast(some)) return;
     if (p.diagnostics.effectiveKind(diagnostic) == .off) return;
 
     var sf = std.heap.stackFallback(1024, p.gpa);
     var buf = std.ArrayList(u8).init(sf.get());
     defer buf.deinit();
+
+    const tok = p.pp.tokens.get(tokenIdx);
+    var loc = tok.loc;
+    if (tokenIdx != 0 and tok.is(.Eof)) {
+        // if the token is EOF, point at the end of the previous token instead
+        const prev = p.pp.tokens.get(tokenIdx - 1);
+        loc = prev.loc;
+        loc.byteOffset += @intCast(p.getTokenText(tokenIdx - 1).len);
+    }
 
     try p.formatArgs(buf.writer(), diagnostic.fmt, args);
     try p.diagnostics.addWithLocation(p.comp, .{
@@ -388,7 +400,7 @@ pub fn err(p: *Parser, diagnostic: Diagnostic, tokenIdx: TokenIndex, args: anyty
         .text = buf.items,
         .opt = diagnostic.opt,
         .extension = diagnostic.extension,
-        .location = p.pp.tokens.items(.loc)[tokenIdx].expand(p.comp),
+        .location = loc.expand(p.comp),
     }, p.pp.expansionSlice(tokenIdx), true);
 }
 
@@ -408,6 +420,9 @@ fn formatArgs(p: *Parser, w: anytype, fmt: []const u8, args: anytype) !void {
                 .value = arg.value,
                 .qt = arg.qt,
             }),
+            Codepoint => try arg.format(w, fmt[i..]),
+            Normalized => try arg.format(w, fmt[i..]),
+            Escaped => try arg.format(w, fmt[i..]),
             else => switch (@typeInfo(@TypeOf(arg))) {
                 .int, .comptime_int => try Diagnostics.formatInt(w, fmt[i..], arg),
                 .pointer => try Diagnostics.formatString(w, fmt[i..], arg),
@@ -419,31 +434,33 @@ fn formatArgs(p: *Parser, w: anytype, fmt: []const u8, args: anytype) !void {
 }
 
 fn formatTokenType(w: anytype, fmt: []const u8, tokenTy: TokenType) !usize {
-    const i = std.mem.indexOf(u8, fmt, "{tok_id}").?;
+    const template = "{tok_id}";
+    const i = std.mem.indexOf(u8, fmt, template).?;
     try w.writeAll(fmt[0..i]);
     try w.writeAll(tokenTy.symbol());
-    return i;
+    return i + template.len;
 }
 
 fn formatQualType(p: *Parser, w: anytype, fmt: []const u8, qt: QualType) !usize {
-    const i = std.mem.indexOf(u8, fmt, "{qt}").?;
+    const template = "{qt}";
+    const i = std.mem.indexOf(u8, fmt, template).?;
     try w.writeAll(fmt[0..i]);
     try qt.print(p.comp, w);
-    return i;
+    return i + template.len;
 }
 
 fn formatResult(p: *Parser, w: anytype, fmt: []const u8, res: Result) !usize {
-    _ = p;
-    const i = std.mem.indexOf(u8, fmt, "{value}").?;
+    const template = "{value}";
+    const i = std.mem.indexOf(u8, fmt, template).?;
     try w.writeAll(fmt[0..i]);
 
     switch (res.value.optRef) {
         .none => try w.writeAll("(none)"),
         .null => try w.writeAll("nullptr_t"),
-        else => {},
+        else => try res.value.print(res.qt, p.comp, w),
     }
 
-    return i;
+    return i + template.len;
 }
 
 const Normalized = struct {
@@ -453,9 +470,10 @@ const Normalized = struct {
         return .{ .str = str };
     }
 
-    pub fn format(w: anytype, fmt_str: []const u8, ctx: Normalized) !usize {
-        const i = std.mem.indexOf(u8, fmt_str, "{normalized}").?;
-        try w.writeAll(fmt_str[0..i]);
+    pub fn format(ctx: Normalized, w: anytype, fmtStr: []const u8) !usize {
+        const template = "{normalized}";
+        const i = std.mem.indexOf(u8, fmtStr, template).?;
+        try w.writeAll(fmtStr[0..i]);
         var it: std.unicode.Utf8Iterator = .{
             .bytes = ctx.str,
             .i = 0,
@@ -477,7 +495,7 @@ const Normalized = struct {
                 }, w);
             }
         }
-        return i;
+        return i + template.len;
     }
 };
 
@@ -488,11 +506,28 @@ const Codepoint = struct {
         return .{ .codepoint = codepoint };
     }
 
-    pub fn write(w: anytype, fmt_str: []const u8, ctx: Codepoint) !usize {
-        const i = std.mem.indexOf(u8, fmt_str, "{codepoint}").?;
-        try w.writeAll(fmt_str[0..i]);
+    pub fn format(ctx: Codepoint, w: anytype, fmtStr: []const u8) !usize {
+        const template = "{codepoint}";
+        const i = std.mem.indexOf(u8, fmtStr, template).?;
+        try w.writeAll(fmtStr[0..i]);
         try w.print("{X:0>4}", .{ctx.codepoint});
-        return i;
+        return i + template.len;
+    }
+};
+
+const Escaped = struct {
+    str: []const u8,
+
+    fn init(str: []const u8) Escaped {
+        return .{ .str = str };
+    }
+
+    pub fn format(ctx: Escaped, w: anytype, fmtStr: []const u8) !usize {
+        const template = "{s}";
+        const i = std.mem.indexOf(u8, fmtStr, template).?;
+        try w.writeAll(fmtStr[0..i]);
+        try w.print("{}", .{std.zig.fmtEscapes(ctx.str)});
+        return i + template.len;
     }
 };
 
@@ -511,9 +546,12 @@ pub fn removeNull(p: *Parser, str: Value) !Value {
     return Value.intern(p.comp, .{ .bytes = p.strings.items[stringsTop..] });
 }
 
-pub fn errValueChanged(p: *Parser, diagnostic: Diagnostic, tokenIdx: TokenIndex, res: Result, oldRes: Result, intQt: QualType) !void {
+pub fn errValueChanged(p: *Parser, diagnostic: Diagnostic, tokenIdx: TokenIndex, res: Result, oldValue: Value, intQt: QualType) !void {
     const zeroStr = if (res.value.isZero(p.comp)) "non-zero " else "";
-    try p.err(diagnostic, tokenIdx, .{ res.qt, intQt, zeroStr, oldRes, res });
+    const oldRes: Result = .{ .node = undefined, .value = oldValue, .qt = res.qt };
+    const newRes: Result = .{ .node = undefined, .value = res.value, .qt = intQt };
+
+    try p.err(diagnostic, tokenIdx, .{ res.qt, intQt, zeroStr, oldRes, newRes });
 }
 
 /// Check for deprecated or unavailable attributes on a type and report them.
@@ -550,8 +588,8 @@ fn checkDeprecatedUnavailable(p: *Parser, ty: QualType, usageToken: TokenIndex, 
 /// It constructs an error message and then calls `errStr` to handle the error.
 fn errDeprecated(p: *Parser, diagnostic: Diagnostic, tokenIdx: TokenIndex, msg: ?Value) Compilation.Error!void {
     const colonStr: []const u8 = if (msg != null) ": " else "";
-    const msgStr = std.zig.fmtEscapes(if (msg) |m| p.comp.interner.get(m.ref()).bytes else "");
-    return p.err(diagnostic, tokenIdx, .{ p.getTokenText(tokenIdx), colonStr, msgStr });
+    const msgStr: []const u8 = if (msg) |m| p.comp.interner.get(m.ref()).bytes else "";
+    return p.err(diagnostic, tokenIdx, .{ p.getTokenText(tokenIdx), colonStr, Escaped.init(msgStr) });
 }
 
 fn errExpectedToken(p: *Parser, expected: TokenType, actual: TokenType) Error {
@@ -1954,11 +1992,10 @@ fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec, attrBufferTop: usize, de
         if (ID.initializer) |some| {
             ID.d.qt = some.qt.withQualifiers(ID.d.qt);
         } else {
-            try p.err(
-                if (ID.d.qt.isC23Auto()) .c23_auto_requires_initializer else .auto_type_requires_initializer,
-                name,
-                .{p.getTokenText(name)},
-            );
+            if (ID.d.qt.isC23Auto())
+                try p.err(.c23_auto_requires_initializer, name, .{})
+            else
+                try p.err(.auto_type_requires_initializer, name, .{p.getTokenText(name)});
             ID.d.qt = .invalid;
             return ID;
         }
@@ -1985,7 +2022,7 @@ fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec, attrBufferTop: usize, de
         if (p.func.qt == null) {
             switch (initType) {
                 .array => |arrayTy| if (arrayTy.len == .incomplete) {
-                    try p.err(.tentative_array, name, .{ID.d.qt});
+                    try p.err(.tentative_array, name, .{});
                     break :incomplete;
                 },
                 .@"struct", .@"union" => |recordTy| {
@@ -2228,11 +2265,14 @@ fn getAnonymousName(p: *Parser, kindToken: TokenIndex) !StringId {
         else => "record field",
     };
 
-    const str = std.fmt.allocPrint(
-        p.gpa, //TODO
+    var arena = p.comp.typeStore.annoNameArena.promote(p.gpa);
+    defer p.comp.typeStore.annoNameArena = arena.state;
+
+    const str = try std.fmt.allocPrint(
+        arena.allocator(),
         "(anonymous {s} at {s}:{d}:{d})",
         .{ kindStr, source.path, lineAndCol.lineNo, lineAndCol.col },
-    ) catch unreachable;
+    );
     return p.comp.internString(str);
 }
 
@@ -2374,8 +2414,13 @@ fn parseRecordSpec(p: *Parser) Error!QualType {
     const fields = p.recordBuffer.items[recordBufferTop..];
 
     if (p.record.flexibleField) |some| {
-        if (fields.len == 1 and isStruct)
-            try p.err(.flexible_in_empty, some, .{});
+        if (fields.len == 1 and isStruct) {
+            if (p.comp.langOpts.emulate == .msvc) {
+                try p.err(.flexible_in_empty_msvc, some, .{});
+            } else {
+                try p.err(.flexible_in_empty, some, .{});
+            }
+        }
     }
 
     if (p.recordBuffer.items.len == recordBufferTop) {
@@ -2667,8 +2712,12 @@ fn parseRecordDecl(p: *Parser) Error!bool {
                     .fixed => {},
                     .incomplete => {
                         if (p.record.kind == .KeywordUnion) {
-                            try p.err(.flexible_in_union, firstToken, .{});
-                            qt = .invalid;
+                            if (p.comp.langOpts.emulate == .msvc) {
+                                try p.err(.flexible_in_union_msvc, firstToken, .{});
+                            } else {
+                                try p.err(.flexible_in_union, firstToken, .{});
+                                qt = .invalid;
+                            }
                         }
                         if (p.record.flexibleField) |some| {
                             if (p.record.kind == .KeywordStruct) {
@@ -2993,7 +3042,13 @@ const Enumerator = struct {
             } else {
                 const byteSize = e.qt.sizeof(p.comp);
                 const bitSize: u8 = @intCast(if (e.qt.isUnsigned(p.comp)) byteSize * 8 else byteSize * 8 - 1);
-                try p.err(.enum_not_representable, token, .{std.math.pow(usize, bitSize, 2)});
+                try p.err(.enum_not_representable, token, .{switch (bitSize) {
+                    63 => "9223372036854775808",
+                    64 => "18446744073709551616",
+                    127 => "170141183460469231731687303715884105728",
+                    128 => "340282366920938463463374607431768211456",
+                    else => unreachable,
+                }});
                 e.qt = .ulonglong;
             }
             _ = try e.value.add(oldVal, .one, e.qt, p.comp);
@@ -4674,7 +4729,7 @@ fn parseGNUAsmStmt(
     }
 
     if (!quals.goto and (p.currToken() != .RParen or ateExtraColor)) {
-        try p.err(.expected_token, p.tokenIdx, .{ p.currToken(), TokenType.RParen });
+        try p.err(.expected_token, p.tokenIdx, .{ TokenType.RParen, p.currToken() });
         return error.ParsingFailed;
     }
 
@@ -4708,7 +4763,7 @@ fn parseGNUAsmStmt(
             if (p.eat(.Comma) == null) break;
         }
     } else if (quals.goto) {
-        try p.err(.expected_token, p.tokenIdx, .{ p.currToken(), TokenType.Colon });
+        try p.err(.expected_token, p.tokenIdx, .{ TokenType.Colon, p.currToken() });
         return error.ParsingFailed;
     }
 
@@ -6701,7 +6756,7 @@ fn parseUnaryExpr(p: *Parser) Error!?Result {
                 }
 
                 if (baseType.qt.sizeofOrNull(p.comp)) |size| {
-                    if (size == 0) try p.err(.sizeof_returns_zero, token, .{});
+                    if (size == 0 and p.comp.langOpts.emulate == .msvc) try p.err(.sizeof_returns_zero, token, .{});
                     res.value = try Value.int(size, p.comp);
                     res.qt = p.comp.typeStore.size;
                 } else {
@@ -7502,7 +7557,7 @@ fn parseCallExpr(p: *Parser, lhs: Result) Error!Result {
 
     if (callExpr.paramCountOverride()) |expected| {
         if (expected != argCount)
-            try p.err(.expected_arguments, firstAfter, .{ paramsLen, argCount });
+            try p.err(.expected_arguments, firstAfter, .{ expected, argCount });
     } else switch (funcKind) {
         .Normal => if (paramsLen != argCount) {
             try p.err(.expected_arguments, firstAfter, .{ paramsLen, argCount });
@@ -8414,6 +8469,7 @@ fn parseStringLiteral(p: *Parser) Error!Result {
             .maxCodepoint = 0x10ffff,
             .loc = p.pp.tokens.items(.loc)[p.tokenIdx],
             .expansionLocs = p.pp.expansionSlice(p.tokenIdx),
+            .incorrectEncodingIsError = count > 1,
         };
 
         try p.strings.ensureUnusedCapacity((slice.len + 1) * @intFromEnum(charWidth));
@@ -8451,10 +8507,7 @@ fn parseStringLiteral(p: *Parser) Error!Result {
                 }
             },
             .improperlyEncoded => |bytes| {
-                if (count > 1) {
-                    try charLiteralParser.err(.illegal_char_encoding_error, .{});
-                    return error.ParsingFailed;
-                }
+                if (count > 1) return error.ParsingFailed;
                 p.strings.appendSliceAssumeCapacity(bytes);
             },
             .utf8Text => |view| {

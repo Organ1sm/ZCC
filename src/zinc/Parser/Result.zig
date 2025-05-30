@@ -457,9 +457,9 @@ pub fn castToBool(res: *Result, p: *Parser, boolQt: QualType, tok: TokenIndex) E
         res.qt = boolQt;
         try res.implicitCast(p, .IntToBool, tok);
     } else if (srcSK.isFloat()) {
-        const oldRes = res.*;
+        const oldValue = res.value;
         const valueChangeKind = try res.value.floatToInt(boolQt, p.comp);
-        try res.floatToIntWarning(p, boolQt, oldRes, valueChangeKind, tok);
+        try res.floatToIntWarning(p, boolQt, oldValue, valueChangeKind, tok);
         if (!srcSK.isReal()) {
             res.qt = res.qt.toReal(p.comp);
             try res.implicitCast(p, .ComplexFloatToReal, tok);
@@ -510,10 +510,10 @@ pub fn castToInt(res: *Result, p: *Parser, intQt: QualType, token: TokenIndex) E
 
     // Cast from floating point to integer.
     else if (res.qt.isFloat(p.comp)) {
-        const oldRes = res.*;
+        const oldValue = res.value;
         const valueChangeKind = try res.value.floatToInt(intQt, p.comp);
 
-        try res.floatToIntWarning(p, intQt, oldRes, valueChangeKind, token);
+        try res.floatToIntWarning(p, intQt, oldValue, valueChangeKind, token);
 
         if (srcSK.isReal() and destSK.isReal()) {
             res.qt = intQt;
@@ -564,7 +564,7 @@ fn floatToIntWarning(
     res: Result,
     p: *Parser,
     intQt: QualType,
-    oldRes: Result,
+    oldValue: Value,
     changeKind: Value.FloatToIntChangeKind,
     tok: TokenIndex,
 ) !void {
@@ -572,8 +572,8 @@ fn floatToIntWarning(
         .none => return p.err(.float_to_int, tok, .{ res.qt, intQt }),
         .outOfRange => return p.err(.float_out_of_range, tok, .{ res.qt, intQt }),
         .overflow => return p.err(.float_overflow_conversion, tok, .{ res.qt, intQt }),
-        .nonZeroToZero => return p.errValueChanged(.float_zero_conversion, tok, res, oldRes, intQt),
-        .valueChanged => return p.errValueChanged(.float_value_changed, tok, res, oldRes, intQt),
+        .nonZeroToZero => return p.errValueChanged(.float_zero_conversion, tok, res, oldValue, intQt),
+        .valueChanged => return p.errValueChanged(.float_value_changed, tok, res, oldValue, intQt),
     }
 }
 
@@ -1176,13 +1176,13 @@ fn coerceExtra(
                 return;
             }
             const differentSignOnly = srcChild.sameRankDifferentSign(destChild, p.comp);
-            try p.err(switch (ctx) {
-                .assign => if (differentSignOnly) .incompatible_ptr_assign_sign else .incompatible_ptr_assign,
-                .init => if (differentSignOnly) .incompatible_ptr_init_sign else .incompatible_ptr_init,
-                .ret => if (differentSignOnly) .incompatible_return_sign else .incompatible_return,
-                .arg => if (differentSignOnly) .incompatible_ptr_arg_sign else .incompatible_ptr_arg,
+            switch (ctx) {
+                .assign => try p.err(if (differentSignOnly) .incompatible_ptr_assign_sign else .incompatible_ptr_assign, tok, .{ destQt, srcOriginalQt }),
+                .init => try p.err(if (differentSignOnly) .incompatible_ptr_init_sign else .incompatible_ptr_init, tok, .{ destQt, srcOriginalQt }),
+                .ret => try p.err(if (differentSignOnly) .incompatible_return_sign else .incompatible_return, tok, .{ srcOriginalQt, destQt }),
+                .arg => try p.err(if (differentSignOnly) .incompatible_ptr_arg_sign else .incompatible_ptr_arg, tok, .{ srcOriginalQt, destQt }),
                 .testCoerce => return error.CoercionFailed,
-            }, tok, .{ destQt, srcOriginalQt });
+            }
             try ctx.note(p);
 
             res.qt = destUnqual;
@@ -1231,16 +1231,12 @@ fn coerceExtra(
         return error.ParsingFailed;
     }
 
-    try p.err(
-        switch (ctx) {
-            .assign => .incompatible_assign,
-            .init => .incompatible_init,
-            .ret => .incompatible_return,
-            .arg => .incompatible_arg,
-            .testCoerce => return error.CoercionFailed,
-        },
-        tok,
-        .{ destUnqual, res.qt },
-    );
+    switch (ctx) {
+        .assign => try p.err(.incompatible_assign, tok, .{ destUnqual, res.qt }),
+        .init => try p.err(.incompatible_init, tok, .{ destUnqual, res.qt }),
+        .ret => try p.err(.incompatible_return, tok, .{ res.qt, destUnqual }),
+        .arg => try p.err(.incompatible_arg, tok, .{ res.qt, destUnqual }),
+        .testCoerce => return error.CoercionFailed,
+    }
     try ctx.note(p);
 }
