@@ -29,6 +29,6 @@ _Pragma()
     "pragma-operator.c:4:19: note: expanded from here" \
     "<scratch space>:9:9: note: expanded from here" \
     "pragma-operator.c:20:1: error: _Pragma requires exactly one string literal token" \
-    "pragma-operator.c:11:14: error: comparison between pointer and integer ('int' and 'int *') [-Werror, -Wpointer-integer-compare]" \
+    "pragma-operator.c:11:14: error: comparison between pointer and integer ('int' and 'int *') [-Werror,-Wpointer-integer-compare]" \
     "pragma-operator.c:13:14: warning: comparison between pointer and integer ('int' and 'int *') [-Wpointer-integer-compare]" \
 

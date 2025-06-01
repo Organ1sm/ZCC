@@ -87,29 +87,6 @@ pub const Iterator = struct {
     }
 };
 
-pub const ArgumentType = enum {
-    string,
-    identifier,
-    int,
-    alignment,
-    float,
-    complexFloat,
-    expression,
-    nullptrTy,
-
-    pub fn toString(self: ArgumentType) []const u8 {
-        return switch (self) {
-            .string => "a string",
-            .identifier => "an identifier",
-            .int, .alignment => "an integer constant",
-            .nullptrTy => "nullptr",
-            .float => "a floating point number",
-            .complexFloat => "a complex floating point number",
-            .expression => "an expression",
-        };
-    }
-};
-
 /// number of required arguments
 pub fn requiredArgCount(attr: Tag) u32 {
     switch (attr) {
@@ -213,7 +190,7 @@ pub fn wantsIdentEnum(attr: Tag) bool {
     }
 }
 
-pub fn diagnoseIdent(attr: Tag, arguments: *Arguments, ident: []const u8) ?Diagnostics.Message {
+pub fn diagnoseIdent(attr: Tag, arguments: *Arguments, ident: TokenIndex, p: *Parser) !bool {
     switch (attr) {
         inline else => |tag| {
             // Get the fields of the Args struct corresponding to the given tag
@@ -223,15 +200,13 @@ pub fn diagnoseIdent(attr: Tag, arguments: *Arguments, ident: []const u8) ?Diagn
 
             const Unwrapped = UnwrapOptional(fields[0].type);
             if (@typeInfo(Unwrapped) != .@"enum") unreachable;
-            if (std.meta.stringToEnum(Unwrapped, normalize(ident))) |enumVal| {
+            if (std.meta.stringToEnum(Unwrapped, normalize(p.getTokenText(ident)))) |enumVal| {
                 @field(@field(arguments, @tagName(tag)), fields[0].name) = enumVal;
-                return null;
+                return false;
             }
 
-            return Diagnostics.Message{
-                .tag = .unknown_attr_enum,
-                .extra = .{ .attrEnum = .{ .tag = attr } },
-            };
+            try p.err(.unknown_attr_enum, ident, .{ @tagName(attr), Formatting.choices(attr) });
+            return true;
         },
     }
 }
@@ -257,7 +232,14 @@ pub fn wantsAlignment(attr: Tag, idx: usize) bool {
 /// argument to diagnose, the value of the argument, the type of the argument, and the compilation
 /// object. It returns a diagnostics message if the alignment argument is invalid, and null if it is
 /// valid.
-pub fn diagnoseAlignment(attr: Tag, arguments: *Arguments, argIdx: u32, res: Result, p: *Parser) !?Diagnostics.Message {
+pub fn diagnoseAlignment(
+    attr: Tag,
+    arguments: *Arguments,
+    argIdx: u32,
+    res: Result,
+    argStart: TokenIndex,
+    p: *Parser,
+) !bool {
     switch (attr) {
         inline else => |tag| {
             const argFields = std.meta.fields(@field(attributes, @tagName(tag)));
@@ -267,21 +249,28 @@ pub fn diagnoseAlignment(attr: Tag, arguments: *Arguments, argIdx: u32, res: Res
                 inline 0...argFields.len - 1 => |argI| {
                     if (UnwrapOptional(argFields[argI].type) != Alignment) unreachable;
 
-                    if (!res.value.is(.int, p.comp))
-                        return Diagnostics.Message{ .tag = .alignas_unavailable };
+                    if (!res.value.is(.int, p.comp)) {
+                        try p.err(.alignas_unavailable, argStart, .{});
+                        return true;
+                    }
 
-                    if (res.value.compare(.lt, Value.zero, p.comp))
-                        return Diagnostics.Message{ .tag = .negative_alignment, .extra = .{ .str = try res.str(p) } };
+                    if (res.value.compare(.lt, Value.zero, p.comp)) {
+                        try p.err(.negative_alignment, argStart, .{res});
+                        return true;
+                    }
 
                     const requested = res.value.toInt(u29, p.comp) orelse {
-                        return Diagnostics.Message{ .tag = .maximum_alignment, .extra = .{ .str = try res.str(p) } };
+                        try p.err(.maximum_alignment, argStart, .{res});
+                        return true;
                     };
-                    if (!std.mem.isValidAlign(requested))
-                        return Diagnostics.Message{ .tag = .non_pow2_align };
+                    if (!std.mem.isValidAlign(requested)) {
+                        try p.err(.non_pow2_align, argStart, .{});
+                        return true;
+                    }
 
                     // Set the alignment of the argument to the requested value
                     @field(@field(arguments, @tagName(tag)), argFields[argI].name) = Alignment{ .requested = requested };
-                    return null;
+                    return false;
                 },
                 else => unreachable,
             }
@@ -295,25 +284,49 @@ fn diagnoseField(
     comptime Wanted: type,
     arguments: *Arguments,
     res: Result,
+    argStart: TokenIndex,
     node: Tree.Node,
     p: *Parser,
-) !?Diagnostics.Message {
+) !bool {
+    const string = "a string";
+    const identifier = "an identifier";
+    const int = "an integer constant";
+    const alignment = "an integer constant";
+    const nullptrTy = "nullptr";
+    const float = "a floating point number";
+    const complexFloat = "a complex floating point number";
+    const expression = "an expression";
+
+    const expected: []const u8 = switch (Wanted) {
+        Value => string,
+        Identifier => identifier,
+        u32 => int,
+        Alignment => alignment,
+        CallingConvention => identifier,
+        else => switch (@typeInfo(Wanted)) {
+            .@"enum" => if (Wanted.opts.enum_kind == .string) string else identifier,
+            else => unreachable,
+        },
+    };
+
     if (res.value.isNone()) {
         if (Wanted == Identifier and node == .declRefExpr) {
             @field(@field(arguments, decl.name), field.name) = .{ .tok = node.declRefExpr.nameToken };
-            return null;
+            return false;
         }
-        return invalidArgMsg(Wanted, .expression);
+        try p.err(.attribute_arg_invalid, argStart, .{ expected, expression });
+        return true;
     }
+
     const key = p.comp.interner.get(res.value.ref());
     switch (key) {
         .int => {
             if (@typeInfo(Wanted) == .int) {
-                @field(@field(arguments, decl.name), field.name) = res.value.toInt(Wanted, p.comp) orelse return .{
-                    .tag = .attribute_int_out_of_range,
-                    .extra = .{ .str = try res.str(p) },
+                @field(@field(arguments, decl.name), field.name) = res.value.toInt(Wanted, p.comp) orelse {
+                    try p.err(.attribute_int_out_of_range, argStart, .{res});
+                    return true;
                 };
-                return null;
+                return false;
             }
         },
         .bytes => |bytes| {
@@ -326,70 +339,33 @@ fn diagnoseField(
                     }
 
                     @field(@field(arguments, decl.name), field.name) = try p.removeNull(res.value);
-                    return null;
+                    return false;
                 }
-                return .{
-                    .tag = .attribute_requires_string,
-                    .extra = .{ .str = decl.name },
-                };
+                try p.err(.attribute_requires_string, argStart, .{decl.name});
+                return true;
             } else if (@typeInfo(Wanted) == .@"enum" and @hasDecl(Wanted, "opts") and Wanted.opts.enum_kind == .string) {
                 const str = bytes[0 .. bytes.len - 1];
                 if (std.meta.stringToEnum(Wanted, str)) |enum_val| {
                     @field(@field(arguments, decl.name), field.name) = enum_val;
-                    return null;
+                    return false;
                 } else {
-                    @setEvalBranchQuota(3000);
-                    return .{
-                        .tag = .unknown_attr_enum,
-                        .extra = .{ .attrEnum = .{ .tag = std.meta.stringToEnum(Tag, decl.name).? } },
-                    };
+                    try p.err(.unknown_attr_enum, argStart, .{ decl.name, Formatting.choices(@field(Tag, decl.name)) });
+                    return true;
                 }
             }
         },
         else => {},
     }
 
-    return invalidArgMsg(Wanted, switch (key) {
-        .int => .int,
-        .bytes => .string,
-        .float => .float,
-        .complex => .complexFloat,
-        .null => .nullptrTy,
-
-        .intTy,
-        .floatTy,
-        .complexTy,
-        .ptrTy,
-        .noreturnTy,
-        .voidTy,
-        .funcTy,
-        .arrayTy,
-        .vectorTy,
-        .recordTy,
-        => unreachable,
-    });
-}
-
-fn invalidArgMsg(comptime Expected: type, actual: ArgumentType) Diagnostics.Message {
-    return .{
-        .tag = .attribute_arg_invalid,
-        .extra = .{
-            .attrArgType = .{
-                .expected = switch (Expected) {
-                    Value => .string,
-                    Identifier => .identifier,
-                    u32 => .int,
-                    Alignment => .alignment,
-                    CallingConvention => .identifier,
-                    else => switch (@typeInfo(Expected)) {
-                        .@"enum" => if (Expected.opts.enum_kind == .string) .string else .identifier,
-                        else => unreachable,
-                    },
-                },
-                .actual = actual,
-            },
-        },
-    };
+    try p.err(.attribute_arg_invalid, argStart, .{ expected, switch (key) {
+        .int => int,
+        .bytes => string,
+        .float => float,
+        .complex => complexFloat,
+        .null => nullptrTy,
+        else => unreachable,
+    } });
+    return true;
 }
 
 pub fn diagnose(
@@ -397,28 +373,23 @@ pub fn diagnose(
     arguments: *Arguments,
     argIdx: u32,
     res: Result,
+    argStart: TokenIndex,
     node: Tree.Node,
     p: *Parser,
-) !?Diagnostics.Message {
+) !bool {
     switch (attr) {
         inline else => |tag| {
             const decl = @typeInfo(attributes).@"struct".decls[@intFromEnum(tag)];
             const max_arg_count = comptime maxArgCount(tag);
-            if (argIdx >= max_arg_count)
-                return Diagnostics.Message{
-                    .tag = .attribute_too_many_args,
-                    .extra = .{
-                        .attrArgCount = .{
-                            .attribute = attr,
-                            .expected = max_arg_count,
-                        },
-                    },
-                };
+            if (argIdx >= max_arg_count) {
+                try p.err(.attribute_too_many_args, argStart, .{ @tagName(attr), max_arg_count });
+                return true;
+            }
 
             const argFields = std.meta.fields(@field(attributes, decl.name));
             switch (argIdx) {
                 inline 0...argFields.len - 1 => |argI| {
-                    return diagnoseField(decl, argFields[argI], UnwrapOptional(argFields[argI].type), arguments, res, node, p);
+                    return diagnoseField(decl, argFields[argI], UnwrapOptional(argFields[argI].type), arguments, res, argStart, node, p);
                 },
                 else => unreachable,
             }
@@ -828,16 +799,12 @@ pub fn normalize(name: []const u8) []const u8 {
 }
 
 fn ignoredAttrErr(p: *Parser, token: TokenIndex, attr: Attribute.Tag, context: []const u8) !void {
-    const stringsTop = p.strings.items.len;
-    defer p.strings.items.len = stringsTop;
-
-    try p.strings.writer().print("attribute '{s}' ignored on {s}", .{ @tagName(attr), context });
-    const str = try p.comp.diagnostics.arena.allocator().dupe(u8, p.strings.items[stringsTop..]);
-    try p.errStr(.ignored_attribute, token, str);
+    try p.err(.ignored_attribute, token, .{ @tagName(attr), context });
 }
 
 pub const applyParameterAttributes = applyVariableAttributes;
-pub fn applyVariableAttributes(p: *Parser, qt: QualType, attrBufferStart: usize, tag: ?Diagnostics.Tag) !QualType {
+
+pub fn applyVariableAttributes(p: *Parser, qt: QualType, attrBufferStart: usize, diag: ?Parser.Diagnostic) !QualType {
     const attrs = p.attrBuffer.items(.attr)[attrBufferStart..];
     const toks = p.attrBuffer.items(.tok)[attrBufferStart..];
     p.attrApplicationBuffer.items.len = 0;
@@ -853,21 +820,21 @@ pub fn applyVariableAttributes(p: *Parser, qt: QualType, attrBufferStart: usize,
         // zig fmt: on
 
         .common => if (nocommon) {
-            try p.errToken(.ignore_common, tok);
+            try p.err(.ignore_common, tok, .{});
         } else {
             try p.attrApplicationBuffer.append(p.gpa, attr);
             common = true;
         },
 
         .nocommon => if (common) {
-            try p.errToken(.ignore_nocommon, tok);
+            try p.err(.ignore_nocommon, tok, .{});
         } else {
             try p.attrApplicationBuffer.append(p.gpa, attr);
             nocommon = true;
         },
 
         .vector_size => try attr.applyVectorSize(p, tok, &baseQt),
-        .aligned => try attr.applyAligned(p, baseQt, tag),
+        .aligned => try attr.applyAligned(p, baseQt, diag),
 
         .nonstring => {
             if (baseQt.get(p.comp, .array)) |arrayTy| {
@@ -879,16 +846,16 @@ pub fn applyVariableAttributes(p: *Parser, qt: QualType, attrBufferStart: usize,
                     else => {},
                 };
             }
-            try p.errStr(.non_string_ignored, tok, try p.typeStr(qt));
+            try p.err(.non_string_ignored, tok, .{qt});
         },
         .uninitialized => if (p.func.qt == null) {
-            try p.errStr(.local_variable_attribute, tok, "uninitialized");
+            try p.err(.local_variable_attribute, tok, .{"uninitialized"});
         } else {
             try p.attrApplicationBuffer.append(p.gpa, attr);
         },
 
         .cleanup => if (p.func.qt == null) {
-            try p.errStr(.local_variable_attribute, tok, "cleanup");
+            try p.err(.local_variable_attribute, tok, .{"cleanup"});
         } else {
             try p.attrApplicationBuffer.append(p.gpa, attr);
         },
@@ -897,7 +864,7 @@ pub fn applyVariableAttributes(p: *Parser, qt: QualType, attrBufferStart: usize,
         .copy,
         .tls_model,
         .visibility,
-        => |t| try p.errExtra(.attribute_todo, tok, .{ .attributeTodo = .{ .tag = t, .kind = .variables } }),
+        => |t| try p.err(.attribute_todo, tok, .{ @tagName(t), "variables" }),
         else => try ignoredAttrErr(p, tok, attr.tag, "variables"),
     };
 
@@ -923,7 +890,7 @@ pub fn applyFieldAttributes(p: *Parser, fieldTy: *QualType, attrBufferStart: usi
     return p.attrApplicationBuffer.items;
 }
 
-pub fn applyTypeAttributes(p: *Parser, qt: QualType, attrBufferStart: usize, tag: ?Diagnostics.Tag) !QualType {
+pub fn applyTypeAttributes(p: *Parser, qt: QualType, attrBufferStart: usize, diag: ?Parser.Diagnostic) !QualType {
     const attrs = p.attrBuffer.items(.attr)[attrBufferStart..];
     const toks = p.attrBuffer.items(.tok)[attrBufferStart..];
     p.attrApplicationBuffer.items.len = 0;
@@ -941,19 +908,19 @@ pub fn applyTypeAttributes(p: *Parser, qt: QualType, attrBufferStart: usize, tag
 
         .transparent_union => try attr.applyTransparentUnion(p, tok, baseQt),
         .vector_size => try attr.applyVectorSize(p, tok, &baseQt),
-        .aligned => try attr.applyAligned(p, baseQt, tag),
+        .aligned => try attr.applyAligned(p, baseQt, diag),
 
         .designated_init => if (baseQt.is(p.comp, .@"struct")) {
             try p.attrApplicationBuffer.append(p.gpa, attr);
         } else {
-            try p.errToken(.designated_init_invalid, tok);
+            try p.err(.designated_init_invalid, tok, .{});
         },
 
         .alloc_size,
         .copy,
         .scalar_storage_order,
         .nonstring,
-        => |t| try p.errExtra(.attribute_todo, tok, .{ .attributeTodo = .{ .tag = t, .kind = .types } }),
+        => |t| try p.err(.attribute_todo, tok, .{ .attributeTodo = .{ @tagName(t), "types" } }),
 
         else => try ignoredAttrErr(p, tok, attr.tag, "types"),
     };
@@ -981,28 +948,28 @@ pub fn applyFunctionAttributes(p: *Parser, qt: QualType, attrBufferStart: usize)
         // zig fmt: on
 
         .hot => if (cold) {
-            try p.errToken(.ignore_hot, tok);
+            try p.err(.ignore_hot, tok, .{});
         } else {
             try p.attrApplicationBuffer.append(p.gpa, attr);
             hot = true;
         },
 
         .cold => if (hot) {
-            try p.errToken(.ignore_cold, tok);
+            try p.err(.ignore_cold, tok, .{});
         } else {
             try p.attrApplicationBuffer.append(p.gpa, attr);
             cold = true;
         },
 
         .always_inline => if (@"noinline") {
-            try p.errToken(.ignore_always_inline, tok);
+            try p.err(.ignore_always_inline, tok, .{});
         } else {
             try p.attrApplicationBuffer.append(p.gpa, attr);
             alwaysInline = true;
         },
 
         .@"noinline" => if (alwaysInline) {
-            try p.errToken(.ignore_noinline, tok);
+            try p.err(.ignore_noinline, tok, .{});
         } else {
             try p.attrApplicationBuffer.append(p.gpa, attr);
             @"noinline" = true;
@@ -1015,11 +982,11 @@ pub fn applyFunctionAttributes(p: *Parser, qt: QualType, attrBufferStart: usize)
             .C => continue,
             .stdcall, .thiscall => switch (p.comp.target.cpu.arch) {
                 .x86 => try p.attrApplicationBuffer.append(p.gpa, attr),
-                else => try p.errStr(.callconv_not_supported, tok, p.tokenIds[tok].lexeme().?),
+                else => try p.err(.callconv_not_supported, tok, .{p.tokenIds[tok].lexeme().?}),
             },
             .vectorcall => switch (p.comp.target.cpu.arch) {
                 .x86, .aarch64, .aarch64_be => try p.attrApplicationBuffer.append(p.gpa, attr),
-                else => try p.errStr(.callconv_not_supported, tok, p.tokenIds[tok].lexeme().?),
+                else => try p.err(.callconv_not_supported, tok, .{p.tokenIds[tok].lexeme().?}),
             },
         },
 
@@ -1064,7 +1031,7 @@ pub fn applyFunctionAttributes(p: *Parser, qt: QualType, attrBufferStart: usize)
         .visibility,
         .weakref,
         .zero_call_used_regs,
-        => |t| try p.errExtra(.attribute_todo, tok, .{ .attributeTodo = .{ .tag = t, .kind = .functions } }),
+        => |t| try p.err(.attribute_todo, tok, .{ .attributeTodo = .{ @tagName(t), "functions" } }),
         else => try ignoredAttrErr(p, tok, attr.tag, "functions"),
     };
     return applySelected(qt, p);
@@ -1092,11 +1059,11 @@ pub fn applyStatementAttributes(p: *Parser, exprStart: TokenIndex, attrBufferSta
             // TODO: this condition is not completely correct; the last statement of a compound
             // statement is also valid if it precedes a switch label (so intervening '}' are ok,
             // but only if they close a compound statement)
-            try p.errToken(.invalid_fallthrough, exprStart);
+            try p.err(.invalid_fallthrough, exprStart, .{});
         } else {
             try p.attrApplicationBuffer.append(p.gpa, attr);
         },
-        else => try p.errStr(.cannot_apply_attribute_to_statement, tok, @tagName(attr.tag)),
+        else => try p.err(.cannot_apply_attribute_to_statement, tok, .{@tagName(attr.tag)}),
     };
     return applySelected(.void, p);
 }
@@ -1113,21 +1080,21 @@ pub fn applyEnumeratorAttributes(p: *Parser, qt: QualType, attrBufferStart: usiz
     return applySelected(qt, p);
 }
 
-fn applyAligned(attr: Attribute, p: *Parser, qt: QualType, tag: ?Diagnostics.Tag) !void {
+fn applyAligned(attr: Attribute, p: *Parser, qt: QualType, diag: ?Parser.Diagnostic) !void {
     if (attr.args.aligned.alignment) |alignment| alignas: {
         if (attr.syntax != .keyword)
             break :alignas;
 
         const alignToken = attr.args.aligned.__name_token;
-        if (tag) |t| try p.errToken(t, alignToken);
+        if (diag) |t| try p.err(t, alignToken, .{});
 
         if (qt.isInvalid()) return;
 
         const defaultAlign = qt.base(p.comp).qt.alignof(p.comp);
         if (qt.is(p.comp, .func)) {
-            try p.errToken(.alignas_on_func, alignToken);
+            try p.err(.alignas_on_func, alignToken, .{});
         } else if (alignment.requested < defaultAlign) {
-            try p.errExtra(.minimum_alignment, alignToken, .{ .unsigned = defaultAlign });
+            try p.err(.minimum_alignment, alignToken, .{defaultAlign});
         }
     }
     try p.attrApplicationBuffer.append(p.gpa, attr);
@@ -1135,13 +1102,13 @@ fn applyAligned(attr: Attribute, p: *Parser, qt: QualType, tag: ?Diagnostics.Tag
 
 fn applyTransparentUnion(attr: Attribute, p: *Parser, token: TokenIndex, qt: QualType) !void {
     const unionTy = qt.get(p.comp, .@"union") orelse {
-        return p.errToken(.transparent_union_wrong_type, token);
+        return p.err(.transparent_union_wrong_type, token, .{});
     };
 
     // TODO validate union defined at end
     if (unionTy.layout == null) return;
     if (unionTy.fields.len == 0)
-        return p.errToken(.transparent_union_one_field, token);
+        return p.err(.transparent_union_one_field, token, .{});
 
     const firstFieldSize = unionTy.fields[0].qt.bitSizeof(p.comp);
     for (unionTy.fields[1..]) |field| {
@@ -1149,13 +1116,8 @@ fn applyTransparentUnion(attr: Attribute, p: *Parser, token: TokenIndex, qt: Qua
         if (fieldSize == firstFieldSize)
             continue;
 
-        const str = try std.fmt.allocPrint(
-            p.comp.diagnostics.arena.allocator(),
-            "'{s}' ({d}",
-            .{ field.name.lookup(p.comp), fieldSize },
-        );
-        try p.errStr(.transparent_union_size, field.nameToken, str);
-        return p.errExtra(.transparent_union_size_note, unionTy.fields[0].nameToken, .{ .unsigned = firstFieldSize });
+        try p.err(.transparent_union_size, field.nameToken, .{ field.name.lookup(p.comp), fieldSize });
+        return p.err(.transparent_union_size_note, unionTy.fields[0].nameToken, .{firstFieldSize});
     }
 
     try p.attrApplicationBuffer.append(p.gpa, attr);
@@ -1170,15 +1132,14 @@ fn applyVectorSize(attr: Attribute, p: *Parser, tok: TokenIndex, qt: *QualType) 
                 return; // Clang silently ignores vector_size on incomplete enums.
             }
         }
-        const originTy = try p.typeStr(qt.*);
-        try p.errStr(.invalid_vec_elem_ty, tok, originTy);
+        try p.err(.invalid_vec_elem_ty, tok, .{qt.*});
         return error.ParsingFailed;
     }
 
     const vecBytes = attr.args.vector_size.bytes;
     const elemSize = qt.sizeof(p.comp);
     if (vecBytes % elemSize != 0)
-        return p.errToken(.vec_size_not_multiple, tok);
+        return p.err(.vec_size_not_multiple, tok, .{});
 
     qt.* = try p.comp.typeStore.put(p.gpa, .{
         .vector = .{

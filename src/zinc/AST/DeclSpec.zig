@@ -28,44 +28,44 @@ qt: QualType,
 pub fn validateParam(d: DeclSpec, p: *Parser) Error!void {
     switch (d.storageClass) {
         .none, .register => {},
-        .auto, .@"extern", .static, .typedef => |tokenIndex| try p.errToken(.invalid_storage_on_param, tokenIndex),
+        .auto, .@"extern", .static, .typedef => |tokenIndex| try p.err(.invalid_storage_on_param, tokenIndex, .{}),
     }
 
-    if (d.threadLocal) |tokenIndex| try p.errToken(.threadlocal_non_var, tokenIndex);
-    if (d.@"inline") |tokenIndex| try p.errStr(.func_spec_non_func, tokenIndex, "inline");
-    if (d.noreturn) |tokenIndex| try p.errStr(.func_spec_non_func, tokenIndex, "_Noreturn");
-    if (d.constexpr) |tokenIndex| try p.errToken(.invalid_storage_on_param, tokenIndex);
+    if (d.threadLocal) |tokenIndex| try p.err(.threadlocal_non_var, tokenIndex, .{});
+    if (d.@"inline") |tokenIndex| try p.err(.func_spec_non_func, tokenIndex, .{"inline"});
+    if (d.noreturn) |tokenIndex| try p.err(.func_spec_non_func, tokenIndex, .{"_Noreturn"});
+    if (d.constexpr) |tokenIndex| try p.err(.invalid_storage_on_param, tokenIndex, .{});
 }
 
 pub fn validateFnDef(d: DeclSpec, p: *Parser) Error!void {
     switch (d.storageClass) {
         .none, .@"extern", .static => {},
-        .auto, .register, .typedef => |index| try p.errToken(.illegal_storage_on_func, index),
+        .auto, .register, .typedef => |index| try p.err(.illegal_storage_on_func, index, .{}),
     }
 
-    if (d.threadLocal) |tokenIdx| try p.errToken(.threadlocal_non_var, tokenIdx);
-    if (d.constexpr) |tokenIdx| try p.errToken(.illegal_storage_on_func, tokenIdx);
+    if (d.threadLocal) |tokenIdx| try p.err(.threadlocal_non_var, tokenIdx, .{});
+    if (d.constexpr) |tokenIdx| try p.err(.illegal_storage_on_func, tokenIdx, .{});
 }
 
 pub fn validateFnDecl(d: DeclSpec, p: *Parser) Error!void {
     switch (d.storageClass) {
         .none, .@"extern" => {},
-        .static => |tokenIdx| if (p.func.qt != null) try p.errToken(.static_func_not_global, tokenIdx),
+        .static => |tokenIdx| if (p.func.qt != null) try p.err(.static_func_not_global, tokenIdx, .{}),
         .typedef => unreachable,
-        .auto, .register => |tokenIdx| try p.errToken(.illegal_storage_on_func, tokenIdx),
+        .auto, .register => |tokenIdx| try p.err(.illegal_storage_on_func, tokenIdx, .{}),
     }
 
-    if (d.threadLocal) |tokenIdx| try p.errToken(.threadlocal_non_var, tokenIdx);
-    if (d.constexpr) |tokenIdx| try p.errToken(.illegal_storage_on_func, tokenIdx);
+    if (d.threadLocal) |tokenIdx| try p.err(.threadlocal_non_var, tokenIdx, .{});
+    if (d.constexpr) |tokenIdx| try p.err(.illegal_storage_on_func, tokenIdx, .{});
 }
 
 pub fn validateDecl(d: DeclSpec, p: *Parser) Error!void {
-    if (d.@"inline") |tokenIdx| try p.errStr(.func_spec_non_func, tokenIdx, "inline");
-    if (d.noreturn) |tokenIdx| try p.errStr(.func_spec_non_func, tokenIdx, "_Noreturn");
+    if (d.@"inline") |tokenIdx| try p.err(.func_spec_non_func, tokenIdx, .{"inline"});
+    if (d.noreturn) |tokenIdx| try p.err(.func_spec_non_func, tokenIdx, .{"_Noreturn"});
 
     switch (d.storageClass) {
         .auto => std.debug.assert(!p.comp.langOpts.standard.atLeast(.c23)),
-        .register => if (p.func.qt == null) try p.err(.illegal_storage_on_global),
+        .register => if (p.func.qt == null) try p.err(.illegal_storage_on_global, p.tokenIdx, .{}),
         else => {},
     }
 }

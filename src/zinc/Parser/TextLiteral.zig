@@ -5,6 +5,7 @@ const Compilation = @import("../Basic/Compilation.zig");
 const Diagnostics = @import("../Basic/Diagnostics.zig");
 const TokenType = @import("../Basic//TokenType.zig").TokenType;
 const QualType = @import("../AST/TypeStore.zig").QualType;
+const Source = @import("../Basic/Source.zig");
 
 pub const Item = union(enum) {
     /// decoded hex or character escape
@@ -141,32 +142,44 @@ pub const Kind = enum {
     }
 };
 
-const charDiagnostic = struct {
-    tag: Diagnostics.Tag,
-    extra: Diagnostics.Message.Extra,
+pub const Ascii = struct {
+    value: u7,
+
+    pub fn init(value: anytype) Ascii {
+        return .{ .value = @intCast(value) };
+    }
+
+    pub fn format(ctx: Ascii, w: anytype, fmtStr: []const u8) !usize {
+        const template = "{c}";
+        const i = std.mem.indexOf(u8, fmtStr, template).?;
+        try w.writeAll(fmtStr[0..i]);
+
+        if (std.ascii.isPrint(ctx.value)) {
+            try w.writeByte(ctx.value);
+        } else {
+            var buf: [3]u8 = undefined;
+            const str = std.fmt.bufPrint(&buf, "x{x}", .{std.fmt.fmtSliceHexLower(&.{ctx.value})}) catch unreachable;
+            try w.writeAll(str);
+        }
+        return i + template.len;
+    }
 };
 
 pub const Parser = struct {
+    comp: *const Compilation,
     literal: []const u8,
-    i: usize = 0,
+    idx: usize = 0,
     kind: Kind,
     maxCodepoint: u21,
+    loc: Source.Location,
+    /// Offset added to `loc.byteOffset` when emitting an error.
+    offset: u32 = 0,
+    expansionLocs: []const Source.Location,
     /// We only want to issue a max of 1 error per char literal
     errored: bool = false,
-    errorsBuffer: [4]charDiagnostic,
-    errorsLen: usize,
-    comp: *const Compilation,
-
-    pub fn init(literal: []const u8, kind: Kind, maxCodepoint: u21, comp: *const Compilation) Parser {
-        return .{
-            .literal = literal,
-            .comp = comp,
-            .kind = kind,
-            .maxCodepoint = maxCodepoint,
-            .errorsBuffer = undefined,
-            .errorsLen = 0,
-        };
-    }
+    /// Makes incorrect encoding always an error.
+    /// Used when concatenating string literals.
+    incorrectEncodingIsError: bool = false,
 
     fn prefixLen(self: *const Parser) usize {
         return switch (self.kind) {
@@ -177,129 +190,271 @@ pub const Parser = struct {
         };
     }
 
-    pub fn errors(p: *Parser) []const charDiagnostic {
-        return p.errorsBuffer[0..p.errorsLen];
+    const Diagnostic = struct {
+        fmt: []const u8,
+        kind: Diagnostics.Message.Kind,
+        opt: ?Diagnostics.Option = null,
+        extension: bool = false,
+
+        pub const illegal_char_encoding_error: Diagnostic = .{
+            .fmt = "illegal character encoding in character literal",
+            .kind = .@"error",
+        };
+
+        pub const illegal_char_encoding_warning: Diagnostic = .{
+            .fmt = "illegal character encoding in character literal",
+            .kind = .warning,
+            .opt = .@"invalid-source-encoding",
+        };
+
+        pub const missing_hex_escape: Diagnostic = .{
+            .fmt = "\\{c} used with no following hex digits",
+            .kind = .@"error",
+        };
+
+        pub const escape_sequence_overflow: Diagnostic = .{
+            .fmt = "escape sequence out of range",
+            .kind = .@"error",
+        };
+
+        pub const incomplete_universal_character: Diagnostic = .{
+            .fmt = "incomplete universal character name",
+            .kind = .@"error",
+        };
+
+        pub const invalid_universal_character: Diagnostic = .{
+            .fmt = "invalid universal character",
+            .kind = .@"error",
+        };
+
+        pub const char_too_large: Diagnostic = .{
+            .fmt = "character too large for enclosing character literal type",
+            .kind = .@"error",
+        };
+
+        pub const ucn_basic_char_error: Diagnostic = .{
+            .fmt = "character '{c}' cannot be specified by a universal character name",
+            .kind = .@"error",
+        };
+
+        pub const ucn_basic_char_warning: Diagnostic = .{
+            .fmt = "specifying character '{c}' with a universal character name is incompatible with C standards before C23",
+            .kind = .off,
+            .opt = .@"pre-c23-compat",
+        };
+
+        pub const ucn_control_char_error: Diagnostic = .{
+            .fmt = "universal character name refers to a control character",
+            .kind = .@"error",
+        };
+
+        pub const ucn_control_char_warning: Diagnostic = .{
+            .fmt = "universal character name referring to a control character is incompatible with C standards before C23",
+            .kind = .off,
+            .opt = .@"pre-c23-compat",
+        };
+
+        pub const c89_ucn_in_literal: Diagnostic = .{
+            .fmt = "universal character names are only valid in C99 or later",
+            .kind = .warning,
+            .opt = .unicode,
+        };
+
+        const non_standard_escape_char: Diagnostic = .{
+            .fmt = "use of non-standard escape character '\\{c}'",
+            .kind = .off,
+            .extension = true,
+        };
+
+        pub const unknown_escape_sequence: Diagnostic = .{
+            .fmt = "unknown escape sequence '\\{c}'",
+            .kind = .warning,
+            .opt = .@"unknown-escape-sequence",
+        };
+
+        pub const four_char_char_literal: Diagnostic = .{
+            .fmt = "multi-character character constant",
+            .opt = .@"four-char-constants",
+            .kind = .off,
+        };
+
+        pub const multichar_literal_warning: Diagnostic = .{
+            .fmt = "multi-character character constant",
+            .kind = .warning,
+            .opt = .multichar,
+        };
+
+        pub const invalid_multichar_literal: Diagnostic = .{
+            .fmt = "{s} character literals may not contain multiple characters",
+            .kind = .@"error",
+        };
+
+        pub const char_lit_too_wide: Diagnostic = .{
+            .fmt = "character constant too long for its type",
+            .kind = .warning,
+        };
+
+        // pub const wide_multichar_literal: Diagnostic = .{
+        //     .fmt = "extraneous characters in character constant ignored",
+        //     .kind = .warning,
+        // };
+    };
+
+    pub fn err(p: *Parser, diagnostic: Diagnostic, args: anytype) !void {
+        defer p.offset = 0;
+        if (p.errored) return;
+        defer p.errored = true;
+        try p.warn(diagnostic, args);
     }
 
-    pub fn err(self: *Parser, tag: Diagnostics.Tag, extra: Diagnostics.Message.Extra) void {
-        if (self.errored) return;
-        self.errored = true;
-        const diagnostic: charDiagnostic = .{ .tag = tag, .extra = extra };
-        if (self.errorsLen == self.errorsBuffer.len) {
-            self.errorsBuffer[self.errorsBuffer.len - 1] = diagnostic;
-        } else {
-            self.errorsBuffer[self.errorsLen] = diagnostic;
-            self.errorsLen += 1;
+    pub fn warn(p: *Parser, diagnostic: Diagnostic, args: anytype) !void {
+        defer p.offset = 0;
+        if (p.errored) return;
+        if (p.comp.diagnostics.effectiveKind(diagnostic) == .off) return;
+
+        var sf = std.heap.stackFallback(1024, p.comp.gpa);
+        var buf = std.ArrayList(u8).init(sf.get());
+        defer buf.deinit();
+
+        try formatArgs(buf.writer(), diagnostic.fmt, args);
+
+        var offsetLocation = p.loc;
+        offsetLocation.byteOffset += p.offset;
+        try p.comp.diagnostics.addWithLocation(p.comp, .{
+            .kind = diagnostic.kind,
+            .text = buf.items,
+            .opt = diagnostic.opt,
+            .extension = diagnostic.extension,
+            .location = offsetLocation.expand(p.comp),
+        }, p.expansionLocs, true);
+    }
+
+    fn formatArgs(w: anytype, fmt: []const u8, args: anytype) !void {
+        var i: usize = 0;
+        inline for (std.meta.fields(@TypeOf(args))) |arg_info| {
+            const arg = @field(args, arg_info.name);
+            i += switch (@TypeOf(arg)) {
+                []const u8 => try Diagnostics.formatString(w, fmt[i..], arg),
+                Ascii => try arg.format(w, fmt[i..]),
+                else => switch (@typeInfo(@TypeOf(arg))) {
+                    .int, .comptime_int => try Diagnostics.formatInt(w, fmt[i..], arg),
+                    .pointer => try Diagnostics.formatString(w, fmt[i..], arg),
+                    else => unreachable,
+                },
+            };
         }
+        try w.writeAll(fmt[i..]);
     }
 
-    pub fn warn(self: *Parser, tag: Diagnostics.Tag, extra: Diagnostics.Message.Extra) void {
-        if (self.errored) return;
-        if (self.errorsLen < self.errorsBuffer.len) {
-            self.errorsBuffer[self.errorsLen] = .{ .tag = tag, .extra = extra };
-            self.errorsLen += 1;
-        }
-    }
+    pub fn next(p: *Parser) !?Item {
+        if (p.idx >= p.literal.len) return null;
 
-    pub fn next(self: *Parser) ?Item {
-        if (self.i >= self.literal.len) return null;
-
-        const start = self.i;
-        if (self.literal[start] != '\\') {
-            self.i = mem.indexOfScalarPos(u8, self.literal, start + 1, '\\') orelse self.literal.len;
-            const unescapedSlice = self.literal[start..self.i];
+        const start = p.idx;
+        if (p.literal[start] != '\\') {
+            p.idx = mem.indexOfScalarPos(u8, p.literal, start + 1, '\\') orelse p.literal.len;
+            const unescapedSlice = p.literal[start..p.idx];
 
             const view = std.unicode.Utf8View.init(unescapedSlice) catch {
-                if (self.kind != .char) {
-                    self.err(.illegal_char_encoding_error, .{ .none = {} });
+                if (p.incorrectEncodingIsError) {
+                    try p.warn(.illegal_char_encoding_error, .{});
+                    return .{ .improperlyEncoded = p.literal[start..p.idx] };
+                }
+                if (p.kind != .char) {
+                    try p.err(.illegal_char_encoding_error, .{});
                     return null;
                 }
-                self.warn(.illegal_char_encoding_warning, .{ .none = {} });
-                return .{ .improperlyEncoded = self.literal[start..self.i] };
+                try p.warn(.illegal_char_encoding_warning, .{});
+                return .{ .improperlyEncoded = p.literal[start..p.idx] };
             };
             return .{ .utf8Text = view };
         }
 
-        switch (self.literal[start + 1]) {
-            'u', 'U' => return self.parseUnicodeEscape(),
-            else => return self.parseEscapedChar(),
+        switch (p.literal[start + 1]) {
+            'u', 'U' => return try p.parseUnicodeEscape(),
+            else => return try p.parseEscapedChar(),
         }
     }
 
-    fn parseUnicodeEscape(self: *Parser) ?Item {
-        const start = self.i;
+    fn parseUnicodeEscape(p: *Parser) !?Item {
+        const start = p.idx;
 
-        std.debug.assert(self.literal[self.i] == '\\');
+        std.debug.assert(p.literal[p.idx] == '\\');
 
-        const kind = self.literal[self.i + 1];
+        const kind = p.literal[p.idx + 1];
         std.debug.assert(kind == 'u' or kind == 'U');
 
-        self.i += 2;
-        if (self.i >= self.literal.len or !std.ascii.isHex(self.literal[self.i])) {
-            self.err(.missing_hex_escape, .{ .ascii = @intCast(kind) });
+        p.idx += 2;
+        if (p.idx >= p.literal.len or !std.ascii.isHex(p.literal[p.idx])) {
+            try p.err(.missing_hex_escape, .{Ascii.init(kind)});
             return null;
         }
-        const expectedLen: usize = if (kind == 'u') 4 else 8;
+        const expected_len: usize = if (kind == 'u') 4 else 8;
         var overflowed = false;
         var count: usize = 0;
-        var val: u32 = 0;
+        var value: u32 = 0;
 
-        for (self.literal[self.i..], 0..) |c, i| {
-            if (i == expectedLen) break;
+        for (p.literal[p.idx..], 0..) |c, i| {
+            if (i == expected_len) break;
 
-            const char = std.fmt.charToDigit(c, 16) catch {
-                break;
-            };
+            const char = std.fmt.charToDigit(c, 16) catch break;
 
-            val, const overflow = @shlWithOverflow(val, 4);
+            value, const overflow = @shlWithOverflow(value, 4);
             overflowed = overflowed or overflow != 0;
-            val |= char;
+            value |= char;
             count += 1;
         }
-        self.i += expectedLen;
+        p.idx += expected_len;
 
         if (overflowed) {
-            self.err(.escape_sequence_overflow, .{ .offset = start + self.prefixLen() });
+            p.offset += @intCast(start + p.prefixLen());
+            try p.err(.escape_sequence_overflow, .{});
             return null;
         }
 
-        if (count != expectedLen) {
-            self.err(.incomplete_universal_character, .{ .none = {} });
+        if (count != expected_len) {
+            try p.err(.incomplete_universal_character, .{});
             return null;
         }
 
-        if (val > std.math.maxInt(u21) or !std.unicode.utf8ValidCodepoint(@intCast(val))) {
-            self.err(.invalid_universal_character, .{ .offset = start + self.prefixLen() });
+        if (value > std.math.maxInt(u21) or !std.unicode.utf8ValidCodepoint(@intCast(value))) {
+            p.offset += @intCast(start + p.prefixLen());
+            try p.err(.invalid_universal_character, .{});
             return null;
         }
 
-        if (val > self.maxCodepoint)
-            self.err(.char_too_large, .{ .none = {} });
+        if (value > p.maxCodepoint) {
+            try p.err(.char_too_large, .{});
+            return null;
+        }
 
-        if (val < 0xA0 and (val != '$' and val != '@' and val != '`')) {
-            const isError = !self.comp.langOpts.standard.atLeast(.c23);
-            if (val >= 0x20 and val <= 0x7F) {
-                if (isError)
-                    self.err(.ucn_basic_char_error, .{ .ascii = @intCast(val) })
-                else
-                    self.warn(.ucn_basic_char_warning, .{ .ascii = @intCast(val) });
+        if (value < 0xA0 and (value != '$' and value != '@' and value != '`')) {
+            const isError = !p.comp.langOpts.standard.atLeast(.c23);
+            if (value >= 0x20 and value <= 0x7F) {
+                if (isError) {
+                    try p.err(.ucn_basic_char_error, .{Ascii.init(value)});
+                } else if (!p.comp.langOpts.standard.atLeast(.c23)) {
+                    try p.warn(.ucn_basic_char_warning, .{Ascii.init(value)});
+                }
             } else {
-                if (isError)
-                    self.err(.ucn_control_char_error, .{ .none = {} })
-                else
-                    self.warn(.ucn_control_char_warning, .{ .none = {} });
+                if (isError) {
+                    try p.err(.ucn_control_char_error, .{});
+                } else if (!p.comp.langOpts.standard.atLeast(.c23)) {
+                    try p.warn(.ucn_control_char_warning, .{});
+                }
             }
         }
 
-        self.warn(.c89_ucn_in_literal, .{ .none = {} });
-        return .{ .codepoint = @intCast(val) };
+        if (!p.comp.langOpts.standard.atLeast(.c99))
+            try p.warn(.c89_ucn_in_literal, .{});
+
+        return .{ .codepoint = @intCast(value) };
     }
 
-    fn parseEscapedChar(self: *Parser) Item {
-        self.i += 1;
-        const c = self.literal[self.i];
+    fn parseEscapedChar(p: *Parser) !Item {
+        p.idx += 1;
+        const c = p.literal[p.idx];
         defer if (c != 'x' and (c < '0' or c > '7')) {
-            self.i += 1;
+            p.idx += 1;
         };
 
         switch (c) {
@@ -312,37 +467,40 @@ pub const Parser = struct {
             'a' => return .{ .value = 0x07 },
             'b' => return .{ .value = 0x08 },
             'e', 'E' => {
-                self.warn(.non_standard_escape_char, .{ .invalidEscape = .{ .char = c, .offset = @intCast(self.i) } });
+                p.offset += @intCast(p.idx);
+                try p.warn(.non_standard_escape_char, .{Ascii.init(c)});
                 return .{ .value = 0x1B };
             },
             'f' => return .{ .value = 0x0C },
             'v' => return .{ .value = 0x0B },
-            'x' => return .{ .value = self.parseNumberEscape(.hex) },
-            '0'...'7' => return .{ .value = self.parseNumberEscape(.octal) },
+            'x' => return .{ .value = try p.parseNumberEscape(.hex) },
+            '0'...'7' => return .{ .value = try p.parseNumberEscape(.octal) },
             'u', 'U' => unreachable, // handled by parseUnicodeEscape
             '(', '{', '[', '%' => {
-                self.warn(.non_standard_escape_char, .{ .invalidEscape = .{ .char = c, .offset = @intCast(self.i) } });
+                p.offset += @intCast(p.idx);
+                try p.warn(.non_standard_escape_char, .{Ascii.init(c)});
                 return .{ .value = c };
             },
             else => {
-                self.warn(.unknown_escape_sequence, .{ .invalidEscape = .{ .char = c, .offset = @intCast(self.i) } });
+                p.offset += @intCast(p.idx);
+                try p.warn(.unknown_escape_sequence, .{Ascii.init(c)});
                 return .{ .value = c };
             },
         }
     }
 
-    fn parseNumberEscape(self: *Parser, base: EscapeBase) u32 {
+    fn parseNumberEscape(p: *Parser, base: EscapeBase) !u32 {
         var val: u32 = 0;
         var count: usize = 0;
         var overflowed = false;
-        const start = self.i;
-        defer self.i += count;
+        const start = p.idx;
+        defer p.idx += count;
 
         const slice = switch (base) {
-            .octal => self.literal[self.i..@min(self.literal.len, self.i + 3)], // max 3 chars
+            .octal => p.literal[p.idx..@min(p.literal.len, p.idx + 3)], // max 3 chars
             .hex => blk: {
-                self.i += 1;
-                break :blk self.literal[self.i..];
+                p.idx += 1;
+                break :blk p.literal[p.idx..];
             },
         };
 
@@ -354,14 +512,15 @@ pub const Parser = struct {
             count += 1;
         }
 
-        if (overflowed or val > self.kind.maxInt(self.comp)) {
-            self.err(.escape_sequence_overflow, .{ .offset = start + self.prefixLen() });
+        if (overflowed or val > p.kind.maxInt(p.comp)) {
+            p.offset += @intCast(start + p.prefixLen());
+            try p.err(.escape_sequence_overflow, .{});
             return 0;
         }
 
         if (count == 0) {
             std.debug.assert(base == .hex);
-            self.err(.missing_hex_escape, .{ .ascii = 'x' });
+            try p.err(.missing_hex_escape, .{Ascii.init('x')});
         }
 
         return val;

@@ -32,13 +32,14 @@ pub fn str(res: Result, p: *Parser) ![]const u8 {
     return try p.comp.diagnostics.arena.allocator().dupe(u8, p.strings.items[stringsTop..]);
 }
 
-pub fn maybeWarnUnused(res: Result, p: *Parser, exprStart: TokenIndex, errStart: usize) Error!void {
+pub fn maybeWarnUnused(res: Result, p: *Parser, exprStart: TokenIndex, prevTotal: usize) Error!void {
     if (res.qt.is(p.comp, .void) or res.qt.isInvalid()) return;
 
     // don't warn about unused result if the expression contained errors besides other unused results
-    for (p.comp.diagnostics.list.items[errStart..]) |errItem| {
-        if (errItem.tag != .unused_value) return;
-    }
+    if (p.diagnostics.total != prevTotal) return; // TODO improve
+    // for (p.comp.diagnostics.list.items[errStart..]) |errItem| {
+    //     if (errItem.tag != .unused_value) return;
+    // }
 
     var curNode = res.node;
     while (true)
@@ -62,8 +63,17 @@ pub fn maybeWarnUnused(res: Result, p: *Parser, exprStart: TokenIndex, errStart:
 
             .callExpr => |call| {
                 const callInfo = p.tree.callableResultUsage(call.callee) orelse return;
-                if (callInfo.nodiscard) try p.errStr(.nodiscard_unused, exprStart, p.getTokenText(callInfo.token));
-                if (callInfo.warnUnusedResult) try p.errStr(.warn_unused_result, exprStart, p.getTokenText(callInfo.token));
+                const callInfoTokenStr = p.getTokenText(callInfo.token);
+                if (callInfo.nodiscard) try p.err(.nodiscard_unused, exprStart, .{callInfoTokenStr});
+                if (callInfo.warnUnusedResult) try p.err(.warn_unused_result, exprStart, .{callInfoTokenStr});
+                return;
+            },
+
+            .builtinCallExpr => |call| {
+                const expanded = p.comp.builtins.lookup(p.getTokenText(call.builtinToken));
+                const attributes = expanded.builtin.properties.attributes;
+                if (attributes.pure) try p.err(.builtin_unused, call.builtinToken, .{"pure"});
+                if (attributes.@"const") try p.err(.builtin_unused, call.builtinToken, .{"const"});
                 return;
             },
 
@@ -78,7 +88,7 @@ pub fn maybeWarnUnused(res: Result, p: *Parser, exprStart: TokenIndex, errStart:
             else => break,
         };
 
-    try p.errToken(.unused_value, exprStart);
+    try p.err(.unused_value, exprStart, .{});
 }
 
 pub fn boolRes(lhs: *Result, p: *Parser, tag: std.meta.Tag(Node), rhs: Result, token: TokenIndex) !void {
@@ -155,7 +165,7 @@ pub fn adjustCondExprPtrs(lhs: *Result, token: TokenIndex, rhs: *Result, p: *Par
     var adjustedElemQt = lhsElem;
     if (!pointersCompatible or hasVoidPtrBranch) {
         if (!pointersCompatible)
-            try p.errStr(.pointer_mismatch, token, try p.typePairStrExtra(lhs.qt, " and ", rhs.qt));
+            try p.err(.pointer_mismatch, token, .{ lhs.qt, rhs.qt });
         adjustedElemQt = .void;
     }
 
@@ -290,13 +300,13 @@ pub fn adjustTypes(lhs: *Result, token: TokenIndex, rhs: *Result, p: *Parser, ki
             if (lhsSK == .NullptrTy or rhsSK == .NullptrTy) return lhs.invalidBinTy(token, rhs, p);
 
             if ((lhsSK.isInt() or rhsSK.isInt()) and !(lhs.value.isZero(p.comp) or rhs.value.isZero(p.comp))) {
-                try p.errStr(.comparison_ptr_int, token, try p.typePairStr(lhs.qt, rhs.qt));
+                try p.err(.comparison_ptr_int, token, .{ lhs.qt, rhs.qt });
             } else if (lhsSK.isPointer() and rhsSK.isPointer()) {
                 if (lhsSK != .VoidPointer and rhsSK != .VoidPointer) {
                     const lhsElem = lhs.qt.childType(p.comp);
                     const rhsElem = rhs.qt.childType(p.comp);
                     if (!lhsElem.eql(rhsElem, p.comp)) {
-                        try p.errStr(.comparison_distinct_ptr, token, try p.typePairStr(lhs.qt, rhs.qt));
+                        try p.err(.comparison_distinct_ptr, token, .{ lhs.qt, rhs.qt });
                     }
                 }
             } else if (lhsSK.isPointer()) {
@@ -330,7 +340,7 @@ pub fn adjustTypes(lhs: *Result, token: TokenIndex, rhs: *Result, p: *Parser, ki
                 const intType = if (lhsSK.isInt()) lhs else rhs;
                 const ptrType = if (lhsSK.isPointer()) lhs else rhs;
 
-                try p.errStr(.implicit_int_to_ptr, token, try p.typePairStrExtra(intType.qt, " to ", ptrType.qt));
+                try p.err(.implicit_int_to_ptr, token, .{ intType.qt, ptrType.qt });
                 try intType.castToPointer(p, ptrType.qt, token);
                 return true;
             }
@@ -379,7 +389,7 @@ pub fn adjustTypes(lhs: *Result, token: TokenIndex, rhs: *Result, p: *Parser, ki
 
             if (lhsSK.isPointer() and rhsSK.isPointer()) {
                 if (!lhs.qt.eql(rhs.qt, p.comp))
-                    try p.errStr(.incompatible_pointers, token, try p.typePairStr(lhs.qt, rhs.qt));
+                    try p.err(.incompatible_pointers, token, .{ lhs.qt, rhs.qt });
                 lhs.qt = p.comp.typeStore.ptrdiff;
             }
 
@@ -426,9 +436,9 @@ pub fn castToBool(res: *Result, p: *Parser, boolQt: QualType, tok: TokenIndex) E
     const srcSK = res.qt.scalarKind(p.comp);
     if (res.qt.is(p.comp, .array)) {
         if (res.value.is(.bytes, p.comp)) {
-            try p.errStr(.string_literal_to_bool, tok, try p.typePairStrExtra(res.qt, " to ", boolQt));
+            try p.err(.string_literal_to_bool, tok, .{ res.qt, boolQt });
         } else {
-            try p.errStr(.array_address_to_bool, tok, p.getTokenText(tok));
+            try p.err(.array_address_to_bool, tok, .{p.getTokenText(tok)});
         }
         try res.lvalConversion(p, tok);
         res.value = .one;
@@ -551,19 +561,19 @@ pub fn castToInt(res: *Result, p: *Parser, intQt: QualType, token: TokenIndex) E
 }
 
 fn floatToIntWarning(
-    res: *Result,
+    res: Result,
     p: *Parser,
-    intTy: QualType,
+    intQt: QualType,
     oldValue: Value,
     changeKind: Value.FloatToIntChangeKind,
     tok: TokenIndex,
 ) !void {
     switch (changeKind) {
-        .none => return p.errStr(.float_to_int, tok, try p.typePairStrExtra(res.qt, " to ", intTy)),
-        .outOfRange => return p.errStr(.float_out_of_range, tok, try p.typePairStrExtra(res.qt, " to ", intTy)),
-        .overflow => return p.errStr(.float_overflow_conversion, tok, try p.typePairStrExtra(res.qt, " to ", intTy)),
-        .nonZeroToZero => return p.errStr(.float_zero_conversion, tok, try p.floatValueChangedStr(res, oldValue, intTy)),
-        .valueChanged => return p.errStr(.float_value_changed, tok, try p.floatValueChangedStr(res, oldValue, intTy)),
+        .none => return p.err(.float_to_int, tok, .{ res.qt, intQt }),
+        .outOfRange => return p.err(.float_out_of_range, tok, .{ res.qt, intQt }),
+        .overflow => return p.err(.float_overflow_conversion, tok, .{ res.qt, intQt }),
+        .nonZeroToZero => return p.errValueChanged(.float_zero_conversion, tok, res, oldValue, intQt),
+        .valueChanged => return p.errValueChanged(.float_value_changed, tok, res, oldValue, intQt),
     }
 }
 
@@ -762,7 +772,7 @@ fn usualArithmeticConversion(lhs: *Result, rhs: *Result, p: *Parser, token: Toke
 }
 
 fn invalidBinTy(lhs: *Result, tok: TokenIndex, rhs: *Result, p: *Parser) Error!bool {
-    try p.errStr(.invalid_bin_types, tok, try p.typePairStr(lhs.qt, rhs.qt));
+    try p.err(.invalid_bin_types, tok, .{ lhs.qt, rhs.qt });
     lhs.value = .{};
     rhs.value = .{};
     lhs.qt = .invalid;
@@ -822,7 +832,7 @@ pub fn castType(res: *Result, p: *Parser, destQt: QualType, operandToken: TokenI
         if (srcSK == .NullptrTy) {
             explicitCK = .NoOP;
         } else {
-            try p.errStr(.invalid_object_cast, lparen, try p.typePairStrExtra(res.qt, " to ", destQt));
+            try p.err(.invalid_object_cast, lparen, .{ res.qt, destQt });
             return error.ParsingFailed;
         }
     } else if (srcSK == .NullptrTy) {
@@ -835,7 +845,7 @@ pub fn castType(res: *Result, p: *Parser, destQt: QualType, operandToken: TokenI
         } else if (destSK.isPointer()) {
             try res.nullToPointer(p, destQt, lparen);
         } else {
-            try p.errStr(.invalid_object_cast, lparen, try p.typePairStrExtra(res.qt, " to ", destQt));
+            try p.err(.invalid_object_cast, lparen, .{ res.qt, destQt });
             return error.ParsingFailed;
         }
         explicitCK = .NoOP;
@@ -843,10 +853,10 @@ pub fn castType(res: *Result, p: *Parser, destQt: QualType, operandToken: TokenI
         explicitCK = .NullToPointer;
     } else if (destSK != .None) cast: {
         if (destSK.isFloat() and srcSK.isPointer()) {
-            try p.errStr(.invalid_cast_to_float, lparen, try p.typeStr(destQt));
+            try p.err(.invalid_cast_to_float, lparen, .{destQt});
             return error.ParsingFailed;
         } else if (srcSK.isFloat() and destSK.isPointer()) {
-            try p.errStr(.invalid_cast_to_pointer, lparen, try p.typeStr(res.qt));
+            try p.err(.invalid_cast_to_pointer, lparen, .{res.qt});
             return error.ParsingFailed;
         }
 
@@ -933,7 +943,7 @@ pub fn castType(res: *Result, p: *Parser, destQt: QualType, operandToken: TokenI
             } else if (res.qt.is(p.comp, .func)) {
                 explicitCK = .FunctionToPointer;
             } else {
-                try p.errStr(.cond_expr_type, operandToken, try p.typeStr(res.qt));
+                try p.err(.cond_expr_type, operandToken, .{res.qt});
                 return error.ParsingFailed;
             }
         } else if (destSK.isFloat()) {
@@ -982,7 +992,7 @@ pub fn castType(res: *Result, p: *Parser, destQt: QualType, operandToken: TokenI
             res.value.boolCast(p.comp);
         } else if (srcSK.isFloat() and destIsInt) {
             if (destQt.hasIncompleteSize(p.comp)) {
-                try p.errStr(.cast_to_incomplete_type, lparen, try p.typeStr(destQt));
+                try p.err(.cast_to_incomplete_type, lparen, .{destQt});
                 return error.ParsingFailed;
             }
             // Explicit cast, no conversion warning
@@ -993,37 +1003,37 @@ pub fn castType(res: *Result, p: *Parser, destQt: QualType, operandToken: TokenI
             try res.value.floatCast(destQt, p.comp);
         } else if (srcIsInt and destIsInt) {
             if (destQt.hasIncompleteSize(p.comp)) {
-                try p.errStr(.cast_to_incomplete_type, lparen, try p.typeStr(destQt));
+                try p.err(.cast_to_incomplete_type, lparen, .{destQt});
                 return error.ParsingFailed;
             }
             try res.value.intCast(destQt, p.comp);
         }
     } else if (destQt.get(p.comp, .@"union")) |unionTy| {
         if (unionTy.layout == null) {
-            try p.errStr(.cast_to_incomplete_type, lparen, try p.typeStr(destQt));
+            try p.err(.cast_to_incomplete_type, lparen, .{destQt});
             return error.ParsingFailed;
         }
 
         for (unionTy.fields) |field| {
             if (field.qt.eql(res.qt, p.comp)) {
                 explicitCK = .UnionCast;
-                try p.errToken(.gnu_union_cast, lparen);
+                try p.err(.gnu_union_cast, lparen, .{});
                 break;
             }
         } else {
-            try p.errStr(.invalid_union_cast, lparen, try p.typeStr(res.qt));
+            try p.err(.invalid_union_cast, lparen, .{res.qt});
             return error.ParsingFailed;
         }
     } else {
-        try p.errStr(.invalid_cast_type, lparen, try p.typeStr(destQt));
+        try p.err(.invalid_cast_type, lparen, .{destQt});
         return error.ParsingFailed;
     }
 
     if (destQt.isQualified())
-        try p.errStr(.qual_cast, lparen, try p.typeStr(destQt));
+        try p.err(.qual_cast, lparen, .{destQt});
 
     if (destSK.isInt() and srcSK.isPointer() and destQt.sizeCompare(res.qt, p.comp) == .lt)
-        try p.errStr(.cast_to_smaller_int, lparen, try p.typePairStrExtra(destQt, " from ", res.qt));
+        try p.err(.cast_to_smaller_int, lparen, .{ destQt, res.qt });
 
     res.qt = destQt.unqualified();
     res.node = try p.addNode(.{
@@ -1061,18 +1071,9 @@ const CoerceContext = union(enum) {
 
     fn note(ctx: CoerceContext, p: *Parser) !void {
         switch (ctx) {
-            .arg => |tok| try p.errToken(.parameter_here, tok),
+            .arg => |tok| try p.err(.parameter_here, tok, .{}),
             .testCoerce => unreachable,
             else => {},
-        }
-    }
-
-    fn typePairStr(ctx: CoerceContext, p: *Parser, destTy: QualType, srcTy: QualType) ![]const u8 {
-        switch (ctx) {
-            .assign, .init => return p.typePairStrExtra(destTy, " from incompatible type ", srcTy),
-            .ret => return p.typePairStrExtra(srcTy, " from a function with incompatible result type ", destTy),
-            .arg => return p.typePairStrExtra(srcTy, " to parameter of incompatible type ", destTy),
-            .testCoerce => unreachable,
         }
     }
 };
@@ -1126,7 +1127,7 @@ fn coerceExtra(
             return;
         } else if (srcSK.isPointer()) {
             if (ctx == .testCoerce) return error.CoercionFailed;
-            try p.errStr(.implicit_ptr_to_int, tok, try p.typePairStrExtra(srcOriginalQt, " to ", destUnqual));
+            try p.err(.implicit_ptr_to_int, tok, .{ srcOriginalQt, destUnqual });
             try ctx.note(p);
             try res.castToInt(p, destUnqual, tok);
             return;
@@ -1146,7 +1147,7 @@ fn coerceExtra(
             return;
         } else if (srcSK.isInt() and srcSK.isReal()) {
             if (ctx == .testCoerce) return error.CoercionFailed;
-            try p.errStr(.implicit_int_to_ptr, tok, try p.typePairStrExtra(srcOriginalQt, " to ", destUnqual));
+            try p.err(.implicit_int_to_ptr, tok, .{ srcOriginalQt, destUnqual });
             try ctx.note(p);
             try res.castToPointer(p, destUnqual, tok);
             return;
@@ -1163,25 +1164,25 @@ fn coerceExtra(
                     (srcChild.@"volatile" and !destChild.@"volatile") or
                     (srcChild.restrict and !destChild.restrict))
                 {
-                    try p.errStr(switch (ctx) {
+                    try p.err(switch (ctx) {
                         .assign => .ptr_assign_discards_quals,
                         .init => .ptr_init_discards_quals,
                         .ret => .ptr_ret_discards_quals,
                         .arg => .ptr_arg_discards_quals,
                         .testCoerce => return error.CoercionFailed,
-                    }, tok, try ctx.typePairStr(p, destQt, srcOriginalQt));
+                    }, tok, .{ destQt, srcOriginalQt });
                 }
                 try res.castToPointer(p, destUnqual, tok);
                 return;
             }
             const differentSignOnly = srcChild.sameRankDifferentSign(destChild, p.comp);
-            try p.errStr(switch (ctx) {
-                .assign => if (differentSignOnly) .incompatible_ptr_assign_sign else .incompatible_ptr_assign,
-                .init => if (differentSignOnly) .incompatible_ptr_init_sign else .incompatible_ptr_init,
-                .ret => if (differentSignOnly) .incompatible_return_sign else .incompatible_return,
-                .arg => if (differentSignOnly) .incompatible_ptr_arg_sign else .incompatible_ptr_arg,
+            switch (ctx) {
+                .assign => try p.err(if (differentSignOnly) .incompatible_ptr_assign_sign else .incompatible_ptr_assign, tok, .{ destQt, srcOriginalQt }),
+                .init => try p.err(if (differentSignOnly) .incompatible_ptr_init_sign else .incompatible_ptr_init, tok, .{ destQt, srcOriginalQt }),
+                .ret => try p.err(if (differentSignOnly) .incompatible_return_sign else .incompatible_return, tok, .{ srcOriginalQt, destQt }),
+                .arg => try p.err(if (differentSignOnly) .incompatible_ptr_arg_sign else .incompatible_ptr_arg, tok, .{ srcOriginalQt, destQt }),
                 .testCoerce => return error.CoercionFailed,
-            }, tok, try ctx.typePairStr(p, destQt, srcOriginalQt));
+            }
             try ctx.note(p);
 
             res.qt = destUnqual;
@@ -1220,7 +1221,7 @@ fn coerceExtra(
     // other type
     else {
         if (ctx == .assign and (destUnqual.is(p.comp, .array) or destUnqual.is(p.comp, .func))) {
-            try p.errToken(.not_assignable, tok);
+            try p.err(.not_assignable, tok, .{});
             return;
         } else if (ctx == .testCoerce) {
             return error.CoercionFailed;
@@ -1230,16 +1231,12 @@ fn coerceExtra(
         return error.ParsingFailed;
     }
 
-    try p.errStr(
-        switch (ctx) {
-            .assign => .incompatible_assign,
-            .init => .incompatible_init,
-            .ret => .incompatible_return,
-            .arg => .incompatible_arg,
-            .testCoerce => return error.CoercionFailed,
-        },
-        tok,
-        try ctx.typePairStr(p, destUnqual, res.qt),
-    );
+    switch (ctx) {
+        .assign => try p.err(.incompatible_assign, tok, .{ destUnqual, res.qt }),
+        .init => try p.err(.incompatible_init, tok, .{ destUnqual, res.qt }),
+        .ret => try p.err(.incompatible_return, tok, .{ res.qt, destUnqual }),
+        .arg => try p.err(.incompatible_arg, tok, .{ res.qt, destUnqual }),
+        .testCoerce => return error.CoercionFailed,
+    }
     try ctx.note(p);
 }

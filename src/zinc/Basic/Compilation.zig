@@ -98,7 +98,7 @@ pub const Environment = struct {
 };
 
 gpa: Allocator,
-diagnostics: Diagnostics,
+diagnostics: *Diagnostics,
 
 environment: Environment = .{},
 sources: std.StringArrayHashMapUnmanaged(Source) = .{},
@@ -119,21 +119,21 @@ typeStore: TypeStore = .{},
 msCwdSourceId: ?Source.ID = null,
 cwd: std.fs.Dir,
 
-pub fn init(gpa: Allocator, cwd: std.fs.Dir) Compilation {
+pub fn init(gpa: Allocator, diags: *Diagnostics, cwd: std.fs.Dir) Compilation {
     return .{
         .gpa = gpa,
-        .diagnostics = Diagnostics.init(gpa),
+        .diagnostics = diags,
         .cwd = cwd,
     };
 }
 
 /// Initialize Compilation with default environment,
 /// pragma handlers and emulation mode set to target.
-pub fn initDefault(gpa: Allocator, cwd: std.fs.Dir) !Compilation {
+pub fn initDefault(gpa: Allocator, diags: *Diagnostics, cwd: std.fs.Dir) !Compilation {
     var comp: Compilation = .{
         .gpa = gpa,
         .environment = try Environment.loadAll(gpa),
-        .diagnostics = Diagnostics.init(gpa),
+        .diagnostics = diags,
         .cwd = cwd,
     };
     errdefer comp.deinit();
@@ -155,7 +155,6 @@ pub fn deinit(comp: *Compilation) void {
     }
 
     comp.sources.deinit(comp.gpa);
-    comp.diagnostics.deinit();
     comp.includeDirs.deinit(comp.gpa);
     for (comp.systemIncludeDirs.items) |path|
         comp.gpa.free(path);
@@ -187,10 +186,8 @@ pub fn getSourceEpoch(self: *const Compilation, max: i64) !?i64 {
 
 fn getTimeStamp(comp: *Compilation) !u47 {
     const provided: ?i64 = comp.getSourceEpoch(MaxTimestamp) catch blk: {
-        try comp.addDiagnostic(.{
-            .tag = .invalid_source_epoch,
-            .loc = .{ .id = .unused, .byteOffset = 0, .line = 0 },
-        }, &.{});
+        const diagnostic: Diagnostic = .invalid_source_epoch;
+        try comp.diagnostics.add(.{ .text = diagnostic.fmt, .kind = diagnostic.kind, .opt = diagnostic.opt, .location = null });
         break :blk null;
     };
     const timestamp = provided orelse std.time.timestamp();
@@ -1005,10 +1002,7 @@ pub fn addSourceFromOwnedBuffer(
                         i = backslashLoc;
                         try spliceList.append(i);
                         if (state == .trailing_ws) {
-                            try comp.addDiagnostic(.{
-                                .tag = .backslash_newline_escape,
-                                .loc = .{ .id = sourceId, .byteOffset = i, .line = line },
-                            }, &.{});
+                            try comp.addNewlineEscapeError(path, buffer, spliceList.items, i, line);
                         }
                         state = if (state == .back_slash_cr) .cr else .back_slash_cr;
                     },
@@ -1029,10 +1023,7 @@ pub fn addSourceFromOwnedBuffer(
                             try spliceList.append(i);
                         }
                         if (state == .trailing_ws) {
-                            try comp.addDiagnostic(.{
-                                .tag = .backslash_newline_escape,
-                                .loc = .{ .id = sourceId, .byteOffset = i, .line = line },
-                            }, &.{});
+                            try comp.addNewlineEscapeError(path, buffer, spliceList.items, i, line);
                         }
                     },
                     .bom1, .bom2 => break,
@@ -1098,6 +1089,38 @@ pub fn addSourceFromOwnedBuffer(
 
     comp.sources.putAssumeCapacityNoClobber(dupedPath, source);
     return source;
+}
+
+fn addNewlineEscapeError(
+    comp: *Compilation,
+    path: []const u8,
+    buffer: []const u8,
+    spliceLocs: []const u32,
+    byteOffset: u32,
+    line: u32,
+) !void {
+
+    // Temporary source for getting the location for errors.
+    var tempSource: Source = .{
+        .path = path,
+        .buffer = buffer,
+        .id = undefined,
+        .kind = undefined,
+        .spliceLocs = spliceLocs,
+    };
+
+    const diagnostic: Diagnostic = .backslash_newline_escape;
+    var loc = tempSource.getLineCol(.{ .id = undefined, .byteOffset = byteOffset, .line = line });
+    loc.line = loc.line[0 .. loc.line.len - 1];
+    loc.width += 1;
+    loc.col += 1;
+
+    try comp.diagnostics.add(.{
+        .text = diagnostic.fmt,
+        .kind = diagnostic.kind,
+        .opt = diagnostic.opt,
+        .location = loc,
+    });
 }
 
 /// Caller retains ownership of `path` and `buffer`.
@@ -1357,11 +1380,17 @@ pub fn findInclude(
         defer sfAllocator.free(found.path);
         if (comp.addSourceFromPathExtra(found.path, found.kind)) |some| {
             if (it.triedMSCwd) {
-                try comp.addDiagnostic(.{
-                    .tag = .ms_search_rule,
-                    .extra = .{ .str = some.path },
-                    .loc = .{ .id = includeToken.source, .byteOffset = includeToken.start, .line = includeToken.line },
-                }, &.{});
+                const diagnostic: Diagnostic = .ms_search_rule;
+                try comp.diagnostics.add(.{
+                    .text = diagnostic.fmt,
+                    .kind = diagnostic.kind,
+                    .opt = diagnostic.opt,
+                    .location = (Source.Location{
+                        .id = includeToken.source,
+                        .byteOffset = includeToken.start,
+                        .line = includeToken.line,
+                    }).expand(comp),
+                });
             }
             return some;
         } else |err| switch (err) {
@@ -1459,12 +1488,40 @@ pub const CharUnitSize = enum(u32) {
     }
 };
 
-pub const addDiagnostic = Diagnostics.add;
+pub const Diagnostic = struct {
+    fmt: []const u8,
+    kind: Diagnostics.Message.Kind,
+    opt: ?Diagnostics.Option = null,
+
+    pub const invalid_source_epoch: Diagnostic = .{
+        .fmt = "environment variable SOURCE_DATE_EPOCH must expand to a non-negative integer less than or equal to 253402300799",
+        .kind = .@"error",
+    };
+
+    pub const backslash_newline_escape: Diagnostic = .{
+        .fmt = "backslash and newline separated by space",
+        .kind = .warning,
+        .opt = .@"backslash-newline-escape",
+    };
+
+    pub const ms_search_rule: Diagnostic = .{
+        .fmt = "#include resolved using non-portable Microsoft search rules as: {s}",
+        .kind = .warning,
+        .opt = .@"microsoft-include",
+    };
+
+    pub const ctrl_z_eof: Diagnostic = .{
+        .fmt = "treating Ctrl-Z as end-of-file is a Microsoft extension",
+        .kind = .off,
+        .opt = .@"microsoft-end-of-file",
+    };
+};
 
 test "addSourceFromReader" {
     const Test = struct {
         fn addSourceFromReader(str: []const u8, expected: []const u8, warningCount: u32, splices: []const u32) !void {
-            var comp = Compilation.init(std.testing.allocator, std.fs.cwd());
+            var diagnostics: Diagnostics = .{ .output = .ignore };
+            var comp = Compilation.init(std.testing.allocator, &diagnostics, std.fs.cwd());
             defer comp.deinit();
 
             var stream = std.io.fixedBufferStream(str);
@@ -1472,12 +1529,13 @@ test "addSourceFromReader" {
             const source = try comp.addSourceFromReader(reader, "path", .User);
 
             try std.testing.expectEqualStrings(expected, source.buffer);
-            try std.testing.expectEqual(warningCount, @as(u32, @intCast(comp.diagnostics.list.items.len)));
+            try std.testing.expectEqual(warningCount, @as(u32, @intCast(diagnostics.warnings)));
             try std.testing.expectEqualSlices(u32, splices, source.spliceLocs);
         }
 
         fn withAllocationFailures(allocator: std.mem.Allocator) !void {
-            var comp = Compilation.init(allocator, std.fs.cwd());
+            var diagnostics: Diagnostics = .{ .output = .ignore };
+            var comp = Compilation.init(allocator, &diagnostics, std.fs.cwd());
             defer comp.deinit();
 
             _ = try comp.addSourceFromBuffer("path", "spliced\\\nbuffer\n");
@@ -1519,7 +1577,8 @@ test "addSourceFromReader - exhaustive check for carriage return elimination" {
     const alen = alphabet.len;
     var buffer: [alphabet.len]u8 = [1]u8{alphabet[0]} ** alen;
 
-    var comp = Compilation.init(std.testing.allocator, std.fs.cwd());
+    var diagnostics: Diagnostics = .{ .output = .ignore };
+    var comp = Compilation.init(std.testing.allocator, &diagnostics, std.fs.cwd());
     defer comp.deinit();
 
     var sourceCount: u32 = 0;
@@ -1547,7 +1606,8 @@ test "ignore BOM at beginning of file" {
 
     const Test = struct {
         fn run(buf: []const u8) !void {
-            var comp = Compilation.init(std.testing.allocator, std.fs.cwd());
+            var diagnostics: Diagnostics = .{ .output = .ignore };
+            var comp = Compilation.init(std.testing.allocator, &diagnostics, std.fs.cwd());
             defer comp.deinit();
 
             var buff = std.io.fixedBufferStream(buf);
