@@ -1879,7 +1879,12 @@ fn attributeSpecifier(p: *Parser, declaratorName: ?TokenIndex) Error!void {
 const InitDeclarator = struct { d: Declarator, initializer: ?Result = null };
 
 /// init-declarator : declarator assembly? attribute-specifier? ('=' initializer)?
-fn parseInitDeclarator(p: *Parser, declSpec: *DeclSpec, attrBufferTop: usize, declNode: Node.Index) Error!?InitDeclarator {
+fn parseInitDeclarator(
+    p: *Parser,
+    declSpec: *DeclSpec,
+    attrBufferTop: usize,
+    declNode: Node.Index,
+) Error!?InitDeclarator {
     const thisAttrBufferTop = p.attrBuffer.len;
     defer p.attrBuffer.len = thisAttrBufferTop;
 
