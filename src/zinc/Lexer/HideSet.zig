@@ -52,9 +52,9 @@ pub const Index = enum(u32) {
 };
 
 map: std.AutoHashMapUnmanaged(Identifier, Index) = .{},
-/// Used for computing intersection of two lists; stored here so that allocations can be retained
+/// Used for computing union/intersection of two lists; stored here so that allocations can be retained
 /// until hideset is deinit'ed
-interSectionMap: std.AutoHashMapUnmanaged(Identifier, void) = .{},
+tempMap: std.AutoHashMapUnmanaged(Identifier, void) = .{},
 linkedList: Item.List = .{},
 comp: *const Compilation,
 
@@ -72,7 +72,7 @@ const Iterator = struct {
 
 pub fn deinit(self: *Hideset) void {
     self.map.deinit(self.comp.gpa);
-    self.interSectionMap.deinit(self.comp.gpa);
+    self.tempMap.deinit(self.comp.gpa);
     self.linkedList.deinit(self.comp.gpa);
 }
 
@@ -83,7 +83,7 @@ pub fn clearRetainingCapacity(self: *Hideset) void {
 
 pub fn clearAndFree(self: *Hideset) void {
     self.map.clearAndFree(self.comp.gpa);
-    self.interSectionMap.clearAndFree(self.comp.gpa);
+    self.tempMap.clearAndFree(self.comp.gpa);
     self.linkedList.shrinkAndFree(self.comp.gpa, 0);
 }
 
@@ -107,10 +107,14 @@ fn ensureUnusedCapacity(self: *Hideset, new_size: usize) !void {
     try self.linkedList.ensureUnusedCapacity(self.comp.gpa, new_size);
 }
 
-/// Creates a one-item list with contents `identifier`
 fn createNodeAssumeCapacity(self: *Hideset, identifier: Identifier) Index {
+    return self.createNodeAssumeCapacityExtra(identifier, .none);
+}
+
+/// Creates a one-item list with contents `identifier`
+fn createNodeAssumeCapacityExtra(self: *Hideset, identifier: Identifier, next: Index) Index {
     const nextIndex = self.linkedList.len;
-    self.linkedList.appendAssumeCapacity(.{ .identifier = identifier });
+    self.linkedList.appendAssumeCapacity(.{ .identifier = identifier, .next = next });
     return @enumFromInt(nextIndex);
 }
 
@@ -121,26 +125,24 @@ pub fn prepend(self: *Hideset, loc: Source.Location, tail: Index) !Index {
     return @enumFromInt(newIndex);
 }
 
-/// Copy a, then attach b at the end
+/// Attach elements of `b` to the front of `a` (if they're not in `a`)
 pub fn @"union"(self: *Hideset, a: Index, b: Index) !Index {
-    var cur: Index = .none;
-    var head: Index = b;
-    try self.ensureUnusedCapacity(self.len(a));
+    if (a == .none) return b;
+    if (b == .none) return a;
+    self.tempMap.clearRetainingCapacity();
 
-    var it = self.iterator(a);
+    var it = self.iterator(b);
     while (it.next()) |identifier| {
-        const newIndex = self.createNodeAssumeCapacity(identifier);
-        if (head == b) {
-            head = newIndex;
-        }
-        if (cur != .none) {
-            self.linkedList.items(.next)[@intFromEnum(cur)] = newIndex;
-        }
-        cur = newIndex;
+        try self.tempMap.put(self.comp.gpa, identifier, {});
     }
 
-    if (cur != .none) {
-        self.linkedList.items(.next)[@intFromEnum(cur)] = b;
+    var head: Index = b;
+    try self.ensureUnusedCapacity(self.len(a));
+    it = self.iterator(a);
+    while (it.next()) |identifier| {
+        if (!self.tempMap.contains(identifier)) {
+            head = self.createNodeAssumeCapacityExtra(identifier, head);
+        }
     }
     return head;
 }
@@ -165,20 +167,20 @@ fn len(self: *const Hideset, list: Index) usize {
 
 pub fn intersection(self: *Hideset, a: Index, b: Index) !Index {
     if (a == .none or b == .none) return .none;
-    self.interSectionMap.clearRetainingCapacity();
+    self.tempMap.clearRetainingCapacity();
 
     var cur: Index = .none;
     var head: Index = .none;
     var it = self.iterator(a);
     var aLength: usize = 0;
     while (it.next()) |identifier| : (aLength += 1) {
-        try self.interSectionMap.put(self.comp.gpa, identifier, {});
+        try self.tempMap.put(self.comp.gpa, identifier, {});
     }
     try self.ensureUnusedCapacity(@min(aLength, self.len(b)));
 
     it = self.iterator(b);
     while (it.next()) |identifier| {
-        if (self.interSectionMap.contains(identifier)) {
+        if (self.tempMap.contains(identifier)) {
             const newIndex = self.createNodeAssumeCapacity(identifier);
             if (head == .none) head = newIndex;
 
