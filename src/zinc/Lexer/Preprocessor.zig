@@ -2322,9 +2322,16 @@ fn expandMacroExhaustive(
                     };
 
                     assert(rparen.id == .RParen);
+
+                    var freeArgExpansionLocs = false;
                     defer {
-                        for (args.items) |item|
+                        for (args.items) |item| {
+                            if (freeArgExpansionLocs) {
+                                for (item) |tok|
+                                    TokenWithExpansionLocs.free(tok.expansionLocs, pp.gpa);
+                            }
                             pp.gpa.free(item);
+                        }
                         args.deinit();
                     }
 
@@ -2346,6 +2353,7 @@ fn expandMacroExhaustive(
 
                     // Validate argument count.
                     if (macro.varArgs and argsCount < macro.params.len) {
+                        freeArgExpansionLocs = true;
                         try pp.err(buf.items[idx], .expected_at_least_arguments, .{ macro.params.len, argsCount });
                         idx += 1;
                         try pp.removeExpandedTokens(buf, idx, macroScanIdx - idx + 1, &movingEndIdx);
@@ -2353,6 +2361,7 @@ fn expandMacroExhaustive(
                     }
 
                     if (!macro.varArgs and argsCount != macro.params.len) {
+                        freeArgExpansionLocs = true;
                         try pp.err(buf.items[idx], .expected_arguments, .{ macro.params.len, argsCount });
                         idx += 1;
                         try pp.removeExpandedTokens(buf, idx, macroScanIdx - idx + 1, &movingEndIdx);
