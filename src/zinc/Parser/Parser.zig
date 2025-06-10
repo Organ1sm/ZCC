@@ -3045,8 +3045,8 @@ const Enumerator = struct {
                 try p.err(.enumerator_overflow, token, .{});
                 e.qt = larger;
             } else {
-                const byteSize = e.qt.sizeof(p.comp);
-                const bitSize: u8 = @intCast(if (e.qt.isUnsigned(p.comp)) byteSize * 8 else byteSize * 8 - 1);
+                const signed = e.qt.signedness(p.comp) == .signed;
+                const bitSize = e.qt.bitSizeof(p.comp) - @intFromBool(signed);
                 try p.err(.enum_not_representable, token, .{switch (bitSize) {
                     63 => "9223372036854775808",
                     64 => "18446744073709551616",
