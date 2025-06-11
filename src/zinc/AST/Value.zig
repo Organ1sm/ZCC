@@ -993,26 +993,44 @@ pub fn printString(
 ) @TypeOf(w).Error!void {
     const size: Compilation.CharUnitSize = @enumFromInt(qt.childType(comp).sizeof(comp));
     const withoutNull = bytes[0 .. bytes.len - @intFromEnum(size)];
+    try w.writeByte('"');
     switch (size) {
-        inline .@"1", .@"2" => |sz| {
-            const dataSlice: []const sz.Type() = @alignCast(std.mem.bytesAsSlice(sz.Type(), withoutNull));
-            const formatter = if (sz == .@"1") std.zig.fmtEscapes(dataSlice) else std.unicode.fmtUtf16Le(dataSlice);
-            try w.print("\"{}\"", .{formatter});
-        },
-        .@"4" => {
-            try w.writeByte('"');
-            const dataSlice = std.mem.bytesAsSlice(u32, withoutNull);
-            var buf: [4]u8 = undefined;
-            for (dataSlice) |item| {
-                if (item <= std.math.maxInt(u21) and std.unicode.utf8ValidCodepoint(@intCast(item))) {
-                    const codepoint: u21 = @intCast(item);
-                    const written = std.unicode.utf8Encode(codepoint, &buf) catch unreachable;
-                    try w.print("{s}", .{buf[0..written]});
+        .@"1" => try w.print("{}", .{std.zig.fmtEscapes(withoutNull)}),
+        .@"2" => {
+            var items: [2]u16 = undefined;
+            var i: usize = 0;
+            while (i < withoutNull.len) {
+                @memcpy(std.mem.sliceAsBytes(items[0..1]), withoutNull[i..][0..2]);
+                i += 2;
+                const isSurrogate = std.unicode.utf16IsHighSurrogate(items[0]);
+                if (isSurrogate and i < withoutNull.len) {
+                    @memcpy(std.mem.sliceAsBytes(items[1..2]), withoutNull[i..][0..2]);
+                    if (std.unicode.utf16DecodeSurrogatePair(&items)) |decoded| {
+                        i += 2;
+                        try w.print("{u}", .{decoded});
+                    } else |_| {
+                        try w.print("\\x{x}", .{items[0]});
+                    }
+                } else if (isSurrogate) {
+                    try w.print("\\x{x}", .{items[0]});
                 } else {
-                    try w.print("\\x{x}", .{item});
+                    try w.print("{u}", .{items[0]});
                 }
             }
-            try w.writeByte('"');
+        },
+        .@"4" => {
+            var item: [1]u32 = undefined;
+            const dataSlice = std.mem.sliceAsBytes(item[0..1]);
+            for (0..@divExact(withoutNull.len, 4)) |n| {
+                @memcpy(dataSlice, withoutNull[n * 4 ..][0..4]);
+                if (item[0] <= std.math.maxInt(u21) and std.unicode.utf8ValidCodepoint(@intCast(item[0]))) {
+                    const codepoint: u21 = @intCast(item[0]);
+                    try w.print("{u}", .{codepoint});
+                } else {
+                    try w.print("\\x{x}", .{item[0]});
+                }
+            }
         },
     }
+    try w.writeByte('"');
 }
