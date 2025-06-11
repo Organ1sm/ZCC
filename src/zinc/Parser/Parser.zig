@@ -6470,9 +6470,10 @@ fn offsetofMemberDesignator(
             try ptr.lvalConversion(p, lbracket);
             try index.lvalConversion(p, lbracket);
 
-            if (!index.qt.isInt(p.comp))
+            if (index.qt.isInt(p.comp))
+                try p.checkArrayBounds(index, lhs, lbracket)
+            else
                 try p.err(.invalid_index, lbracket, .{});
-            try p.checkArrayBounds(index, lhs, lbracket);
 
             try index.saveValue(p);
             try ptr.bin(p, .arrayAccessExpr, index, lbracket);
@@ -7002,12 +7003,16 @@ fn parseSuffixExpr(p: *Parser, lhs: Result) Error!?Result {
 
             if (ptr.qt.get(p.comp, .pointer)) |ptrTy| {
                 ptr.qt = ptrTy.child;
-                if (!index.qt.isInt(p.comp)) try p.err(.invalid_index, lb, .{});
-                try p.checkArrayBounds(indexBeforeConversion, arrayBeforeConversion, lb);
+                if (index.qt.isInt(p.comp))
+                    try p.checkArrayBounds(indexBeforeConversion, arrayBeforeConversion, lb)
+                else
+                    try p.err(.invalid_index, lb, .{});
             } else if (index.qt.get(p.comp, .pointer)) |ptrTy| {
                 index.qt = ptrTy.child;
-                if (!ptr.qt.isInt(p.comp)) try p.err(.invalid_index, lb, .{});
-                try p.checkArrayBounds(arrayBeforeConversion, indexBeforeConversion, lb);
+                if (ptr.qt.isInt(p.comp))
+                    try p.checkArrayBounds(arrayBeforeConversion, indexBeforeConversion, lb)
+                else
+                    try p.err(.invalid_index, lb, .{});
                 std.mem.swap(Result, &ptr, &index);
             } else {
                 try p.err(.invalid_subscript, lb, .{});
