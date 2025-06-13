@@ -108,6 +108,9 @@ constDeclFolding: ConstDeclFoldingMode = .FoldConstDecls,
 /// if a computed goto is used, the function must contain an
 /// address-of-label expression (tracked with ContainsAddressOfLabel)
 computedGotoTok: ?TokenIndex = null,
+/// __auto_type may only be used with a single declarator. Keep track of the name
+/// so that it is not used in its own initializer.
+autoTypeDeclName: StringId = .empty,
 
 initContext: InitContext = .runtime,
 
@@ -1967,6 +1970,12 @@ fn parseInitDeclarator(
 
         const internedName = try p.getInternString(ID.d.name);
         try p.symStack.declareSymbol(internedName, ID.d.qt, ID.d.name, declNode);
+
+        // TODO this should be a stack of auto type names because of statement expressions.
+        if (ID.d.qt.isAutoType() or ID.d.qt.isC23Auto()) {
+            p.autoTypeDeclName = internedName;
+        }
+        defer p.autoTypeDeclName = .empty;
 
         const initContext = p.initContext;
         defer p.initContext = initContext;
@@ -7648,6 +7657,11 @@ fn parsePrimaryExpr(p: *Parser) Error!?Result {
             const nameToken = try p.expectIdentifier();
             const name = p.getTokenText(nameToken);
             const internedName = try p.comp.internString(name);
+
+            if (internedName == p.autoTypeDeclName) {
+                try p.err(.auto_type_self_initialized, nameToken, .{name});
+                return error.ParsingFailed;
+            }
 
             if (p.symStack.findSymbol(internedName)) |sym| {
                 try p.checkDeprecatedUnavailable(sym.qt, nameToken, sym.token);
