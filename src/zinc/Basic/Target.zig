@@ -459,6 +459,7 @@ pub fn get32BitArchVariant(target: std.Target) ?std.Target {
         .loongarch32,
         .xtensa,
         .propeller,
+        .or1k,
         => {}, // Already 32 bit
 
         .aarch64 => copy.cpu.arch = .arm,
@@ -492,6 +493,7 @@ pub fn get64BitArchVariant(target: std.Target) ?std.Target {
         .xcore,
         .xtensa,
         .propeller,
+        .or1k,
         => return null,
 
         .aarch64,
@@ -588,8 +590,8 @@ pub fn toLLVMTriple(target: std.Target, buf: []u8) []const u8 {
         .wasm64 => "wasm64",
         .ve => "ve",
         .propeller => "propeller",
+        .or1k => "or1k",
     };
-
     writer.writeAll(llvm_arch) catch unreachable;
     writer.writeByte('-') catch unreachable;
 
@@ -614,7 +616,6 @@ pub fn toLLVMTriple(target: std.Target, buf: []u8) []const u8 {
         .amdhsa => "amdhsa",
         .ps4 => "ps4",
         .ps5 => "ps5",
-        .elfiamcu => "elfiamcu",
         .mesa3d => "mesa3d",
         .contiki => "contiki",
         .amdpal => "amdpal",
@@ -659,7 +660,6 @@ pub fn toLLVMTriple(target: std.Target, buf: []u8) []const u8 {
         .gnuf32 => "gnuf32",
         .gnusf => "gnusf",
         .gnux32 => "gnux32",
-        .gnuilp32 => "gnu_ilp32",
         .code16 => "code16",
         .eabi => "eabi",
         .eabihf => "eabihf",
@@ -670,6 +670,8 @@ pub fn toLLVMTriple(target: std.Target, buf: []u8) []const u8 {
         .muslabi64 => "muslabi64",
         .musleabi => "musleabi",
         .musleabihf => "musleabihf",
+        .muslf32 => "muslf32",
+        .muslsf => "muslsf",
         .muslx32 => "muslx32",
         .msvc => "msvc",
         .itanium => "itanium",
