@@ -74,7 +74,7 @@ tree: AST,
 
 // buffers used during compilation
 symStack: SymbolStack = .{},
-strings: std.ArrayListAligned(u8, 4),
+strings: std.ArrayListAligned(u8, .@"4"),
 labels: std.ArrayList(Label),
 listBuffer: NodeList,
 declBuffer: NodeList,

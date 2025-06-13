@@ -901,7 +901,7 @@ pub fn fixedEnumTagType(comp: *const Compilation) ?QualType {
 }
 
 pub fn getCharSignedness(comp: *const Compilation) std.builtin.Signedness {
-    return comp.langOpts.charSignednessOverride orelse comp.target.charSignedness();
+    return comp.langOpts.charSignednessOverride orelse comp.target.cCharSignedness();
 }
 
 /// Add built-in zinc headers directory to system include paths

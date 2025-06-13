@@ -380,7 +380,7 @@ pub const FPSemantics = enum {
 /// Value of the `-m` flag for `ld` for this target
 pub fn ldEmulationOption(target: std.Target, armEndianness: ?std.builtin.Endian) ?[]const u8 {
     return switch (target.cpu.arch) {
-        .x86 => if (target.os.tag == .elfiamcu) "elf_iamcu" else "elf_i386",
+        .x86 => "elf_i386",
         .arm,
         .armeb,
         .thumb,

@@ -162,7 +162,6 @@ pub fn buildLinkerArgs(self: *const Linux, tc: *const Toolchain, argv: *std.Arra
     const isStaticPie = try self.getStaticPIE(d);
     const isStatic = self.getStatic(d);
     const isAndroid = target.abi.isAndroid();
-    const isIamcu = target.os.tag == .elfiamcu;
     const isVe = target.cpu.arch == .ve;
     const hasCrtBeginEndFiles = target.abi != .none; // TODO: clang checks for MIPS vendor
 
@@ -211,7 +210,7 @@ pub fn buildLinkerArgs(self: *const Linux, tc: *const Toolchain, argv: *std.Arra
     try argv.appendSlice(&.{ "-o", d.outputName orelse "a.out" });
 
     if (!d.nostdlib and !d.nostartfiles and !d.relocatable) {
-        if (!isAndroid and !isIamcu) {
+        if (!isAndroid) {
             if (!d.shared) {
                 const crt1 = if (isPie)
                     "Scrt1.o"
@@ -227,9 +226,7 @@ pub fn buildLinkerArgs(self: *const Linux, tc: *const Toolchain, argv: *std.Arra
         if (isVe)
             try argv.appendSlice(&.{ "-z", "max-page-size=0x4000000" });
 
-        if (isIamcu) {
-            try argv.append(try tc.getFilePath("crt0.o"));
-        } else if (hasCrtBeginEndFiles) {
+        if (hasCrtBeginEndFiles) {
             var path: []const u8 = "";
             if (tc.getRuntimeLibKind() == .compiler_rt and !isAndroid) {
                 const crtBegin = try tc.getCompilerRt("crtbegin", .object);
@@ -272,19 +269,13 @@ pub fn buildLinkerArgs(self: *const Linux, tc: *const Toolchain, argv: *std.Arra
             if (!d.nolibc)
                 try argv.append("-lc");
 
-            if (isIamcu)
-                try argv.append("-lgloss");
-
             if (isStatic or isStaticPie)
                 try argv.append("--end-group")
             else
                 try tc.addRuntimeLibs(argv);
-
-            if (isIamcu)
-                try argv.appendSlice(&.{ "--as-needed", "-lsoftfp", "--no-as-needed" });
         }
 
-        if (!d.nostartfiles and !isIamcu) {
+        if (!d.nostartfiles) {
             if (hasCrtBeginEndFiles) {
                 var path: []const u8 = "";
                 if (tc.getRuntimeLibKind() == .compiler_rt and !isAndroid) {
