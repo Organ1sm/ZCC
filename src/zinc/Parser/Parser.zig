@@ -4516,6 +4516,12 @@ fn convertInitList(p: *Parser, il: InitList, initQt: QualType) Error!Node.Index 
                 try p.listBuffer.append(elem);
             }
 
+            const maxElems = p.comp.maxArrayBytes() / (@max(1, elemType.sizeofOrNull(p.comp) orelse 1));
+            if (start > maxElems) {
+                try p.err(.array_too_large, il.tok, .{});
+                start = maxElems;
+            }
+
             var arrInitTy = initQt;
             if (arrayTy.len == .incomplete) {
                 arrInitTy = try p.comp.typeStore.put(p.gpa, .{ .array = .{
