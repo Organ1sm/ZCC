@@ -6219,6 +6219,9 @@ fn parseCastExpr(p: *Parser) Error!?Result {
             };
             try p.expectClosing(lp, .RParen);
             try res.un(p, .stmtExpr, tok);
+            while (try p.parseSuffixExpr(res)) |suffix| {
+                res = suffix;
+            }
             return res;
         }
         const ty = (try p.parseTypeName()) orelse {
