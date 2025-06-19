@@ -20,16 +20,3 @@ $ ./hello
 Hello, world!
 $
 ```
-
-```c
----
-## Ignoring errors in tests
-A test can ignore errors by defining a `NO_ERROR_VALIDATION` macro. This means the test will only fail if the
-compilation panics / crashes. This is useful for testing bugs found by fuzzing, where there may be a large number of
-uninteresting diagnostics.
-
-**example:**
-```c
-#define NO_ERROR_VALIDATION
-/* code goes here */
-```
