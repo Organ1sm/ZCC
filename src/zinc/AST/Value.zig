@@ -194,36 +194,26 @@ pub fn floatToInt(v: *Value, destTy: QualType, comp: *Compilation) !FloatToIntCh
         return .outOfRange;
     }
 
-    const hadFraction = @rem(floatVal, 1) != 0;
-    const isNegative = std.math.signbit(floatVal);
-    const floored = @floor(@abs(floatVal));
-
-    var rational = try std.math.big.Rational.init(comp.gpa);
-    defer rational.deinit();
-
-    rational.setFloat(f128, floored) catch |err| switch (err) {
-        error.NonFiniteFloat => {
-            v.* = .{};
-            return .overflow;
-        },
-        error.OutOfMemory => return error.OutOfMemory,
-    };
-
-    // The float is reduced in rational.setFloat, so we assert that denominator is equal to one
-    const bigOne = BigIntConst{ .limbs = &.{1}, .positive = true };
-    assert(rational.q.toConst().eqlAbs(bigOne));
-
-    if (isNegative) {
-        rational.negate();
-    }
-
     const signedness = destTy.signedness(comp);
     const bits: usize = @intCast(destTy.bitSizeof(comp));
 
-    // rational.p.truncate(rational.p.toConst(), signedness: Signedness, bit_count: usize)
-    const fits = rational.p.fitsInTwosComp(signedness, bits);
-    v.* = try intern(comp, .{ .int = .{ .bigInt = rational.p.toConst() } });
-    try rational.p.truncate(&rational.p, signedness, bits);
+    var bigInt: BigIntMutable = .{
+        .limbs = try comp.gpa.alloc(std.math.big.Limb, @max(
+            std.math.big.int.calcLimbLen(floatVal),
+            std.math.big.int.calcTwosCompLimbCount(bits),
+        )),
+        .len = undefined,
+        .positive = undefined,
+    };
+    defer comp.gpa.free(bigInt.limbs);
+    const hadFraction = switch (bigInt.setFloat(floatVal, .trunc)) {
+        .inexact => true,
+        .exact => false,
+    };
+
+    const fits = bigInt.toConst().fitsInTwosComp(signedness, bits);
+    v.* = try intern(comp, .{ .int = .{ .bigInt = bigInt.toConst() } });
+    bigInt.truncate(bigInt.toConst(), signedness, bits);
 
     if (!wasZero and v.isZero(comp)) return .nonZeroToZero;
     if (!fits) return .outOfRange;
