@@ -8054,6 +8054,7 @@ fn parseFloat(p: *Parser, buf: []const u8, suffix: NumberSuffix, tokenIdx: Token
         try p.err(.gnu_imaginary_constant, p.tokenIdx, .{});
         res.qt = try qt.toComplex(p.comp);
         res.value = try Value.intern(p.comp, switch (res.qt.bitSizeof(p.comp)) {
+            32 => .{ .complex = .{ .cf16 = .{ 0.0, val.toFloat(f16, p.comp) } } },
             64 => .{ .complex = .{ .cf32 = .{ 0.0, val.toFloat(f32, p.comp) } } },
             128 => .{ .complex = .{ .cf64 = .{ 0.0, val.toFloat(f64, p.comp) } } },
             160 => .{ .complex = .{ .cf80 = .{ 0.0, val.toFloat(f80, p.comp) } } },

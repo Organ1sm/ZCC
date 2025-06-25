@@ -75,6 +75,7 @@ pub const Key = union(enum) {
     };
 
     pub const Complex = union(enum) {
+        cf16: [2]f16,
         cf32: [2]f32,
         cf64: [2]f64,
         cf80: [2]f80,
@@ -172,6 +173,7 @@ pub const Key = union(enum) {
                 else => unreachable,
             },
             .complexTy => |bits| switch (bits) {
+                16 => return .cf16,
                 32 => return .cf32,
                 64 => return .cf64,
                 80 => return .cf80,
@@ -223,10 +225,11 @@ pub const Ref = enum(u32) {
     zero = max - 16,
     one = max - 17,
     null = max - 18,
-    cf32 = max - 19,
-    cf64 = max - 20,
-    cf80 = max - 21,
-    cf128 = max - 22,
+    cf16 = max - 19,
+    cf32 = max - 20,
+    cf64 = max - 21,
+    cf80 = max - 22,
+    cf128 = max - 23,
     _,
 };
 
@@ -252,10 +255,11 @@ pub const OptRef = enum(u32) {
     zero = max - 16,
     one = max - 17,
     null = max - 18,
-    cf32 = max - 19,
-    cf64 = max - 20,
-    cf80 = max - 21,
-    cf128 = max - 22,
+    cf16 = max - 19,
+    cf32 = max - 20,
+    cf64 = max - 21,
+    cf80 = max - 22,
+    cf128 = max - 23,
     _,
 };
 
@@ -288,6 +292,8 @@ pub const Tag = enum(u8) {
     f80,
     /// `data` is `F128`
     f128,
+    /// `data` is `CF16`
+    cf16,
     /// `data` is `CF32`
     cf32,
     /// `data` is `CF64`
@@ -393,6 +399,22 @@ pub const Tag = enum(u8) {
                 .piece2 = @as(u32, @truncate(bits >> 64)),
                 .piece3 = @as(u32, @truncate(bits >> 96)),
             };
+        }
+    };
+
+    pub const CF16 = struct {
+        piece0: u32,
+
+        pub fn get(self: CF16) [2]f16 {
+            const real: f16 = @bitCast(@as(u16, @truncate(self.piece0 >> 16)));
+            const imag: f16 = @bitCast(@as(u16, @truncate(self.piece0)));
+            return .{ real, imag };
+        }
+
+        fn pack(val: [2]f16) CF16 {
+            const real: u16 = @bitCast(val[0]);
+            const imag: u16 = @bitCast(val[1]);
+            return .{ .piece0 = (@as(u32, real) << 16) | @as(u32, imag) };
         }
     };
 
@@ -637,6 +659,10 @@ pub fn put(self: *Interner, gpa: Allocator, key: Key) !Ref {
         },
 
         .complex => |repr| switch (repr) {
+            .cf16 => |data| self.items.appendAssumeCapacity(.{
+                .tag = .cf16,
+                .data = try self.addExtra(gpa, Tag.CF16.pack(data)),
+            }),
             .cf32 => |data| self.items.appendAssumeCapacity(.{
                 .tag = .cf32,
                 .data = try self.addExtra(gpa, Tag.CF32.pack(data)),
@@ -727,6 +753,7 @@ pub fn get(self: *const Interner, ref: Ref) Key {
         .zero => return .{ .int = .{ .u64 = 0 } },
         .one => return .{ .int = .{ .u64 = 1 } },
         .null => return .null,
+        .cf16 => return .{ .complexTy = 16 },
         .cf32 => return .{ .complexTy = 32 },
         .cf64 => return .{ .complexTy = 64 },
         .cf80 => return .{ .complexTy = 80 },
@@ -790,6 +817,10 @@ pub fn get(self: *const Interner, ref: Ref) Key {
             return .{ .float = .{ .f128 = float.get() } };
         },
 
+        .cf16 => {
+            const components = self.extraData(Tag.CF16, data);
+            return .{ .complex = .{ .cf16 = components.get() } };
+        },
         .cf32 => {
             const components = self.extraData(Tag.CF32, data);
             return .{ .complex = .{ .cf32 = components.get() } };
