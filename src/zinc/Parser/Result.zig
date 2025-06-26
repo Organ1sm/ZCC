@@ -536,7 +536,14 @@ pub fn castToInt(res: *Result, p: *Parser, intQt: QualType, token: TokenIndex) E
 
     // Cast from integer to integer
     else if (!res.qt.eql(intQt, p.comp)) {
-        try res.value.intCast(intQt, p.comp);
+        const oldValue = res.value;
+        const valueChangeKind = try res.value.intCast(intQt, p.comp);
+        switch (valueChangeKind) {
+            .none => {},
+            .truncated => try p.errValueChanged(.int_value_changed, token, res.*, oldValue, intQt),
+            .signChanged => try p.err(.sign_conversion, token, .{ res.qt, intQt }),
+        }
+
         if (srcSK.isReal() and destSK.isReal()) {
             res.qt = intQt;
             try res.implicitCast(p, .IntCast, token);
@@ -1006,7 +1013,7 @@ pub fn castType(res: *Result, p: *Parser, destQt: QualType, operandToken: TokenI
                 try p.err(.cast_to_incomplete_type, lparen, .{destQt});
                 return error.ParsingFailed;
             }
-            try res.value.intCast(destQt, p.comp);
+            _ = try res.value.intCast(destQt, p.comp);
         }
     } else if (destQt.get(p.comp, .@"union")) |unionTy| {
         if (unionTy.layout == null) {

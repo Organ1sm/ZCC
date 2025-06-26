@@ -272,24 +272,50 @@ pub fn intToFloat(v: *Value, destTy: QualType, comp: *Compilation) !void {
     };
 }
 
-/// `.none` value remains unchanged.
-pub fn intCast(v: *Value, destTy: QualType, comp: *Compilation) !void {
-    if (v.isNone()) return;
+pub const IntCastChangeKind = enum {
+    ///value did not change,
+    none,
+    /// Trucation occurred (e.g. i32 to i16)
+    truncated,
+    /// Sign conversion occurred(e.g. i32 to u32)
+    signChanged,
+};
 
-    const bits: usize = @intCast(destTy.bitSizeof(comp));
+/// `.none` value remains unchanged.
+pub fn intCast(v: *Value, destTy: QualType, comp: *Compilation) !IntCastChangeKind {
+    if (v.isNone()) return .none;
+
+    const destBits: usize = @intCast(destTy.bitSizeof(comp));
+    const destSigned = !destTy.isUnsigned(comp);
+
     var space: BigIntSpace = undefined;
     const big = v.toBigInt(&space, comp);
 
+    const valueBits = big.bitCountTwosComp();
+
+    const srcSigned = (!big.positive or big.limbs[0] == 0);
+    const signChange = srcSigned != destSigned;
+
     const limbs = try comp.gpa.alloc(
         std.math.big.Limb,
-        std.math.big.int.calcTwosCompLimbCount(@max(big.bitCountTwosComp(), bits)),
+        std.math.big.int.calcTwosCompLimbCount(@max(valueBits, destBits)),
     );
     defer comp.gpa.free(limbs);
 
     var result = std.math.big.int.Mutable{ .limbs = limbs, .positive = undefined, .len = undefined };
-    result.truncate(big, destTy.signedness(comp), bits);
+    result.truncate(big, destTy.signedness(comp), destBits);
+
+    const truncationOccurred = valueBits > destBits;
 
     v.* = try intern(comp, .{ .int = .{ .bigInt = result.toConst() } });
+
+    if (truncationOccurred) {
+        return .truncated;
+    } else if (signChange) {
+        return .signChanged;
+    } else {
+        return .none;
+    }
 }
 
 pub fn imag(v: Value, comptime T: type, comp: *const Compilation) T {

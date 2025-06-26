@@ -2965,7 +2965,7 @@ fn parseEnumSpec(p: *Parser) Error!QualType {
                 continue;
 
             const symbol = p.symStack.getPtr(field.name, .vars);
-            try symbol.value.intCast(destTy, p.comp);
+            _ = try symbol.value.intCast(destTy, p.comp);
 
             symbol.qt = destTy;
             field.qt = destTy;
