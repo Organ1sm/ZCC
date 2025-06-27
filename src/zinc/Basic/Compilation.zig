@@ -550,6 +550,9 @@ pub fn generateBuiltinMacros(comp: *Compilation, systemDefinesMode: SystemDefine
         \\#define __STDC_NO_VLA__ 1
         \\#define __STDC_UTF_16__ 1
         \\#define __STDC_UTF_32__ 1
+        \\#define __STDC_EMBED_NOT_FOUND__ 0
+        \\#define __STDC_EMBED_FOUND__ 1
+        \\#define __STDC_EMBED_EMPTY__ 2
         \\
     );
 
