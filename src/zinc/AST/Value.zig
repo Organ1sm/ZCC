@@ -293,7 +293,7 @@ pub fn intCast(v: *Value, destTy: QualType, comp: *Compilation) !IntCastChangeKi
 
     const valueBits = big.bitCountTwosComp();
 
-    const srcSigned = (!big.positive or big.limbs[0] == 0);
+    const srcSigned = (!big.positive or big.eqlZero());
     const signChange = srcSigned != destSigned;
 
     const limbs = try comp.gpa.alloc(
