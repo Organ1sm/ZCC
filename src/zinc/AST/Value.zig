@@ -293,7 +293,7 @@ pub fn intCast(v: *Value, destTy: QualType, comp: *Compilation) !IntCastChangeKi
 
     const valueBits = big.bitCountTwosComp();
 
-    const srcSigned = (!big.positive or big.eqlZero());
+    const srcSigned = !big.positive;
     const signChange = srcSigned != destSigned;
 
     const limbs = try comp.gpa.alloc(
@@ -305,10 +305,9 @@ pub fn intCast(v: *Value, destTy: QualType, comp: *Compilation) !IntCastChangeKi
     var result = std.math.big.int.Mutable{ .limbs = limbs, .positive = undefined, .len = undefined };
     result.truncate(big, destTy.signedness(comp), destBits);
 
-    const truncationOccurred = valueBits > destBits;
-
     v.* = try intern(comp, .{ .int = .{ .bigInt = result.toConst() } });
 
+    const truncationOccurred = valueBits > destBits;
     if (truncationOccurred) {
         return .truncated;
     } else if (signChange) {
