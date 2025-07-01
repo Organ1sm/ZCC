@@ -27,6 +27,8 @@ const Builtins = @import("../Builtins.zig");
 const Builtin = Builtins.Builtin;
 const evalBuiltin = @import("../Builtins/eval.zig").eval;
 
+const TargetUtil = @import("../Basic/Target.zig");
+
 const Token = AST.Token;
 const NumberPrefix = Token.NumberPrefix;
 const NumberSuffix = Token.NumberSuffix;
@@ -8182,7 +8184,14 @@ fn fixedSizeInt(p: *Parser, base: u8, buf: []const u8, suffix: NumberSuffix, tok
         const maxInt = try Value.maxInt(res.qt, p.comp);
         if (internedVal.compare(.lte, maxInt, p.comp)) break;
     } else {
-        res.qt = .ulonglong;
+        if (p.comp.langOpts.emulate == .gcc) {
+            if (TargetUtil.hasInt128(p.comp.target))
+                res.qt = .int128
+            else
+                res.qt = .longlong;
+        } else {
+            res.qt = .ulonglong;
+        }
     }
 
     res.node = try p.addNode(.{ .intLiteral = .{ .qt = res.qt, .literalToken = tokenIdx } });
