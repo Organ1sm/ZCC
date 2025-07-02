@@ -102,8 +102,8 @@ pub fn getLineCol(source: Source, loc: Location) ExpandedLocation {
     } else @intCast(source.spliceLocs.len); // No splices found, return length of splices array.
 
     var i: usize = start;
-    var col: u32 = 1; // Column numbers start at 1.
-    var width: u32 = 0; // Width is the calculated visual width of the characters.
+    var col: u32 = 1;
+    var width: u32 = 0;
 
     // Iterate from the start of the line to the given byte offset to calculate column and visual width.
     while (i < loc.byteOffset) : (col += 1) {
@@ -115,12 +115,18 @@ pub fn getLineCol(source: Source, loc: Location) ExpandedLocation {
         const slice = source.buffer[i..];
         if (len > slice.len) break;
 
-        const cp = std.unicode.utf8Decode(source.buffer[i..][0..len]) catch {
-            i += 1;
+        const cp = switch (len) {
+            1 => slice[0],
+            2 => std.unicode.utf8Decode2(slice[0..2].*),
+            3 => std.unicode.utf8Decode3(slice[0..3].*),
+            4 => std.unicode.utf8Decode4(slice[0..4].*),
+            else => unreachable,
+        } catch {
+            i += 1; // Skip invalid UTF-8 sequence and continue.
             continue;
         };
-        width += codepointWidth(cp); // Add the visual width of the code point.
 
+        width += codepointWidth(cp); // Add the visual width of the code point.
         i += len; // Advance by the length of the UTF-8 sequence.
     }
 
