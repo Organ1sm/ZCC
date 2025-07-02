@@ -1104,3 +1104,30 @@ test "comments" {
 test "C23 keywords" {
     try expectTokensExtra("true false alignas alignof bool static_assert thread_local nullptr typeof_unqual", &.{ .KeywordTrue, .KeywordFalse, .KeywordC23Alignas, .KeywordC23Alignof, .KeywordC23Bool, .KeywordC23StaticAssert, .KeywordC23ThreadLocal, .KeywordNullptr, .KeywordTypeofUnqual }, .c23);
 }
+
+test "Lexer fuzz test" {
+    const Context = struct {
+        fn testOne(_: @This(), inputBytes: []const u8) anyerror!void {
+            var comp = Compilation.init(std.testing.allocator, undefined, std.fs.cwd());
+            defer comp.deinit();
+
+            const source = try comp.addSourceFromBuffer("fuzz.c", inputBytes);
+
+            var lexer: Lexer = .{
+                .buffer = source.buffer,
+                .source = source.id,
+                .langOpts = comp.langOpts,
+            };
+
+            while (true) {
+                const prevIndex = lexer.index;
+                const token = lexer.next();
+
+                if (token.is(.Eof)) break;
+                try std.testing.expect(prevIndex < lexer.index);
+            }
+        }
+    };
+
+    return std.testing.fuzz(Context{}, Context.testOne, .{});
+}
