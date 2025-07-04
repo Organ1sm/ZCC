@@ -7566,6 +7566,26 @@ fn parseCallExpr(p: *Parser, lhs: Result) Error!Result {
 
         if (funcQt.get(p.comp, .func)) |funcTy| {
             const param = funcTy.params[argCount];
+            if (param.qt.get(p.comp, .pointer)) |pointerTy| static_check: {
+                const decayedChildQt = pointerTy.decayed orelse break :static_check;
+                const paramArrayTy = decayedChildQt.get(p.comp, .array).?;
+
+                if (paramArrayTy.len != .static) break :static_check;
+
+                const paramArrayLen = paramArrayTy.len.static;
+                const argArrayLen = arg.qt.arrayLen(p.comp);
+
+                if (argArrayLen != null and argArrayLen.? < paramArrayLen) {
+                    try p.err(.array_argument_too_small, paramToken, .{ argArrayLen.?, paramArrayLen });
+                    try p.err(.callee_with_static_array, param.nameToken, .{});
+                }
+
+                if (arg.value.isZero(p.comp)) {
+                    try p.err(.non_null_argument, paramToken, .{});
+                    try p.err(.callee_with_static_array, param.nameToken, .{});
+                }
+            }
+
             if (callExpr.shouldCoerceArg(argCount)) {
                 try arg.coerce(p, param.qt, paramToken, .{ .arg = param.nameToken });
             }
