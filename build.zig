@@ -20,6 +20,7 @@ pub fn build(b: *std.Build) !void {
     const DefaultUnwindlib = b.option([]const u8, "default-unwindlib", "Default unwind library to use (\"none\" \"libgcc\" or \"libunwind\", empty to match runtime library.)") orelse
         if (std.mem.eql(u8, DefaultRtlib, "libgcc")) "libgcc" else "";
     const GCCInstallPrefix = b.option([]const u8, "gcc-install-prefix", "Directory where gcc is installed.") orelse "";
+    const UseLLVM = b.option(bool, "llvm", "Use LLVM backend to generate aro executable");
 
     const systemDefaults = b.addOptions();
     systemDefaults.addOption(bool, "enableLinkerBuildId", EnableLinkerBuildId);
@@ -119,6 +120,8 @@ pub fn build(b: *std.Build) !void {
         .target = target,
         .optimize = mode,
         .single_threaded = true,
+        .use_llvm = UseLLVM,
+        .use_lld = UseLLVM,
     });
     exe.root_module.addImport("zinc", zincModule);
 
@@ -151,6 +154,8 @@ pub fn build(b: *std.Build) !void {
             .root_source_file = b.path("test/test_runner.zig"),
             .target = target,
             .optimize = mode,
+            .use_lld = UseLLVM,
+            .use_llvm = UseLLVM,
         });
         integration_tests.root_module.addImport("zinc", zincModule);
 
@@ -175,6 +180,8 @@ pub fn build(b: *std.Build) !void {
             .root_source_file = b.path("test/record_runner.zig"),
             .optimize = mode,
             .target = target,
+            .use_llvm = UseLLVM,
+            .use_lld = UseLLVM,
         });
         record_tests.root_module.addImport("zinc", zincModule);
 
