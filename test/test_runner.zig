@@ -11,15 +11,23 @@ const AllocatorError = std.mem.Allocator.Error;
 
 var general_purpose_allocator = std.heap.GeneralPurposeAllocator(.{}){};
 
+const AddCommandLineArgsResult = struct {
+    bool,
+    zinc.Preprocessor.LineMarkers,
+    zinc.Compilation.SystemDefinesMode,
+    zinc.Preprocessor.DumpMode,
+};
+
 /// Returns onlyPreprocess and lineMarkers settings if saw -E
 fn addCommandLineArgs(
     comp: *zinc.Compilation,
     file: zinc.Source,
     macroBuffer: anytype,
-) !struct { bool, zinc.Preprocessor.LineMarkers, zinc.Compilation.SystemDefinesMode } {
+) !AddCommandLineArgsResult {
     var onlyPreprocess = false;
     var lineMarkers: zinc.Preprocessor.LineMarkers = .None;
     var systemDefines: zinc.Compilation.SystemDefinesMode = .IncludeSystemDefines;
+    var dumpMode: zinc.Preprocessor.DumpMode = .ResultOnly;
 
     comp.langOpts.gnucVersion = 40201;
 
@@ -38,6 +46,7 @@ fn addCommandLineArgs(
 
         onlyPreprocess = driver.onlyPreprocess;
         systemDefines = driver.systemDefines;
+        dumpMode = driver.debugDumpLetters.getPreprocessorDumpMode();
 
         if (onlyPreprocess) {
             if (driver.lineCommands)
@@ -63,7 +72,7 @@ fn addCommandLineArgs(
         }
     }
 
-    return .{ onlyPreprocess, lineMarkers, systemDefines };
+    return .{ onlyPreprocess, lineMarkers, systemDefines, dumpMode };
 }
 
 fn testOne(allocator: std.mem.Allocator, path: []const u8, testDir: []const u8) !void {
@@ -239,7 +248,7 @@ pub fn main() !void {
         var macroBuffer = std.ArrayList(u8).init(comp.gpa);
         defer macroBuffer.deinit();
 
-        const onlyPreprocess, const lineMarkers, const systemDefines = try addCommandLineArgs(&comp, file, macroBuffer.writer());
+        const onlyPreprocess, const lineMarkers, const systemDefines, const dumpNode = try addCommandLineArgs(&comp, file, macroBuffer.writer());
         const userMacros = try comp.addSourceFromBuffer("<command line>", macroBuffer.items);
 
         const builtinMacros = try comp.generateBuiltinMacros(systemDefines);
@@ -250,6 +259,7 @@ pub fn main() !void {
         if (onlyPreprocess) {
             pp.preserveWhitespace = true;
             pp.linemarkers = lineMarkers;
+            if (dumpNode != .ResultOnly) pp.storeMacroTokens = true;
         }
         try pp.addBuiltinMacros();
 
@@ -310,12 +320,25 @@ pub fn main() !void {
             var output = std.ArrayList(u8).init(gpa);
             defer output.deinit();
 
-            try pp.prettyPrintTokens(output.writer());
-
-            if (std.testing.expectEqualStrings(expectedOutput, output.items))
-                passCount += 1
-            else |_|
-                failCount += 1;
+            try pp.prettyPrintTokens(output.writer(), dumpNode);
+            if (pp.defines.contains("CHECK_PARTIAL_MATCH")) {
+                const index = std.mem.indexOf(u8, output.items, expectedOutput);
+                if (index != null) {
+                    passCount += 1;
+                } else {
+                    failCount += 1;
+                    std.debug.print("\n====== expected to find: =========\n", .{});
+                    std.debug.print("{s}", .{expectedOutput});
+                    std.debug.print("\n======== but did not find it in this: =========\n", .{});
+                    std.debug.print("{s}", .{output.items});
+                    std.debug.print("\n======================================\n", .{});
+                }
+            } else {
+                if (std.testing.expectEqualStrings(expectedOutput, output.items))
+                    passCount += 1
+                else |_|
+                    failCount += 1;
+            }
             continue;
         }
 

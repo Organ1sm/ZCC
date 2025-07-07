@@ -55,6 +55,20 @@ color: ?bool = true,
 nobuiltininc: bool = false,
 nostdinc: bool = false,
 nostdlibinc: bool = false,
+debugDumpLetters: packed struct(u3) {
+    d: bool = false,
+    m: bool = false,
+    n: bool = false,
+
+    /// According to GCC, specifying letters whose behavior conflicts is undefined.
+    /// We follow clang in that `-dM` always takes precedence over `-dD`
+    pub fn getPreprocessorDumpMode(self: @This()) Preprocessor.DumpMode {
+        if (self.m) return .MacrosOnly;
+        if (self.d) return .MacrosAndResult;
+        if (self.n) return .MacroNamesAndResult;
+        return .ResultOnly;
+    }
+} = .{},
 
 /// name of the zinc executable
 zincName: []const u8 = "",
@@ -100,6 +114,9 @@ const usage =
     \\ 
     \\Compile Options:
     \\  -c, --compile           Only run preprocess, compile, and assemble steps
+    \\  -dM                     Output #define directives for all the macros defined during the execution of the preprocessor
+    \\  -dD                     Like -dM except that it outputs both the #define directives and the result of preprocessing
+    \\  -dN                     Like -dD, but emit only the macro names, not their expansions.
     \\  -D <macro>=<value>      Define <macro> to <value> (defaults to 1)
     \\  -E                      Only run the preprocessor 
     \\  -fchar8_t               Enable char8_t (enabled by default in C23 and later)
@@ -251,6 +268,12 @@ pub fn parseArgs(
                 d.systemDefines = .NoSystemDefines;
             } else if (std.mem.eql(u8, arg, "-c") or std.mem.eql(u8, arg, "--compile")) {
                 d.onlyCompile = true;
+            } else if (mem.eql(u8, arg, "-dD")) {
+                d.debugDumpLetters.d = true;
+            } else if (mem.eql(u8, arg, "-dM")) {
+                d.debugDumpLetters.m = true;
+            } else if (mem.eql(u8, arg, "-dN")) {
+                d.debugDumpLetters.n = true;
             } else if (std.mem.eql(u8, arg, "-E")) {
                 d.onlyPreprocess = true;
             } else if (std.mem.eql(u8, arg, "-P") or std.mem.eql(u8, arg, "--no-line-commands")) {
@@ -708,11 +731,18 @@ fn processSource(
     if (d.comp.langOpts.msExtensions)
         d.comp.msCwdSourceId = source.id;
 
+    const dumpNode = d.debugDumpLetters.getPreprocessorDumpMode();
+
     if (d.dumpPP) pp.verbose = true;
     if (d.onlyPreprocess) {
         pp.preserveWhitespace = true;
         if (d.lineCommands)
             pp.linemarkers = if (d.useLineDirectives) .LineDirectives else .NumericDirectives;
+
+        switch (dumpNode) {
+            .MacrosAndResult, .MacroNamesAndResult => pp.storeMacroTokens = true,
+            .ResultOnly, .MacrosOnly => {},
+        }
     }
 
     if (d.dumpRawTokens)
@@ -736,7 +766,7 @@ fn processSource(
         defer if (d.outputName != null) file.close();
 
         var bufWriter = std.io.bufferedWriter(file.writer());
-        pp.prettyPrintTokens(bufWriter.writer()) catch |er|
+        pp.prettyPrintTokens(bufWriter.writer(), dumpNode) catch |er|
             return d.fatal("unable to write result: {s}", .{errorDescription(er)});
 
         bufWriter.flush() catch |er|

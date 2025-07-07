@@ -141,6 +141,11 @@ topExpansionBuffer: ExpandBuffer,
 /// Map from Source.ID to macro name in the `#ifndef` condition which guards the source, if any
 includeGuards: std.AutoHashMapUnmanaged(Source.ID, []const u8) = .{},
 
+/// Store `keyword-define` and `keyword-undef` tokens.
+/// Used to implement preprocessor debug dump options
+/// Must be false unless in -E mode (parser does not handle those token types)
+storeMacroTokens: bool = false,
+
 /// Dump current state to stderr
 verbose: bool = false,
 preserveWhitespace: bool = false,
@@ -463,6 +468,7 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!TokenWithExpans
 
                     .KeywordUndef => {
                         const macroName = (try pp.expectMacroName(&lexer)) orelse continue;
+                        if (pp.storeMacroTokens) try pp.addToken(tokenFromRaw(directive));
                         _ = pp.defines.remove(macroName);
                         try pp.expectNewLine(&lexer);
                     },
@@ -615,7 +621,7 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!TokenWithExpans
                         ifContext.decrement();
                     },
 
-                    .KeywordDefine => try pp.define(&lexer),
+                    .KeywordDefine => try pp.define(&lexer, directive),
                     .KeywordInclude => {
                         try pp.include(&lexer, .First);
                         continue;
@@ -2582,7 +2588,7 @@ fn makeGeneratedToken(pp: *Preprocessor, start: usize, id: TokenType, source: To
 }
 
 /// Defines a new macro and warns  if it  is a duplicate
-fn defineMacro(pp: *Preprocessor, nameToken: RawToken, macro: Macro) Error!void {
+fn defineMacro(pp: *Preprocessor, defineToken: RawToken, nameToken: RawToken, macro: Macro) Error!void {
     const name = pp.getTokenSlice(nameToken);
     const gop = try pp.defines.getOrPut(pp.gpa, name);
     if (gop.found_existing and !gop.value_ptr.eql(macro, pp)) {
@@ -2602,11 +2608,14 @@ fn defineMacro(pp: *Preprocessor, nameToken: RawToken, macro: Macro) Error!void 
     if (pp.verbose)
         pp.verboseLog(nameToken, "macro {s} defined", .{name});
 
+    if (pp.storeMacroTokens)
+        try pp.addToken(tokenFromRaw(defineToken));
+
     gop.value_ptr.* = macro;
 }
 
 /// Handle #define directive
-fn define(pp: *Preprocessor, lexer: *Lexer) Error!void {
+fn define(pp: *Preprocessor, lexer: *Lexer, defineToken: RawToken) Error!void {
     // get the macro name and validate.
     const macroName = lexer.nextNoWhiteSpace();
     if (macroName.is(.KeywordDefined)) {
@@ -2630,7 +2639,7 @@ fn define(pp: *Preprocessor, lexer: *Lexer) Error!void {
 
     var first = lexer.next();
     switch (first.id) {
-        .NewLine, .Eof => return pp.defineMacro(macroName, .{
+        .NewLine, .Eof => return pp.defineMacro(defineToken, macroName, .{
             .params = &.{},
             .tokens = &.{},
             .varArgs = false,
@@ -2638,7 +2647,7 @@ fn define(pp: *Preprocessor, lexer: *Lexer) Error!void {
             .loc = tokenFromRaw(macroName).loc,
         }),
         .WhiteSpace => first = lexer.next(),
-        .LParen => return pp.defineFunc(lexer, macroName, first),
+        .LParen => return pp.defineFunc(lexer, defineToken, macroName, first),
         else => try pp.err(first, .whitespace_after_macro_name, .{}),
     }
 
@@ -2701,7 +2710,7 @@ fn define(pp: *Preprocessor, lexer: *Lexer) Error!void {
     }
 
     const list = try pp.arena.allocator().dupe(RawToken, pp.tokenBuffer.items);
-    try pp.defineMacro(macroName, .{
+    try pp.defineMacro(defineToken, macroName, .{
         .loc = tokenFromRaw(macroName).loc,
         .tokens = list,
         .params = undefined,
@@ -2884,7 +2893,13 @@ fn embed(pp: *Preprocessor, lexer: *Lexer) MacroError!void {
 }
 
 /// Handle a function like #define directive
-fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: RawToken, lParen: RawToken) Error!void {
+fn defineFunc(
+    pp: *Preprocessor,
+    lexer: *Lexer,
+    defineToken: RawToken,
+    macroName: RawToken,
+    lParen: RawToken,
+) Error!void {
     assert(macroName.id.isMacroIdentifier());
     var params = std.ArrayList([]const u8).init(pp.gpa);
     defer params.deinit();
@@ -3083,7 +3098,7 @@ fn defineFunc(pp: *Preprocessor, lexer: *Lexer, macroName: RawToken, lParen: Raw
 
     const paramList = try pp.arena.allocator().dupe([]const u8, params.items);
     const tokenList = try pp.arena.allocator().dupe(RawToken, pp.tokenBuffer.items);
-    try pp.defineMacro(macroName, .{
+    try pp.defineMacro(defineToken, macroName, .{
         .isFunc = true,
         .params = paramList,
         .varArgs = varArgs or gnuVarArgs.len != 0,
@@ -3375,8 +3390,83 @@ fn printLinemarker(
 // After how many empty lines are needed to replace them with linemarkers.
 const CollapseNewlines = 8;
 
+pub const DumpMode = enum {
+    ResultOnly,
+    /// Output only #define directives for all the macros defined during the execution of the preprocessor
+    /// Only macros which are still defined at the end of preprocessing are printed.
+    /// Only the most recent definition is printed
+    /// Defines are printed in arbitrary order
+    MacrosOnly,
+    /// Standard preprocessor output; but additionally output #define's and #undef's for macros as they are encountered
+    MacrosAndResult,
+    /// Same as macros_and_result, except only the macro name is printed for #define's
+    MacroNamesAndResult,
+};
+
+/// Pretty-print the macro define or undef at location `loc`.
+/// We re-tokenize the directive because we are printing a macro that may have the same name as one in
+/// `pp.defines` but a different definition (due to being #undef'ed and then redefined)
+fn prettyPrintMacro(
+    pp: *Preprocessor,
+    w: anytype,
+    loc: Source.Location,
+    parts: enum { NameOnly, NameAndBody },
+) !void {
+    const source = pp.comp.getSource(loc.id);
+    var lexer: Lexer = .{
+        .buffer = source.buffer,
+        .langOpts = pp.comp.langOpts,
+        .source = source.id,
+        .index = loc.byteOffset,
+    };
+
+    // avoid printing multiple whitespace if /* */ comments are within the macro def
+    var prevWs = false;
+    // do not print comments before the name token is seen.
+    var sawName = false;
+    while (true) {
+        const tok = lexer.next();
+        switch (tok.id) {
+            .Comment => {
+                if (sawName) {
+                    prevWs = false;
+                    try w.print("{s}", .{pp.getTokenSlice(tok)});
+                }
+            },
+            .NewLine, .Eof => break,
+            .WhiteSpace => {
+                if (!prevWs) {
+                    try w.writeByte(' ');
+                    prevWs = true;
+                }
+            },
+            else => {
+                prevWs = false;
+                try w.print("{s}", .{pp.getTokenSlice(tok)});
+            },
+        }
+        if (tok.id == .Identifier or tok.id == .ExtendedIdentifier) {
+            if (parts == .NameOnly) break;
+            sawName = true;
+        }
+    }
+}
+
+fn prettyPrintMacrosOnly(pp: *Preprocessor, w: anytype) !void {
+    var it = pp.defines.valueIterator();
+    while (it.next()) |macro| {
+        if (macro.isBuiltin) continue;
+
+        try w.writeAll("#define ");
+        try pp.prettyPrintMacro(w, macro.loc, .NameAndBody);
+        try w.writeByte('\n');
+    }
+}
+
 /// pretty print tokens and try to preserve whitespace
-pub fn prettyPrintTokens(pp: *Preprocessor, w: anytype) !void {
+pub fn prettyPrintTokens(pp: *Preprocessor, w: anytype, macroDumpNode: DumpMode) !void {
+    if (macroDumpNode == .MacrosOnly) return pp.prettyPrintMacrosOnly(w);
+
     const tokenIds = pp.tokens.items(.id);
 
     var lastNewline = true;
@@ -3475,6 +3565,21 @@ pub fn prettyPrintTokens(pp: *Preprocessor, w: anytype) !void {
                 lastNewline = true;
             },
 
+            .KeywordDefine, .KeywordUndef => {
+                switch (macroDumpNode) {
+                    .MacrosAndResult, .MacroNamesAndResult => {
+                        try w.writeByte('#');
+                        try pp.prettyPrintMacro(
+                            w,
+                            cur.loc,
+                            if (macroDumpNode == .MacrosAndResult) .NameAndBody else .NameOnly,
+                        );
+                    },
+                    .ResultOnly => unreachable, // pp.storeMacroTokens should be false for standard
+                    .MacrosOnly => unreachable, // handled by prettyPrintMacroOnly()
+                }
+            },
+
             else => {
                 const slice = pp.expandedSlice(cur);
                 try w.writeAll(slice);
@@ -3533,7 +3638,7 @@ test "Preserve pragma tokens sometimes" {
             const eof = try pp.preprocess(testRunnerMacros);
             try pp.addToken(eof);
 
-            try pp.prettyPrintTokens(buf.writer());
+            try pp.prettyPrintTokens(buf.writer(), .ResultOnly);
             return allocator.dupe(u8, buf.items);
         }
 
