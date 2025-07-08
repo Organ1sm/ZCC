@@ -685,9 +685,9 @@ pub fn main(d: *Driver, tc: *Toolchain, args: []const []const u8, comptime fastE
     const userDefinedMacros = try d.comp.addSourceFromBuffer("<command line>", macroBuffer.items);
 
     if (fastExit and d.inputs.items.len == 1) {
-        processSource(tc, d.inputs.items[0], builtinMacros, userDefinedMacros, fastExit) catch |e| switch (e) {
+        d.processSource(tc, d.inputs.items[0], builtinMacros, userDefinedMacros, fastExit) catch |e| switch (e) {
             error.FatalError => {
-                d.renderErrors();
+                d.printDiagnosticsStats();
                 d.exitWithCleanup(1);
             },
             else => |er| return er,
@@ -821,7 +821,7 @@ fn processSource(
 
     // do not compile if there were errors
     if (d.diagnostics.errors != prevErrors) {
-        if (fastExit) exitWithCleanup(1);
+        if (fastExit) d.exitWithCleanup(1);
         return; // Don't compile if there were errors
     }
 
@@ -911,7 +911,7 @@ fn processSource(
     d.tempFileCount += 1;
 
     if (fastExit)
-        try invokeLinker(tc, fastExit);
+        try d.invokeLinker(tc, fastExit);
 }
 
 fn printLinkerArgs(items: []const []const u8) !void {
