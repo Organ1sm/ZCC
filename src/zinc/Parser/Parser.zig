@@ -6890,7 +6890,9 @@ fn parseUnaryExpr(p: *Parser) Error!?Result {
                 .gcc => operand.value = Value.zero,
                 .clang => {
                     if (operand.value.is(.int, p.comp) or operand.value.is(.float, p.comp))
-                        operand.value = Value.zero;
+                        operand.value = Value.zero
+                    else
+                        operand.value = .{};
                 },
             }
 

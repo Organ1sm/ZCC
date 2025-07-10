@@ -55,6 +55,8 @@ color: ?bool = true,
 nobuiltininc: bool = false,
 nostdinc: bool = false,
 nostdlibinc: bool = false,
+desiredPicLevel: ?backend.CodeGenOptions.PicLevel = null,
+desiredPieLevel: ?backend.CodeGenOptions.PicLevel = null,
 debugDumpLetters: packed struct(u3) {
     d: bool = false,
     m: bool = false,
@@ -123,6 +125,8 @@ const usage =
     \\  -fno-char8_t            Disable char8_t (disabled by default for pre-C23)
     \\  -fcolor-diagnostics     Enable colors in diagnostics
     \\  -fno-color-diagnostics  Disable colors in diagnostics
+    \\  -fcommon                Place uninitialized global variables in a common block
+    \\  -fno-common             Place uninitialized global variables in the BSS section of the object file
     \\  -fdeclspec              Enable support for __declspec attributes
     \\  -fno-declspec           Disable support for __declspec attributes
     \\  -ffp-eval-method=[source|double|extended]
@@ -153,6 +157,10 @@ const usage =
     \\  -fnative-half-type      Use the native half type for __fp16 instead of promoting to float
     \\  -fnative-half-arguments-and-returns
     \\                          Allow half-precision function arguments and return values
+    \\  -fpic                   Generate position-independent code (PIC) suitable for use in a shared library, if supported for the target machine
+    \\  -fPIC                   Similar to -fpic but avoid any limit on the size of the global offset table
+    \\  -fpie                   Similar to -fpic, but the generated position-independent code can only be linked into executables
+    \\  -fPIE                   Similar to -fPIC, but the generated position-independent code can only be linked into executables
     \\  -I <dir>                Add directory to include search path
     \\  -isystem                Add directory to system include search path
     \\  --emulate=[clang|gcc|msvc]
@@ -290,6 +298,10 @@ pub fn parseArgs(
                 d.color = true;
             } else if (std.mem.eql(u8, arg, "-fno-color-diagnostics")) {
                 d.color = false;
+            } else if (mem.eql(u8, arg, "-fcommon")) {
+                d.comp.codegenOptions.common = true;
+            } else if (mem.eql(u8, arg, "-fno-common")) {
+                d.comp.codegenOptions.common = false;
             } else if (std.mem.eql(u8, arg, "-fshort-enums")) {
                 d.comp.langOpts.shortEnums = true;
             } else if (std.mem.eql(u8, arg, "-fno-short-enums")) {
@@ -335,6 +347,25 @@ pub fn parseArgs(
                 d.comp.langOpts.useNativeHalfType = true;
             } else if (std.mem.eql(u8, arg, "-fnative-half-arguments-and-returns")) {
                 d.comp.langOpts.allowHalfArgsAndReturns = true;
+            } else if (mem.eql(u8, arg, "-fno-pic") or
+                mem.eql(u8, arg, "-fno-PIC") or
+                mem.eql(u8, arg, "-fno-pie") or
+                mem.eql(u8, arg, "-fno-PIE"))
+            {
+                d.desiredPicLevel = .none;
+                d.desiredPieLevel = .none;
+            } else if (mem.eql(u8, arg, "-fpic")) {
+                d.desiredPicLevel = .one;
+                d.desiredPieLevel = .none;
+            } else if (mem.eql(u8, arg, "-fPIC")) {
+                d.desiredPicLevel = .two;
+                d.desiredPieLevel = .none;
+            } else if (mem.eql(u8, arg, "-fpie")) {
+                d.desiredPicLevel = .one;
+                d.desiredPieLevel = .one;
+            } else if (mem.eql(u8, arg, "-fPIE")) {
+                d.desiredPicLevel = .two;
+                d.desiredPieLevel = .two;
             } else if (std.mem.startsWith(u8, arg, "-I")) {
                 var path = arg["-I".len..];
                 if (path.len == 0) {
@@ -554,6 +585,11 @@ pub fn parseArgs(
         return d.fatal("invalid value '{0s}' in '-fgnuc-version={0s}'", .{gnucVersion});
     }
     d.comp.langOpts.gnucVersion = version.toUnsigned();
+
+    const wantsPie: ?bool = if (d.desiredPieLevel) |level| level != .none else null;
+    const picLevel, const isPie = Target.getPICMode(d.comp.target, d.desiredPicLevel, wantsPie);
+    d.comp.codegenOptions.picLevel = picLevel;
+    d.comp.codegenOptions.isPie = isPie;
 
     return false;
 }

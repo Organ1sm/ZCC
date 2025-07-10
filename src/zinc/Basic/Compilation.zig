@@ -5,6 +5,7 @@ const assert = std.debug.assert;
 
 const backend = @import("backend");
 const Interner = backend.Interner;
+const CodeGenOptions = backend.CodeGenOptions;
 
 const Source = @import("Source.zig");
 const Diagnostics = @import("../Basic/Diagnostics.zig");
@@ -100,6 +101,7 @@ pub const Environment = struct {
 gpa: Allocator,
 diagnostics: *Diagnostics,
 
+codegenOptions: CodeGenOptions = .default,
 environment: Environment = .{},
 sources: std.StringArrayHashMapUnmanaged(Source) = .{},
 includeDirs: std.ArrayListUnmanaged([]const u8) = .{},
@@ -522,6 +524,24 @@ pub fn generateSystemDefines(comp: *Compilation, w: anytype) !void {
         \\#define __DECIMAL_DIG__ __LDBL_DECIMAL_DIG__
         \\
     );
+
+    switch (comp.codegenOptions.picLevel) {
+        .none => {},
+        .one, .two => {
+            try w.print(
+                \\#define __pic__ {0d}
+                \\#define __PIC__ {0d}
+                \\
+            , .{@intFromEnum(comp.codegenOptions.picLevel)});
+            if (comp.codegenOptions.isPie) {
+                try w.print(
+                    \\#define __pie__ {0d}
+                    \\#define __PIE__ {0d}
+                    \\
+                , .{@intFromEnum(comp.codegenOptions.picLevel)});
+            }
+        },
+    }
 }
 
 /// Generate builtin macros that will be available to each source file.
