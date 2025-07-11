@@ -368,6 +368,9 @@ pub fn adjustTypes(lhs: *Result, token: TokenIndex, rhs: *Result, p: *Parser, ki
             if (lhsSK.isPointer() == rhsSK.isPointer() or lhsSK.isInt() == rhsSK.isInt())
                 return lhs.invalidBinTy(token, rhs, p);
 
+            if (lhsSK == .VoidPointer or rhsSK == .VoidPointer)
+                try p.err(.gnu_pointer_arith, token, .{});
+
             if (lhsSK == .NullptrTy) try lhs.nullToPointer(p, .voidPointer, token);
             if (rhsSK == .NullptrTy) try rhs.nullToPointer(p, .voidPointer, token);
 
@@ -383,6 +386,9 @@ pub fn adjustTypes(lhs: *Result, token: TokenIndex, rhs: *Result, p: *Parser, ki
         .sub => {
             // if both aren't arithmetic then either both should be pointers or just a
             if (!lhsSK.isPointer() or !(rhsSK.isPointer() or rhsSK.isInt())) return lhs.invalidBinTy(token, rhs, p);
+
+            if (lhsSK == .VoidPointer)
+                try p.err(.gnu_pointer_arith, token, .{});
 
             if (lhsSK == .NullptrTy) try lhs.nullToPointer(p, .voidPointer, token);
             if (rhsSK == .NullptrTy) try rhs.nullToPointer(p, .voidPointer, token);

@@ -6639,8 +6639,9 @@ fn parseUnaryExpr(p: *Parser) Error!?Result {
             var operand = try p.expect(parseCastExpr);
 
             const sk = operand.qt.scalarKind(p.comp);
-            if (sk == .None)
-                try p.err(.invalid_argument_un, token, .{operand.qt});
+            if (sk == .VoidPointer) try p.err(.gnu_pointer_arith, token, .{});
+            if (sk == .None) try p.err(.invalid_argument_un, token, .{operand.qt});
+
             if (!sk.isReal())
                 try p.err(.complex_prefix_postfix_op, p.tokenIdx, .{operand.qt});
 
@@ -6666,9 +6667,11 @@ fn parseUnaryExpr(p: *Parser) Error!?Result {
             p.tokenIdx += 1;
 
             var operand = try p.expect(parseCastExpr);
+
             const sk = operand.qt.scalarKind(p.comp);
-            if (sk == .None)
-                try p.err(.invalid_argument_un, token, .{operand.qt});
+            if (sk == .VoidPointer) try p.err(.gnu_pointer_arith, token, .{});
+            if (sk == .None) try p.err(.invalid_argument_un, token, .{operand.qt});
+
             if (!sk.isReal())
                 try p.err(.complex_prefix_postfix_op, p.tokenIdx, .{operand.qt});
 
@@ -7080,8 +7083,8 @@ fn parseSuffixExpr(p: *Parser, lhs: Result) Error!?Result {
             var operand = lhs;
 
             const scalarKind = operand.qt.scalarKind(p.comp);
-            if (scalarKind == .None)
-                try p.err(.invalid_argument_un, p.tokenIdx, .{operand.qt});
+            if (scalarKind == .VoidPointer) try p.err(.gnu_pointer_arith, p.tokenIdx, .{});
+            if (scalarKind == .None) try p.err(.invalid_argument_un, p.tokenIdx, .{operand.qt});
 
             if (!scalarKind.isReal())
                 try p.err(.complex_prefix_postfix_op, p.tokenIdx, .{operand.qt});
@@ -7101,8 +7104,8 @@ fn parseSuffixExpr(p: *Parser, lhs: Result) Error!?Result {
             var operand = lhs;
 
             const scalarKind = operand.qt.scalarKind(p.comp);
-            if (scalarKind == .None)
-                try p.err(.invalid_argument_un, p.tokenIdx, .{operand.qt});
+            if (scalarKind == .VoidPointer) try p.err(.gnu_pointer_arith, p.tokenIdx, .{});
+            if (scalarKind == .None) try p.err(.invalid_argument_un, p.tokenIdx, .{operand.qt});
 
             if (!scalarKind.isReal())
                 try p.err(.complex_prefix_postfix_op, p.tokenIdx, .{operand.qt});
