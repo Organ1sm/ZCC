@@ -6249,8 +6249,8 @@ fn parseCastExpr(p: *Parser) Error!?Result {
     switch (p.currToken()) {
         .BuiltinChooseExpr => return try p.parseBuiltinChooseExpr(),
         .BuiltinVaArg => return try p.builtinVaArg(),
-        .BuiltinOffsetof => return try p.builtinOffsetof(false),
-        .BuiltinBitOffsetof => return try p.builtinOffsetof(true),
+        .BuiltinOffsetof => return try p.builtinOffsetof(.Bytes),
+        .BuiltinBitOffsetof => return try p.builtinOffsetof(.Bits),
         .BuiltinTypesCompatibleP => return try p.typesCompatible(),
         // TODO: other special-cased builtins
         else => {},
@@ -6377,7 +6377,9 @@ fn builtinVaArg(p: *Parser) Error!Result {
     };
 }
 
-fn builtinOffsetof(p: *Parser, wantsBits: bool) Error!Result {
+const OffsetKind = enum { Bits, Bytes };
+
+fn builtinOffsetof(p: *Parser, offsetKind: OffsetKind) Error!Result {
     const builtinToken = p.tokenIdx;
     p.tokenIdx += 1;
 
@@ -6404,7 +6406,7 @@ fn builtinOffsetof(p: *Parser, wantsBits: bool) Error!Result {
 
     _ = try p.expectToken(.Comma);
 
-    const offsetofExpr = try p.offsetofMemberDesignator(recordTy, operandQt, wantsBits, builtinToken);
+    const offsetofExpr = try p.offsetofMemberDesignator(recordTy, operandQt, offsetKind, builtinToken);
 
     try p.expectClosing(lparen, .RParen);
 
@@ -6426,7 +6428,7 @@ fn offsetofMemberDesignator(
     p: *Parser,
     baseRecordTy: Type.Record,
     baseQt: QualType,
-    wantBits: bool,
+    offsetKind: OffsetKind,
     accessToken: TokenIndex,
 ) Error!Result {
     errdefer p.skipTo(.RParen);
@@ -6502,7 +6504,7 @@ fn offsetofMemberDesignator(
         else => break,
     };
 
-    const val = try Value.int(if (wantBits) totalOffset else totalOffset / 8, p.comp);
+    const val = try Value.int(if (offsetKind == .Bits) totalOffset else totalOffset / 8, p.comp);
     return .{ .qt = baseQt, .value = val, .node = lhs.node };
 }
 
