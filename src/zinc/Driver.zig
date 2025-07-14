@@ -2,9 +2,12 @@ const std = @import("std");
 const mem = std.mem;
 const Allocator = mem.Allocator;
 const process = std.process;
+const StaticStringSet = std.StaticStringMap(void);
+
 const backend = @import("backend");
 const IR = backend.Ir;
 const Object = backend.Object;
+
 const CodeGen = @import("CodeGen/CodeGen.zig");
 const Compilation = @import("Basic/Compilation.zig");
 const Diagnostics = @import("Basic/Diagnostics.zig");
@@ -15,6 +18,17 @@ const Source = @import("Basic/Source.zig");
 const Toolchain = @import("Toolchain.zig");
 const Target = @import("Basic/Target.zig");
 const GCCVersion = @import("Driver/GCCVersion.zig");
+
+const PicRelatedOptions = StaticStringSet.initComptime(.{
+    .{"-fpic"},
+    .{"-fno-pic"},
+    .{"-fPIC"},
+    .{"-fno-PIC"},
+    .{"-fpie"},
+    .{"-fno-pie"},
+    .{"-fPIE"},
+    .{"-fno-PIE"},
+});
 
 pub const Linker = enum {
     ld,
@@ -57,6 +71,13 @@ nostdinc: bool = false,
 nostdlibinc: bool = false,
 desiredPicLevel: ?backend.CodeGenOptions.PicLevel = null,
 desiredPieLevel: ?backend.CodeGenOptions.PicLevel = null,
+appleKext: bool = false,
+mkernel: bool = false,
+mabicalls: ?bool = null,
+dynamicNopic: ?bool = null,
+ropi: bool = false,
+rwpi: bool = false,
+cmodel: std.builtin.CodeModel = .default,
 debugDumpLetters: packed struct(u3) {
     d: bool = false,
     m: bool = false,
@@ -121,6 +142,7 @@ const usage =
     \\  -dN                     Like -dD, but emit only the macro names, not their expansions.
     \\  -D <macro>=<value>      Define <macro> to <value> (defaults to 1)
     \\  -E                      Only run the preprocessor 
+    \\  -fapple-kext            Use Apple's kernel extensions ABI
     \\  -fchar8_t               Enable char8_t (enabled by default in C23 and later)
     \\  -fno-char8_t            Disable char8_t (disabled by default for pre-C23)
     \\  -fcolor-diagnostics     Enable colors in diagnostics
@@ -161,10 +183,18 @@ const usage =
     \\  -fPIC                   Similar to -fpic but avoid any limit on the size of the global offset table
     \\  -fpie                   Similar to -fpic, but the generated position-independent code can only be linked into executables
     \\  -fPIE                   Similar to -fPIC, but the generated position-independent code can only be linked into executables
+    \\  -frwpi                  Generate read-write position independent code (ARM only)
+    \\  -fno-rwpi               Disable generate read-write position independent code (ARM only).
+    \\  -fropi                  Generate read-only position independent code (ARM only)
+    \\  -fno-ropi               Disable generate read-only position independent code (ARM only). 
     \\  -I <dir>                Add directory to include search path
     \\  -isystem                Add directory to system include search path
     \\  --emulate=[clang|gcc|msvc]
     \\                          Select which C compiler to emulate (default clang)
+    \\  -mabicalls              Enable SVR4-style position-independent code (Mips only)
+    \\  -mno-abicalls           Disable SVR4-style position-independent code (Mips only)
+    \\  -mcmodel=<code-model>   Generate code for the given code model
+    \\  -mkernel                Enable kernel development mode
     \\  -nobuiltininc           Do not search the compiler's builtin directory for include files
     \\  -nostdinc, --no-standard-includes
     \\                          Do not search the standard system directories or compiler builtin directories for include files.
@@ -230,6 +260,8 @@ pub fn parseArgs(
     var commentArg: []const u8 = "";
     var hosted: ?bool = null;
     var gnucVersion: []const u8 = "4.2.1"; // default value set by clang
+    var picArg: []const u8 = "";
+
     var i: usize = 1;
     while (i < args.len) : (i += 1) {
         const arg = args[i];
@@ -290,6 +322,19 @@ pub fn parseArgs(
                 d.useLineDirectives = true;
             } else if (std.mem.eql(u8, arg, "-fno-use-line-directives")) {
                 d.useLineDirectives = false;
+            } else if (mem.eql(u8, arg, "-fapple-kext")) {
+                d.appleKext = true;
+            } else if (option(arg, "-mcmodel=")) |cmodel| {
+                d.cmodel = std.meta.stringToEnum(std.builtin.CodeModel, cmodel) orelse
+                    return d.fatal("unsupported machine code model: '{s}'", .{arg});
+            } else if (mem.eql(u8, arg, "-mkernel")) {
+                d.mkernel = true;
+            } else if (mem.eql(u8, arg, "-mdynamic-no-pic")) {
+                d.dynamicNopic = true;
+            } else if (mem.eql(u8, arg, "-mabicalls")) {
+                d.mabicalls = true;
+            } else if (mem.eql(u8, arg, "-mno-abicalls")) {
+                d.mabicalls = false;
             } else if (mem.eql(u8, arg, "-fchar8_t")) {
                 d.comp.langOpts.hasChar8tOverride = true;
             } else if (mem.eql(u8, arg, "-fno-char8_t")) {
@@ -347,25 +392,16 @@ pub fn parseArgs(
                 d.comp.langOpts.useNativeHalfType = true;
             } else if (std.mem.eql(u8, arg, "-fnative-half-arguments-and-returns")) {
                 d.comp.langOpts.allowHalfArgsAndReturns = true;
-            } else if (mem.eql(u8, arg, "-fno-pic") or
-                mem.eql(u8, arg, "-fno-PIC") or
-                mem.eql(u8, arg, "-fno-pie") or
-                mem.eql(u8, arg, "-fno-PIE"))
-            {
-                d.desiredPicLevel = .none;
-                d.desiredPieLevel = .none;
-            } else if (mem.eql(u8, arg, "-fpic")) {
-                d.desiredPicLevel = .one;
-                d.desiredPieLevel = .none;
-            } else if (mem.eql(u8, arg, "-fPIC")) {
-                d.desiredPicLevel = .two;
-                d.desiredPieLevel = .none;
-            } else if (mem.eql(u8, arg, "-fpie")) {
-                d.desiredPicLevel = .one;
-                d.desiredPieLevel = .one;
-            } else if (mem.eql(u8, arg, "-fPIE")) {
-                d.desiredPicLevel = .two;
-                d.desiredPieLevel = .two;
+            } else if (PicRelatedOptions.has(arg)) {
+                picArg = arg;
+            } else if (mem.eql(u8, arg, "-fropi")) {
+                d.ropi = true;
+            } else if (mem.eql(u8, arg, "-fno-ropi")) {
+                d.ropi = false;
+            } else if (mem.eql(u8, arg, "-frwpi")) {
+                d.rwpi = true;
+            } else if (mem.eql(u8, arg, "-fno-rwpi")) {
+                d.rwpi = false;
             } else if (std.mem.startsWith(u8, arg, "-I")) {
                 var path = arg["-I".len..];
                 if (path.len == 0) {
@@ -586,8 +622,7 @@ pub fn parseArgs(
     }
     d.comp.langOpts.gnucVersion = version.toUnsigned();
 
-    const wantsPie: ?bool = if (d.desiredPieLevel) |level| level != .none else null;
-    const picLevel, const isPie = Target.getPICMode(d.comp.target, d.desiredPicLevel, wantsPie);
+    const picLevel, const isPie = try d.getPICMode(picArg);
     d.comp.codegenOptions.picLevel = picLevel;
     d.comp.codegenOptions.isPie = isPie;
 
@@ -620,6 +655,13 @@ pub fn warn(d: *Driver, fmt: []const u8, args: anytype) Compilation.Error!void {
 
     try Diagnostics.formatArgs(buf.writer(), fmt, args);
     try d.diagnostics.add(.{ .kind = .warning, .text = buf.items, .location = null });
+}
+
+pub fn unsupportedOptionForTarget(d: *Driver, target: std.Target, opt: []const u8) Compilation.Error!void {
+    try d.err(
+        "unsupported option '{s}' for target '{s}-{s}-{s}'",
+        .{ opt, @tagName(target.cpu.arch), @tagName(target.os.tag), @tagName(target.abi) },
+    );
 }
 
 pub fn fatal(d: *Driver, comptime fmt: []const u8, args: anytype) error{ FatalError, OutOfMemory } {
@@ -1004,4 +1046,172 @@ fn exitWithCleanup(d: *Driver, code: u8) noreturn {
     for (d.linkObjects.items[d.linkObjects.items.len - d.tempFileCount ..]) |obj|
         std.fs.deleteFileAbsolute(obj) catch {};
     std.process.exit(code);
+}
+
+/// Parses the various -fpic/-fPIC/-fpie/-fPIE arguments.
+/// Then, smooshes them together with platform defaults, to decide whether
+/// this compile should be using PIC mode or not.
+/// Returns a tuple of ( backend.CodeGenOptions.PicLevel, IsPIE).
+pub fn getPICMode(d: *Driver, lastpic: []const u8) Compilation.Error!struct { backend.CodeGenOptions.PicLevel, bool } {
+    const eqlIgnoreCase = std.ascii.eqlIgnoreCase;
+
+    const target = d.comp.target;
+    const linker = d.useLinker orelse @import("system-defaults").linker;
+    const isBfdLinker = eqlIgnoreCase(linker, "bfd");
+
+    const isPieDefault = switch (Target.isPIEDefault(target)) {
+        .Yes => true,
+        .No => false,
+        .DependsOnLinker => if (isBfdLinker)
+            target.cpu.arch == .x86_64 // CrossWindows
+        else
+            false, //MSVC
+    };
+    const isPicDefault = switch (Target.isPICdefault(target)) {
+        .Yes => true,
+        .No => false,
+        .DependsOnLinker => if (isBfdLinker)
+            target.cpu.arch == .x86_64
+        else
+            (target.cpu.arch == .x86_64 or target.cpu.arch == .aarch64),
+    };
+
+    var pie: bool = isPieDefault;
+    var pic: bool = pie or isPicDefault;
+    // The Darwin/MachO default to use PIC does not apply when using -static.
+    if (target.ofmt == .macho and d.static) {
+        pic, pie = .{ false, false };
+    }
+    var isPicLevelTwo = pic;
+
+    const kernelOrKext: bool = d.mkernel or d.appleKext;
+
+    // Android-specific defaults for PIC/PIE
+    if (target.abi.isAndroid()) {
+        switch (target.cpu.arch) {
+            .arm,
+            .armeb,
+            .thumb,
+            .thumbeb,
+            .aarch64,
+            .mips,
+            .mipsel,
+            .mips64,
+            .mips64el,
+            => pic = true, // "-fpic"
+
+            .x86, .x86_64 => {
+                pic = true; // "-fPIC"
+                isPicLevelTwo = true;
+            },
+            else => {},
+        }
+    }
+
+    // OHOS-specific defaults for PIC/PIE
+    if (target.abi == .ohos and target.cpu.arch == .aarch64)
+        pic = true;
+
+    // OpenBSD-specific defaults for PIE
+    if (target.os.tag == .openbsd) {
+        switch (target.cpu.arch) {
+            .arm, .aarch64, .mips64, .mips64el, .x86, .x86_64 => isPicLevelTwo = false, // "-fpie"
+            .powerpc, .sparc64 => isPicLevelTwo = true, // "-fPIE"
+            else => {},
+        }
+    }
+
+    // The last argument relating to either PIC or PIE wins, and no
+    // other argument is used. If the last argument is any flavor of the
+    // '-fno-...' arguments, both PIC and PIE are disabled. Any PIE
+    // option implicitly enables PIC at the same level.
+    if (target.os.tag == .windows and
+        !Target.isCygwinMinGW(target) and
+        (eqlIgnoreCase(lastpic, "-fpic") or eqlIgnoreCase(lastpic, "-fpie"))) // -fpic/-fPIC, -fpie/-fPIE
+    {
+        try d.unsupportedOptionForTarget(target, lastpic);
+        if (target.cpu.arch == .x86_64)
+            return .{ .two, false };
+        return .{ .none, false };
+    }
+
+    // Check whether the tool chain trumps the PIC-ness decision. If the PIC-ness
+    // is forced, then neither PIC nor PIE flags will have no effect.
+    const forced = switch (Target.isPICDefaultForced(target)) {
+        .Yes => true,
+        .No => false,
+        .DependsOnLinker => if (isBfdLinker) target.cpu.arch == .x86_64 else target.cpu.arch == .aarch64 or target.cpu.arch == .x86_64,
+    };
+    if (!forced) {
+        // -fpic/-fPIC, -fpie/-fPIE
+        if (eqlIgnoreCase(lastpic, "-fpic") or eqlIgnoreCase(lastpic, "-fpie")) {
+            pie = eqlIgnoreCase(lastpic, "-fpie");
+            pic = pie or eqlIgnoreCase(lastpic, "-fpic");
+            isPicLevelTwo = mem.eql(u8, lastpic, "-fPIE") or mem.eql(u8, lastpic, "-fPIC");
+        } else {
+            pic, pie = .{ false, false };
+            if (Target.isPS(target)) {
+                if (d.cmodel != .kernel) {
+                    pic = true;
+                    try d.warn(
+                        "option '{s}' was ignored by the {s} toolchain, using '-fPIC'",
+                        .{ lastpic, if (target.os.tag == .ps4) "PS4" else "PS5" },
+                    );
+                }
+            }
+        }
+    }
+
+    if (pic and (target.os.tag.isDarwin() or Target.isPS(target))) {
+        isPicLevelTwo = isPicLevelTwo or isPicDefault;
+    }
+
+    // This kernel flags are a trump-card: they will disable PIC/PIE
+    // generation, independent of the argument order.
+    if (kernelOrKext and
+        (!(target.os.tag != .ios) or (target.os.isAtLeast(.ios, .{ .major = 6, .minor = 0, .patch = 0 }) orelse false)) and
+        !(target.os.tag != .watchos) and
+        !(target.os.tag != .driverkit))
+    {
+        pie, pic = .{ false, false };
+    }
+
+    if (d.dynamicNopic == true) {
+        if (!target.os.tag.isDarwin()) {
+            try d.unsupportedOptionForTarget(target, "-mdynamic-no-pic");
+        }
+        pic = isPicDefault or forced;
+        return .{ if (pic) .two else .none, false };
+    }
+
+    const embedderPiSupported = target.cpu.arch.isArm();
+    if (!embedderPiSupported) {
+        if (d.ropi) try d.unsupportedOptionForTarget(target, "-fropi");
+        if (d.rwpi) try d.unsupportedOptionForTarget(target, "-frwpi");
+    }
+
+    // ROPI and RWPI are not compatible with PIC or PIE.
+    if ((d.ropi or d.rwpi) and (pic or pie)) {
+        try d.err("embedded and GOT-based position independence are incompatible", .{});
+    }
+
+    if (target.cpu.arch.isMIPS()) {
+        // When targeting the N64 ABI, PIC is the default, except in the case
+        // when the -mno-abicalls option is used. In that case we exit
+        // at next check regardless of PIC being set below.
+        // TODO: implement incomplete!!
+        if (target.cpu.arch.isMIPS64())
+            pic = true;
+
+        // When targettng MIPS with -mno-abicalls, it's always static.
+        if (d.mabicalls == false)
+            return .{ .none, false };
+
+        // Unlike other architectures, MIPS, even with -fPIC/-mxgot/multigot,
+        // does not use PIC level 2 for historical reasons.
+        isPicLevelTwo = false;
+    }
+
+    if (pic) return .{ if (isPicLevelTwo) .two else .one, pie };
+    return .{ .none, false };
 }

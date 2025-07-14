@@ -178,6 +178,10 @@ pub fn isCygwinMinGW(target: std.Target) bool {
     return target.os.tag == .windows and (target.abi == .gnu or target.abi == .cygnus);
 }
 
+pub fn isPS(target: std.Target) bool {
+    return (target.os.tag == .ps4 or target.os.tag == .ps5) and target.cpu.arch == .x86_64;
+}
+
 /// Determines whether to ignore the alignment requirements for non-zero-sized
 /// bitfield types for the given target architecture and operating system.
 pub fn ignoreNonZeroSizedBitfieldTypeAlignment(target: std.Target) bool {
@@ -683,14 +687,226 @@ pub fn toLLVMTriple(target: std.Target, buf: []u8) []const u8 {
     return stream.getWritten();
 }
 
-/// This currently just returns the desired settings without considering target defaults / requirements
-pub fn getPICMode(
-    target: std.Target,
-    desiredPicLevel: ?backend.CodeGenOptions.PicLevel,
-    wantsPie: ?bool,
-) struct { backend.CodeGenOptions.PicLevel, bool } {
-    _ = target;
-    return .{ desiredPicLevel orelse .none, wantsPie orelse false };
+pub const DefaultPIStatus = enum { Yes, No, DependsOnLinker };
+
+pub fn isPIEDefault(target: std.Target) DefaultPIStatus {
+    return switch (target.os.tag) {
+        .aix,
+        .haiku,
+
+        .macos,
+        .ios,
+        .tvos,
+        .watchos,
+        .visionos,
+        .driverkit,
+
+        .dragonfly,
+        .netbsd,
+        .freebsd,
+        .solaris,
+
+        .cuda,
+        .amdhsa,
+        .amdpal,
+        .mesa3d,
+
+        .ps4,
+        .ps5,
+
+        .hurd,
+        .zos,
+        => .No,
+
+        .openbsd,
+        .fuchsia,
+        => .Yes,
+
+        .linux => {
+            if (target.abi == .ohos)
+                return .Yes;
+
+            switch (target.cpu.arch) {
+                .ve => return .No,
+                else => return if (target.os.tag == .linux or target.abi.isAndroid() or target.abi.isMusl()) .Yes else .No,
+            }
+        },
+
+        .windows => {
+            if (target.isMinGW())
+                return .No;
+
+            if (target.abi == .itanium)
+                return if (target.cpu.arch == .x86_64) .Yes else .No;
+
+            if (target.abi == .msvc or target.abi == .none)
+                return .DependsOnLinker;
+
+            return .No;
+        },
+
+        else => {
+            switch (target.cpu.arch) {
+                .hexagon => {
+                    // CLANG_DEFAULT_PIE_ON_LINUX
+                    return if (target.os.tag == .linux or target.abi.isAndroid() or target.abi.isMusl()) .Yes else .No;
+                },
+
+                else => return .No,
+            }
+        },
+    };
+}
+
+pub fn isPICdefault(target: std.Target) DefaultPIStatus {
+    return switch (target.os.tag) {
+        .aix,
+        .haiku,
+
+        .macos,
+        .ios,
+        .tvos,
+        .watchos,
+        .visionos,
+        .driverkit,
+
+        .amdhsa,
+        .amdpal,
+        .mesa3d,
+
+        .ps4,
+        .ps5,
+        => .Yes,
+
+        .fuchsia,
+        .cuda,
+        .zos,
+        => .No,
+
+        .dragonfly,
+        .openbsd,
+        .netbsd,
+        .freebsd,
+        .solaris,
+        .hurd,
+        => {
+            return switch (target.cpu.arch) {
+                .mips64, .mips64el => .Yes,
+                else => .No,
+            };
+        },
+
+        .linux => {
+            if (target.abi == .ohos)
+                return .No;
+
+            return switch (target.cpu.arch) {
+                .mips64, .mips64el => .Yes,
+                else => .No,
+            };
+        },
+
+        .windows => {
+            if (target.isMinGW())
+                return if (target.cpu.arch == .x86_64 or target.cpu.arch == .aarch64) .Yes else .No;
+
+            if (target.abi == .itanium)
+                return if (target.cpu.arch == .x86_64) .Yes else .No;
+
+            if (target.abi == .msvc or target.abi == .none)
+                return .DependsOnLinker;
+
+            if (target.ofmt == .macho)
+                return .Yes;
+
+            return switch (target.cpu.arch) {
+                .x86_64, .mips64, .mips64el => .Yes,
+                else => .No,
+            };
+        },
+
+        else => {
+            if (target.ofmt == .macho)
+                return .Yes;
+
+            return switch (target.cpu.arch) {
+                .mips64, .mips64el => .Yes,
+                else => .No,
+            };
+        },
+    };
+}
+
+pub fn isPICDefaultForced(target: std.Target) DefaultPIStatus {
+    return switch (target.os.tag) {
+        .aix, .amdhsa, .amdpal, .mesa3d => .Yes,
+
+        .haiku,
+        .dragonfly,
+        .openbsd,
+        .netbsd,
+        .freebsd,
+        .solaris,
+        .cuda,
+        .ps4,
+        .ps5,
+        .hurd,
+        .linux,
+        .fuchsia,
+        .zos,
+        => .No,
+
+        .windows => {
+            if (target.isMinGW())
+                return .Yes;
+
+            if (target.abi == .itanium)
+                return if (target.cpu.arch == .x86_64) .Yes else .No;
+
+            // if (bfd) return target.cpu.arch == .x86_64 else target.cpu.arch == .x86_64 or target.cpu.arch == .aarch64;
+            if (target.abi == .msvc or target.abi == .none)
+                return .DependsOnLinker;
+
+            if (target.ofmt == .macho)
+                return if (target.cpu.arch == .aarch64 or target.cpu.arch == .x86_64) .Yes else .No;
+
+            return if (target.cpu.arch == .x86_64) .Yes else .No;
+        },
+
+        .macos,
+        .ios,
+        .tvos,
+        .watchos,
+        .visionos,
+        .driverkit,
+        => if (target.cpu.arch == .x86_64 or target.cpu.arch == .aarch64) .Yes else .No,
+
+        else => {
+            return switch (target.cpu.arch) {
+                .hexagon,
+                .lanai,
+                .avr,
+                .riscv32,
+                .riscv64,
+                .csky,
+                .xcore,
+                .wasm32,
+                .wasm64,
+                .ve,
+                .spirv32,
+                .spirv64,
+                => .No,
+
+                .msp430 => .Yes,
+
+                else => {
+                    if (target.ofmt == .macho)
+                        return if (target.cpu.arch == .aarch64 or target.cpu.arch == .x86_64) .Yes else .No;
+                    return .No;
+                },
+            };
+        },
+    };
 }
 
 test "alignment functions - smoke test" {
