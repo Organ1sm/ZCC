@@ -377,6 +377,7 @@ pub fn main() !void {
                 if (node == .fnDef) break node.fnDef;
             } else {
                 failCount += 1;
+                std.debug.print("{s}:\n", .{case});
                 std.debug.print("EXPECTED_TYPES requires a function to be defined\n", .{});
                 break;
             };
@@ -391,6 +392,7 @@ pub fn main() !void {
                 if (str.is(.MacroWS)) continue;
                 if (str.isNot(.StringLiteral)) {
                     failCount += 1;
+                    std.debug.print("{s}:\n", .{case});
                     std.debug.print("EXPECTED_TYPES tokens must be string literals (found {s})\n", .{@tagName(str.id)});
                     continue :next_test;
                 }
@@ -402,6 +404,7 @@ pub fn main() !void {
                 const actualType = actual.types.items[i];
                 if (!std.mem.eql(u8, expectedType, actualType)) {
                     failCount += 1;
+                    std.debug.print("{s}:\n", .{case});
                     std.debug.print("expected type '{s}' did not match actual type '{s}'\n", .{
                         expectedType,
                         actualType,
@@ -411,6 +414,7 @@ pub fn main() !void {
             }
             if (i != actual.types.items.len) {
                 failCount += 1;
+                std.debug.print("{s}:\n", .{case});
                 std.debug.print(
                     "EXPECTED_TYPES count differs: expected {d} found {d}\n",
                     .{ i, actual.types.items.len },
@@ -420,7 +424,10 @@ pub fn main() !void {
         }
 
         if (try checkExpectedErrors(&pp, &buffer, case)) |some| {
-            if (some) passCount += 1 else failCount += 1;
+            if (some) passCount += 1 else {
+                std.debug.print("in case {s}\n", .{case});
+                failCount += 1;
+            }
             continue;
         }
 
@@ -433,12 +440,14 @@ pub fn main() !void {
 
             if (macro.isFunc) {
                 failCount += 1;
+                std.debug.print("{s}:\n", .{case});
                 std.debug.print("invalid EXPECTED_OUTPUT {}\n", .{macro});
                 continue;
             }
 
             if (macro.tokens.len != 1 or macro.tokens[0].isNot(.StringLiteral)) {
                 failCount += 1;
+                std.debug.print("{s}:\n", .{case});
                 std.debug.print("EXPECTED_OUTPUT takes exactly one string", .{});
                 continue;
             }
@@ -480,6 +489,7 @@ pub fn main() !void {
 
             if (!std.mem.eql(u8, expectedOutput, stdout)) {
                 failCount += 1;
+                std.debug.print("{s}:\n", .{case});
                 std.debug.print(
                     \\
                     \\======= expected output =======
