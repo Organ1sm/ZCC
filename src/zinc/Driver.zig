@@ -256,7 +256,7 @@ pub fn parseArgs(
     stdOut: anytype,
     macroBuffer: anytype,
     args: []const []const u8,
-) !bool {
+) Compilation.Error!bool {
     var commentArg: []const u8 = "";
     var hosted: ?bool = null;
     var gnucVersion: []const u8 = "4.2.1"; // default value set by clang
@@ -753,15 +753,24 @@ pub fn main(d: *Driver, tc: *Toolchain, args: []const []const u8, comptime fastE
         for (d.linkObjects.items) |obj|
             try d.err("{s}: linker input file unused because linking not done", .{obj});
 
-    try tc.discover();
+    tc.discover() catch |er| switch (er) {
+        error.OutOfMemory => return error.OutOfMemory,
+        error.TooManyMultilibs => return d.fatal("found more than one multilib with the same priority", .{}),
+    };
+
     tc.defineSystemIncludes() catch |er| switch (er) {
         error.OutOfMemory => return error.OutOfMemory,
         error.ZincIncludeNotFound => return d.fatal("unable to find Zinc builtin headers", .{}),
     };
 
-    const builtinMacros = try d.comp.generateBuiltinMacros(d.systemDefines);
-    const userDefinedMacros = try d.comp.addSourceFromBuffer("<command line>", macroBuffer.items);
-
+    const builtinMacros = d.comp.generateBuiltinMacros(d.systemDefines) catch |er| switch (er) {
+        error.StreamTooLong => return d.fatal("builtin macro source exceeded max size", .{}),
+        else => |e| return e,
+    };
+    const userDefinedMacros = d.comp.addSourceFromBuffer("<command line>", macroBuffer.items) catch |er| switch (er) {
+        error.StreamTooLong => return d.fatal("user provided macro source exceeded max size", .{}),
+        else => |e| return e,
+    };
     if (fastExit and d.inputs.items.len == 1) {
         d.processSource(tc, d.inputs.items[0], builtinMacros, userDefinedMacros, fastExit) catch |e| switch (e) {
             error.FatalError => {
@@ -1001,7 +1010,7 @@ fn printLinkerArgs(items: []const []const u8) !void {
     try stdout.writeByte('\n');
 }
 
-fn invokeLinker(d: *Driver, tc: *Toolchain, comptime fastExit: bool) !void {
+fn invokeLinker(d: *Driver, tc: *Toolchain, comptime fastExit: bool) Compilation.Error!void {
     var argv = std.ArrayList([]const u8).init(d.comp.gpa);
     defer argv.deinit();
 
