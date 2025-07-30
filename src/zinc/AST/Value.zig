@@ -63,6 +63,7 @@ pub fn isZero(v: Value, comp: *const Compilation) bool {
             inline else => |data| return data[0] == 0.0 and data[1] == 0.0,
         },
         .bytes => return false,
+        .pointer => return false,
         else => unreachable,
     }
 }
@@ -89,9 +90,17 @@ pub fn int(i: anytype, comp: *Compilation) !Value {
     }
 }
 
+pub fn pointer(r: Interner.Key.Pointer, comp: *Compilation) !Value {
+    return intern(comp, .{ .pointer = r });
+}
+
 pub fn ref(v: Value) Interner.Ref {
     std.debug.assert(v.optRef != .none);
     return @enumFromInt(@intFromEnum(v.optRef));
+}
+
+pub fn fromRef(r: Interner.Ref) Value {
+    return .{ .optRef = @enumFromInt(@intFromEnum(r)) };
 }
 
 /// Number of bits needed to hold `v`.
@@ -285,11 +294,14 @@ pub const IntCastChangeKind = enum {
 pub fn intCast(v: *Value, destTy: QualType, comp: *Compilation) !IntCastChangeKind {
     if (v.isNone()) return .none;
 
+    const key = comp.interner.get(v.ref());
+    if (key == .pointer) return .none;
+
     const destBits: usize = @intCast(destTy.bitSizeof(comp));
     const destSigned = !destTy.isUnsigned(comp);
 
     var space: BigIntSpace = undefined;
-    const big = v.toBigInt(&space, comp);
+    const big = keyToBigInt(key, &space);
 
     const valueBits = big.bitCountTwosComp();
 
@@ -357,11 +369,12 @@ pub fn floatCast(v: *Value, destTy: QualType, comp: *Compilation) !void {
     }
 }
 
-pub fn toBigInt(val: Value, space: *BigIntSpace, comp: *const Compilation) BigIntConst {
-    return switch (comp.interner.get(val.ref()).int) {
-        inline .u64, .i64 => |x| BigIntMutable.init(&space.limbs, x).toConst(),
-        .bigInt => |b| b,
-    };
+fn keyToBigInt(key: Interner.Key, space: *BigIntSpace) BigIntConst {
+    return key.int.toBigInt(space);
+}
+
+fn toBigInt(val: Value, space: *BigIntSpace, comp: *const Compilation) BigIntConst {
+    return keyToBigInt(comp.interner.get(val.ref()), space);
 }
 
 pub fn toFloat(v: Value, comptime T: type, comp: *const Compilation) T {
@@ -486,10 +499,12 @@ pub fn toBool(v: Value, comp: *const Compilation) bool {
 
 pub fn toInt(v: Value, comptime T: type, comp: *const Compilation) ?T {
     if (v.isNone()) return null;
-    if (comp.interner.get(v.ref()) != .int) return null;
+
+    const key = comp.interner.get(v.ref());
+    if (key != .int) return null;
 
     var space: BigIntSpace = undefined;
-    const bigInt = v.toBigInt(&space, comp);
+    const bigInt = keyToBigInt(key, &space);
     return bigInt.to(T) catch null;
 }
 
@@ -543,26 +558,55 @@ pub fn add(res: *Value, lhs: Value, rhs: Value, qt: QualType, comp: *Compilation
         };
         res.* = try intern(comp, .{ .float = f });
         return false;
-    } else {
-        var lhsSpace: BigIntSpace = undefined;
-        var rhsSpace: BigIntSpace = undefined;
-        const lhsBigInt = lhs.toBigInt(&lhsSpace, comp);
-        const rhsBigInt = rhs.toBigInt(&rhsSpace, comp);
-
-        const limbs = try comp.gpa.alloc(
-            std.math.big.Limb,
-            std.math.big.int.calcTwosCompLimbCount(bits),
-        );
-        defer comp.gpa.free(limbs);
-
-        var result = BigIntMutable{ .limbs = limbs, .positive = undefined, .len = undefined };
-        const overflowed = result.addWrap(lhsBigInt, rhsBigInt, qt.signedness(comp), bits);
-        res.* = try intern(comp, .{ .int = .{ .bigInt = result.toConst() } });
-        return overflowed;
     }
+
+    const lhsKey = comp.interner.get(lhs.ref());
+    const rhsKey = comp.interner.get(rhs.ref());
+    if (lhsKey == .pointer or rhsKey == .pointer) {
+        const rel, const index = if (lhsKey == .pointer)
+            .{ lhsKey.pointer, rhs }
+        else
+            .{ rhsKey.pointer, lhs };
+
+        const elemSize = try int(qt.childType(comp).sizeofOrNull(comp) orelse 1, comp);
+        var totalOffset: Value = undefined;
+
+        const mulOverflow = try totalOffset.mul(elemSize, index, comp.typeStore.ptrdiff, comp);
+        const oldOffset = fromRef(rel.offset);
+        const addOverflow = try totalOffset.add(totalOffset, oldOffset, comp.typeStore.ptrdiff, comp);
+
+        _ = try totalOffset.intCast(comp.typeStore.ptrdiff, comp);
+        res.* = try pointer(.{ .node = rel.node, .offset = totalOffset.ref() }, comp);
+        return mulOverflow or addOverflow;
+    }
+
+    var lhsSpace: BigIntSpace = undefined;
+    var rhsSpace: BigIntSpace = undefined;
+    const lhsBigInt = keyToBigInt(lhsKey, &lhsSpace);
+    const rhsBigInt = keyToBigInt(rhsKey, &rhsSpace);
+
+    const limbs = try comp.gpa.alloc(
+        std.math.big.Limb,
+        std.math.big.int.calcTwosCompLimbCount(bits),
+    );
+    defer comp.gpa.free(limbs);
+
+    var result = BigIntMutable{ .limbs = limbs, .positive = undefined, .len = undefined };
+    const overflowed = result.addWrap(lhsBigInt, rhsBigInt, qt.signedness(comp), bits);
+    res.* = try intern(comp, .{ .int = .{ .bigInt = result.toConst() } });
+    return overflowed;
 }
 
-pub fn sub(res: *Value, lhs: Value, rhs: Value, qt: QualType, comp: *Compilation) !bool {
+pub fn negate(res: *Value, val: Value, qt: QualType, comp: *Compilation) !bool {
+    return res.sub(zero, val, qt, undefined, comp);
+}
+
+pub fn decrement(res: *Value, val: Value, qt: QualType, comp: *Compilation) !bool {
+    return res.sub(val, one, qt, undefined, comp);
+}
+
+/// elemSize is only used when subtracting two pointers, so we can scale the result by the size of the element type
+pub fn sub(res: *Value, lhs: Value, rhs: Value, qt: QualType, elemSize: u64, comp: *Compilation) !bool {
     const bits: usize = @intCast(qt.bitSizeof(comp));
     const scalarKind = qt.scalarKind(comp);
     if (scalarKind.isFloat()) {
@@ -587,23 +631,57 @@ pub fn sub(res: *Value, lhs: Value, rhs: Value, qt: QualType, comp: *Compilation
         };
         res.* = try intern(comp, .{ .float = f });
         return false;
-    } else {
-        var lhsSpace: BigIntSpace = undefined;
-        var rhsSpace: BigIntSpace = undefined;
-        const lhsBigInt = lhs.toBigInt(&lhsSpace, comp);
-        const rhsBigInt = rhs.toBigInt(&rhsSpace, comp);
-
-        const limbs = try comp.gpa.alloc(
-            std.math.big.Limb,
-            std.math.big.int.calcTwosCompLimbCount(bits),
-        );
-        defer comp.gpa.free(limbs);
-
-        var result = BigIntMutable{ .limbs = limbs, .positive = undefined, .len = undefined };
-        const overflowed = result.subWrap(lhsBigInt, rhsBigInt, qt.signedness(comp), bits);
-        res.* = try intern(comp, .{ .int = .{ .bigInt = result.toConst() } });
-        return overflowed;
     }
+
+    const lhsKey = comp.interner.get(lhs.ref());
+    const rhsKey = comp.interner.get(rhs.ref());
+    if (lhsKey == .pointer and rhsKey == .pointer) {
+        const lhsReloc = lhsKey.pointer;
+        const rhsReloc = rhsKey.pointer;
+
+        if (lhsReloc.node != rhsReloc.node) {
+            res.* = .{};
+            return false;
+        }
+
+        const lhsOffset = fromRef(lhsReloc.offset);
+        const rhsOffset = fromRef(rhsReloc.offset);
+
+        const overflowed = try res.sub(lhsOffset, rhsOffset, comp.typeStore.ptrdiff, undefined, comp);
+        const rhsSize = try int(elemSize, comp);
+
+        _ = try res.div(res.*, rhsSize, comp.typeStore.ptrdiff, comp);
+        return overflowed;
+    } else if (lhsKey == .pointer) {
+        const rel = lhsKey.pointer;
+        const lhsSize = try int(elemSize, comp);
+
+        var totalOffset: Value = undefined;
+        const mulOverflow = try totalOffset.mul(lhsSize, rhs, comp.typeStore.ptrdiff, comp);
+        const oldOffset = fromRef(rel.offset);
+        const addOverflow = try totalOffset.sub(oldOffset, totalOffset, comp.typeStore.ptrdiff, undefined, comp);
+
+        _ = try totalOffset.intCast(comp.typeStore.ptrdiff, comp);
+        res.* = try pointer(.{ .node = rel.node, .offset = totalOffset.ref() }, comp);
+
+        return mulOverflow or addOverflow;
+    }
+
+    var lhsSpace: BigIntSpace = undefined;
+    var rhsSpace: BigIntSpace = undefined;
+    const lhsBigInt = keyToBigInt(lhsKey, &lhsSpace);
+    const rhsBigInt = keyToBigInt(rhsKey, &rhsSpace);
+
+    const limbs = try comp.gpa.alloc(
+        std.math.big.Limb,
+        std.math.big.int.calcTwosCompLimbCount(bits),
+    );
+    defer comp.gpa.free(limbs);
+
+    var result = BigIntMutable{ .limbs = limbs, .positive = undefined, .len = undefined };
+    const overflowed = result.subWrap(lhsBigInt, rhsBigInt, qt.signedness(comp), bits);
+    res.* = try intern(comp, .{ .int = .{ .bigInt = result.toConst() } });
+    return overflowed;
 }
 
 pub fn mul(res: *Value, lhs: Value, rhs: Value, qt: QualType, comp: *Compilation) !bool {
@@ -739,7 +817,7 @@ pub fn rem(lhs: Value, rhs: Value, qt: QualType, comp: *Compilation) !Value {
             var tmp: Value = undefined;
             _ = try tmp.div(lhs, rhs, qt, comp);
             _ = try tmp.mul(tmp, rhs, qt, comp);
-            _ = try tmp.sub(lhs, tmp, qt, comp);
+            _ = try tmp.sub(lhs, tmp, qt, undefined, comp);
             return tmp;
         }
     }
@@ -909,12 +987,17 @@ pub fn complexConj(val: Value, qt: QualType, comp: *Compilation) !Value {
     return intern(comp, .{ .complex = cf });
 }
 
-pub fn compare(lhs: Value, op: std.math.CompareOperator, rhs: Value, comp: *Compilation) bool {
+fn shallowCompare(lhs: Value, op: std.math.CompareOperator, rhs: Value) ?bool {
     if (op == .eq) {
         return lhs.optRef == rhs.optRef;
     } else if (lhs.optRef == rhs.optRef) {
         return std.math.Order.eq.compare(op);
     }
+    return null;
+}
+
+pub fn compare(lhs: Value, op: std.math.CompareOperator, rhs: Value, comp: *const Compilation) bool {
+    if (lhs.shallowCompare(op, rhs)) |val| return val;
 
     const lhsKey = comp.interner.get(lhs.ref());
     const rhsKey = comp.interner.get(rhs.ref());
@@ -937,6 +1020,29 @@ pub fn compare(lhs: Value, op: std.math.CompareOperator, rhs: Value, comp: *Comp
     const rhsBigInt = rhs.toBigInt(&rhsBigIntSpace, comp);
 
     return lhsBigInt.order(rhsBigInt).compare(op);
+}
+
+/// Returns null for values that cannot be compared at compile time (e.g. `&x < &y`) for globals `x` and `y`.
+pub fn comparePointers(lhs: Value, op: std.math.CompareOperator, rhs: Value, comp: *const Compilation) ?bool {
+    if (lhs.shallowCompare(op, rhs)) |val| return val;
+
+    const lhsKey = comp.interner.get(lhs.ref());
+    const rhsKey = comp.interner.get(rhs.ref());
+
+    if (lhsKey == .pointer and rhsKey == .pointer) {
+        const lhsReloc = lhsKey.pointer;
+        const rhsReloc = rhsKey.pointer;
+        switch (op) {
+            .eq => if (lhsReloc.node != rhsReloc.node) return false,
+            .neq => if (lhsReloc.node != rhsReloc.node) return true,
+            else => if (lhsReloc.node != rhsReloc.node) return null,
+        }
+
+        const lhsOffset = fromRef(lhsReloc.offset);
+        const rhsOffset = fromRef(lhsReloc.offset);
+        return lhsOffset.compare(op, rhsOffset, comp);
+    }
+    return null;
 }
 
 pub fn hash(v: Value) u64 {
@@ -1010,6 +1116,7 @@ pub fn print(v: Value, qt: QualType, comp: *const Compilation, w: anytype) @Type
                 @as(f64, @floatCast(components[1])),
             }),
         },
+        .pointer => {},
         else => unreachable, // not a value
     }
 }

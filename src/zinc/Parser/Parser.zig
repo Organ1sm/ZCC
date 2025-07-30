@@ -5505,6 +5505,19 @@ fn parseCompoundStmt(p: *Parser, isFnBody: bool, stmtExprState: ?*StmtExprState)
     });
 }
 
+pub fn pointerValue(p: *Parser, node: Node.Index, offset: Value) !Value {
+    switch (node.get(&p.tree)) {
+        .declRefExpr => |declRef| {
+            const varName = try p.comp.internString(p.getTokenText(declRef.nameToken));
+            const sym = p.symStack.findSymbol(varName) orelse return .{};
+            const symNode = sym.node.unpack() orelse return .{};
+            return Value.pointer(.{ .node = @intFromEnum(symNode), .offset = offset.ref() }, p.comp);
+        },
+        .stringLiteralExpr => return p.tree.valueMap.get(node).?,
+        else => return .{},
+    }
+}
+
 /// return-statement : `return` expression? ';'
 fn parseReturnStmt(p: *Parser) Error!?Node.Index {
     const retToken = p.eat(.KeywordReturn) orelse return null;
@@ -6035,8 +6048,12 @@ fn parseEqExpr(p: *Parser) Error!?Result {
         var rhs = try p.expect(parseCompExpr);
         if (try lhs.adjustTypes(tok, &rhs, p, .equality)) {
             const op: std.math.CompareOperator = if (tag == .equalExpr) .eq else .neq;
-            const res = lhs.value.compare(op, rhs.value, p.comp);
-            lhs.value = Value.fromBool(res);
+            const res: ?bool = if (lhs.qt.isPointer(p.comp) or rhs.qt.isPointer(p.comp))
+                lhs.value.comparePointers(op, rhs.value, p.comp)
+            else
+                lhs.value.compare(op, rhs.value, p.comp);
+
+            lhs.value = if (res) |val| Value.fromBool(val) else .{};
         } else {
             lhs.value.boolCast(p.comp);
         }
@@ -6118,12 +6135,31 @@ fn parseAddExpr(p: *Parser) Error!?Result {
         const originalLhsQt = lhs.qt;
 
         if (try lhs.adjustTypes(tok, &rhs, p, if (tag == .addExpr) .add else .sub)) {
+            const lhsSk = lhs.qt.scalarKind(p.comp);
             if (tag == .addExpr) {
-                if (try lhs.value.add(lhs.value, rhs.value, lhs.qt, p.comp) and
-                    lhs.qt.signedness(p.comp) != .unsigned) try p.err(.overflow, tok, .{lhs});
+                if (try lhs.value.add(lhs.value, rhs.value, lhs.qt, p.comp)) {
+                    if (lhsSk.isPointer()) {
+                        const increment = lhs;
+                        const ptrBits = p.comp.typeStore.intptr.bitSizeof(p.comp);
+                        const elemSize = increment.qt.childType(p.comp).sizeofOrNull(p.comp) orelse 1;
+                        const maxElems = p.comp.maxArrayBytes() / elemSize;
+
+                        try p.err(.array_overflow, tok, .{ increment, ptrBits, elemSize * 8, elemSize, maxElems });
+                    } else if (lhs.qt.signedness(p.comp) != .unsigned) {
+                        try p.err(.overflow, tok, .{lhs});
+                    }
+                }
             } else {
-                if (try lhs.value.sub(lhs.value, rhs.value, lhs.qt, p.comp) and
-                    lhs.qt.signedness(p.comp) != .unsigned) try p.err(.overflow, tok, .{lhs});
+                const elemSize = if (originalLhsQt.isPointer(p.comp)) originalLhsQt.childType(p.comp).sizeofOrNull(p.comp) orelse 1 else 1;
+                if (elemSize == 0 and rhs.qt.isPointer(p.comp)) {
+                    lhs.value = .{};
+                } else {
+                    if (try lhs.value.sub(lhs.value, rhs.value, lhs.qt, elemSize, p.comp) and
+                        lhs.qt.signedness(p.comp) != .unsigned)
+                    {
+                        try p.err(.overflow, tok, .{lhs});
+                    }
+                }
             }
         }
 
@@ -6508,6 +6544,47 @@ fn offsetofMemberDesignator(
     return .{ .qt = baseQt, .value = val, .node = lhs.node };
 }
 
+fn computeOffsetExtra(p: *Parser, node: Node.Index, offsetSoFar: *Value) !Value {
+    switch (node.get(&p.tree)) {
+        .cast => |cast| {
+            return switch (cast.kind) {
+                .ArrayToPointer, .NoOP, .Bitcast => p.computeOffsetExtra(cast.operand, offsetSoFar),
+                .LValToRVal => .{},
+                else => unreachable,
+            };
+        },
+        .parenExpr => |un| return p.computeOffsetExtra(un.operand, offsetSoFar),
+        .declRefExpr => return p.pointerValue(node, offsetSoFar.*),
+        .arrayAccessExpr => |access| {
+            const indexValue = p.tree.valueMap.get(access.index) orelse return .{};
+            var size = try Value.int(access.qt.sizeof(p.comp), p.comp);
+            const mulOverflow = try size.mul(size, indexValue, p.comp.typeStore.ptrdiff, p.comp);
+
+            const addOverflow = try offsetSoFar.add(size, offsetSoFar.*, p.comp.typeStore.ptrdiff, p.comp);
+            _ = mulOverflow;
+            _ = addOverflow;
+
+            return p.computeOffsetExtra(access.base, offsetSoFar);
+        },
+        .memberAccessExpr, .memberAccessPtrExpr => |access| {
+            var ty = access.base.qt(&p.tree);
+            if (ty.isPointer(p.comp)) ty = ty.childType(p.comp);
+            const recordTy = ty.getRecord(p.comp).?;
+
+            const fieldOffset = try Value.int(@divExact(recordTy.fields[access.memberIndex].layout.offsetBits, 8), p.comp);
+            _ = try offsetSoFar.add(fieldOffset, offsetSoFar.*, p.comp.typeStore.ptrdiff, p.comp);
+            return p.computeOffsetExtra(access.base, offsetSoFar);
+        },
+        else => return .{},
+    }
+}
+
+/// Compute the offset (in bytes) of an expression from a base pointer.
+fn computeOffset(p: *Parser, res: Result) !Value {
+    var val: Value = if (res.value.isNone()) .zero else res.value;
+    return p.computeOffsetExtra(res.node, &val);
+}
+
 /// unaryExpr
 ///  : (compoundLiteral | primaryExpr) suffix-expression*
 ///  | '&&' identifier
@@ -6523,6 +6600,8 @@ fn parseUnaryExpr(p: *Parser) Error!?Result {
                 try p.err(.invalid_preproc_operator, p.tokenIdx, .{});
                 return error.ParsingFailed;
             }
+
+            var addrValue: Value = .{};
             p.tokenIdx += 1;
 
             var operand = try p.expect(parseCastExpr);
@@ -6536,6 +6615,8 @@ fn parseUnaryExpr(p: *Parser) Error!?Result {
             if (!operand.qt.isInvalid()) {
                 if (!p.tree.isLValue(operand.node))
                     try p.err(.addr_of_rvalue, token, .{});
+
+                addrValue = try p.computeOffset(operand);
 
                 operand.qt = try p.comp.typeStore.put(p.gpa, .{
                     .pointer = .{ .child = operand.qt, .decayed = null },
@@ -6559,6 +6640,7 @@ fn parseUnaryExpr(p: *Parser) Error!?Result {
 
             try operand.saveValue(p);
             try operand.un(p, .addrOfExpr, token);
+            operand.value = addrValue;
             return operand;
         },
 
@@ -6587,6 +6669,7 @@ fn parseUnaryExpr(p: *Parser) Error!?Result {
                 .array, .func, .pointer => {
                     try operand.lvalConversion(p, token);
                     operand.qt = operand.qt.childType(p.comp);
+                    operand.value = .{};
                 },
                 else => {
                     try p.err(.indirection_ptr, token, .{});
@@ -6627,7 +6710,7 @@ fn parseUnaryExpr(p: *Parser) Error!?Result {
 
             try operand.usualUnaryConversion(p, token);
             if (operand.value.isArithmetic(p.comp))
-                _ = try operand.value.sub(Value.zero, operand.value, operand.qt, p.comp)
+                _ = try operand.value.negate(operand.value, operand.qt, p.comp)
             else
                 operand.value = .{};
 
@@ -6685,7 +6768,7 @@ fn parseUnaryExpr(p: *Parser) Error!?Result {
             try operand.usualUnaryConversion(p, token);
 
             if (operand.value.isNumeric(p.comp)) {
-                if (try operand.value.sub(operand.value, .one, operand.qt, p.comp))
+                if (try operand.value.decrement(operand.value, operand.qt, p.comp))
                     try p.err(.overflow, token, .{operand});
             } else {
                 operand.value = .{};

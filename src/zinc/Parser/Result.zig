@@ -396,6 +396,10 @@ pub fn adjustTypes(lhs: *Result, token: TokenIndex, rhs: *Result, p: *Parser, ki
             if (lhsSK.isPointer() and rhsSK.isPointer()) {
                 if (!lhs.qt.eql(rhs.qt, p.comp))
                     try p.err(.incompatible_pointers, token, .{ lhs.qt, rhs.qt });
+
+                if (lhs.qt.childType(p.comp).sizeofOrNull(p.comp) orelse 1 == 0)
+                    try p.err(.subtract_pointers_zero_elem_size, token, .{lhs.qt.childType(p.comp)});
+
                 lhs.qt = p.comp.typeStore.ptrdiff;
             }
 
@@ -424,7 +428,7 @@ pub fn lvalConversion(res: *Result, p: *Parser, token: TokenIndex) Error!void {
     }
     // Decay an array type to a pointer to its first element.
     else if (res.qt.is(p.comp, .array)) {
-        res.value = .{};
+        res.value = try p.pointerValue(res.node, .zero);
         res.qt = try res.qt.decay(p.comp);
         try res.implicitCast(p, .ArrayToPointer, token);
     }

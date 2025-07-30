@@ -65,6 +65,7 @@ pub const Key = union(enum) {
     float: Float,
     complex: Complex,
     bytes: []const u8,
+    pointer: Pointer,
 
     pub const Float = union(enum) {
         f16: f16,
@@ -80,6 +81,13 @@ pub const Key = union(enum) {
         cf64: [2]f64,
         cf80: [2]f80,
         cf128: [2]f128,
+    };
+
+    pub const Pointer = struct {
+        /// NodeIndex of decl or compound literal whose address we are offsetting from
+        node: u32,
+        /// Offset in bytes
+        offset: Ref,
     };
 
     pub fn hash(key: Key) u32 {
@@ -306,6 +314,8 @@ pub const Tag = enum(u8) {
     bytes,
     /// `data` is `Record`
     recordTy,
+    /// `data` is `Pointer`
+    pointer,
 
     pub const Array = struct {
         len0: u32,
@@ -323,6 +333,11 @@ pub const Tag = enum(u8) {
     pub const Vector = struct {
         len: u32,
         child: Ref,
+    };
+
+    pub const Pointer = struct {
+        node: u32,
+        offset: Ref,
     };
 
     pub const Int = struct {
@@ -704,6 +719,16 @@ pub fn put(self: *Interner, gpa: Allocator, key: Key) !Ref {
             self.extra.appendSliceAssumeCapacity(@ptrCast(elems));
         },
 
+        .pointer => |info| {
+            self.items.appendAssumeCapacity(.{
+                .tag = .pointer,
+                .data = try self.addExtra(gpa, Tag.Pointer{
+                    .node = info.node,
+                    .offset = info.offset,
+                }),
+            });
+        },
+
         .ptrTy,
         .noreturnTy,
         .voidTy,
@@ -782,6 +807,16 @@ pub fn get(self: *const Interner, ref: Ref) Key {
                 .vectorTy = .{
                     .len = vectorType.len,
                     .child = vectorType.child,
+                },
+            };
+        },
+
+        .pointer => {
+            const pointer = self.extraData(Tag.Pointer, data);
+            return .{
+                .pointer = .{
+                    .node = pointer.node,
+                    .offset = pointer.offset,
                 },
             };
         },
