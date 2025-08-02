@@ -6057,7 +6057,6 @@ fn parseEqExpr(p: *Parser) Error!?Result {
         } else {
             lhs.value.boolCast(p.comp);
         }
-
         try lhs.boolRes(p, tag, rhs, tok);
     }
     return lhs;
@@ -6085,8 +6084,11 @@ fn parseCompExpr(p: *Parser) Error!?Result {
                 else => unreachable,
             };
 
-            const res = lhs.value.compare(op, rhs.value, p.comp);
-            lhs.value = Value.fromBool(res);
+            const res = if (lhs.qt.isPointer(p.comp) or rhs.qt.isPointer(p.comp))
+                lhs.value.comparePointers(op, rhs.value, p.comp)
+            else
+                lhs.value.compare(op, rhs.value, p.comp);
+            lhs.value = if (res) |val| Value.fromBool(val) else .{};
         } else {
             lhs.value.boolCast(p.comp);
         }

@@ -1039,7 +1039,7 @@ pub fn comparePointers(lhs: Value, op: std.math.CompareOperator, rhs: Value, com
         }
 
         const lhsOffset = fromRef(lhsReloc.offset);
-        const rhsOffset = fromRef(lhsReloc.offset);
+        const rhsOffset = fromRef(rhsReloc.offset);
         return lhsOffset.compare(op, rhsOffset, comp);
     }
     return null;
