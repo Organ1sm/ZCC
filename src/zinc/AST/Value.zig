@@ -301,7 +301,7 @@ pub fn intCast(v: *Value, destTy: QualType, comp: *Compilation) !IntCastChangeKi
     const destSigned = !destTy.isUnsigned(comp);
 
     var space: BigIntSpace = undefined;
-    const big = keyToBigInt(key, &space);
+    const big = key.toBigInt(&space);
 
     const valueBits = big.bitCountTwosComp();
 
@@ -369,12 +369,8 @@ pub fn floatCast(v: *Value, destTy: QualType, comp: *Compilation) !void {
     }
 }
 
-fn keyToBigInt(key: Interner.Key, space: *BigIntSpace) BigIntConst {
-    return key.int.toBigInt(space);
-}
-
 fn toBigInt(val: Value, space: *BigIntSpace, comp: *const Compilation) BigIntConst {
-    return keyToBigInt(comp.interner.get(val.ref()), space);
+    return comp.interner.get(val.ref()).toBigInt(space);
 }
 
 pub fn toFloat(v: Value, comptime T: type, comp: *const Compilation) T {
@@ -504,7 +500,7 @@ pub fn toInt(v: Value, comptime T: type, comp: *const Compilation) ?T {
     if (key != .int) return null;
 
     var space: BigIntSpace = undefined;
-    const bigInt = keyToBigInt(key, &space);
+    const bigInt = key.toBigInt(&space);
     return bigInt.to(T) catch null;
 }
 
@@ -582,8 +578,8 @@ pub fn add(res: *Value, lhs: Value, rhs: Value, qt: QualType, comp: *Compilation
 
     var lhsSpace: BigIntSpace = undefined;
     var rhsSpace: BigIntSpace = undefined;
-    const lhsBigInt = keyToBigInt(lhsKey, &lhsSpace);
-    const rhsBigInt = keyToBigInt(rhsKey, &rhsSpace);
+    const lhsBigInt = lhsKey.toBigInt(&lhsSpace);
+    const rhsBigInt = rhsKey.toBigInt(&rhsSpace);
 
     const limbs = try comp.gpa.alloc(
         std.math.big.Limb,
@@ -669,8 +665,8 @@ pub fn sub(res: *Value, lhs: Value, rhs: Value, qt: QualType, elemSize: u64, com
 
     var lhsSpace: BigIntSpace = undefined;
     var rhsSpace: BigIntSpace = undefined;
-    const lhsBigInt = keyToBigInt(lhsKey, &lhsSpace);
-    const rhsBigInt = keyToBigInt(rhsKey, &rhsSpace);
+    const lhsBigInt = lhsKey.toBigInt(&lhsSpace);
+    const rhsBigInt = rhsKey.toBigInt(&rhsSpace);
 
     const limbs = try comp.gpa.alloc(
         std.math.big.Limb,
