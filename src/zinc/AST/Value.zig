@@ -1086,35 +1086,54 @@ pub fn maxInt(qt: QualType, comp: *Compilation) !Value {
     return twosCompIntLimit(.max, qt, comp);
 }
 
-pub fn print(v: Value, qt: QualType, comp: *const Compilation, w: anytype) @TypeOf(w).Error!void {
-    if (qt.is(comp, .bool))
-        return w.writeAll(if (v.isZero(comp)) "false" else "true");
+const NestedPrint = union(enum) {
+    pointer: struct {
+        node: u32,
+        offset: Value,
+    },
+};
+
+pub fn printPointer(offset: Value, base: []const u8, comp: *const Compilation, w: anytype) @TypeOf(w).Error!void {
+    try w.writeByte('&');
+    try w.writeAll(base);
+    if (!offset.isZero(comp)) {
+        const maybeNested = try offset.print(comp.typeStore.ptrdiff, comp, w);
+        std.debug.assert(maybeNested == null);
+    }
+}
+
+pub fn print(v: Value, qt: QualType, comp: *const Compilation, w: anytype) @TypeOf(w).Error!?NestedPrint {
+    if (qt.is(comp, .bool)) {
+        try w.writeAll(if (v.isZero(comp)) "false" else "true");
+        return null;
+    }
 
     const key = comp.interner.get(v.ref());
     switch (key) {
-        .null => return w.writeAll("nullptr_t"),
+        .null => try w.writeAll("nullptr_t"),
         .int => |repr| switch (repr) {
-            inline else => |x| return w.print("{d}", .{x}),
+            inline else => |x| try w.print("{d}", .{x}),
         },
         .float => |repr| switch (repr) {
-            .f16 => |x| return w.print("{d}", .{@round(@as(f64, @floatCast(x)) * 1000) / 1000}),
-            .f32 => |x| return w.print("{d}", .{@round(@as(f64, @floatCast(x)) * 1000000) / 1000000}),
-            inline else => |x| return w.print("{d}", .{@as(f64, @floatCast(x))}),
+            .f16 => |x| try w.print("{d}", .{@round(@as(f64, @floatCast(x)) * 1000) / 1000}),
+            .f32 => |x| try w.print("{d}", .{@round(@as(f64, @floatCast(x)) * 1000000) / 1000000}),
+            inline else => |x| try w.print("{d}", .{@as(f64, @floatCast(x))}),
         },
-        .bytes => |b| return printString(b, qt, comp, w),
+        .bytes => |b| try printString(b, qt, comp, w),
         .complex => |repr| switch (repr) {
-            .cf32 => |components| return w.print("{d} + {d}i", .{
+            .cf32 => |components| try w.print("{d} + {d}i", .{
                 @round(@as(f64, @floatCast(components[0])) * 1000000) / 1000000,
                 @round(@as(f64, @floatCast(components[1])) * 1000000) / 1000000,
             }),
-            inline else => |components| return w.print("{d} + {d}i", .{
+            inline else => |components| try w.print("{d} + {d}i", .{
                 @as(f64, @floatCast(components[0])),
                 @as(f64, @floatCast(components[1])),
             }),
         },
-        .pointer => {},
+        .pointer => |ptr| return .{ .pointer = .{ .node = ptr.node, .offset = fromRef(ptr.offset) } },
         else => unreachable, // not a value
     }
+    return null;
 }
 
 pub fn printString(

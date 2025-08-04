@@ -2919,7 +2919,21 @@ fn dumpNode(
     if (tree.valueMap.get(nodeIndex)) |val| {
         try config.setColor(w, LITERAL);
         try w.writeAll(" (value: ");
-        try val.print(nodeIndex.qt(tree), tree.comp, w);
+        if (try val.print(nodeIndex.qt(tree), tree.comp, w)) |nested| switch (nested) {
+            .pointer => |ptr| {
+                switch (tree.nodes.items(.tag)[ptr.node]) {
+                    .CompoundLiteralExpr => {
+                        try w.writeAll("(compound literal): ");
+                        _ = try ptr.offset.print(tree.comp.typeStore.ptrdiff, tree.comp, w);
+                    },
+                    else => {
+                        const ptrNode: Node.Index = @enumFromInt(ptr.node);
+                        const declName = tree.tokenSlice(ptrNode.tok(tree));
+                        try ptr.offset.printPointer(declName, tree.comp, w);
+                    },
+                }
+            },
+        };
         try w.writeByte(')');
     }
 

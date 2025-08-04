@@ -462,7 +462,13 @@ fn formatResult(p: *Parser, w: anytype, fmt: []const u8, res: Result) !usize {
     switch (res.value.optRef) {
         .none => try w.writeAll("(none)"),
         .null => try w.writeAll("nullptr_t"),
-        else => try res.value.print(res.qt, p.comp, w),
+        else => if (try res.value.print(res.qt, p.comp, w)) |nested| switch (nested) {
+            .pointer => |ptr| {
+                const ptrNode: Node.Index = @enumFromInt(ptr.node);
+                const declName = p.tree.tokenSlice(ptrNode.tok(&p.tree));
+                try ptr.offset.printPointer(declName, p.comp, w);
+            },
+        },
     }
 
     return i + template.len;

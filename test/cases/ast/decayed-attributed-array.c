@@ -23,7 +23,7 @@ variable: 'attributed([1]int)'
 variable: '*int'
  name: ptr
  init:
-  implicit cast: (ArrayToPointer) 'decayed *attributed([1]int)' (value: )
+  implicit cast: (ArrayToPointer) 'decayed *attributed([1]int)' (value: &arr)
     declRefExpr: 'attributed([1]int)' lvalue
      attr: aligned alignment: null
      name: arr
@@ -39,7 +39,7 @@ fnDef: 'fn () void'
     variable: '*char'
      name: y
      init:
-      addrOfExpr: '*char' (value: )
+      addrOfExpr: '*char' (value: &x)
        operand:
         arrayAccessExpr: 'char' lvalue
          lhs:
