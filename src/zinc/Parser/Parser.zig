@@ -7361,6 +7361,21 @@ fn checkVaStartArg(
     }
 }
 
+fn checkArithOverflowArg(p: *Parser, builtinToken: TokenIndex, firstAfter: TokenIndex, paramToken: TokenIndex, arg: *Result, idx: u32) !void {
+    _ = builtinToken;
+    _ = firstAfter;
+    if (idx <= 1) {
+        const argSk = arg.qt.scalarKind(p.comp);
+        if (!argSk.isInt() or !argSk.isReal()) {
+            return p.err(.overflow_builtin_requires_int, paramToken, .{arg.qt});
+        }
+    } else if (idx == 2) {
+        if (!arg.qt.isPointer(p.comp)) return p.err(.overflow_result_requires_ptr, paramToken, .{arg.qt});
+        const child = arg.qt.childType(p.comp);
+        if (child.scalarKind(p.comp) != .Int or child.@"const") return p.err(.overflow_result_requires_ptr, paramToken, .{arg.qt});
+    }
+}
+
 fn checkComplexArg(
     p: *Parser,
     builtinTok: TokenIndex,
@@ -7418,6 +7433,9 @@ const CallExpr = union(enum) {
                 .__builtin_isinf,
                 .__builtin_isinf_sign,
                 .__builtin_isnan,
+                .__builtin_add_overflow,
+                .__builtin_sub_overflow,
+                .__builtin_mul_overflow,
                 => false,
                 else => true,
             },
@@ -7437,6 +7455,10 @@ const CallExpr = union(enum) {
         switch (self.builtin.tag) {
             .__builtin_va_start, .__va_start, .va_start => return p.checkVaStartArg(builtinToken, firstAfter, paramToken, arg, argIdx),
             .__builtin_complex => return p.checkComplexArg(builtinToken, firstAfter, paramToken, arg, argIdx),
+            .__builtin_add_overflow,
+            .__builtin_sub_overflow,
+            .__builtin_mul_overflow,
+            => return p.checkArithOverflowArg(builtinToken, firstAfter, paramToken, arg, argIdx),
             else => {},
         }
     }
@@ -7482,6 +7504,9 @@ const CallExpr = union(enum) {
                 .__atomic_xor_fetch,
                 .__atomic_or_fetch,
                 .__atomic_nand_fetch,
+                .__builtin_add_overflow,
+                .__builtin_sub_overflow,
+                .__builtin_mul_overflow,
                 => 3,
 
                 .__c11_atomic_compare_exchange_strong,
