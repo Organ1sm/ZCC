@@ -6,6 +6,7 @@ const RawToken = @import("../Lexer/Token.zig").Token;
 const TokenType = @import("../Basic/TokenType.zig").TokenType;
 const Compilation = @import("../Basic/Compilation.zig");
 const Error = Compilation.Error;
+const SourceEpoch = Compilation.Environment.SourceEpoch;
 const Source = @import("../Basic/Source.zig");
 const Lexer = @import("Lexer.zig");
 const Parser = @import("../Parser/Parser.zig");
@@ -155,6 +156,10 @@ linemarkers: LineMarkers = .None,
 
 hideSet: HideSet,
 
+/// Epoch used for __DATE__, __TIME__, and possibly __TIMESTAMP__
+sourceEpoch: SourceEpoch,
+mtimes: std.AutoHashMapUnmanaged(Source.ID, u64) = .{},
+
 pub const parse = Parser.parse;
 
 pub const LineMarkers = enum {
@@ -166,33 +171,10 @@ pub const LineMarkers = enum {
     NumericDirectives,
 };
 
-const BuiltinMacros = struct {
-    const args = [1][]const u8{"X"};
-    const hasAttribute = makeFeatCheckMacro(.MacroParamHasAttribute);
-    const hasCAttribute = makeFeatCheckMacro(.MacroParamHasCAttribute);
-    const hasDeclspecAttribute = makeFeatCheckMacro(.MacroParamHasDeclspecAttribute);
-    const hasWarning = makeFeatCheckMacro(.MacroParamHasWarning);
-    const hasFeature = makeFeatCheckMacro(.MacroParamHasFeature);
-    const hasExtension = makeFeatCheckMacro(.MacroParamHasExtension);
-    const hasBuiltin = makeFeatCheckMacro(.MacroParamHasBuiltin);
-    const hasInclude = makeFeatCheckMacro(.MacroParamHasInclude);
-    const hasIncludeNext = makeFeatCheckMacro(.MacroParamHasIncludeNext);
-    const hasEmbed = makeFeatCheckMacro(.MacroParamHasEmbed);
-    const isIdentifier = makeFeatCheckMacro(.MacroParamIsIdentifier);
-    const file = makeFeatCheckMacro(.MacroFile);
-    const line = makeFeatCheckMacro(.MacroLine);
-    const counter = makeFeatCheckMacro(.MacroCounter);
-    const pragmaOperator = makeFeatCheckMacro(.MacroParamPragmaOperator);
-
-    inline fn makeFeatCheckMacro(id: TokenType) [1]RawToken {
-        return [1]RawToken{.{ .id = id, .source = .generated }};
-    }
-};
-
-pub fn addBuiltinMacro(pp: *Preprocessor, name: []const u8, isFunc: bool, tokens: []const RawToken) !void {
+pub fn addBuiltinMacro(pp: *Preprocessor, name: []const u8, isFunc: bool, comptime paramTokenTy: TokenType) !void {
     try pp.defines.putNoClobber(pp.gpa, name, .{
-        .params = &BuiltinMacros.args,
-        .tokens = tokens,
+        .params = &[1][]const u8{"X"},
+        .tokens = &[1]RawToken{.{ .id = paramTokenTy, .source = .generated }},
         .varArgs = false,
         .isFunc = isFunc,
         .loc = .{ .id = .generated },
@@ -201,24 +183,28 @@ pub fn addBuiltinMacro(pp: *Preprocessor, name: []const u8, isFunc: bool, tokens
 }
 
 pub fn addBuiltinMacros(pp: *Preprocessor) !void {
-    try pp.addBuiltinMacro("__has_attribute", true, &BuiltinMacros.hasAttribute);
-    try pp.addBuiltinMacro("__has_c_attribute", true, &BuiltinMacros.hasCAttribute);
-    try pp.addBuiltinMacro("__has_declspec_attribute", true, &BuiltinMacros.hasDeclspecAttribute);
-    try pp.addBuiltinMacro("__has_warning", true, &BuiltinMacros.hasWarning);
-    try pp.addBuiltinMacro("__has_feature", true, &BuiltinMacros.hasFeature);
-    try pp.addBuiltinMacro("__has_extension", true, &BuiltinMacros.hasExtension);
-    try pp.addBuiltinMacro("__has_builtin", true, &BuiltinMacros.hasBuiltin);
-    try pp.addBuiltinMacro("__has_include", true, &BuiltinMacros.hasInclude);
-    try pp.addBuiltinMacro("__has_include_next", true, &BuiltinMacros.hasIncludeNext);
-    try pp.addBuiltinMacro("__has_embed", true, &BuiltinMacros.hasEmbed);
-    try pp.addBuiltinMacro("__is_identifier", true, &BuiltinMacros.isIdentifier);
-    try pp.addBuiltinMacro("_Pragma", true, &BuiltinMacros.pragmaOperator);
-    try pp.addBuiltinMacro("__FILE__", false, &BuiltinMacros.file);
-    try pp.addBuiltinMacro("__LINE__", false, &BuiltinMacros.line);
-    try pp.addBuiltinMacro("__COUNTER__", false, &BuiltinMacros.counter);
+    try pp.addBuiltinMacro("__has_attribute", true, .MacroParamHasAttribute);
+    try pp.addBuiltinMacro("__has_c_attribute", true, .MacroParamHasCAttribute);
+    try pp.addBuiltinMacro("__has_declspec_attribute", true, .MacroParamHasDeclspecAttribute);
+    try pp.addBuiltinMacro("__has_warning", true, .MacroParamHasWarning);
+    try pp.addBuiltinMacro("__has_feature", true, .MacroParamHasFeature);
+    try pp.addBuiltinMacro("__has_extension", true, .MacroParamHasExtension);
+    try pp.addBuiltinMacro("__has_builtin", true, .MacroParamHasBuiltin);
+    try pp.addBuiltinMacro("__has_include", true, .MacroParamHasInclude);
+    try pp.addBuiltinMacro("__has_include_next", true, .MacroParamHasIncludeNext);
+    try pp.addBuiltinMacro("__has_embed", true, .MacroParamHasEmbed);
+    try pp.addBuiltinMacro("__is_identifier", true, .MacroParamIsIdentifier);
+    try pp.addBuiltinMacro("_Pragma", true, .MacroParamPragmaOperator);
+
+    try pp.addBuiltinMacro("__FILE__", false, .MacroFile);
+    try pp.addBuiltinMacro("__LINE__", false, .MacroLine);
+    try pp.addBuiltinMacro("__COUNTER__", false, .MacroCounter);
+    try pp.addBuiltinMacro("__DATE__", false, .MacroDate);
+    try pp.addBuiltinMacro("__TIME__", false, .MacroTime);
+    try pp.addBuiltinMacro("__TIMESTAMP__", false, .MacroTimestamp);
 }
 
-pub fn init(comp: *Compilation) Preprocessor {
+pub fn init(comp: *Compilation, sourceEpoch: SourceEpoch) Preprocessor {
     const pp = Preprocessor{
         .comp = comp,
         .diagnostics = comp.diagnostics,
@@ -229,6 +215,7 @@ pub fn init(comp: *Compilation) Preprocessor {
         .poisonedIdentifiers = std.StringHashMap(void).init(comp.gpa),
         .topExpansionBuffer = ExpandBuffer.init(comp.gpa),
         .hideSet = .{ .comp = comp },
+        .sourceEpoch = sourceEpoch,
     };
 
     comp.pragmaEvent(.BeforePreprocess);
@@ -237,7 +224,15 @@ pub fn init(comp: *Compilation) Preprocessor {
 
 /// Initialize Preprocessor with builtin macros.
 pub fn initDefault(comp: *Compilation) !Preprocessor {
-    var pp = init(comp);
+    const sourceEpoch: SourceEpoch = comp.environment.sourceEpoch() catch |er| switch (er) {
+        error.InvalidEpoch => blk: {
+            const diagnostic: Diagnostic = .invalid_source_epoch;
+            try comp.diagnostics.add(.{ .text = diagnostic.fmt, .kind = diagnostic.kind, .opt = diagnostic.opt, .location = null });
+            break :blk .default;
+        },
+    };
+
+    var pp = init(comp, sourceEpoch);
     errdefer pp.deinit();
 
     try pp.addBuiltinMacros();
@@ -254,6 +249,7 @@ pub fn deinit(pp: *Preprocessor) void {
     pp.topExpansionBuffer.deinit();
     pp.includeGuards.deinit(pp.gpa);
     pp.hideSet.deinit();
+    pp.mtimes.deinit(pp.gpa);
 
     for (pp.expansionEntries.items(.locs)) |locs| {
         TokenWithExpansionLocs.free(locs, pp.gpa);
@@ -267,6 +263,14 @@ fn clearBuffers(pp: *Preprocessor) void {
     pp.charBuffer.clearAndFree();
     pp.topExpansionBuffer.clearAndFree();
     pp.hideSet.clearAndFree();
+}
+
+fn mTime(pp: *Preprocessor, sourceID: Source.ID) !u64 {
+    const gop = try pp.mtimes.getOrPut(pp.gpa, sourceID);
+    if (!gop.found_existing) {
+        gop.value_ptr.* = pp.comp.getSourceMTimeUncached(sourceID) orelse 0;
+    }
+    return gop.value_ptr.*;
 }
 
 pub fn expansionSlice(pp: *Preprocessor, tok: Tree.TokenIndex) []Source.Location {
@@ -1217,14 +1221,14 @@ fn deinitMacroArguments(allocator: Allocator, args: *const MacroArguments) void 
 }
 
 fn expandObjMacro(pp: *Preprocessor, simpleMacro: *const Macro) Error!ExpandBuffer {
-    var buff = ExpandBuffer.init(pp.gpa);
-    errdefer buff.deinit();
+    var buffer = ExpandBuffer.init(pp.gpa);
+    errdefer buffer.deinit();
 
     if (simpleMacro.tokens.len == 0) {
-        try buff.append(.{ .id = .PlaceMarker, .loc = .{ .id = .generated } });
-        return buff;
+        try buffer.append(.{ .id = .PlaceMarker, .loc = .{ .id = .generated } });
+        return buffer;
     }
-    try buff.ensureTotalCapacity(simpleMacro.tokens.len);
+    try buffer.ensureTotalCapacity(simpleMacro.tokens.len);
 
     var i: usize = 0;
     while (i < simpleMacro.tokens.len) : (i += 1) {
@@ -1243,9 +1247,9 @@ fn expandObjMacro(pp: *Preprocessor, simpleMacro: *const Macro) Error!ExpandBuff
                         i += 1;
                     } else break;
                 }
-                try pp.pasteTokens(&buff, &.{rhs});
+                try pp.pasteTokens(&buffer, &.{rhs});
             },
-            .WhiteSpace => if (pp.preserveWhitespace) buff.appendAssumeCapacity(token),
+            .WhiteSpace => if (pp.preserveWhitespace) buffer.appendAssumeCapacity(token),
             .MacroFile => {
                 const start = pp.comp.generatedBuffer.items.len;
                 const source = pp.comp.getSource(pp.expansionSourceLoc.id);
@@ -1253,7 +1257,7 @@ fn expandObjMacro(pp: *Preprocessor, simpleMacro: *const Macro) Error!ExpandBuff
                 const w = pp.comp.generatedBuffer.writer(pp.gpa);
                 try w.print("\"{s}\"\n", .{source.path});
 
-                buff.appendAssumeCapacity(try pp.makeGeneratedToken(start, .StringLiteral, token));
+                buffer.appendAssumeCapacity(try pp.makeGeneratedToken(start, .StringLiteral, token));
             },
             .MacroLine => {
                 const start = pp.comp.generatedBuffer.items.len;
@@ -1262,7 +1266,7 @@ fn expandObjMacro(pp: *Preprocessor, simpleMacro: *const Macro) Error!ExpandBuff
                 const w = pp.comp.generatedBuffer.writer(pp.gpa);
                 try w.print("{d}\n", .{source.physicalLine(pp.expansionSourceLoc)});
 
-                buff.appendAssumeCapacity(try pp.makeGeneratedToken(start, .PPNumber, token));
+                buffer.appendAssumeCapacity(try pp.makeGeneratedToken(start, .PPNumber, token));
             },
             .MacroCounter => {
                 defer pp.counter += 1;
@@ -1271,13 +1275,91 @@ fn expandObjMacro(pp: *Preprocessor, simpleMacro: *const Macro) Error!ExpandBuff
                 const w = pp.comp.generatedBuffer.writer(pp.gpa);
                 try w.print("{d}\n", .{pp.counter});
 
-                buff.appendAssumeCapacity(try pp.makeGeneratedToken(start, .PPNumber, token));
+                buffer.appendAssumeCapacity(try pp.makeGeneratedToken(start, .PPNumber, token));
             },
-            else => buff.appendAssumeCapacity(token),
+            .MacroDate, .MacroTime => {
+                const start = pp.comp.generatedBuffer.items.len;
+                const timestamp = switch (pp.sourceEpoch) {
+                    .system, .provided => |ts| ts,
+                };
+                try pp.writeDateTimeStamp(.fromTokId(raw.id), timestamp);
+                buffer.appendAssumeCapacity(try pp.makeGeneratedToken(start, .StringLiteral, token));
+            },
+            .MacroTimestamp => {
+                const start = pp.comp.generatedBuffer.items.len;
+                const timestamp = switch (pp.sourceEpoch) {
+                    .provided => |ts| ts,
+                    .system => try pp.mTime(pp.expansionSourceLoc.id),
+                };
+
+                try pp.writeDateTimeStamp(.fromTokId(raw.id), timestamp);
+                buffer.appendAssumeCapacity(try pp.makeGeneratedToken(start, .StringLiteral, token));
+            },
+            else => buffer.appendAssumeCapacity(token),
         }
     }
 
-    return buff;
+    return buffer;
+}
+
+const DateTimeStampKind = enum {
+    date,
+    time,
+    timestamp,
+
+    fn fromTokId(tokenTy: TokenType) DateTimeStampKind {
+        return switch (tokenTy) {
+            .MacroDate => .date,
+            .MacroTime => .time,
+            .MacroTimestamp => .timestamp,
+            else => unreachable,
+        };
+    }
+};
+
+fn writeDateTimeStamp(pp: *Preprocessor, kind: DateTimeStampKind, timestamp: u64) !void {
+    std.debug.assert(std.time.epoch.Month.jan.numeric() == 1);
+
+    const w = pp.comp.generatedBuffer.writer(pp.gpa);
+
+    const epochSeconds = std.time.epoch.EpochSeconds{ .secs = timestamp };
+    const epochDay = epochSeconds.getEpochDay();
+    const daySeconds = epochSeconds.getDaySeconds();
+    const yearDay = epochDay.calculateYearDay();
+    const monthDay = yearDay.calculateMonthDay();
+
+    const dayNames = [_][]const u8{ "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun" };
+    const monthNames = [_][]const u8{ "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
+    const dayName = dayNames[@intCast((epochDay.day + 3) % 7)];
+    const monthName = monthNames[monthDay.month.numeric() - 1];
+
+    switch (kind) {
+        .date => {
+            try w.print("\"{s} {d: >2} {d}\"", .{
+                monthName,
+                monthDay.day_index + 1,
+                yearDay.year,
+            });
+        },
+        .time => {
+            try w.print("\"{d:0>2}:{d:0>2}:{d:0>2}\"", .{
+                daySeconds.getHoursIntoDay(),
+                daySeconds.getMinutesIntoHour(),
+                daySeconds.getSecondsIntoMinute(),
+            });
+        },
+        .timestamp => {
+            try w.print("\"{s} {s} {d: >2} {d:0>2}:{d:0>2}:{d:0>2} {d}\"", .{
+                dayName,
+                monthName,
+                monthDay.day_index + 1,
+                daySeconds.getHoursIntoDay(),
+                daySeconds.getMinutesIntoHour(),
+                daySeconds.getSecondsIntoMinute(),
+                yearDay.year,
+            });
+        },
+    }
 }
 
 /// Join a possibly-parenthesized series of string literal tokens into a single string without
@@ -3628,7 +3710,7 @@ test "Preserve pragma tokens sometimes" {
 
             try comp.addDefaultPragmaHandlers();
 
-            var pp = Preprocessor.init(&comp);
+            var pp = Preprocessor.init(&comp, .default);
             defer pp.deinit();
 
             pp.preserveWhitespace = true;
@@ -3689,7 +3771,7 @@ test "destringify" {
     var comp = Compilation.init(allocator, &diagnostics, std.fs.cwd());
     defer comp.deinit();
 
-    var pp = Preprocessor.init(&comp);
+    var pp = Preprocessor.init(&comp, .default);
     defer pp.deinit();
 
     try Test.testDestringify(&pp, "hello\tworld\n", "hello\tworld\n");
@@ -3754,7 +3836,7 @@ test "Include guards" {
             var comp = Compilation.init(allocator, &diagnostics, std.fs.cwd());
             defer comp.deinit();
 
-            var pp = Preprocessor.init(&comp);
+            var pp = Preprocessor.init(&comp, .default);
             defer pp.deinit();
 
             const path = try std.fs.path.join(allocator, &.{ ".", "bar.h" });

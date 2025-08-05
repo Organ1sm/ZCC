@@ -249,11 +249,11 @@ pub fn main() !void {
         defer macroBuffer.deinit();
 
         const onlyPreprocess, const lineMarkers, const systemDefines, const dumpNode = try addCommandLineArgs(&comp, file, macroBuffer.writer());
-        const userMacros = try comp.addSourceFromBuffer("<command line>", macroBuffer.items);
 
+        const userMacros = try comp.addSourceFromBuffer("<command line>", macroBuffer.items);
         const builtinMacros = try comp.generateBuiltinMacros(systemDefines);
 
-        var pp = zinc.Preprocessor.init(&comp);
+        var pp = try zinc.Preprocessor.initDefault(&comp);
         defer pp.deinit();
 
         if (onlyPreprocess) {
@@ -261,7 +261,6 @@ pub fn main() !void {
             pp.linemarkers = lineMarkers;
             if (dumpNode != .ResultOnly) pp.storeMacroTokens = true;
         }
-        try pp.addBuiltinMacros();
 
         if (comp.langOpts.msExtensions)
             comp.msCwdSourceId = file.id;

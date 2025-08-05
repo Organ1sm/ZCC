@@ -771,6 +771,7 @@ pub fn main(d: *Driver, tc: *Toolchain, args: []const []const u8, comptime fastE
         error.StreamTooLong => return d.fatal("user provided macro source exceeded max size", .{}),
         else => |e| return e,
     };
+
     if (fastExit and d.inputs.items.len == 1) {
         d.processSource(tc, d.inputs.items[0], builtinMacros, userDefinedMacros, fastExit) catch |e| switch (e) {
             error.FatalError => {

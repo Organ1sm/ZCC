@@ -404,3 +404,8 @@ pub const unterminated_string_literal_warning: Diagnostic = .{
     .kind = .warning,
     .opt = .@"invalid-pp-token",
 };
+
+pub const invalid_source_epoch: Diagnostic = .{
+    .fmt = "environment variable SOURCE_DATE_EPOCH must expand to a non-negative integer less than or equal to 253402300799",
+    .kind = .@"error",
+};

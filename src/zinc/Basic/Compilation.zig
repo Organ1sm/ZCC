@@ -61,8 +61,19 @@ pub const Environment = struct {
     /// TODO: not implemented yet
     cIncludePath: ?[]const u8 = null,
 
-    /// UNIX timestamp to be used instead of the current date and time in the __DATE__ and __TIME__ macros
+    /// UNIX timestamp to be used instead of the current date and time in the __DATE__ and __TIME__ macros, and instead of the
+    /// file modification time in the __TIMESTAMP__ macro
     sourceDateEpoch: ?[]const u8 = null,
+
+    pub const SourceEpoch = union(enum) {
+        /// Represents system time when aro is invoked; used for __DATE__ and __TIME__ macros
+        system: u64,
+        /// Represents a user-provided time (typically via the SOURCE_DATE_EPOCH environment variable)
+        /// used for __DATE__, __TIME__, and __TIMESTAMP__
+        provided: u64,
+
+        pub const default: @This() = .{ .provided = 0 };
+    };
 
     /// Load all of the environment variables using the std.process API.
     /// Do not use if using zinc as a shared library on Linux without libc
@@ -95,6 +106,19 @@ pub const Environment = struct {
             }
         }
         self.* = undefined;
+    }
+
+    pub fn sourceEpoch(self: *const Environment) !SourceEpoch {
+        const max_timestamp = 253402300799; // Dec 31 9999 23:59:59
+
+        if (self.sourceDateEpoch) |epoch| {
+            const parsed = std.fmt.parseInt(u64, epoch, 10) catch return error.InvalidEpoch;
+            if (parsed > max_timestamp) return error.InvalidEpoch;
+            return .{ .provided = parsed };
+        } else {
+            const timestamp = std.math.cast(u64, std.time.timestamp()) orelse return error.InvalidEpoch;
+            return .{ .system = std.math.clamp(timestamp, 0, max_timestamp) };
+        }
     }
 };
 
@@ -173,63 +197,6 @@ pub fn deinit(comp: *Compilation) void {
 
 pub fn internString(comp: *Compilation, str: []const u8) !StringInterner.StringId {
     return comp.stringInterner.intern(comp.gpa, str);
-}
-
-/// Dec 31 9999 23:59:59
-const MaxTimestamp = 253402300799;
-
-pub fn getSourceEpoch(self: *const Compilation, max: i64) !?i64 {
-    const provided = self.environment.sourceDateEpoch orelse return null;
-    const parsed = std.fmt.parseInt(i64, provided, 10) catch return error.InvalidEpoch;
-    if (parsed < 0 or parsed > max)
-        return error.InvalidEpoch;
-    return parsed;
-}
-
-fn getTimeStamp(comp: *Compilation) !u47 {
-    const provided: ?i64 = comp.getSourceEpoch(MaxTimestamp) catch blk: {
-        const diagnostic: Diagnostic = .invalid_source_epoch;
-        try comp.diagnostics.add(.{ .text = diagnostic.fmt, .kind = diagnostic.kind, .opt = diagnostic.opt, .location = null });
-        break :blk null;
-    };
-    const timestamp = provided orelse std.time.timestamp();
-    return @intCast(std.math.clamp(timestamp, 0, MaxTimestamp));
-}
-
-fn generateDateAndTime(w: anytype, timestamp: u47) !void {
-    const epochSeconds = EpochSeconds{ .secs = timestamp };
-    const epochDay = epochSeconds.getEpochDay();
-    const daySeconds = epochSeconds.getDaySeconds();
-    const yearDay = epochDay.calculateYearDay();
-    const monthDay = yearDay.calculateMonthDay();
-
-    const MonthNames = [_][]const u8{ "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
-    assert(std.time.epoch.Month.jan.numeric() == 1);
-
-    const monthName = MonthNames[monthDay.month.numeric() - 1];
-    try w.print("#define __DATE__ \"{s} {d: >2} {d}\"\n", .{
-        monthName,
-        monthDay.day_index + 1,
-        yearDay.year,
-    });
-    try w.print("#define __TIME__ \"{d:0>2}:{d:0>2}:{d:0>2}\"\n", .{
-        daySeconds.getHoursIntoDay(),
-        daySeconds.getMinutesIntoHour(),
-        daySeconds.getSecondsIntoMinute(),
-    });
-
-    const day_names = [_][]const u8{ "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun" };
-    // days since Thu Oct 1 1970
-    const day_name = day_names[@intCast((epochDay.day + 3) % 7)];
-    try w.print("#define __TIMESTAMP__ \"{s} {s} {d: >2} {d:0>2}:{d:0>2}:{d:0>2} {d}\"\n", .{
-        day_name,
-        monthName,
-        monthDay.day_index + 1,
-        daySeconds.getHoursIntoDay(),
-        daySeconds.getMinutesIntoHour(),
-        daySeconds.getSecondsIntoMinute(),
-        yearDay.year,
-    });
 }
 
 /// Which set of system defines to generate via generateBuiltinMacros
@@ -581,10 +548,6 @@ pub fn generateBuiltinMacros(comp: *Compilation, systemDefinesMode: SystemDefine
         try buf.appendSlice(stdcVersion);
         try buf.append('\n');
     }
-
-    // timestamps
-    const timestamp = try comp.getTimeStamp();
-    try generateDateAndTime(buf.writer(), timestamp);
 
     if (systemDefinesMode == .IncludeSystemDefines) {
         try comp.generateSystemDefines(buf.writer());
@@ -1497,6 +1460,16 @@ pub fn hasBuiltinFunction(comp: *const Compilation, builtin: Builtin) bool {
     }
 }
 
+pub fn getSourceMTimeUncached(comp: *const Compilation, sourceId: Source.ID) ?u64 {
+    const source = comp.getSource(sourceId);
+    if (comp.cwd.statFile(source.path)) |stat| {
+        const mtime = @divTrunc(stat.mtime, std.time.ns_per_s);
+        return std.math.cast(u64, mtime);
+    } else |_| {
+        return null;
+    }
+}
+
 pub const CharUnitSize = enum(u32) {
     @"1" = 1,
     @"2" = 2,
@@ -1515,11 +1488,6 @@ pub const Diagnostic = struct {
     fmt: []const u8,
     kind: Diagnostics.Message.Kind,
     opt: ?Diagnostics.Option = null,
-
-    pub const invalid_source_epoch: Diagnostic = .{
-        .fmt = "environment variable SOURCE_DATE_EPOCH must expand to a non-negative integer less than or equal to 253402300799",
-        .kind = .@"error",
-    };
 
     pub const backslash_newline_escape: Diagnostic = .{
         .fmt = "backslash and newline separated by space",
