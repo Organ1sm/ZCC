@@ -18,20 +18,6 @@ node: Node.Index,
 qt: QualType = .int,
 value: Value = .{},
 
-pub fn str(res: Result, p: *Parser) ![]const u8 {
-    switch (res.value.optRef) {
-        .none => return "(none)",
-        .null => return "nullptr_t",
-        else => {},
-    }
-
-    const stringsTop = p.strings.items.len;
-    defer p.strings.items.len = stringsTop;
-
-    try res.value.print(res.qt, p.comp, p.strings.writer());
-    return try p.comp.diagnostics.arena.allocator().dupe(u8, p.strings.items[stringsTop..]);
-}
-
 pub fn maybeWarnUnused(res: Result, p: *Parser, exprStart: TokenIndex, prevTotal: usize) Error!void {
     if (res.qt.is(p.comp, .void) or res.qt.isInvalid()) return;
 
