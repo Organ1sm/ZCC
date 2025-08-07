@@ -773,21 +773,12 @@ pub fn main(d: *Driver, tc: *Toolchain, args: []const []const u8, comptime fastE
     };
 
     if (fastExit and d.inputs.items.len == 1) {
-        d.processSource(tc, d.inputs.items[0], builtinMacros, userDefinedMacros, fastExit) catch |e| switch (e) {
-            error.FatalError => {
-                d.printDiagnosticsStats();
-                d.exitWithCleanup(1);
-            },
-            else => |er| return er,
-        };
+        try d.processSource(tc, d.inputs.items[0], builtinMacros, userDefinedMacros, fastExit);
         unreachable;
     }
 
     for (d.inputs.items) |source| {
-        d.processSource(tc, source, builtinMacros, userDefinedMacros, fastExit) catch |e| switch (e) {
-            error.FatalError => d.printDiagnosticsStats(),
-            else => |er| return er,
-        };
+        try d.processSource(tc, source, builtinMacros, userDefinedMacros, fastExit);
     }
 
     if (d.diagnostics.errors != 0) {
