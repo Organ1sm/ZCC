@@ -187,16 +187,22 @@ pub fn getLinkerPath(tc: *const Toolchain, buf: []u8) ![]const u8 {
 /// TODO: this isn't exactly right since our target names don't necessarily match up
 /// with GCC's.
 /// For example the Zig target `arm-freestanding-eabi` would need the `arm-none-eabi` tools
-fn possibleProgramNames(rawTriple: ?[]const u8, name: []const u8, buf: *[64]u8) std.BoundedArray([]const u8, 2) {
-    var possibleNames: std.BoundedArray([]const u8, 2) = .{};
+fn possibleProgramNames(
+    rawTriple: ?[]const u8,
+    name: []const u8,
+    buf: *[64]u8,
+    possibleNameBuffer: *[2][]const u8,
+) []const []const u8 {
+    var i: u32 = 0;
     if (rawTriple) |triple| {
         if (std.fmt.bufPrint(buf, "{s}-{s}", .{ triple, name })) |res| {
-            possibleNames.appendAssumeCapacity(res);
+            possibleNameBuffer[i] = res;
+            i += 1;
         } else |_| {}
     }
 
-    possibleNames.appendAssumeCapacity(name);
-    return possibleNames;
+    possibleNameBuffer[i] = name;
+    return possibleNameBuffer[0..i];
 }
 
 /// Add toolchain `file_paths` to argv as `-L` arguments
@@ -207,7 +213,7 @@ pub fn addFilePathLibArgs(tc: *const Toolchain, argv: *std.ArrayList([]const u8)
     for (tc.filePaths.items) |path| {
         bytesNeeded += path.len + 2; // +2 for `-L`
     }
-    var bytes = try tc.arena.alloc(u8, bytesNeeded);
+    var bytes = try tc.driver.comp.arena.alloc(u8, bytesNeeded);
     var index: usize = 0;
     for (tc.filePaths.items) |path| {
         @memcpy(bytes[index..][0..2], "-L");
@@ -225,9 +231,10 @@ fn getProgramPath(tc: *const Toolchain, name: []const u8, buf: []u8) []const u8 
     var fib = std.heap.FixedBufferAllocator.init(&pathBuffer);
 
     var toolSpecificBuffer: [64]u8 = undefined;
-    const possibleNames = possibleProgramNames(tc.driver.rawTargetTriple, name, &toolSpecificBuffer);
+    var possibleNameBuffer: [2][]const u8 = undefined;
+    const possibleNames = possibleProgramNames(tc.driver.rawTargetTriple, name, &toolSpecificBuffer, &possibleNameBuffer);
 
-    for (possibleNames.constSlice()) |toolName| {
+    for (possibleNames) |toolName| {
         for (tc.programPaths.items) |programPath| {
             defer fib.reset();
 

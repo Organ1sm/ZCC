@@ -533,20 +533,21 @@ fn findBiarchMultilibs(
         .want64 => Multilib.init("", "", &.{ "-m32", "+m64", "-mx32" }),
         .wantx32 => Multilib.init("", "", &.{ "-m32", "-m64", "+mx32" }),
     };
-    result.multilibs.appendSliceAssumeCapacity(&.{
+
+    result.multilibBuffer[result.multilibCount..][0..4].* = .{
         default,
         alt64,
         alt32,
         altX32,
-    });
+    };
+    result.multilibCount += 4;
     result.filter(multilibFilter, tc.filesystem);
 
-    var flags: Multilib.Flags = .{};
-    flags.appendAssumeCapacity(if (targetPtrWidth == 64 and !isX32) "+m64" else "-m64");
-    flags.appendAssumeCapacity(if (targetPtrWidth == 32) "+m32" else "-m32");
-    flags.appendAssumeCapacity(if (targetPtrWidth == 64 and isX32) "+mx32" else "-mx32");
-
-    return result.select(flags);
+    return result.select(&.{
+        if (targetPtrWidth == 64 and !isX32) "+m64" else "-m64",
+        if (targetPtrWidth == 32) "+m32" else "-m32",
+        if (targetPtrWidth == 64 and isX32) "+mx32" else "-mx32",
+    });
 }
 
 fn scanGCCForMultilibs(
