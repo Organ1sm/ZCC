@@ -1170,19 +1170,24 @@ pub const QualType = packed struct(u32) {
         return comp.langOpts.shortEnums or TargetUtil.packAllEnums(comp.target) or qt.hasAttribute(comp, .@"packed");
     }
 
-    pub fn print(qt: QualType, comp: *const Compilation, w: anytype) @TypeOf(w).Error!void {
+    pub fn print(qt: QualType, comp: *const Compilation, w: *std.Io.Writer) std.Io.Writer.Error!void {
         _ = try qt.printPrologue(comp, w);
         try qt.printEpilogue(comp, w);
     }
 
-    pub fn printNamed(qt: QualType, name: []const u8, comp: *const Compilation, w: anytype) @TypeOf(w).Error!void {
+    pub fn printNamed(
+        qt: QualType,
+        name: []const u8,
+        comp: *const Compilation,
+        w: *std.Io.Writer,
+    ) std.Io.Writer.Error!void {
         const simple = try qt.printPrologue(comp, w);
         if (simple) try w.writeByte(' ');
         try w.writeAll(name);
         try qt.printEpilogue(comp, w);
     }
 
-    fn printPrologue(qt: QualType, comp: *const Compilation, w: anytype) @TypeOf(w).Error!bool {
+    fn printPrologue(qt: QualType, comp: *const Compilation, w: *std.Io.Writer) std.Io.Writer.Error!bool {
         loop: switch (qt.type(comp)) {
             .pointer => |pointer| {
                 const simple = try pointer.child.printPrologue(comp, w);
@@ -1297,7 +1302,7 @@ pub const QualType = packed struct(u32) {
         return true;
     }
 
-    fn printEpilogue(qt: QualType, comp: *const Compilation, w: anytype) @TypeOf(w).Error!void {
+    fn printEpilogue(qt: QualType, comp: *const Compilation, w: *std.Io.Writer) std.Io.Writer.Error!void {
         loop: switch (qt.type(comp)) {
             .pointer => |pointer| {
                 switch (pointer.child.base(comp).type) {
@@ -1353,7 +1358,7 @@ pub const QualType = packed struct(u32) {
         }
     }
 
-    pub fn dump(qt: QualType, comp: *const Compilation, w: anytype) @TypeOf(w).Error!void {
+    pub fn dump(qt: QualType, comp: *const Compilation, w: *std.Io.Writer) std.Io.Writer.Error!void {
         if (qt.@"const") try w.writeAll("const ");
         if (qt.@"volatile") try w.writeAll("volatile ");
         if (qt.restrict) try w.writeAll("restrict ");

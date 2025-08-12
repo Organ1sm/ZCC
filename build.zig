@@ -58,7 +58,7 @@ pub fn build(b: *std.Build) !void {
 
                 const ancestor_ver = try std.SemanticVersion.parse(taggedAncestor);
                 if (!ZincVersion.order(ancestor_ver).compare(.gte)) {
-                    std.debug.print("Zinc version '{}' must be greater than tagged ancestor '{}'\n", .{ ZincVersion, ancestor_ver });
+                    std.debug.print("Zinc version '{f}' must be greater than tagged ancestor '{f}'\n", .{ ZincVersion, ancestor_ver });
                     std.process.exit(1);
                 }
 
@@ -116,14 +116,19 @@ pub fn build(b: *std.Build) !void {
 
     const exe = b.addExecutable(.{
         .name = "zincc",
-        .root_source_file = b.path("src/main.zig"),
-        .target = target,
-        .optimize = mode,
-        .single_threaded = true,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/main.zig"),
+            .optimize = mode,
+            .target = target,
+            .single_threaded = true,
+        }),
         .use_llvm = UseLLVM,
         .use_lld = UseLLVM,
     });
     exe.root_module.addImport("zinc", zincModule);
+
+    if (target.result.os.tag == .windows)
+        exe.root_module.linkSystemLibrary("advapi32", .{});
 
     if (LinkLibc)
         exe.linkLibC();
@@ -137,7 +142,13 @@ pub fn build(b: *std.Build) !void {
     }
 
     const unit_tests_step = step: {
-        var unit_tests = b.addTest(.{ .root_source_file = b.path("src/zinc.zig") });
+        var unit_tests = b.addTest(.{
+            .root_module = b.createModule(.{
+                .target = target,
+                .root_source_file = b.path("src/zinc.zig"),
+            }),
+        });
+
         for (zincModule.import_table.keys(), zincModule.import_table.values()) |name, module| {
             unit_tests.root_module.addImport(name, module);
         }
@@ -151,9 +162,11 @@ pub fn build(b: *std.Build) !void {
     const integration_tests_step = step: {
         var integration_tests = b.addExecutable(.{
             .name = "test-runner",
-            .root_source_file = b.path("test/test_runner.zig"),
-            .target = target,
-            .optimize = mode,
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("test/test_runner.zig"),
+                .target = target,
+                .optimize = mode,
+            }),
             .use_lld = UseLLVM,
             .use_llvm = UseLLVM,
         });
@@ -177,9 +190,11 @@ pub fn build(b: *std.Build) !void {
     const record_tests_step = step: {
         const record_tests = b.addExecutable(.{
             .name = "record-runner",
-            .root_source_file = b.path("test/record_runner.zig"),
-            .optimize = mode,
-            .target = target,
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("test/record_runner.zig"),
+                .target = target,
+                .optimize = mode,
+            }),
             .use_llvm = UseLLVM,
             .use_lld = UseLLVM,
         });

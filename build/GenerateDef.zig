@@ -84,14 +84,14 @@ fn make(step: *Step, options: std.Build.Step.MakeOptions) !void {
     const subPathDirname = std.fs.path.dirname(subPath).?;
 
     b.cache_root.handle.makePath(subPathDirname) catch |err| {
-        return step.fail("unable to make path '{}{s}': {s}", .{
+        return step.fail("unable to make path '{f}{s}': {s}", .{
             b.cache_root, subPathDirname, @errorName(err),
         });
     };
 
     const output = try self.generate(contents);
     b.cache_root.handle.writeFile(.{ .sub_path = subPath, .data = output }) catch |err| {
-        return step.fail("unable to write file '{}{s}': {s}", .{
+        return step.fail("unable to write file '{f}{s}': {s}", .{
             b.cache_root, subPath, @errorName(err),
         });
     };
@@ -206,7 +206,7 @@ fn generate(self: *GenerateDef, input: []const u8) ![]const u8 {
         if (self.kind == .named) {
             try writer.writeAll("pub const Tag = enum {\n");
             for (values.keys()) |property| {
-                try writer.print("    {p},\n", .{std.zig.fmtId(property)});
+                try writer.print("    {f},\n", .{std.zig.fmtIdFlags(property, .{ .allow_primitive = true })});
             }
             try writer.writeAll(
                 \\
@@ -257,7 +257,7 @@ fn generate(self: *GenerateDef, input: []const u8) ![]const u8 {
             \\
         );
         for (valuesArray) |value| {
-            try writer.print("    {},\n", .{std.zig.fmtId(value.name)});
+            try writer.print("    {f},\n", .{std.zig.fmtId(value.name)});
         }
         try writer.writeAll(
             \\};
@@ -371,8 +371,7 @@ fn generate(self: *GenerateDef, input: []const u8) ![]const u8 {
             \\
             \\    var node_index: u16 = 0;
             \\    var count: u16 = index;
-            \\    var fbs = std.io.fixedBufferStream(buf);
-            \\    const w = fbs.writer();
+            \\    var w = std.Io.Writer.fixed(buf);
             \\
             \\    while (true) {
             \\        var sibling_index = dafsa[node_index].child_index;
@@ -394,7 +393,7 @@ fn generate(self: *GenerateDef, input: []const u8) ![]const u8 {
             \\        if (count == 0) break;
             \\    }
             \\
-            \\    return fbs.getWritten();
+            \\    return w.buffered();
             \\}
             \\
             \\
@@ -476,7 +475,7 @@ fn writeData(writer: anytype, values: []const Value) !void {
     try writer.writeAll("    break :blk [_]@This(){\n");
 
     for (values) |value| {
-        try writer.print("        .{{ .tag = .{}, .properties = .{{", .{std.zig.fmtId(value.name)});
+        try writer.print("        .{{ .tag = .{f}, .properties = .{{", .{std.zig.fmtId(value.name)});
         for (value.properties, 0..) |property, j| {
             if (j != 0) try writer.writeByte(',');
             try writer.writeByte(' ');

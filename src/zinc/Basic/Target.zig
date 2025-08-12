@@ -544,10 +544,9 @@ pub fn toLLVMTriple(target: std.Target, buf: []u8) []const u8 {
     // 64 bytes is assumed to be large enough to hold any target triple; increase if necessary
     std.debug.assert(buf.len >= 64);
 
-    var stream = std.io.fixedBufferStream(buf);
-    const writer = stream.writer();
+    var writer: std.Io.Writer = .fixed(buf);
 
-    const llvm_arch = switch (target.cpu.arch) {
+    const llvmArch = switch (target.cpu.arch) {
         .arm => "arm",
         .armeb => "armeb",
         .aarch64 => if (target.abi == .ilp32) "aarch64_32" else "aarch64",
@@ -594,7 +593,7 @@ pub fn toLLVMTriple(target: std.Target, buf: []u8) []const u8 {
         .propeller => "propeller",
         .or1k => "or1k",
     };
-    writer.writeAll(llvm_arch) catch unreachable;
+    writer.writeAll(llvmArch) catch unreachable;
     writer.writeByte('-') catch unreachable;
 
     const llvm_os = switch (target.os.tag) {
@@ -684,7 +683,7 @@ pub fn toLLVMTriple(target: std.Target, buf: []u8) []const u8 {
         .ohoseabi => "ohoseabi",
     };
     writer.writeAll(LLVMAbi) catch unreachable;
-    return stream.getWritten();
+    return writer.buffered();
 }
 
 pub const DefaultPIStatus = enum { Yes, No, DependsOnLinker };

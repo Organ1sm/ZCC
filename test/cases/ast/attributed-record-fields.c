@@ -76,8 +76,8 @@ structDecl: 'struct S9'
   recordField: 'long'
    name: l
    field attr: packed
-   field attr: aligned alignment: zinc.Lexer.Attribute.Alignment{ .node = zinc.AST.AST.Node.OptIndex.null, .requested = 16 }
-   field attr: warn_if_not_aligned alignment: zinc.Lexer.Attribute.Alignment{ .node = zinc.AST.AST.Node.OptIndex.null, .requested = 16 }
+   field attr: aligned alignment: .{ .node = .null, .requested = 16 }
+   field attr: warn_if_not_aligned alignment: .{ .node = .null, .requested = 16 }
 
 unionDecl: 'union U1'
   recordField: 'long'
@@ -85,7 +85,7 @@ unionDecl: 'union U1'
 
   recordField: 'int'
    name: y
-   field attr: aligned alignment: zinc.Lexer.Attribute.Alignment{ .node = zinc.AST.AST.Node.OptIndex.null, .requested = 32 }
+   field attr: aligned alignment: .{ .node = .null, .requested = 32 }
 
   recordField: 'unsigned int'
    name: z

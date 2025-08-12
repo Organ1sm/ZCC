@@ -33,7 +33,7 @@ fnDef: 'fn () void'
  body:
   compoundStmt
     variable: 'attributed([64]char)'
-     attr: aligned alignment: zinc.Lexer.Attribute.Alignment{ .node = zinc.AST.AST.Node.OptIndex(13), .requested = 8 }
+     attr: aligned alignment: .{ .node = @enumFromInt(13), .requested = 8 }
      name: x
 
     variable: '*char'
@@ -45,10 +45,10 @@ fnDef: 'fn () void'
          lhs:
           implicit cast: (ArrayToPointer) 'decayed *attributed([64]char)'
             parenExpr: 'attributed([64]char)' lvalue
-             attr: aligned alignment: zinc.Lexer.Attribute.Alignment{ .node = zinc.AST.AST.Node.OptIndex(13), .requested = 8 }
+             attr: aligned alignment: .{ .node = @enumFromInt(13), .requested = 8 }
              operand:
               declRefExpr: 'attributed([64]char)' lvalue
-               attr: aligned alignment: zinc.Lexer.Attribute.Alignment{ .node = zinc.AST.AST.Node.OptIndex(13), .requested = 8 }
+               attr: aligned alignment: .{ .node = @enumFromInt(13), .requested = 8 }
                name: x
          index:
           intLiteral: 'int' (value: 0)

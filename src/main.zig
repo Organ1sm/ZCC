@@ -34,14 +34,13 @@ pub fn main() u8 {
     };
     defer gpa.free(zincName);
 
-    const stderrFile = std.io.getStdErr();
+    var stderrBuffer: [1024]u8 = undefined;
+    var stderr = std.fs.File.stderr().writer(&stderrBuffer);
     var diagnostics: Diagnostics = .{
-        .output = .{
-            .toFile = .{
-                .config = std.io.tty.detectConfig(stderrFile),
-                .file = stderrFile,
-            },
-        },
+        .output = .{ .toWriter = .{
+            .color = .detect(stderr.file),
+            .writer = &stderr.interface,
+        } },
     };
 
     var comp = Compilation.initDefault(gpa, arena, &diagnostics, std.fs.cwd()) catch |er| switch (er) {

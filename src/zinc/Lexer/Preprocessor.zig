@@ -790,17 +790,17 @@ fn tokenFromRaw(raw: RawToken) TokenWithExpansionLocs {
 
 pub const Diagnostic = @import("Diagnostic.zig");
 
-fn err(pp: *Preprocessor, location: anytype, diagnostic: Diagnostic, args: anytype) !void {
+fn err(pp: *Preprocessor, location: anytype, diagnostic: Diagnostic, args: anytype) Compilation.Error!void {
     if (pp.diagnostics.effectiveKind(diagnostic) == .off) return;
 
     var sf = std.heap.stackFallback(1024, pp.gpa);
-    var buf = std.ArrayList(u8).init(sf.get());
-    defer buf.deinit();
+    var allocating: std.Io.Writer.Allocating = .init(sf.get());
+    defer allocating.deinit();
 
-    try Diagnostics.formatArgs(buf.writer(), diagnostic.fmt, args);
+    Diagnostics.formatArgs(&allocating.writer, diagnostic.fmt, args) catch return error.OutOfMemory;
     try pp.diagnostics.addWithLocation(pp.comp, .{
         .kind = diagnostic.kind,
-        .text = buf.items,
+        .text = allocating.getWritten(),
         .opt = diagnostic.opt,
         .extension = diagnostic.extension,
         .location = switch (@TypeOf(location)) {
@@ -823,13 +823,13 @@ fn err(pp: *Preprocessor, location: anytype, diagnostic: Diagnostic, args: anyty
 
 fn fatal(pp: *Preprocessor, raw: RawToken, comptime fmt: []const u8, args: anytype) Compilation.Error {
     var sf = std.heap.stackFallback(1024, pp.gpa);
-    var buf = std.ArrayList(u8).init(sf.get());
-    defer buf.deinit();
+    var allocating: std.Io.Writer.Allocating = .init(sf.get());
+    defer allocating.deinit();
 
-    try Diagnostics.formatArgs(buf.writer(), fmt, args);
+    Diagnostics.formatArgs(&allocating.writer, fmt, args) catch return error.OutOfMemory;
     try pp.diagnostics.add(.{
         .kind = .@"fatal error",
-        .text = buf.items,
+        .text = allocating.getWritten(),
         .location = (Source.Location{
             .id = raw.source,
             .byteOffset = raw.start,
@@ -848,7 +848,7 @@ fn fatalNotFound(pp: *Preprocessor, tok: TokenWithExpansionLocs, filename: []con
     var buf = std.ArrayList(u8).init(sf.get());
     defer buf.deinit();
 
-    try Diagnostics.formatArgs(buf.writer(), "'{s}' not found", .{filename});
+    try buf.print("'{s}' not found", .{filename});
     try pp.diagnostics.addWithLocation(pp.comp, .{
         .kind = .@"fatal error",
         .text = buf.items,
@@ -861,15 +861,16 @@ fn verboseLog(pp: *Preprocessor, raw: RawToken, comptime fmt: []const u8, args: 
     const source = pp.comp.getSource(raw.source);
     const lineCol = source.getLineCol(.{ .id = raw.source, .line = raw.line, .byteOffset = raw.start });
 
-    const stderr = std.io.getStdErr().writer();
-    var buffWriter = std.io.bufferedWriter(stderr);
-    const writer = buffWriter.writer();
-    defer buffWriter.flush() catch {};
-    writer.print("{s}:{d}:{d}: ", .{ source.path, lineCol.lineNo, lineCol.col }) catch return;
-    writer.print(fmt, args) catch return;
-    writer.writeByte('\n') catch return;
-    writer.writeAll(lineCol.line) catch return;
-    writer.writeByte('\n') catch return;
+    var stderrBuffer: [4096]u8 = undefined;
+    var stderr = std.fs.File.stderr().writer(&stderrBuffer);
+    const w = &stderr.interface;
+
+    w.print("{s}:{d}:{d}: ", .{ source.path, lineCol.lineNo, lineCol.col }) catch return;
+    w.print(fmt, args) catch return;
+    w.writeByte('\n') catch return;
+    w.writeAll(lineCol.line) catch return;
+    w.writeByte('\n') catch return;
+    w.flush() catch return;
 }
 
 /// Consume next token, error if it is not an identifier.
@@ -1254,8 +1255,7 @@ fn expandObjMacro(pp: *Preprocessor, simpleMacro: *const Macro) Error!ExpandBuff
                 const start = pp.comp.generatedBuffer.items.len;
                 const source = pp.comp.getSource(pp.expansionSourceLoc.id);
 
-                const w = pp.comp.generatedBuffer.writer(pp.gpa);
-                try w.print("\"{s}\"\n", .{source.path});
+                try pp.comp.generatedBuffer.print(pp.gpa, "\"{f}\"\n", .{fmtEscapes(source.path)});
 
                 buffer.appendAssumeCapacity(try pp.makeGeneratedToken(start, .StringLiteral, token));
             },
@@ -1263,8 +1263,7 @@ fn expandObjMacro(pp: *Preprocessor, simpleMacro: *const Macro) Error!ExpandBuff
                 const start = pp.comp.generatedBuffer.items.len;
                 const source = pp.comp.getSource(pp.expansionSourceLoc.id);
 
-                const w = pp.comp.generatedBuffer.writer(pp.gpa);
-                try w.print("{d}\n", .{source.physicalLine(pp.expansionSourceLoc)});
+                try pp.comp.generatedBuffer.print(pp.gpa, "{d}\n", .{source.physicalLine(pp.expansionSourceLoc)});
 
                 buffer.appendAssumeCapacity(try pp.makeGeneratedToken(start, .PPNumber, token));
             },
@@ -1272,8 +1271,7 @@ fn expandObjMacro(pp: *Preprocessor, simpleMacro: *const Macro) Error!ExpandBuff
                 defer pp.counter += 1;
                 const start = pp.comp.generatedBuffer.items.len;
 
-                const w = pp.comp.generatedBuffer.writer(pp.gpa);
-                try w.print("{d}\n", .{pp.counter});
+                try pp.comp.generatedBuffer.print(pp.gpa, "{d}\n", .{pp.counter});
 
                 buffer.appendAssumeCapacity(try pp.makeGeneratedToken(start, .PPNumber, token));
             },
@@ -1320,8 +1318,6 @@ const DateTimeStampKind = enum {
 fn writeDateTimeStamp(pp: *Preprocessor, kind: DateTimeStampKind, timestamp: u64) !void {
     std.debug.assert(std.time.epoch.Month.jan.numeric() == 1);
 
-    const w = pp.comp.generatedBuffer.writer(pp.gpa);
-
     const epochSeconds = std.time.epoch.EpochSeconds{ .secs = timestamp };
     const epochDay = epochSeconds.getEpochDay();
     const daySeconds = epochSeconds.getDaySeconds();
@@ -1335,21 +1331,21 @@ fn writeDateTimeStamp(pp: *Preprocessor, kind: DateTimeStampKind, timestamp: u64
 
     switch (kind) {
         .date => {
-            try w.print("\"{s} {d: >2} {d}\"", .{
+            try pp.comp.generatedBuffer.print(pp.gpa, "\"{s} {d: >2} {d}\"", .{
                 monthName,
                 monthDay.day_index + 1,
                 yearDay.year,
             });
         },
         .time => {
-            try w.print("\"{d:0>2}:{d:0>2}:{d:0>2}\"", .{
+            try pp.comp.generatedBuffer.print(pp.gpa, "\"{d:0>2}:{d:0>2}:{d:0>2}\"", .{
                 daySeconds.getHoursIntoDay(),
                 daySeconds.getMinutesIntoHour(),
                 daySeconds.getSecondsIntoMinute(),
             });
         },
         .timestamp => {
-            try w.print("\"{s} {s} {d: >2} {d:0>2}:{d:0>2}:{d:0>2} {d}\"", .{
+            try pp.comp.generatedBuffer.print(pp.gpa, "\"{s} {s} {d: >2} {d:0>2}:{d:0>2}:{d:0>2} {d}\"", .{
                 dayName,
                 monthName,
                 monthDay.day_index + 1,
@@ -1832,9 +1828,7 @@ fn expandFuncMacro(
                 } else try pp.handleBuiltinMacro(raw.id, arg, macroToken.loc);
 
                 const start = pp.comp.generatedBuffer.items.len;
-                const w = pp.comp.generatedBuffer.writer(pp.gpa);
-
-                try w.print("{}\n", .{@intFromBool(result)});
+                try pp.comp.generatedBuffer.print(pp.gpa, "{}\n", .{@intFromBool(result)});
                 try buf.append(try pp.makeGeneratedToken(start, .PPNumber, tokenFromRaw(raw)));
             },
 
@@ -2018,7 +2012,7 @@ fn expandFuncMacro(
                         else => unreachable,
                     };
                     const filename = includeStr[1 .. includeStr.len - 1];
-                    const contents = (try pp.comp.findEmbed(filename, arg[0].loc.id, includeType, 1)) orelse
+                    const contents = (try pp.comp.findEmbed(filename, arg[0].loc.id, includeType, .limited(1))) orelse
                         break :res notFound;
 
                     defer pp.comp.gpa.free(contents);
@@ -2840,7 +2834,7 @@ fn embed(pp: *Preprocessor, lexer: *Lexer) MacroError!void {
 
     pp.tokenBuffer.items.len = 0;
 
-    var limit: ?u32 = null;
+    var limit: ?std.Io.Limit = null;
     var prefix: ?Range = null;
     var suffix: ?Range = null;
     var ifEmpty: ?Range = null;
@@ -2909,10 +2903,10 @@ fn embed(pp: *Preprocessor, lexer: *Lexer) MacroError!void {
                 continue;
             }
 
-            limit = std.fmt.parseInt(u32, pp.getTokenSlice(limitToken), 10) catch {
+            limit = .limited(std.fmt.parseInt(u32, pp.getTokenSlice(limitToken), 10) catch {
                 try pp.err(limitToken, .malformed_embed_limit, .{});
                 continue;
-            };
+            });
             pp.tokenBuffer.items.len = start;
         } else if (std.mem.eql(u8, param, "prefix")) {
             if (prefix != null) {
@@ -2938,7 +2932,7 @@ fn embed(pp: *Preprocessor, lexer: *Lexer) MacroError!void {
         }
     }
 
-    const embedBytes = (try pp.comp.findEmbed(filename, first.source, includeType, limit)) orelse
+    const embedBytes = (try pp.comp.findEmbed(filename, first.source, includeType, limit orelse .unlimited)) orelse
         return pp.fatalNotFound(fileNameToken, filename);
     defer pp.comp.gpa.free(embedBytes);
 
@@ -2954,18 +2948,17 @@ fn embed(pp: *Preprocessor, lexer: *Lexer) MacroError!void {
     // TODO: We currently only support systems with CHAR_BIT == 8
     // If the target's CHAR_BIT is not 8, we need to write out correctly-sized embed_bytes
     // and correctly account for the target's endianness
-    const writer = pp.comp.generatedBuffer.writer(pp.gpa);
 
     {
         const byte = embedBytes[0];
         const start = pp.comp.generatedBuffer.items.len;
-        try writer.print("{d}", .{byte});
+        try pp.comp.generatedBuffer.print(pp.gpa, "{d}", .{byte});
         pp.addTokenAssumeCapacity(try pp.makeGeneratedToken(start, .EmbedByte, fileNameToken));
     }
 
     for (embedBytes[1..]) |byte| {
         const start = pp.comp.generatedBuffer.items.len;
-        try writer.print(",{d}", .{byte});
+        try pp.comp.generatedBuffer.print(pp.gpa, ",{d}", .{byte});
         pp.addTokenAssumeCapacity(.{ .id = .Comma, .loc = .{ .id = .generated, .byteOffset = @intCast(start) } });
         pp.addTokenAssumeCapacity(try pp.makeGeneratedToken(start + 1, .EmbedByte, fileNameToken));
     }
@@ -3429,30 +3422,15 @@ fn findIncludeSource(
 
 fn printLinemarker(
     pp: *Preprocessor,
-    w: anytype,
+    w: *std.Io.Writer,
     lineNO: u32,
     source: Source,
     start_resume: enum(u8) { start, @"resume", none },
 ) !void {
     try w.writeByte('#');
     if (pp.linemarkers == .LineDirectives) try w.writeAll("line");
-    try w.print(" {d} \"", .{lineNO});
-    for (source.path) |byte| switch (byte) {
-        '\n' => try w.writeAll("\\n"),
-        '\r' => try w.writeAll("\\r"),
-        '\t' => try w.writeAll("\\t"),
-        '\\' => try w.writeAll("\\\\"),
-        '"' => try w.writeAll("\\\""),
-        ' ', '!', '#'...'&', '('...'[', ']'...'~' => try w.writeByte(byte),
-        // Use hex escapes for any non-ASCII/unprintable characters.
-        // This ensures that the parsed version of this string will end up
-        // containing the same bytes as the input regardless of encoding.
-        else => {
-            try w.writeAll("\\x");
-            try std.fmt.formatInt(byte, 16, .lower, .{ .width = 2, .fill = '0' }, w);
-        },
-    };
-    try w.writeByte('"');
+    try w.print(" {d} \"{f}\"", .{ lineNO, fmtEscapes(source.path) });
+
     if (pp.linemarkers == .NumericDirectives) {
         switch (start_resume) {
             .none => {},
@@ -3490,7 +3468,7 @@ pub const DumpMode = enum {
 /// `pp.defines` but a different definition (due to being #undef'ed and then redefined)
 fn prettyPrintMacro(
     pp: *Preprocessor,
-    w: anytype,
+    w: *std.Io.Writer,
     loc: Source.Location,
     parts: enum { NameOnly, NameAndBody },
 ) !void {
@@ -3534,7 +3512,7 @@ fn prettyPrintMacro(
     }
 }
 
-fn prettyPrintMacrosOnly(pp: *Preprocessor, w: anytype) !void {
+fn prettyPrintMacrosOnly(pp: *Preprocessor, w: *std.Io.Writer) !void {
     var it = pp.defines.valueIterator();
     while (it.next()) |macro| {
         if (macro.isBuiltin) continue;
@@ -3546,7 +3524,7 @@ fn prettyPrintMacrosOnly(pp: *Preprocessor, w: anytype) !void {
 }
 
 /// pretty print tokens and try to preserve whitespace
-pub fn prettyPrintTokens(pp: *Preprocessor, w: anytype, macroDumpNode: DumpMode) !void {
+pub fn prettyPrintTokens(pp: *Preprocessor, w: *std.Io.Writer, macroDumpNode: DumpMode) !void {
     if (macroDumpNode == .MacrosOnly) return pp.prettyPrintMacrosOnly(w);
 
     const tokenIds = pp.tokens.items(.id);
@@ -3558,6 +3536,7 @@ pub fn prettyPrintTokens(pp: *Preprocessor, w: anytype, macroDumpNode: DumpMode)
         switch (cur.id) {
             .Eof => {
                 if (!lastNewline) try w.writeByte('\n');
+                try w.flush();
                 return;
             },
 
@@ -3568,6 +3547,7 @@ pub fn prettyPrintTokens(pp: *Preprocessor, w: anytype, macroDumpNode: DumpMode)
                         newlines += 1;
                     } else if (id == .Eof) {
                         if (!lastNewline) try w.writeByte('\n');
+                        try w.flush();
                         return;
                     } else if (id != .WhiteSpace) {
                         if (pp.linemarkers == .None) {
@@ -3697,6 +3677,30 @@ fn debugTokenBuf(pp: *Preprocessor, buf: []const Token) !void {
     std.debug.print("[{} tokens]\n", .{buf.len});
 }
 
+/// Like `std.zig.fmtEscapes`, but for C strings. Hex escapes are used for any
+/// non-ASCII/unprintable bytes to ensure that the string bytes do not change if
+/// the encoding of the file is not UTF-8.
+fn fmtEscapes(bytes: []const u8) FmtEscapes {
+    return .{ .bytes = bytes };
+}
+const FmtEscapes = struct {
+    bytes: []const u8,
+    pub fn format(ctx: FmtEscapes, w: *std.Io.Writer) !void {
+        for (ctx.bytes) |byte| switch (byte) {
+            '\n' => try w.writeAll("\\n"),
+            '\r' => try w.writeAll("\\r"),
+            '\t' => try w.writeAll("\\t"),
+            '\\' => try w.writeAll("\\\\"),
+            '"' => try w.writeAll("\\\""),
+            ' ', '!', '#'...'&', '('...'[', ']'...'~' => try w.writeByte(byte),
+            // Use hex escapes for any non-ASCII/unprintable characters.
+            // This ensures that the parsed version of this string will end up
+            // containing the same bytes as the input regardless of encoding.
+            else => try w.print("\\x{x:0>2}", .{byte}),
+        };
+    }
+};
+
 test "Preserve pragma tokens sometimes" {
     const gpa = std.testing.allocator;
     const Test = struct {
@@ -3720,8 +3724,11 @@ test "Preserve pragma tokens sometimes" {
             const eof = try pp.preprocess(testRunnerMacros);
             try pp.addToken(eof);
 
-            try pp.prettyPrintTokens(buf.writer(), .ResultOnly);
-            return allocator.dupe(u8, buf.items);
+            var allocating: std.Io.Writer.Allocating = .init(gpa);
+            defer allocating.deinit();
+
+            try pp.prettyPrintTokens(&allocating.writer, .ResultOnly);
+            return allocating.toOwnedSlice();
         }
 
         fn check(sourceText: []const u8, expected: []const u8) !void {
@@ -3850,19 +3857,18 @@ test "Include guards" {
 
             _ = try comp.addSourceFromBuffer(path, "int bar = 5;\n");
 
-            var buf = std.ArrayList(u8).init(allocator);
+            var buf = std.ArrayList(u8).init(gpa);
             defer buf.deinit();
 
-            var writer = buf.writer();
             switch (tokenID) {
-                .KeywordInclude, .KeywordIncludeNext => try writer.print(template, .{ tokenID.lexeme().?, " \"bar.h\"" }),
-                .KeywordDefine, .KeywordUndef => try writer.print(template, .{ tokenID.lexeme().?, " BAR" }),
+                .KeywordInclude, .KeywordIncludeNext => try buf.print(template, .{ tokenID.lexeme().?, " \"bar.h\"" }),
+                .KeywordDefine, .KeywordUndef => try buf.print(template, .{ tokenID.lexeme().?, " BAR" }),
                 .KeywordIfndef,
                 .KeywordIfdef,
                 .KeywordElifdef,
                 .KeywordElifndef,
-                => try writer.print(template, .{ tokenID.lexeme().?, " BAR\n#endif" }),
-                else => try writer.print(template, .{ tokenID.lexeme().?, "" }),
+                => try buf.print(template, .{ tokenID.lexeme().?, " BAR\n#endif" }),
+                else => try buf.print(template, .{ tokenID.lexeme().?, "" }),
             }
 
             const source = try comp.addSourceFromBuffer("test.h", buf.items);

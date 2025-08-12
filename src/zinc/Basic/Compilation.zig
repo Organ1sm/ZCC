@@ -31,6 +31,8 @@ pub const Error = error{
     FatalError,
 } || Allocator.Error;
 
+pub const AddSourceError = Error || error{FileTooBig};
+
 pub const BitIntMaxBits = std.math.maxInt(u16);
 const PathBufferStackLimit = 1024;
 
@@ -212,7 +214,7 @@ pub const SystemDefinesMode = enum {
 };
 
 /// Generate builtin macros that will be available to each source file.
-pub fn generateSystemDefines(comp: *Compilation, w: anytype) !void {
+pub fn generateSystemDefines(comp: *Compilation, w: *std.Io.Writer) !void {
     const ptrWidth = comp.target.ptrBitWidth();
 
     if (comp.langOpts.gnucVersion > 0) {
@@ -516,14 +518,26 @@ pub fn generateSystemDefines(comp: *Compilation, w: anytype) !void {
 }
 
 /// Generate builtin macros that will be available to each source file.
-pub fn generateBuiltinMacros(comp: *Compilation, systemDefinesMode: SystemDefinesMode) !Source {
+pub fn generateBuiltinMacros(comp: *Compilation, systemDefinesMode: SystemDefinesMode) AddSourceError!Source {
     try comp.typeStore.initNamedTypes(comp);
 
-    var buf = std.ArrayList(u8).init(comp.gpa);
-    defer buf.deinit();
+    var allocating: std.io.Writer.Allocating = try .initCapacity(comp.gpa, 2 << 13);
+    defer allocating.deinit();
 
+    comp.writeBuiltinMacros(systemDefinesMode, &allocating.writer) catch |err| switch (err) {
+        error.WriteFailed, error.OutOfMemory => return error.OutOfMemory,
+    };
+
+    if (allocating.getWritten().len > std.math.maxInt(u32)) return error.FileTooBig;
+
+    const contents = try allocating.toOwnedSlice();
+    errdefer comp.gpa.free(contents);
+    return comp.addSourceFromOwnedBuffer("<builtin>", contents, .User);
+}
+
+fn writeBuiltinMacros(comp: *Compilation, systemDefinesMode: SystemDefinesMode, w: *std.Io.Writer) !void {
     if (systemDefinesMode == .IncludeSystemDefines) {
-        try buf.appendSlice(
+        try w.writeAll(
             \\#define __VERSION__ "Zinc 
         ++ @import("backend").VersionStr ++ "\"\n" ++
             \\#define __Zinc__
@@ -531,11 +545,11 @@ pub fn generateBuiltinMacros(comp: *Compilation, systemDefinesMode: SystemDefine
         );
     }
 
-    try buf.appendSlice("#define __STDC__ 1\n");
-    try buf.writer().print("#define __STDC_HOSTED__ {d}\n", .{@intFromBool(comp.target.os.tag != .freestanding)});
+    try w.writeAll("#define __STDC__ 1\n");
+    try w.print("#define __STDC_HOSTED__ {d}\n", .{@intFromBool(comp.target.os.tag != .freestanding)});
 
     // Standard macros
-    try buf.appendSlice(
+    try w.writeAll(
         \\#define __STDC_NO_COMPLEX__ 1
         \\#define __STDC_NO_THREADS__ 1
         \\#define __STDC_NO_VLA__ 1
@@ -548,19 +562,17 @@ pub fn generateBuiltinMacros(comp: *Compilation, systemDefinesMode: SystemDefine
     );
 
     if (comp.langOpts.standard.StdCVersionMacro()) |stdcVersion| {
-        try buf.appendSlice("#define __STDC_VERSION__ ");
-        try buf.appendSlice(stdcVersion);
-        try buf.append('\n');
+        try w.writeAll("#define __STDC_VERSION__ ");
+        try w.writeAll(stdcVersion);
+        try w.writeByte('\n');
     }
 
     if (systemDefinesMode == .IncludeSystemDefines) {
-        try comp.generateSystemDefines(buf.writer());
+        try comp.generateSystemDefines(w);
     }
-
-    return comp.addSourceFromBuffer("<builtin>", buf.items);
 }
 
-fn generateFloatMacros(w: anytype, prefix: []const u8, semantics: Target.FPSemantics, ext: []const u8) !void {
+fn generateFloatMacros(w: *std.Io.Writer, prefix: []const u8, semantics: Target.FPSemantics, ext: []const u8) !void {
     const denormMin = semantics.chooseValue(
         []const u8,
         .{
@@ -635,7 +647,7 @@ fn generateFloatMacros(w: anytype, prefix: []const u8, semantics: Target.FPSeman
     try w.print("#define __{s}_MIN__ {s}{s}\n", .{ prefix, min, ext });
 }
 
-fn generateTypeMacro(comp: *const Compilation, w: anytype, name: []const u8, qt: QualType) !void {
+fn generateTypeMacro(comp: *const Compilation, w: *std.Io.Writer, name: []const u8, qt: QualType) !void {
     try w.print("#define {s} ", .{name});
     try qt.print(comp, w);
     try w.writeByte('\n');
@@ -659,7 +671,7 @@ fn generateFastOrLeastType(
     bits: usize,
     kind: enum { least, fast },
     signedness: std.builtin.Signedness,
-    w: anytype,
+    w: *std.Io.Writer,
 ) !void {
     const ty = comp.intLeastN(bits, signedness); // defining the fast types as the least types is permitted
 
@@ -676,7 +688,7 @@ fn generateFastOrLeastType(
 
     const full = std.fmt.bufPrint(&buffer, "{s}{s}{d}{s}", .{
         baseName, kindStr, bits, suffix,
-    }) catch return error.OutOfMemory;
+    }) catch unreachable;
 
     try comp.generateTypeMacro(w, full, ty);
 
@@ -689,7 +701,7 @@ fn generateFastOrLeastType(
     try comp.generateFmt(prefix, w, ty);
 }
 
-fn generateFastAndLeastWidthTypes(comp: *Compilation, w: anytype) !void {
+fn generateFastAndLeastWidthTypes(comp: *Compilation, w: *std.Io.Writer) !void {
     const sizes = [_]usize{ 8, 16, 32, 64 };
     for (sizes) |size| {
         try comp.generateFastOrLeastType(size, .least, .signed, w);
@@ -699,7 +711,7 @@ fn generateFastAndLeastWidthTypes(comp: *Compilation, w: anytype) !void {
     }
 }
 
-fn generateExactWidthTypes(comp: *Compilation, w: anytype) !void {
+fn generateExactWidthTypes(comp: *Compilation, w: *std.Io.Writer) !void {
     try comp.generateExactWidthType(w, .schar);
 
     if (QualType.short.sizeof(comp) > QualType.char.sizeof(comp))
@@ -743,7 +755,7 @@ fn generateExactWidthTypes(comp: *Compilation, w: anytype) !void {
     }
 }
 
-fn generateFmt(comp: *const Compilation, prefix: []const u8, w: anytype, qt: QualType) !void {
+fn generateFmt(comp: *const Compilation, prefix: []const u8, w: *std.Io.Writer, qt: QualType) !void {
     const unsigned = qt.isUnsigned(comp);
     const modifier = qt.formatModifier(comp);
     const formats = if (unsigned) "ouxX" else "di";
@@ -751,7 +763,7 @@ fn generateFmt(comp: *const Compilation, prefix: []const u8, w: anytype, qt: Qua
         try w.print("#define {s}_FMT{c}__ \"{s}{c}\"\n", .{ prefix, c, modifier, c });
 }
 
-fn generateSuffixMacro(comp: *const Compilation, prefix: []const u8, w: anytype, qt: QualType) !void {
+fn generateSuffixMacro(comp: *const Compilation, prefix: []const u8, w: *std.Io.Writer, qt: QualType) !void {
     return w.print("#define {s}_C_SUFFIX__ {s}\n", .{ prefix, qt.intValueSuffix(comp) });
 }
 
@@ -759,7 +771,7 @@ fn generateSuffixMacro(comp: *const Compilation, prefix: []const u8, w: anytype,
 ///     Name macro (e.g. #define __UINT32_TYPE__ unsigned int)
 ///     Format strings (e.g. #define __UINT32_FMTu__ "u")
 ///     Suffix macro (e.g. #define __UINT32_C_SUFFIX__ U)
-fn generateExactWidthType(comp: *Compilation, w: anytype, originalQt: QualType) !void {
+fn generateExactWidthType(comp: *Compilation, w: *std.Io.Writer, originalQt: QualType) !void {
     var qt = originalQt;
     const width = qt.sizeof(comp) * 8;
     const unsigned = qt.isUnsigned(comp);
@@ -774,7 +786,7 @@ fn generateExactWidthType(comp: *Compilation, w: anytype, originalQt: QualType) 
     const suffix = "_TYPE__";
     const full = std.fmt.bufPrint(&buffer, "{s}{d}{s}", .{
         if (unsigned) "__UINT" else "__INT", width, suffix,
-    }) catch return error.OutOfMemory;
+    }) catch unreachable;
 
     try comp.generateTypeMacro(w, full, qt);
 
@@ -784,7 +796,7 @@ fn generateExactWidthType(comp: *Compilation, w: anytype, originalQt: QualType) 
     try comp.generateSuffixMacro(prefix, w, qt);
 }
 
-fn generateIntMax(comp: *const Compilation, w: anytype, name: []const u8, qt: QualType) !void {
+fn generateIntMax(comp: *const Compilation, w: *std.Io.Writer, name: []const u8, qt: QualType) !void {
     const unsigned = qt.isUnsigned(comp);
     const max: u128 = switch (qt.bitSizeof(comp)) {
         8 => if (unsigned) std.math.maxInt(u8) else std.math.maxInt(i8),
@@ -808,7 +820,7 @@ pub fn wcharMax(comp: *const Compilation) u32 {
     };
 }
 
-fn generateExactWidthIntMax(comp: *Compilation, w: anytype, orginalQt: QualType) !void {
+fn generateExactWidthIntMax(comp: *Compilation, w: *std.Io.Writer, orginalQt: QualType) !void {
     var qt = orginalQt;
     const bitCount: u8 = @intCast(qt.sizeof(comp) * 8);
     const unsigned = qt.isUnsigned(comp);
@@ -819,21 +831,21 @@ fn generateExactWidthIntMax(comp: *Compilation, w: anytype, orginalQt: QualType)
     var nameBuffer: [6]u8 = undefined;
     const name = std.fmt.bufPrint(&nameBuffer, "{s}{d}", .{
         if (unsigned) "UINT" else "INT", bitCount,
-    }) catch return error.OutOfMemory;
+    }) catch unreachable;
 
     return comp.generateIntMax(w, name, qt);
 }
 
-fn generateIntWidth(comp: *Compilation, w: anytype, name: []const u8, qt: QualType) !void {
+fn generateIntWidth(comp: *Compilation, w: *std.Io.Writer, name: []const u8, qt: QualType) !void {
     try w.print("#define __{s}_WIDTH__ {d}\n", .{ name, 8 * qt.sizeof(comp) });
 }
 
-fn generateIntMaxAndWidth(comp: *Compilation, w: anytype, name: []const u8, qt: QualType) !void {
+fn generateIntMaxAndWidth(comp: *Compilation, w: *std.Io.Writer, name: []const u8, qt: QualType) !void {
     try comp.generateIntMax(w, name, qt);
     try comp.generateIntWidth(w, name, qt);
 }
 
-fn generateSizeofType(comp: *Compilation, w: anytype, name: []const u8, qt: QualType) !void {
+fn generateSizeofType(comp: *Compilation, w: *std.Io.Writer, name: []const u8, qt: QualType) !void {
     try w.print("#define {s} {d}\n", .{ name, qt.sizeof(comp) });
 }
 
@@ -932,14 +944,14 @@ pub fn getSource(comp: *const Compilation, id: Source.ID) Source {
 /// `buf` will be modified and the allocation will be resized if newline splicing
 /// or line-ending changes happen.
 /// caller retains ownership of `path`
-/// To add the contents of an arbitrary reader as a Source, see addSourceFromReader
 /// To add a file's contents given its path, see addSourceFromPath
 pub fn addSourceFromOwnedBuffer(
     comp: *Compilation,
-    buffer: []u8,
     path: []const u8,
+    buffer: []u8,
     kind: Source.Kind,
 ) !Source {
+    assert(buffer.len <= std.math.maxInt(u32));
     try comp.sources.ensureUnusedCapacity(comp.gpa, 1);
 
     var contents = buffer;
@@ -1057,10 +1069,16 @@ pub fn addSourceFromOwnedBuffer(
     const spliceLocs = try spliceList.toOwnedSlice();
     errdefer comp.gpa.free(spliceLocs);
 
-    if (i != contents.len) contents = try comp.gpa.realloc(contents, i);
+    if (i != contents.len) {
+        var list: std.ArrayListUnmanaged(u8) = .{
+            .items = contents[0..i],
+            .capacity = contents.len,
+        };
+        contents = try list.toOwnedSlice(comp.gpa);
+    }
     errdefer @compileError("errdefers in callers would possibly free the realloced slice using the original len");
 
-    const source = Source{
+    const source: Source = .{
         .id = sourceId,
         .path = dupedPath,
         .buffer = contents,
@@ -1109,12 +1127,12 @@ fn addNewlineEscapeError(
 /// the allocation, please use `addSourceFromOwnedBuffer`
 pub fn addSourceFromBuffer(comp: *Compilation, path: []const u8, buffer: []const u8) !Source {
     if (comp.sources.get(path)) |some| return some;
-    if (@as(u64, buffer.len) > std.math.maxInt(u32)) return error.StreamTooLong;
+    if (@as(u64, buffer.len) > std.math.maxInt(u32)) return error.FileTooBig;
 
     const contents = try comp.gpa.dupe(u8, buffer);
     errdefer comp.gpa.free(contents);
 
-    return comp.addSourceFromOwnedBuffer(contents, path, .User);
+    return comp.addSourceFromOwnedBuffer(path, contents, .User);
 }
 
 pub fn addSourceFromPath(comp: *Compilation, path: []const u8) !Source {
@@ -1139,13 +1157,23 @@ pub fn addSourceFromPathExtra(comp: *Compilation, path: []const u8, kind: Source
     const file = try comp.cwd.openFile(path, .{});
     defer file.close();
 
-    const contents = file.readToEndAlloc(comp.gpa, std.math.maxInt(u32)) catch |err| switch (err) {
-        error.FileTooBig => return error.StreamTooLong,
-        else => |e| return e,
-    };
-    errdefer comp.gpa.free(contents);
+    return comp.addSourceFromFile(file, path, kind);
+}
 
-    return comp.addSourceFromOwnedBuffer(contents, path, kind);
+pub fn addSourceFromFile(comp: *Compilation, file: std.fs.File, path: []const u8, kind: Source.Kind) !Source {
+    var fileBuffer: [4096]u8 = undefined;
+    var fileReader = file.reader(&fileBuffer);
+    if (try fileReader.getSize() > std.math.maxInt(u32)) return error.FileTooBig;
+
+    var allocating: std.Io.Writer.Allocating = .init(comp.gpa);
+    _ = allocating.writer.sendFileAll(&fileReader, .limited(std.math.maxInt(u32))) catch |e| switch (e) {
+        error.WriteFailed => return error.OutOfMemory,
+        error.ReadFailed => return fileReader.err.?,
+    };
+
+    const contents = try allocating.toOwnedSlice();
+    errdefer comp.gpa.free(contents);
+    return comp.addSourceFromOwnedBuffer(path, contents, kind);
 }
 
 pub const IncludeDirIterator = struct {
@@ -1274,23 +1302,26 @@ pub const IncludeType = enum {
     AngleBrackets, // `<`
 };
 
-fn getFileContents(comp: *Compilation, path: []const u8, limit: ?u32) ![]const u8 {
+fn getFileContents(comp: *Compilation, path: []const u8, limit: std.Io.Limit) ![]const u8 {
     if (std.mem.indexOfScalar(u8, path, 0) != null)
         return error.FileNotFound;
 
     const file = try comp.cwd.openFile(path, .{});
     defer file.close();
 
-    var buffer = std.ArrayList(u8).init(comp.gpa);
-    defer buffer.deinit();
+    var allocating: std.Io.Writer.Allocating = .init(comp.gpa);
+    defer allocating.deinit();
 
-    const max = limit orelse std.math.maxInt(u32);
-    file.reader().readAllArrayList(&buffer, max) catch |e| switch (e) {
-        error.StreamTooLong => if (limit == null) return e,
-        else => return e,
+    var fileBuffer: [4096]u8 = undefined;
+    var fileReader = file.reader(&fileBuffer);
+    if (limit.minInt64(try fileReader.getSize()) > std.math.maxInt(u32)) return error.FileTooBig;
+
+    _ = allocating.writer.sendFileAll(&fileReader, limit) catch |err| switch (err) {
+        error.WriteFailed => return error.OutOfMemory,
+        error.ReadFailed => return fileReader.err.?,
     };
 
-    return buffer.toOwnedSlice();
+    return allocating.toOwnedSlice();
 }
 
 pub fn findEmbed(
@@ -1299,7 +1330,7 @@ pub fn findEmbed(
     includerTokenSource: Source.ID,
     /// angle bracket vs quotes
     includeType: IncludeType,
-    limit: ?u32,
+    limit: std.Io.Limit,
 ) !?[]const u8 {
     if (std.fs.path.isAbsolute(filename)) {
         return if (comp.getFileContents(filename, limit)) |some|
@@ -1503,9 +1534,9 @@ pub const Diagnostic = struct {
     };
 };
 
-test "addSourceFromReader" {
+test "addSourceFromBuffer" {
     const Test = struct {
-        fn addSourceFromReader(str: []const u8, expected: []const u8, warningCount: u32, splices: []const u32) !void {
+        fn addSourceFromBuffer(str: []const u8, expected: []const u8, warningCount: u32, splices: []const u32) !void {
             var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
             defer arena.deinit();
 
@@ -1513,9 +1544,7 @@ test "addSourceFromReader" {
             var comp = Compilation.init(std.testing.allocator, arena.allocator(), &diagnostics, std.fs.cwd());
             defer comp.deinit();
 
-            var stream = std.io.fixedBufferStream(str);
-            const reader = stream.reader();
-            const source = try comp.addSourceFromReader(reader, "path", .User);
+            const source = try comp.addSourceFromBuffer("path", str);
 
             try std.testing.expectEqualStrings(expected, source.buffer);
             try std.testing.expectEqual(warningCount, @as(u32, @intCast(diagnostics.warnings)));
@@ -1534,37 +1563,37 @@ test "addSourceFromReader" {
             _ = try comp.addSourceFromBuffer("path", "non-spliced buffer\n");
         }
     };
-    try Test.addSourceFromReader("ab\\\nc", "abc", 0, &.{2});
-    try Test.addSourceFromReader("ab\\\rc", "abc", 0, &.{2});
-    try Test.addSourceFromReader("ab\\\r\nc", "abc", 0, &.{2});
-    try Test.addSourceFromReader("ab\\ \nc", "abc", 1, &.{2});
-    try Test.addSourceFromReader("ab\\\t\nc", "abc", 1, &.{2});
-    try Test.addSourceFromReader("ab\\                     \t\nc", "abc", 1, &.{2});
-    try Test.addSourceFromReader("ab\\\r \nc", "ab \nc", 0, &.{2});
-    try Test.addSourceFromReader("ab\\\\\nc", "ab\\c", 0, &.{3});
-    try Test.addSourceFromReader("ab\\   \r\nc", "abc", 1, &.{2});
-    try Test.addSourceFromReader("ab\\ \\\nc", "ab\\ c", 0, &.{4});
-    try Test.addSourceFromReader("ab\\\r\\\nc", "abc", 0, &.{ 2, 2 });
-    try Test.addSourceFromReader("ab\\  \rc", "abc", 1, &.{2});
-    try Test.addSourceFromReader("ab\\", "ab\\", 0, &.{});
-    try Test.addSourceFromReader("ab\\\\", "ab\\\\", 0, &.{});
-    try Test.addSourceFromReader("ab\\ ", "ab\\ ", 0, &.{});
-    try Test.addSourceFromReader("ab\\\n", "ab", 0, &.{2});
-    try Test.addSourceFromReader("ab\\\r\n", "ab", 0, &.{2});
-    try Test.addSourceFromReader("ab\\\r", "ab", 0, &.{2});
+    try Test.addSourceFromBuffer("ab\\\nc", "abc", 0, &.{2});
+    try Test.addSourceFromBuffer("ab\\\rc", "abc", 0, &.{2});
+    try Test.addSourceFromBuffer("ab\\\r\nc", "abc", 0, &.{2});
+    try Test.addSourceFromBuffer("ab\\ \nc", "abc", 1, &.{2});
+    try Test.addSourceFromBuffer("ab\\\t\nc", "abc", 1, &.{2});
+    try Test.addSourceFromBuffer("ab\\                     \t\nc", "abc", 1, &.{2});
+    try Test.addSourceFromBuffer("ab\\\r \nc", "ab \nc", 0, &.{2});
+    try Test.addSourceFromBuffer("ab\\\\\nc", "ab\\c", 0, &.{3});
+    try Test.addSourceFromBuffer("ab\\   \r\nc", "abc", 1, &.{2});
+    try Test.addSourceFromBuffer("ab\\ \\\nc", "ab\\ c", 0, &.{4});
+    try Test.addSourceFromBuffer("ab\\\r\\\nc", "abc", 0, &.{ 2, 2 });
+    try Test.addSourceFromBuffer("ab\\  \rc", "abc", 1, &.{2});
+    try Test.addSourceFromBuffer("ab\\", "ab\\", 0, &.{});
+    try Test.addSourceFromBuffer("ab\\\\", "ab\\\\", 0, &.{});
+    try Test.addSourceFromBuffer("ab\\ ", "ab\\ ", 0, &.{});
+    try Test.addSourceFromBuffer("ab\\\n", "ab", 0, &.{2});
+    try Test.addSourceFromBuffer("ab\\\r\n", "ab", 0, &.{2});
+    try Test.addSourceFromBuffer("ab\\\r", "ab", 0, &.{2});
 
     // carriage return normalization
-    try Test.addSourceFromReader("ab\r", "ab\n", 0, &.{});
-    try Test.addSourceFromReader("ab\r\r", "ab\n\n", 0, &.{});
-    try Test.addSourceFromReader("ab\r\r\n", "ab\n\n", 0, &.{});
-    try Test.addSourceFromReader("ab\r\r\n\r", "ab\n\n\n", 0, &.{});
-    try Test.addSourceFromReader("\r\\", "\n\\", 0, &.{});
-    try Test.addSourceFromReader("\\\r\\", "\\", 0, &.{0});
+    try Test.addSourceFromBuffer("ab\r", "ab\n", 0, &.{});
+    try Test.addSourceFromBuffer("ab\r\r", "ab\n\n", 0, &.{});
+    try Test.addSourceFromBuffer("ab\r\r\n", "ab\n\n", 0, &.{});
+    try Test.addSourceFromBuffer("ab\r\r\n\r", "ab\n\n\n", 0, &.{});
+    try Test.addSourceFromBuffer("\r\\", "\n\\", 0, &.{});
+    try Test.addSourceFromBuffer("\\\r\\", "\\", 0, &.{0});
 
     try std.testing.checkAllAllocationFailures(std.testing.allocator, Test.withAllocationFailures, .{});
 }
 
-test "addSourceFromReader - exhaustive check for carriage return elimination" {
+test "addSourceFromBuffer - exhaustive check for carriage return elimination" {
     var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
     defer arena.deinit();
 
@@ -1605,8 +1634,7 @@ test "ignore BOM at beginning of file" {
             var comp = Compilation.init(std.testing.allocator, arena, &diagnostics, std.fs.cwd());
             defer comp.deinit();
 
-            var buff = std.io.fixedBufferStream(buf);
-            const source = try comp.addSourceFromReader(buff.reader(), "file.c", .User);
+            const source = try comp.addSourceFromBuffer("file.c", buf);
             const expectedOutput = if (std.mem.startsWith(u8, buf, BOM)) buf[BOM.len..] else buf;
             try std.testing.expectEqualStrings(expectedOutput, source.buffer);
         }

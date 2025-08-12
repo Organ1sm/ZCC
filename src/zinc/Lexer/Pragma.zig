@@ -200,15 +200,15 @@ pub const Diagnostic = struct {
 
 pub fn err(pp: *Preprocessor, tokenIdx: TokenIndex, diagnostic: Diagnostic, args: anytype) Compilation.Error!void {
     var sf = std.heap.stackFallback(1024, pp.gpa);
-    var buf = std.ArrayList(u8).init(sf.get());
-    defer buf.deinit();
+    var allocating: std.Io.Writer.Allocating = .init(sf.get());
+    defer allocating.deinit();
 
-    try Diagnostics.formatArgs(buf.writer(), diagnostic.fmt, args);
+    Diagnostics.formatArgs(&allocating.writer, diagnostic.fmt, args) catch return error.OutOfMemory;
 
     try pp.diagnostics.addWithLocation(pp.comp, .{
         .kind = diagnostic.kind,
         .opt = diagnostic.opt,
-        .text = buf.items,
+        .text = allocating.getWritten(),
         .location = pp.tokens.items(.loc)[tokenIdx].expand(pp.comp),
     }, pp.expansionSlice(tokenIdx), true);
 }

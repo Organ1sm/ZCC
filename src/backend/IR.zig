@@ -375,21 +375,34 @@ pub fn deinit(ir: *IR, gpa: std.mem.Allocator) void {
     ir.* = undefined;
 }
 
-const TYPE = std.io.tty.Color.bright_magenta;
-const INST = std.io.tty.Color.bright_cyan;
-const REF = std.io.tty.Color.bright_blue;
-const LITERAL = std.io.tty.Color.bright_green;
-const ATTRIBUTE = std.io.tty.Color.bright_yellow;
+const TYPE = std.Io.tty.Color.bright_magenta;
+const INST = std.Io.tty.Color.bright_cyan;
+const REF = std.Io.tty.Color.bright_blue;
+const LITERAL = std.Io.tty.Color.bright_green;
+const ATTRIBUTE = std.Io.tty.Color.bright_yellow;
 
 const RefMap = std.AutoArrayHashMap(Ref, void);
 
-pub fn dump(ir: *const IR, gpa: Allocator, config: std.io.tty.Config, w: anytype) !void {
+pub fn dump(
+    ir: *const IR,
+    gpa: Allocator,
+    config: std.Io.tty.Config,
+    w: *std.Io.Writer,
+) !void {
     for (ir.decls.keys(), ir.decls.values()) |name, *decl| {
         try ir.dumpDecl(decl, gpa, name, config, w);
     }
+    try w.flush();
 }
 
-fn dumpDecl(ir: *const IR, decl: *const Decl, gpa: Allocator, name: []const u8, config: std.io.tty.Config, w: anytype) !void {
+fn dumpDecl(
+    ir: *const IR,
+    decl: *const Decl,
+    gpa: Allocator,
+    name: []const u8,
+    config: std.Io.tty.Config,
+    w: *std.Io.Writer,
+) !void {
     const tags = decl.instructions.items(.tag);
     const data = decl.instructions.items(.data);
 
@@ -649,7 +662,12 @@ fn dumpDecl(ir: *const IR, decl: *const Decl, gpa: Allocator, name: []const u8, 
     try w.writeAll("}\n\n");
 }
 
-fn writeType(ir: IR, tyRef: Interner.Ref, config: std.io.tty.Config, w: anytype) !void {
+fn writeType(
+    ir: IR,
+    tyRef: Interner.Ref,
+    config: std.Io.tty.Config,
+    w: *std.Io.Writer,
+) !void {
     const ty = ir.interner.get(tyRef);
     try config.setColor(w, TYPE);
     switch (ty) {
@@ -679,7 +697,12 @@ fn writeType(ir: IR, tyRef: Interner.Ref, config: std.io.tty.Config, w: anytype)
     }
 }
 
-fn writeValue(ir: IR, val: Interner.Ref, config: std.io.tty.Config, w: anytype) !void {
+fn writeValue(
+    ir: IR,
+    val: Interner.Ref,
+    config: std.Io.tty.Config,
+    w: *std.Io.Writer,
+) !void {
     try config.setColor(w, LITERAL);
     const key = ir.interner.get(val);
     switch (key) {
@@ -690,12 +713,19 @@ fn writeValue(ir: IR, val: Interner.Ref, config: std.io.tty.Config, w: anytype) 
         .float => |repr| switch (repr) {
             inline else => |x| return w.print("{d}", .{@as(f64, @floatCast(x))}),
         },
-        .bytes => |b| return std.zig.stringEscape(b, "", .{}, w),
+        .bytes => |b| return std.zig.stringEscape(b, w),
         else => unreachable, // not a value
     }
 }
 
-fn writeRef(ir: IR, decl: *const Decl, refMap: *RefMap, ref: Ref, config: std.io.tty.Config, w: anytype) !void {
+fn writeRef(
+    ir: IR,
+    decl: *const Decl,
+    refMap: *RefMap,
+    ref: Ref,
+    config: std.Io.tty.Config,
+    w: *std.Io.Writer,
+) !void {
     assert(ref != .none);
     const index = @intFromEnum(ref);
     const tyRef = decl.instructions.items(.type)[index];
@@ -720,7 +750,14 @@ fn writeRef(ir: IR, decl: *const Decl, refMap: *RefMap, ref: Ref, config: std.io
     try w.print(" %{d}", .{refIndex});
 }
 
-fn writeNewRef(ir: IR, decl: *const Decl, refMap: *RefMap, ref: Ref, config: std.io.tty.Config, w: anytype) !void {
+fn writeNewRef(
+    ir: IR,
+    decl: *const Decl,
+    refMap: *RefMap,
+    ref: Ref,
+    config: std.Io.tty.Config,
+    w: *std.Io.Writer,
+) !void {
     try refMap.put(ref, {});
     try w.writeAll("    ");
     try ir.writeRef(decl, refMap, ref, config, w);
@@ -729,7 +766,13 @@ fn writeNewRef(ir: IR, decl: *const Decl, refMap: *RefMap, ref: Ref, config: std
     try config.setColor(w, INST);
 }
 
-fn writeLabel(decl: *const Decl, labelMap: *RefMap, ref: Ref, config: std.io.tty.Config, w: anytype) !void {
+fn writeLabel(
+    decl: *const Decl,
+    labelMap: *RefMap,
+    ref: Ref,
+    config: std.Io.tty.Config,
+    w: *std.Io.Writer,
+) !void {
     assert(ref != .none);
     const index = @intFromEnum(ref);
     const label = decl.instructions.items(.data)[index].label;

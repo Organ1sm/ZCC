@@ -14,9 +14,9 @@ implicit typedef: 'struct __NSConstantString_tag'
  name: __NSConstantString
 
 variable: 'attributed(int)'
- attr: aligned alignment: zinc.Lexer.Attribute.Alignment{ .node = zinc.AST.AST.Node.OptIndex.null, .requested = 4 }
- attr: aligned alignment: zinc.Lexer.Attribute.Alignment{ .node = zinc.AST.AST.Node.OptIndex.null, .requested = 4 }
- attr: aligned alignment: zinc.Lexer.Attribute.Alignment{ .node = zinc.AST.AST.Node.OptIndex(5), .requested = 16 }
+ attr: aligned alignment: .{ .node = .null, .requested = 4 }
+ attr: aligned alignment: .{ .node = .null, .requested = 4 }
+ attr: aligned alignment: .{ .node = @enumFromInt(5), .requested = 16 }
  name: a
 
 variable: 'const volatile int'
