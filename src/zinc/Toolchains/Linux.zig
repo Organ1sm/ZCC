@@ -200,7 +200,7 @@ pub fn buildLinkerArgs(self: *const Linux, tc: *const Toolchain, argv: *std.Arra
             const dynamicLinker = target.standardDynamicLinkerPath();
             // todo: check for --dyld-prefix
             if (dynamicLinker.get()) |path| {
-                try argv.appendSlice(&.{ "-dynamic-linker", try tc.arena.dupe(u8, path) });
+                try argv.appendSlice(&.{ "-dynamic-linker", try d.comp.arena.dupe(u8, path) });
             } else {
                 try d.err("Could not find dynamic linker path", .{});
             }
@@ -408,7 +408,7 @@ test Linux {
 
     const arena = arenaInstance.allocator();
 
-    var comp = Compilation.init(std.testing.allocator, undefined, std.fs.cwd());
+    var comp = Compilation.init(std.testing.allocator, arena, undefined, std.fs.cwd());
     defer comp.deinit();
 
     comp.environment = .{
@@ -429,7 +429,7 @@ test Linux {
     try driver.linkObjects.append(driver.comp.gpa, linkObj);
     driver.tempFileCount += 1;
 
-    var toolchain: Toolchain = .{ .driver = &driver, .arena = arena, .filesystem = .{ .fake = &.{
+    var toolchain: Toolchain = .{ .driver = &driver, .filesystem = .{ .fake = &.{
         .{ .path = "/tmp" },
         .{ .path = "/usr" },
         .{ .path = "/usr/lib64" },

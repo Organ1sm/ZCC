@@ -50,7 +50,6 @@ const Inner = union(enum) {
 
 filesystem: Filesystem,
 driver: *Driver,
-arena: mem.Allocator,
 
 /// The list of toolchain specific path prefixes to search for libraries.
 libaryPaths: PathList = .{},
@@ -262,6 +261,8 @@ pub fn getFilePath(tc: *const Toolchain, name: []const u8) ![]const u8 {
     var fib = std.heap.FixedBufferAllocator.init(&pathBuffer);
     const allocator = fib.allocator();
 
+    const arena = tc.driver.comp.arena;
+
     const sysroot = tc.getSysroot();
 
     // todo check resource dir
@@ -270,13 +271,13 @@ pub fn getFilePath(tc: *const Toolchain, name: []const u8) ![]const u8 {
     const zincDir = std.fs.path.dirname(tc.driver.zincName) orelse "";
     const candidate = try std.fs.path.join(allocator, &.{ zincDir, "..", name });
     if (tc.filesystem.exists(candidate))
-        return tc.arena.dupe(u8, candidate);
+        return arena.dupe(u8, candidate);
 
     if (tc.searchPaths(&fib, sysroot, tc.libaryPaths.items, name)) |path|
-        return tc.arena.dupe(u8, path);
+        return arena.dupe(u8, path);
 
     if (tc.searchPaths(&fib, sysroot, tc.filePaths.items, name)) |path|
-        return try tc.arena.dupe(u8, path);
+        return try arena.dupe(u8, path);
 
     return name;
 }
@@ -310,7 +311,7 @@ const PathKind = enum {
     program,
 };
 
-/// Join `components` into a path. If the path exists, dupe it into the toolchain arena and
+/// Join `components` into a path. If the path exists, dupe it into the Compilation arena and
 /// add it to the specified path list.
 pub fn addPathIfExists(tc: *Toolchain, components: []const []const u8, destKind: PathKind) !void {
     var pathBuffer: [std.fs.max_path_bytes]u8 = undefined;
@@ -319,7 +320,7 @@ pub fn addPathIfExists(tc: *Toolchain, components: []const []const u8, destKind:
     const candidate = try std.fs.path.join(fib.allocator(), components);
 
     if (tc.filesystem.exists(candidate)) {
-        const duped = try tc.arena.dupe(u8, candidate);
+        const duped = try tc.driver.comp.arena.dupe(u8, candidate);
         const dest = switch (destKind) {
             .library => &tc.libaryPaths,
             .file => &tc.filePaths,
@@ -329,10 +330,10 @@ pub fn addPathIfExists(tc: *Toolchain, components: []const []const u8, destKind:
     }
 }
 
-/// Join `components` using the toolchain arena and add the resulting path to `dest_kind`. Does not check
+/// Join `components` using the Compilation arena and add the resulting path to `dest_kind`. Does not check
 /// whether the path actually exists
 pub fn addPathFromComponents(tc: *Toolchain, components: []const []const u8, destKind: PathKind) !void {
-    const fullPath = try std.fs.path.join(tc.arena, components);
+    const fullPath = try std.fs.path.join(tc.driver.comp.arena, components);
     const dest = switch (destKind) {
         .library => &tc.libaryPaths,
         .file => &tc.filePaths,
@@ -343,7 +344,7 @@ pub fn addPathFromComponents(tc: *Toolchain, components: []const []const u8, des
 
 /// Add linker args to `argv`. Does not add path to linker executable as first item;
 /// that must be handled separately
-/// Items added to `argv` will be string literals or owned by `tc.arena`
+/// Items added to `argv` will be string literals or owned by `tc.driver.comp.driver`
 /// so they must not be individually freed
 pub fn buildLinkerArgs(tc: *Toolchain, argv: *std.ArrayList([]const u8)) !void {
     return switch (tc.inner) {

@@ -776,7 +776,10 @@ fn expectTokens(contents: []const u8, expectedTokens: []const TokenType) !void {
 }
 
 fn expectTokensExtra(contents: []const u8, expected: []const TokenType, standard: ?LangOpts.Standard) !void {
-    var comp = Compilation.init(std.testing.allocator, undefined, std.fs.cwd());
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+
+    var comp = Compilation.init(std.testing.allocator, arena.allocator(), undefined, std.fs.cwd());
     defer comp.deinit();
 
     if (standard) |provided|
@@ -1108,7 +1111,10 @@ test "C23 keywords" {
 test "Lexer fuzz test" {
     const Context = struct {
         fn testOne(_: @This(), inputBytes: []const u8) anyerror!void {
-            var comp = Compilation.init(std.testing.allocator, undefined, std.fs.cwd());
+            var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+            defer arena.deinit();
+
+            var comp = Compilation.init(std.testing.allocator, arena.allocator(), undefined, std.fs.cwd());
             defer comp.deinit();
 
             const source = try comp.addSourceFromBuffer("fuzz.c", inputBytes);

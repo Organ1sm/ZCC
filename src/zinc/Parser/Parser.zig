@@ -565,11 +565,6 @@ pub fn errValueChanged(p: *Parser, diagnostic: Diagnostic, tokenIdx: TokenIndex,
     try p.err(diagnostic, tokenIdx, .{ res.qt, intQt, zeroStr, oldRes, newRes });
 }
 
-/// Check for deprecated or unavailable attributes on a type and report them.
-/// If the type has an 'unavailable' attribute, it reports an error for both
-/// the usage and declaration tokens, then aborts parsing.
-/// If the type has a 'deprecated' attribute, it reports a warning for both
-/// the usage and declaration tokens.
 fn checkDeprecatedUnavailable(p: *Parser, ty: QualType, usageToken: TokenIndex, declToken: TokenIndex) !void {
     if (ty.getAttribute(p.comp, .@"error")) |@"error"| {
         const msgStr = p.comp.interner.get(@"error".msg.ref()).bytes;

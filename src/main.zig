@@ -44,7 +44,7 @@ pub fn main() u8 {
         },
     };
 
-    var comp = Compilation.initDefault(gpa, &diagnostics, std.fs.cwd()) catch |er| switch (er) {
+    var comp = Compilation.initDefault(gpa, arena, &diagnostics, std.fs.cwd()) catch |er| switch (er) {
         error.OutOfMemory => {
             std.debug.print("Out of Memory\n", .{});
             if (fastExit) process.exit(1);
@@ -56,7 +56,7 @@ pub fn main() u8 {
     var driver = Driver{ .comp = &comp, .zincName = zincName, .diagnostics = &diagnostics };
     defer driver.deinit();
 
-    var toolChain: Toolchain = .{ .driver = &driver, .arena = arena, .filesystem = .{ .real = comp.cwd } };
+    var toolChain: Toolchain = .{ .driver = &driver, .filesystem = .{ .real = comp.cwd } };
     defer toolChain.deinit();
 
     driver.main(&toolChain, args, fastExit) catch |er| switch (er) {

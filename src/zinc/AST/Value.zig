@@ -120,7 +120,11 @@ test "minUnsignedBits" {
         }
     };
 
-    var comp = Compilation.init(std.testing.allocator, undefined, std.fs.cwd());
+    var arenaState: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arenaState.deinit();
+    const arena = arenaState.allocator();
+
+    var comp = Compilation.init(std.testing.allocator, arena, undefined, std.fs.cwd());
     defer comp.deinit();
 
     const targetQuery = try std.Target.Query.parse(.{ .arch_os_abi = "x86_64-linux-gnu" });
@@ -155,8 +159,11 @@ test "minSignedBits" {
             try std.testing.expectEqual(expected, val.minSignedBits(comp));
         }
     };
+    var arenaState: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arenaState.deinit();
+    const arena = arenaState.allocator();
 
-    var comp = Compilation.init(std.testing.allocator, undefined, std.fs.cwd());
+    var comp = Compilation.init(std.testing.allocator, arena, undefined, std.fs.cwd());
     defer comp.deinit();
 
     const targetQuery = try std.Target.Query.parse(.{ .arch_os_abi = "x86_64-linux-gnu" });

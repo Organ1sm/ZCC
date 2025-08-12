@@ -431,9 +431,7 @@ pub fn parseArgs(
                     }
                     path = args[i];
                 }
-                const duped = try d.comp.gpa.dupe(u8, path);
-                errdefer d.comp.gpa.free(duped);
-                try d.comp.systemIncludeDirs.append(d.comp.gpa, duped);
+                try d.comp.systemIncludeDirs.append(d.comp.gpa, path);
             } else if (option(arg, "--emulate=")) |compilerStr| {
                 const compiler = std.meta.stringToEnum(LangOpts.Compiler, compilerStr) orelse {
                     try d.err("invalid compiler '{s}'", .{arg});
@@ -666,8 +664,8 @@ pub fn unsupportedOptionForTarget(d: *Driver, target: std.Target, opt: []const u
 
 pub fn fatal(d: *Driver, comptime fmt: []const u8, args: anytype) error{ FatalError, OutOfMemory } {
     var sf = std.heap.stackFallback(1024, d.comp.gpa);
-    var buf = std.ArrayList(u8).init(sf.get());
-    defer buf.deinit();
+    var allocating: std.Io.Writer.Allocating = .init(sf.get());
+    defer allocating.deinit();
 
     try Diagnostics.formatArgs(buf.writer(), fmt, args);
     try d.diagnostics.add(.{ .kind = .@"fatal error", .text = buf.items, .location = null });

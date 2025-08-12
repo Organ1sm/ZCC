@@ -75,8 +75,11 @@ fn addCommandLineArgs(
     return .{ onlyPreprocess, lineMarkers, systemDefines, dumpMode };
 }
 
-fn testOne(allocator: std.mem.Allocator, path: []const u8, testDir: []const u8) !void {
-    var comp = zinc.Compilation.init(allocator, std.fs.cwd());
+fn testOne(gpa: std.mem.Allocator, path: []const u8, testDir: []const u8) !void {
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+
+    var comp = zinc.Compilation.init(gpa, arena.allocator(), std.fs.cwd());
     defer comp.deinit();
 
     try comp.addDefaultPragmaHandlers();
@@ -103,7 +106,7 @@ fn testOne(allocator: std.mem.Allocator, path: []const u8, testDir: []const u8) 
     _ = try pp.preprocess(userMacros);
 
     const eof = pp.preprocess(file);
-    try pp.tokens.append(allocator, eof);
+    try pp.tokens.append(gpa, eof);
 
     var tree = try zinc.Parser.parse(&pp);
     defer tree.deinit();
@@ -135,8 +138,11 @@ pub fn main() !void {
     const gpa = general_purpose_allocator.allocator();
     defer if (general_purpose_allocator.deinit() == .leak) std.process.exit(1);
 
-    const args = try std.process.argsAlloc(gpa);
-    defer std.process.argsFree(gpa, args);
+    var arenaState: std.heap.ArenaAllocator = .init(gpa);
+    defer arenaState.deinit();
+    const arena = arenaState.allocator();
+
+    const args = try std.process.argsAlloc(arena);
 
     if (args.len != 3) {
         print("expected test case directory and zig executable as only argument\n", .{});
@@ -149,9 +155,7 @@ pub fn main() !void {
     var cases = std.ArrayList([]const u8).init(gpa);
 
     defer {
-        for (cases.items) |path|
-            gpa.free(path);
-        buffer.deinit();
+        buffer.deinit(gpa);
         cases.deinit();
     }
 
@@ -169,11 +173,7 @@ pub fn main() !void {
                 print("skipping non file entry '{s}'\n", .{entry.name});
                 continue;
             }
-
-            defer buffer.items.len = 0;
-            try buffer.writer().print("{s}{c}{s}", .{ args[1], std.fs.path.sep, entry.name });
-
-            try cases.append(try gpa.dupe(u8, buffer.items));
+            try cases.append(try std.fmt.allocPrint(arena, "{s}{c}{s}", .{ args[1], std.fs.path.sep, entry.name }));
         }
     }
 
@@ -191,7 +191,7 @@ pub fn main() !void {
     defer diagnostics.deinit();
 
     // prepare compiler
-    var initialComp = zinc.Compilation.init(gpa, &diagnostics, std.fs.cwd());
+    var initialComp = zinc.Compilation.init(gpa, arena, &diagnostics, std.fs.cwd());
     defer initialComp.deinit();
 
     const casesIncludeDir = try std.fs.path.join(gpa, &.{ args[1], "include" });
