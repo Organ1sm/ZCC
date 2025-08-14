@@ -13,6 +13,7 @@ const Builtins = @import("../Builtins.zig");
 const Builtin = Builtins.Builtin;
 const Token = @import("../Lexer/Token.zig").Token;
 const LangOpts = @import("LangOpts.zig");
+const Lexer = @import("../Lexer/Lexer.zig");
 const Pragma = @import("../Lexer/Pragma.zig");
 const StringInterner = @import("../Basic/StringInterner.zig");
 const RecordLayout = @import("RecordLayout.zig");
@@ -1484,6 +1485,18 @@ pub fn hasBuiltinFunction(comp: *const Compilation, builtin: Builtin) bool {
         .all_ms_languages => return comp.langOpts.emulate == .msvc,
         .gnu_lang, .all_gnu_languages => return comp.langOpts.standard.isGNU(),
     }
+}
+
+pub fn locSlice(comp: *const Compilation, loc: Source.Location) []const u8 {
+    var tempLexer = Lexer{
+        .buffer = comp.getSource(loc.id).buffer,
+        .langOpts = comp.langOpts,
+        .index = loc.byteOffset,
+        .source = .generated,
+    };
+
+    const token = tempLexer.next();
+    return tempLexer.buffer[token.start..token.end];
 }
 
 pub fn getSourceMTimeUncached(comp: *const Compilation, sourceId: Source.ID) ?u64 {

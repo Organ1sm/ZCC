@@ -8883,3 +8883,46 @@ fn parseGenericSelection(p: *Parser) Error!?Result {
         }),
     };
 }
+
+test "Node locations" {
+    var arenaState: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arenaState.deinit();
+    const arena = arenaState.allocator();
+
+    var diagnostics: Diagnostics = .{ .output = .ignore };
+    var comp = Compilation.init(std.testing.allocator, arena, &diagnostics, std.fs.cwd());
+    defer comp.deinit();
+
+    const file = try comp.addSourceFromBuffer("file.c",
+        \\int foo = 5;
+        \\int bar = 10;
+        \\int main(void) {}
+        \\
+    );
+
+    const builtinMacros = try comp.generateBuiltinMacros(.NoSystemDefines);
+
+    var pp = Preprocessor.init(&comp, .default);
+    defer pp.deinit();
+    try pp.addBuiltinMacros();
+
+    _ = try pp.preprocess(builtinMacros);
+
+    const eof = try pp.preprocess(file);
+    try pp.addToken(eof);
+
+    var tree = try Parser.parse(&pp);
+    defer tree.deinit();
+
+    try std.testing.expectEqual(0, comp.diagnostics.total);
+    for (tree.rootDecls.items[tree.rootDecls.items.len - 3 ..], 0..) |node, i| {
+        const slice = tree.tokenSlice(node.tok(&tree));
+        const expected = switch (i) {
+            0 => "foo",
+            1 => "bar",
+            2 => "main",
+            else => unreachable,
+        };
+        try std.testing.expectEqualStrings(expected, slice);
+    }
+}

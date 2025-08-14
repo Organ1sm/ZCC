@@ -2801,19 +2801,9 @@ pub fn callableResultUsage(tree: *const Tree, node: Node.Index) ?CallableResultU
 }
 
 pub fn tokenSlice(tree: Tree, tokenIdx: TokenIndex) []const u8 {
-    if (tree.tokens.items(.id)[tokenIdx].lexeme()) |some|
-        return some;
-
+    if (tree.tokens.items(.id)[tokenIdx].lexeme()) |some| return some;
     const loc = tree.tokens.items(.loc)[tokenIdx];
-    var lexer = Lexer{
-        .buffer = tree.comp.getSource(loc.id).buffer,
-        .langOpts = tree.comp.langOpts,
-        .index = loc.byteOffset,
-        .source = .generated,
-    };
-
-    const token = lexer.next();
-    return lexer.buffer[token.start..token.end];
+    return tree.comp.locSlice(loc);
 }
 
 pub fn dump(tree: *const Tree, config: std.Io.tty.Config, w: *std.Io.Writer) std.Io.tty.Config.SetColorError!void {
