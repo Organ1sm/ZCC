@@ -1,6 +1,7 @@
 const std = @import("std");
 const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
+
 const Interner = @import("Interner.zig");
 const Object = @import("Object.zig");
 

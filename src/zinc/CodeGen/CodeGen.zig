@@ -1,19 +1,21 @@
 const std = @import("std");
 const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
+
 const backend = @import("backend");
+const Interner = backend.Interner;
 const IR = backend.Ir;
 const IRBuilder = IR.Builder;
 const Inst = IR.Inst;
-const Interner = backend.Interner;
+
+const Builtins = @import("../Builtins.zig");
+const Builtin = Builtins.Builtin;
 const Compilation = @import("../Basic/Compilation.zig");
+const StringId = @import("../Basic/StringInterner.zig").StringId;
 const Tree = @import("../AST/AST.zig");
 const Node = Tree.Node;
 const QualType = @import("../AST/TypeStore.zig").QualType;
 const Value = @import("../AST/Value.zig");
-const StringId = @import("../Basic/StringInterner.zig").StringId;
-const Builtins = @import("../Builtins.zig");
-const Builtin = Builtins.Builtin;
 
 const CodeGen = @This();
 

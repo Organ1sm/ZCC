@@ -1,12 +1,12 @@
 const std = @import("std");
 const mem = std.mem;
+
 const Compilation = @import("../../Basic//Compilation.zig");
-const Pragma = @import("../Pragma.zig");
 const Diagnostics = @import("../../Basic/Diagnostics.zig");
-const Preprocessor = @import("../Preprocessor.zig");
 const Parser = @import("../../Parser/Parser.zig");
-const Tree = @import("../../AST/AST.zig");
-const TokenIndex = Tree.TokenIndex;
+const Pragma = @import("../Pragma.zig");
+const Preprocessor = @import("../Preprocessor.zig");
+const TokenIndex = @import("../../AST/AST.zig").TokenIndex;
 
 const Pack = @This();
 

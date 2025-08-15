@@ -3,9 +3,9 @@ const mem = std.mem;
 
 const Compilation = @import("../Basic/Compilation.zig");
 const Diagnostics = @import("../Basic/Diagnostics.zig");
-const TokenType = @import("../Basic//TokenType.zig").TokenType;
 const QualType = @import("../AST/TypeStore.zig").QualType;
 const Source = @import("../Basic/Source.zig");
+const TokenType = @import("../Basic//TokenType.zig").TokenType;
 
 pub const Item = union(enum) {
     /// decoded hex or character escape

@@ -1,7 +1,7 @@
+pub const CodeGenOptions = @import("backend/CodeGenOptions.zig");
+pub const Interner = @import("backend/Interner.zig");
 pub const Ir = @import("backend/IR.zig");
 pub const Object = @import("backend/Object.zig");
-pub const Interner = @import("backend/Interner.zig");
-pub const CodeGenOptions = @import("backend/CodeGenOptions.zig");
 
 pub const CallingConvention = enum {
     C,
@@ -11,4 +11,4 @@ pub const CallingConvention = enum {
 };
 
 pub const VersionStr = @import("build-options").version_str;
-pub const version = @import("std").SemanticVersion.parse(VersionStr) catch unreachable;
+pub const Version = @import("std").SemanticVersion.parse(VersionStr) catch unreachable;

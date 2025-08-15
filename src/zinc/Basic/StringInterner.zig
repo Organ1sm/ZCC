@@ -1,6 +1,7 @@
 const std = @import("std");
 const mem = std.mem;
-const Compilation = @import("../Basic//Compilation.zig");
+
+const Compilation = @import("../Basic/Compilation.zig");
 
 const StringInterner = @This();
 

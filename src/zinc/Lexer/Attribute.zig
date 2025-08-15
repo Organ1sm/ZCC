@@ -1,15 +1,17 @@
 const std = @import("std");
 const mem = std.mem;
 const ZigType = std.builtin.Type;
+
 const CallingConvention = @import("backend").CallingConvention;
+
 const Compilation = @import("../Basic/Compilation.zig");
 const Diagnostics = @import("../Basic/Diagnostics.zig");
 const Parser = @import("../Parser/Parser.zig");
-const Result = @import("../Parser/Result.zig");
 const QualType = @import("../AST/TypeStore.zig").QualType;
+const Result = @import("../Parser/Result.zig");
 const Tree = @import("../AST/AST.zig");
-const Value = @import("../AST/Value.zig");
 const TokenIndex = Tree.TokenIndex;
+const Value = @import("../AST/Value.zig");
 
 const Attribute = @This();
 

@@ -1,9 +1,10 @@
 const std = @import("std");
-const TokenType = @import("../Basic/TokenType.zig").TokenType;
-const Token = @import("Token.zig").Token;
-const Source = @import("../Basic/Source.zig");
-const LangOpts = @import("../Basic/LangOpts.zig");
+
 const Compilation = @import("../Basic/Compilation.zig");
+const LangOpts = @import("../Basic/LangOpts.zig");
+const Source = @import("../Basic/Source.zig");
+const Token = @import("Token.zig").Token;
+const TokenType = @import("../Basic/TokenType.zig").TokenType;
 
 const Lexer = @This();
 

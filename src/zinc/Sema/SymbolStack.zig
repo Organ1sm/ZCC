@@ -5,14 +5,13 @@ const assert = std.debug.assert;
 
 const Parser = @import("../Parser/Parser.zig");
 const QualType = @import("../AST/TypeStore.zig").QualType;
-const Value = @import("../AST/Value.zig");
 const StringId = @import("../Basic/StringInterner.zig").StringId;
-
 const TokenType = @import("../Basic/TokenType.zig").TokenType;
 const Tree = @import("../AST/AST.zig");
 const Token = Tree.Token;
 const TokenIndex = Tree.TokenIndex;
 const Node = Tree.Node;
+const Value = @import("../AST/Value.zig");
 
 const SymbolStack = @This();
 

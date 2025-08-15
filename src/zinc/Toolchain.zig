@@ -1,12 +1,13 @@
 const std = @import("std");
 const mem = std.mem;
-const Driver = @import("Driver.zig");
+
 const Compilation = @import("Basic/Compilation.zig");
-const SystemDefaults = @import("system-defaults");
-const TargetUtil = @import("Basic/Target.zig");
+const Driver = @import("Driver.zig");
+const Filesystem = @import("Driver/Filesystem.zig").Filesystem;
 const Linux = @import("Toolchains/Linux.zig");
 const Multilib = @import("Driver/Multilib.zig");
-const Filesystem = @import("Driver/Filesystem.zig").Filesystem;
+const SystemDefaults = @import("system-defaults");
+const TargetUtil = @import("Basic/Target.zig");
 
 const Toolchain = @This();
 

@@ -1,5 +1,4 @@
 const std = @import("std");
-const DiagnosticTag = @import("Diagnostics.zig").Tag;
 const CharInfo = @import("CharInfo.zig");
 
 const LangOpts = @This();

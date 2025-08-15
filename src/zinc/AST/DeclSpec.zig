@@ -1,9 +1,10 @@
 const std = @import("std");
+
 const AST = @import("AST.zig");
 const TokenIndex = AST.TokenIndex;
-const QualType = @import("TypeStore.zig").QualType;
-const Parser = @import("../Parser/Parser.zig");
 const Compilation = @import("../Basic/Compilation.zig");
+const Parser = @import("../Parser/Parser.zig");
+const QualType = @import("TypeStore.zig").QualType;
 
 pub const Error = Compilation.Error || error{ParsingFailed};
 const DeclSpec = @This();

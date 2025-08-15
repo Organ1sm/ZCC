@@ -1,12 +1,13 @@
 const std = @import("std");
 const process = std.process;
 const builtin = @import("builtin");
-const zinc = @import("zinc");
+
 const Compilation = zinc.Compilation;
 const Diagnostics = zinc.Diagnostics;
 const Driver = zinc.Driver;
-const Toolchain = zinc.ToolChain;
 const Target = zinc.TargetUtil;
+const Toolchain = zinc.ToolChain;
+const zinc = @import("zinc");
 
 var GeneralPurposeAllocator = std.heap.GeneralPurposeAllocator(.{}){};
 

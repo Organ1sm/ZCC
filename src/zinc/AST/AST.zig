@@ -2,13 +2,13 @@ const std = @import("std");
 
 const Interner = @import("backend").Interner;
 
-const QualType = @import("TypeStore.zig").QualType;
-const Compilation = @import("../Basic/Compilation.zig");
+const Attribute = @import("../Lexer/Attribute.zig");
 const CodeGen = @import("../CodeGen/CodeGen.zig");
+const Compilation = @import("../Basic/Compilation.zig");
+const Lexer = @import("../Lexer/Lexer.zig");
 const NumberAffixes = @import("NumberAffixes.zig");
 const Source = @import("../Basic/Source.zig");
-const Lexer = @import("../Lexer/Lexer.zig");
-const Attribute = @import("../Lexer/Attribute.zig");
+const QualType = @import("TypeStore.zig").QualType;
 const Value = @import("Value.zig");
 
 const Tree = @This();

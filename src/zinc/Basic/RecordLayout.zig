@@ -13,8 +13,8 @@ const QualType = TypeStore.QualType;
 const Type = TypeStore.Type;
 const Record = Type.Record;
 const Field = Record.Field;
-const RecordLayout = Type.Record.Layout;
-const FieldLayout = Type.Record.Field.Layout;
+const RecordLayout = Record.Layout;
+const FieldLayout = Record.Field.Layout;
 
 const BITS_PER_BYTE = 8;
 

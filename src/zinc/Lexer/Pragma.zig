@@ -3,8 +3,8 @@ const assert = std.debug.assert;
 
 const Compilation = @import("../Basic/Compilation.zig");
 const Diagnostics = @import("../Basic/Diagnostics.zig");
-const Preprocessor = @import("Preprocessor.zig");
 const Parser = @import("../Parser/Parser.zig");
+const Preprocessor = @import("Preprocessor.zig");
 const TokenIndex = @import("../AST/AST.zig").TokenIndex;
 
 const Pragma = @This();

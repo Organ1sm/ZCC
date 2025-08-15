@@ -1,12 +1,13 @@
 const std = @import("std");
 const mem = std.mem;
+
 const Compilation = @import("../Basic/Compilation.zig");
-const Toolchain = @import("../Toolchain.zig");
-const Driver = @import("../Driver.zig");
 const Distro = @import("../Driver/Distro.zig");
+const Driver = @import("../Driver.zig");
 const GCCDetector = @import("../Driver/GCCDetector.zig");
-const TargetUtil = @import("../Basic/Target.zig");
 const SystemDefaults = @import("system-defaults");
+const TargetUtil = @import("../Basic/Target.zig");
+const Toolchain = @import("../Toolchain.zig");
 
 const Linux = @This();
 

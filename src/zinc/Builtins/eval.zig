@@ -1,13 +1,15 @@
 const std = @import("std");
+
 const backend = @import("backend");
 const Interner = backend.Interner;
+
 const Builtins = @import("../Builtins.zig");
 const Builtin = Builtins.Builtin;
 const Parser = @import("../Parser/Parser.zig");
+const QualType = TypeStore.QualType;
 const Tree = @import("../AST/AST.zig");
 const TypeStore = @import("../AST/TypeStore.zig");
 const Type = TypeStore.Type;
-const QualType = TypeStore.QualType;
 const Value = @import("../AST/Value.zig");
 
 fn makeNan(comptime T: type, str: []const u8) T {

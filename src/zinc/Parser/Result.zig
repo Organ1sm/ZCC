@@ -2,15 +2,14 @@ const std = @import("std");
 const assert = std.debug.assert;
 
 const AST = @import("../AST/AST.zig");
+const TokenIndex = AST.TokenIndex;
+const Node = AST.Node;
 const Diagnostics = @import("../Basic/Diagnostics.zig");
-const Value = @import("../AST/Value.zig");
 const Parser = @import("Parser.zig");
+const Error = Parser.Error;
 const TypeStore = @import("../AST/TypeStore.zig");
 const QualType = TypeStore.QualType;
-
-const Node = AST.Node;
-const TokenIndex = AST.TokenIndex;
-const Error = Parser.Error;
+const Value = @import("../AST/Value.zig");
 
 const Result = @This();
 

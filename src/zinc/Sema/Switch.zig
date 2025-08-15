@@ -1,11 +1,10 @@
 const std = @import("std");
-const AST = @import("../AST/AST.zig");
-const Compilation = @import("../Basic/Compilation.zig");
-const Value = @import("../AST/Value.zig");
-const QualType = @import("../AST/TypeStore.zig").QualType;
 
+const AST = @import("../AST/AST.zig");
 const TokenIndex = AST.TokenIndex;
-const NodeIndex = AST.NodeIndex;
+const Compilation = @import("../Basic/Compilation.zig");
+const QualType = @import("../AST/TypeStore.zig").QualType;
+const Value = @import("../AST/Value.zig");
 
 pub const Switch = @This();
 

@@ -2,45 +2,43 @@ const std = @import("std");
 const assert = std.debug.assert;
 const big = std.math.big;
 const Allocator = std.mem.Allocator;
-const NodeList = std.ArrayList(Node.Index);
 
-const Compilation = @import("../Basic/Compilation.zig");
-const Source = @import("../Basic/Source.zig");
-const TokenType = @import("../Basic/TokenType.zig").TokenType;
-const Lexer = @import("../Lexer/Lexer.zig");
-const Preprocessor = @import("../Lexer/Preprocessor.zig");
 const AST = @import("../AST/AST.zig");
-const Diagnostics = @import("../Basic/Diagnostics.zig");
-const DeclSpec = @import("../AST/DeclSpec.zig");
-const SymbolStack = @import("../Sema/SymbolStack.zig");
-const Symbol = SymbolStack.Symbol;
-const Switch = @import("../Sema/Switch.zig");
-const Result = @import("Result.zig");
-const InitList = @import("InitList.zig");
+const Token = AST.Token;
+const TokenIndex = AST.TokenIndex;
+const NumberPrefix = Token.NumberPrefix;
+const NumberSuffix = Token.NumberSuffix;
+const Node = AST.Node;
 const Attribute = @import("../Lexer/Attribute.zig");
-const CharInfo = @import("../Basic/CharInfo.zig");
-const TextLiteral = @import("../Parser/TextLiteral.zig");
-const Value = @import("../AST/Value.zig");
-const StringId = @import("../Basic/StringInterner.zig").StringId;
-const RecordLayout = @import("../Basic/RecordLayout.zig");
 const Builtins = @import("../Builtins.zig");
 const Builtin = Builtins.Builtin;
 const evalBuiltin = @import("../Builtins/eval.zig").eval;
-
+const CharInfo = @import("../Basic/CharInfo.zig");
+const Compilation = @import("../Basic/Compilation.zig");
+const DeclSpec = @import("../AST/DeclSpec.zig");
+const Diagnostics = @import("../Basic/Diagnostics.zig");
+const InitList = @import("InitList.zig");
+const Lexer = @import("../Lexer/Lexer.zig");
+const Preprocessor = @import("../Lexer/Preprocessor.zig");
+const Result = @import("Result.zig");
+const RecordLayout = @import("../Basic/RecordLayout.zig");
+const SymbolStack = @import("../Sema/SymbolStack.zig");
+const Symbol = SymbolStack.Symbol;
+const Switch = @import("../Sema/Switch.zig");
+const Source = @import("../Basic/Source.zig");
+const StringId = @import("../Basic/StringInterner.zig").StringId;
 const TargetUtil = @import("../Basic/Target.zig");
-
-const Token = AST.Token;
-const NumberPrefix = Token.NumberPrefix;
-const NumberSuffix = Token.NumberSuffix;
-const TokenIndex = AST.TokenIndex;
-const Node = AST.Node;
-
+const TextLiteral = @import("../Parser/TextLiteral.zig");
+const TokenType = @import("../Basic/TokenType.zig").TokenType;
 const TypeStore = @import("../AST/TypeStore.zig");
 const Type = TypeStore.Type;
 const QualType = TypeStore.QualType;
 const TypeBuilder = TypeStore.Builder;
+const Value = @import("../AST/Value.zig");
 
 pub const Error = Compilation.Error || error{ParsingFailed};
+
+const NodeList = std.ArrayList(Node.Index);
 
 /// An attribute that has been parsed but not yet validated in its context
 const TentativeAttribute = struct {
@@ -59,6 +57,20 @@ const ConstDeclFoldingMode = enum {
     GNUVLAFoldingExtension,
     /// folding const decls is prohibited; return an unavailable value
     NoConstDeclFolding,
+};
+
+const Label = union(enum) {
+    unresolvedGoto: TokenIndex,
+    label: TokenIndex,
+};
+
+pub const InitContext = enum {
+    /// inits do not need to be compile-time constants
+    runtime,
+    /// constexpr variable, could be any scope but inits must be compile-time constants
+    constexpr,
+    /// static and global variables, inits must be compile-time constants
+    static,
 };
 
 const Parser = @This();
@@ -172,20 +184,6 @@ stringsIds: struct {
     sigJmpBuf: StringId,
     ucontextTy: StringId,
 },
-
-const Label = union(enum) {
-    unresolvedGoto: TokenIndex,
-    label: TokenIndex,
-};
-
-pub const InitContext = enum {
-    /// inits do not need to be compile-time constants
-    runtime,
-    /// constexpr variable, could be any scope but inits must be compile-time constants
-    constexpr,
-    /// static and global variables, inits must be compile-time constants
-    static,
-};
 
 fn checkIdentifierCodepointWarnings(p: *Parser, codepoint: u21, loc: Source.Location) Compilation.Error!bool {
     assert(codepoint >= 0x80);

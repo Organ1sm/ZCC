@@ -1,10 +1,12 @@
 const std = @import("std");
+
 const Driver = @import("../Driver.zig");
-const Toolchain = @import("../Toolchain.zig");
-const TargetUtil = @import("../Basic/Target.zig");
-const SystemDefaults = @import("system-defaults");
 const GCCVersion = @import("GCCVersion.zig");
 const Multilib = @import("Multilib.zig");
+const SystemDefaults = @import("system-defaults");
+const TargetUtil = @import("../Basic/Target.zig");
+const Toolchain = @import("../Toolchain.zig");
+
 const GCCDetector = @This();
 
 isValid: bool = false,

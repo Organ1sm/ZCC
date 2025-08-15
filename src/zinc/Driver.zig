@@ -11,13 +11,13 @@ const Object = backend.Object;
 const CodeGen = @import("CodeGen/CodeGen.zig");
 const Compilation = @import("Basic/Compilation.zig");
 const Diagnostics = @import("Basic/Diagnostics.zig");
+const GCCVersion = @import("Driver/GCCVersion.zig");
 const LangOpts = @import("Basic/LangOpts.zig");
 const Lexer = @import("Lexer/Lexer.zig");
 const Preprocessor = @import("Lexer/Preprocessor.zig");
 const Source = @import("Basic/Source.zig");
-const Toolchain = @import("Toolchain.zig");
 const Target = @import("Basic/Target.zig");
-const GCCVersion = @import("Driver/GCCVersion.zig");
+const Toolchain = @import("Toolchain.zig");
 
 const PicRelatedOptions = StaticStringSet.initComptime(.{
     .{"-fpic"},

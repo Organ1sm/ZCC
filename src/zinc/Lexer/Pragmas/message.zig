@@ -1,11 +1,13 @@
 const std = @import("std");
+
 const Compilation = @import("../../Basic/Compilation.zig");
-const Pragma = @import("../Pragma.zig");
 const Diagnostics = @import("../../Basic/Diagnostics.zig");
-const Preprocessor = @import("../Preprocessor.zig");
 const Parser = @import("../../Parser//Parser.zig");
-const TokenIndex = @import("../../AST/AST.zig").TokenIndex;
+const Pragma = @import("../Pragma.zig");
+const Preprocessor = @import("../Preprocessor.zig");
 const Source = @import("../../Basic/Source.zig");
+const TokenIndex = @import("../../AST/AST.zig").TokenIndex;
+
 const Message = @This();
 
 pragma: Pragma = .{

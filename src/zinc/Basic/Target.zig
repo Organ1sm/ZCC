@@ -1,9 +1,8 @@
 const std = @import("std");
 
 const LangOpts = @import("LangOpts.zig");
-const TargetSet = @import("../Builtins/Properties.zig").TargetSet;
 const QualType = @import("../AST/TypeStore.zig").QualType;
-const backend = @import("backend");
+const TargetSet = @import("../Builtins/Properties.zig").TargetSet;
 
 /// intmax_t for this target
 pub fn intMaxType(target: std.Target) QualType {

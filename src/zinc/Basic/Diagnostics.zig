@@ -1,6 +1,5 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const builtin = @import("builtin");
 
 const Compilation = @import("Compilation.zig");
 const LangOpts = @import("../Basic/LangOpts.zig");

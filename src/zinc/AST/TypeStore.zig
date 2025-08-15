@@ -3,8 +3,8 @@ pub const std = @import("std");
 const Attribute = @import("../Lexer//Attribute.zig");
 const Compilation = @import("../Basic/Compilation.zig");
 const LangOpts = @import("../Basic/LangOpts.zig");
-const RecordLayout = @import("../Basic/RecordLayout.zig");
 const Parser = @import("../Parser/Parser.zig");
+const RecordLayout = @import("../Basic/RecordLayout.zig");
 const StringInterner = @import("../Basic/StringInterner.zig");
 const StringId = StringInterner.StringId;
 const TargetUtil = @import("../Basic/Target.zig");
@@ -313,7 +313,7 @@ pub const QualType = packed struct(u32) {
                 comptime std.debug.assert(@sizeOf(Type.Record.Layout) == @sizeOf(u32) * layoutSize);
                 comptime std.debug.assert(@sizeOf(Type.Record.Field) == @sizeOf(u32) * fieldSize);
 
-                const layout = @as(*Type.Record.Layout, @alignCast(@ptrCast(extra[repr.data[1]..][0..layoutSize]))).*;
+                const layout = @as(*Type.Record.Layout, @ptrCast(@alignCast(extra[repr.data[1]..][0..layoutSize]))).*;
                 const fieldsLen = extra[repr.data[1] + layoutSize] * fieldSize;
                 const extraFields = extra[repr.data[1] + layoutSize + 1 ..][0..fieldsLen];
 
