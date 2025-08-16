@@ -992,8 +992,27 @@ pub fn applyFunctionAttributes(p: *Parser, qt: QualType, attrBufferStart: usize)
             },
         },
 
+        .alloc_align => {
+            const funcTy = baseQt.get(p.comp, .func).?;
+            if (funcTy.returnType.isPointer(p.comp)) {
+                if (attr.args.alloc_align.position == 0 or attr.args.alloc_align.position > funcTy.params.len) {
+                    try p.err(.attribute_param_out_of_bounds, tok, .{ "alloc_align", 1 });
+                } else {
+                    const argQt = funcTy.params[attr.args.alloc_align.position - 1].qt;
+                    if (argQt.isInvalid()) continue;
+                    const argSk = argQt.scalarKind(p.comp);
+                    if (!argSk.isInt() or !argSk.isReal()) {
+                        try p.err(.alloc_align_required_int_param, tok, .{});
+                    } else {
+                        try p.attrApplicationBuffer.append(p.gpa, attr);
+                    }
+                }
+            } else {
+                try p.err(.alloc_align_requires_ptr_return, tok, .{});
+            }
+        },
+
         .access,
-        .alloc_align,
         .alloc_size,
         .artificial,
         .assume_aligned,
