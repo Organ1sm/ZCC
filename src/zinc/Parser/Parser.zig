@@ -78,7 +78,6 @@ const Parser = @This();
 // values from pp
 pp: *Preprocessor,
 comp: *Compilation,
-gpa: Allocator,
 diagnostics: *Diagnostics,
 tokenIds: []const TokenType,
 tokenIdx: u32 = 0,
@@ -88,21 +87,21 @@ tree: AST,
 
 // buffers used during compilation
 symStack: SymbolStack = .{},
-strings: std.ArrayListAligned(u8, .@"4"),
-labels: std.ArrayList(Label),
-listBuffer: NodeList,
-declBuffer: NodeList,
+strings: std.array_list.Aligned(u8, .@"4") = .empty,
+labels: std.ArrayList(Label) = .empty,
+listBuffer: NodeList = .empty,
+declBuffer: NodeList = .empty,
 /// Function type parameters, also used for generic selection association
 /// duplicate checking.
-paramBuffer: std.ArrayList(Type.Func.Param),
+paramBuffer: std.ArrayList(Type.Func.Param) = .empty,
 /// Enum type fields.
-enumBuffer: std.ArrayList(Type.Enum.Field),
+enumBuffer: std.ArrayList(Type.Enum.Field) = .empty,
 /// Record type fields.
-recordBuffer: std.ArrayList(Type.Record.Field),
+recordBuffer: std.ArrayList(Type.Record.Field) = .empty,
 /// Attributes that have been parsed but not yet validated or applied.
-attrBuffer: std.MultiArrayList(TentativeAttribute) = .{},
+attrBuffer: std.MultiArrayList(TentativeAttribute) = .empty,
 /// Used to store validated attributes before they are applied to types.
-attrApplicationBuffer: std.ArrayListUnmanaged(Attribute) = .{},
+attrApplicationBuffer: std.ArrayList(Attribute) = .empty,
 /// type name -> variable name location for tentative definitions (top-level defs with thus-far-incomplete types)
 /// e.g. `struct Foo bar;` where `struct Foo` is not defined yet.
 /// The key is the StringId of `Foo` and the value is the TokenIndex of `bar`
@@ -154,7 +153,7 @@ record: struct {
                 break;
             }
         }
-        try p.recordMembers.append(p.gpa, .{ .name = name, .token = token });
+        try p.recordMembers.append(p.comp.gpa, .{ .name = name, .token = token });
     }
 
     fn addFieldsFromAnonymous(r: @This(), p: *Parser, recordTy: Type.Record) Error!void {
@@ -170,7 +169,7 @@ record: struct {
     }
 } = .{},
 
-recordMembers: std.ArrayListUnmanaged(struct { token: TokenIndex, name: StringId }) = .{},
+recordMembers: std.ArrayList(struct { token: TokenIndex, name: StringId }) = .empty,
 
 @"switch": ?*Switch = null,
 inLoop: bool = false,
@@ -189,7 +188,7 @@ fn checkIdentifierCodepointWarnings(p: *Parser, codepoint: u21, loc: Source.Loca
     assert(codepoint >= 0x80);
 
     const prevTotal = p.diagnostics.total;
-    var sf = std.heap.stackFallback(1024, p.gpa);
+    var sf = std.heap.stackFallback(1024, p.comp.gpa);
     var allocating: std.Io.Writer.Allocating = .init(sf.get());
     defer allocating.deinit();
 
@@ -210,7 +209,7 @@ fn checkIdentifierCodepointWarnings(p: *Parser, codepoint: u21, loc: Source.Loca
 
         try p.diagnostics.add(.{
             .kind = diagnostic.kind,
-            .text = allocating.getWritten(),
+            .text = allocating.written(),
             .extension = diagnostic.extension,
             .opt = diagnostic.opt,
             .location = loc.expand(p.comp),
@@ -223,7 +222,7 @@ fn checkIdentifierCodepointWarnings(p: *Parser, codepoint: u21, loc: Source.Loca
 
         try p.diagnostics.add(.{
             .kind = diagnostic.kind,
-            .text = allocating.getWritten(),
+            .text = allocating.written(),
             .extension = diagnostic.extension,
             .opt = diagnostic.opt,
             .location = loc.expand(p.comp),
@@ -384,7 +383,7 @@ pub fn err(p: *Parser, diagnostic: Diagnostic, tokenIdx: TokenIndex, args: anyty
     if (diagnostic.suppressUnlessVersion) |some| if (!p.comp.langOpts.standard.atLeast(some)) return;
     if (p.diagnostics.effectiveKind(diagnostic) == .off) return;
 
-    var sf = std.heap.stackFallback(1024, p.gpa);
+    var sf = std.heap.stackFallback(1024, p.comp.gpa);
     var allocating: std.Io.Writer.Allocating = .init(sf.get());
     defer allocating.deinit();
 
@@ -401,7 +400,7 @@ pub fn err(p: *Parser, diagnostic: Diagnostic, tokenIdx: TokenIndex, args: anyty
 
     try p.diagnostics.addWithLocation(p.comp, .{
         .kind = diagnostic.kind,
-        .text = allocating.getWritten(),
+        .text = allocating.written(),
         .opt = diagnostic.opt,
         .extension = diagnostic.extension,
         .location = loc.expand(p.comp),
@@ -551,7 +550,7 @@ pub fn removeNull(p: *Parser, str: Value) !Value {
     defer p.strings.items.len = stringsTop;
     {
         const bytes = p.comp.interner.get(str.ref()).bytes;
-        try p.strings.appendSlice(bytes[0 .. bytes.len - 1]);
+        try p.strings.appendSlice(p.comp.gpa, bytes[0 .. bytes.len - 1]);
     }
     return Value.intern(p.comp, .{ .bytes = p.strings.items[stringsTop..] });
 }
@@ -712,12 +711,14 @@ fn diagnoseIncompleteDefinitions(p: *Parser) !void {
 }
 
 fn addImplicitTypedef(p: *Parser, name: []const u8, qt: QualType) !void {
+    const gpa = p.comp.gpa;
     const start = p.comp.generatedBuffer.items.len;
-    try p.comp.generatedBuffer.appendSlice(p.comp.gpa, name);
-    try p.comp.generatedBuffer.append(p.comp.gpa, '\n');
+    try p.comp.generatedBuffer.ensureUnusedCapacity(gpa, name.len + 1);
+    p.comp.generatedBuffer.appendSliceAssumeCapacity(name);
+    p.comp.generatedBuffer.appendAssumeCapacity('\n');
 
     const nameToken: u32 = @intCast(p.pp.tokens.len);
-    try p.pp.tokens.append(p.gpa, .{ .id = .Identifier, .loc = .{
+    try p.pp.tokens.append(gpa, .{ .id = .Identifier, .loc = .{
         .id = .generated,
         .byteOffset = @intCast(start),
         .line = p.pp.generatedLine,
@@ -736,16 +737,17 @@ fn addImplicitTypedef(p: *Parser, name: []const u8, qt: QualType) !void {
     });
 
     const internedName = try p.comp.internString(name);
-    const typedefQt = (try p.comp.typeStore.put(p.gpa, .{ .typedef = .{
+    const typedefQt = (try p.comp.typeStore.put(gpa, .{ .typedef = .{
         .base = qt,
         .name = internedName,
     } })).withQualifiers(qt);
     try p.symStack.defineTypedef(internedName, typedefQt, nameToken, node);
-    try p.declBuffer.append(node);
+    try p.declBuffer.append(gpa, node);
 }
 
 /// root : (decl | inline assembly ';' | static-assert-declaration)*
 pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
+    const gpa = pp.comp.gpa;
     assert(pp.linemarkers == .None);
     pp.comp.pragmaEvent(.BeforeParse);
 
@@ -753,7 +755,6 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
         .pp = pp,
         .comp = pp.comp,
         .diagnostics = pp.diagnostics,
-        .gpa = pp.comp.gpa,
         .tokenIds = pp.tokens.items(.id),
 
         .tree = .{
@@ -761,13 +762,6 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
             .tokens = pp.tokens.slice(),
         },
 
-        .labels = .init(pp.comp.gpa),
-        .strings = .init(pp.comp.gpa),
-        .listBuffer = .init(pp.comp.gpa),
-        .declBuffer = .init(pp.comp.gpa),
-        .paramBuffer = .init(pp.comp.gpa),
-        .enumBuffer = .init(pp.comp.gpa),
-        .recordBuffer = .init(pp.comp.gpa),
         .stringsIds = .{
             .declSpecId = try pp.comp.internString("__declspec"),
             .mainId = try pp.comp.internString("main"),
@@ -781,18 +775,18 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
     errdefer p.tree.deinit();
 
     defer {
-        p.labels.deinit();
-        p.strings.deinit();
-        p.symStack.deinit(pp.comp.gpa);
-        p.listBuffer.deinit();
-        p.declBuffer.deinit();
-        p.paramBuffer.deinit();
-        p.enumBuffer.deinit();
-        p.recordBuffer.deinit();
-        p.recordMembers.deinit(pp.comp.gpa);
-        p.attrBuffer.deinit(pp.comp.gpa);
-        p.attrApplicationBuffer.deinit(pp.comp.gpa);
-        p.tentativeDefs.deinit(pp.comp.gpa);
+        p.labels.deinit(gpa);
+        p.strings.deinit(gpa);
+        p.symStack.deinit(gpa);
+        p.listBuffer.deinit(gpa);
+        p.declBuffer.deinit(gpa);
+        p.paramBuffer.deinit(gpa);
+        p.enumBuffer.deinit(gpa);
+        p.recordBuffer.deinit(gpa);
+        p.recordMembers.deinit(gpa);
+        p.attrBuffer.deinit(gpa);
+        p.attrApplicationBuffer.deinit(gpa);
+        p.tentativeDefs.deinit(gpa);
     }
 
     //bind p to the symbol stack for simplify symbol stack api
@@ -863,14 +857,14 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
             },
             else => |e| return e,
         }) |node| {
-            try p.declBuffer.append(node);
+            try p.declBuffer.append(gpa, node);
             continue;
         }
 
         if (p.eat(.Semicolon)) |tok| {
             try p.err(.extra_semi, tok, .{});
             const empty = try p.addNode(.{ .emptyDecl = .{ .semicolon = tok } });
-            try p.declBuffer.append(empty);
+            try p.declBuffer.append(gpa, empty);
             continue;
         }
 
@@ -881,7 +875,9 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
     if (p.tentativeDefs.count() > 0)
         try p.diagnoseIncompleteDefinitions();
 
-    p.tree.rootDecls = p.declBuffer.moveToUnmanaged();
+    p.tree.rootDecls = p.declBuffer;
+    p.declBuffer = .empty;
+
     if (p.tree.rootDecls.items.len == implicitTypedefCount)
         try p.err(.empty_translation_unit, p.tokenIdx - 1, .{});
 
@@ -1016,6 +1012,8 @@ fn typedefDefined(p: *Parser, name: StringId, ty: QualType) void {
 /// init-declarator-list
 ///  : init-declarator (',' init-declarator)*
 fn parseDeclaration(p: *Parser) Error!bool {
+    const gpa = p.comp.gpa;
+
     _ = try p.pragma();
     const firstToken = p.tokenIdx;
 
@@ -1054,7 +1052,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
 
     if (declSpec.noreturn) |token| {
         const attr = Attribute{ .tag = .noreturn, .args = .{ .noreturn = .{} }, .syntax = .keyword };
-        try p.attrBuffer.append(p.gpa, .{ .attr = attr, .tok = token });
+        try p.attrBuffer.append(gpa, .{ .attr = attr, .tok = token });
     }
 
     var declNode = try p.tree.addNode(.{ .emptyDecl = .{ .semicolon = firstToken } });
@@ -1128,7 +1126,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
             const funcQt = initDeclarator.d.qt.base(p.comp).qt;
             const paramsLen = funcQt.get(p.comp, .func).?.params.len;
 
-            const newParams = try p.paramBuffer.addManyAsSlice(paramsLen);
+            const newParams = try p.paramBuffer.addManyAsSlice(gpa, paramsLen);
             for (newParams) |*newParam| {
                 newParam.name = .empty;
             }
@@ -1216,7 +1214,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
                 }
             }
             // Update the function type to contain the declared parameters.
-            p.func.qt = try p.comp.typeStore.put(p.gpa, .{ .func = .{
+            p.func.qt = try p.comp.typeStore.put(gpa, .{ .func = .{
                 .kind = .Normal,
                 .params = newParams,
                 .returnType = funcTy.returnType,
@@ -1272,7 +1270,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
                 .body = body,
             },
         });
-        try p.declBuffer.append(declNode);
+        try p.declBuffer.append(gpa, declNode);
 
         // check gotos
         if (func.qt == null) {
@@ -1328,7 +1326,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
                 if (nodeQt.get(p.comp, .array)) |arrayTy| {
                     if (arrayTy.len == .incomplete) {
                         // Create tentative array node with fixed type.
-                        nodeQt = try p.comp.typeStore.put(p.gpa, .{ .array = .{
+                        nodeQt = try p.comp.typeStore.put(gpa, .{ .array = .{
                             .elem = arrayTy.elem,
                             .len = .{ .fixed = 1 },
                         } });
@@ -1352,14 +1350,14 @@ fn parseDeclaration(p: *Parser) Error!bool {
                 },
             });
         }
-        try p.declBuffer.append(declNode);
+        try p.declBuffer.append(gpa, declNode);
 
         const internedName = try p.getInternString(initDeclarator.d.name);
         if (declSpec.storageClass == .typedef) {
             const typedefQt = if (initDeclarator.d.qt.isInvalid())
                 initDeclarator.d.qt
             else
-                (try p.comp.typeStore.put(p.gpa, .{ .typedef = .{
+                (try p.comp.typeStore.put(gpa, .{ .typedef = .{
                     .base = initDeclarator.d.qt,
                     .name = internedName,
                 } })).withQualifiers(initDeclarator.d.qt);
@@ -1432,19 +1430,20 @@ fn staticAssertMessage(
     if (maybeMessage) |message| {
         assert(message.node.get(&p.tree) == .stringLiteralExpr);
 
-        if (allocating.getWritten().len > 0)
-            try p.strings.append(' ');
+        if (allocating.written().len > 0)
+            try p.strings.append(p.comp.gpa, ' ');
 
         const bytes = p.comp.interner.get(message.value.ref()).bytes;
         try Value.printString(bytes, message.qt, p.comp, w);
     }
 
-    return allocating.getWritten();
+    return allocating.written();
 }
 
 /// static-assert-declaration
 ///  : (`_Static_assert` | `static_assert`) '(' integer-const-expression ',' StringLiteral+ ')' ';'
 fn parseStaticAssert(p: *Parser) Error!bool {
+    const gpa = p.comp.gpa;
     const staticAssert = p.eat(.KeywordStaticAssert) orelse p.eat(.KeywordC23StaticAssert) orelse return false;
     const lp = try p.expectToken(.LParen);
     const resToken = p.tokenIdx;
@@ -1485,7 +1484,7 @@ fn parseStaticAssert(p: *Parser) Error!bool {
             try p.err(.static_assert_not_constant, resToken, .{});
     } else {
         if (!res.value.toBool(p.comp)) {
-            var sf = std.heap.stackFallback(1024, p.gpa);
+            var sf = std.heap.stackFallback(1024, gpa);
             var allocating: std.Io.Writer.Allocating = .init(sf.get());
             defer allocating.deinit();
 
@@ -1503,7 +1502,7 @@ fn parseStaticAssert(p: *Parser) Error!bool {
             .message = if (str) |some| some.node else null,
         },
     });
-    try p.declBuffer.append(node);
+    try p.declBuffer.append(gpa, node);
     return true;
 }
 
@@ -1511,6 +1510,7 @@ fn parseStaticAssert(p: *Parser) Error!bool {
 ///   : `typeof` '(' type-name ')'
 ///   | `typeof` '(' expr ')'
 fn typeof(p: *Parser) Error!?QualType {
+    const gpa = p.comp.gpa;
     var unqual = false;
     switch (p.currToken()) {
         .KeywordTypeof, .KeywordTypeof1, .KeywordTypeof2 => p.tokenIdx += 1,
@@ -1526,7 +1526,7 @@ fn typeof(p: *Parser) Error!?QualType {
         try p.expectClosing(lp, .RParen);
         if (qt.isInvalid()) return null;
 
-        const typeofQt = try p.comp.typeStore.put(p.gpa, .{ .typeof = .{
+        const typeofQt = try p.comp.typeStore.put(gpa, .{ .typeof = .{
             .base = qt,
             .expr = null,
         } });
@@ -1538,7 +1538,7 @@ fn typeof(p: *Parser) Error!?QualType {
 
     if (typeofExpr.qt.isInvalid()) return null;
 
-    const typeofQt = try p.comp.typeStore.put(p.gpa, .{ .typeof = .{
+    const typeofQt = try p.comp.typeStore.put(gpa, .{ .typeof = .{
         .base = typeofExpr.qt,
         .expr = typeofExpr.node,
     } });
@@ -1783,13 +1783,12 @@ fn diagnose(p: *Parser, attr: Attribute.Tag, arguments: *Attribute.Arguments, ar
 
 fn handleAttr(p: *Parser, format: Attribute.Kind, namespace: ?[]const u8) Error!void {
     if (try p.attribute(format, namespace)) |attr|
-        try p.attrBuffer.append(p.gpa, attr);
+        try p.attrBuffer.append(p.comp.gpa, attr);
 }
 
 /// attribute-list : (attribute (',' attribute)*)?
 fn parseGNUAttrList(p: *Parser) Error!void {
-    if (p.currToken() == .RParen)
-        return;
+    if (p.currToken() == .RParen) return;
 
     try p.handleAttr(.gnu, null);
     while (p.currToken() != .RParen) {
@@ -1897,6 +1896,7 @@ fn parseInitDeclarator(
 ) Error!?InitDeclarator {
     const thisAttrBufferTop = p.attrBuffer.len;
     defer p.attrBuffer.len = thisAttrBufferTop;
+    const gpa = p.comp.gpa;
 
     var ID = InitDeclarator{ .d = (try p.declarator(declSpec.qt, .normal)) orelse return null };
 
@@ -1997,7 +1997,7 @@ fn parseInitDeclarator(
             if (baseArrayTy.len == .incomplete) if (initListExpr.qt.get(p.comp, .array)) |initArrayTy| {
                 switch (initArrayTy.len) {
                     .fixed, .static => |len| {
-                        ID.d.qt = (try p.comp.typeStore.put(p.gpa, .{ .array = .{
+                        ID.d.qt = (try p.comp.typeStore.put(gpa, .{ .array = .{
                             .elem = baseArrayTy.elem,
                             .len = .{ .fixed = len },
                         } })).withQualifiers(ID.d.qt);
@@ -2047,11 +2047,11 @@ fn parseInitDeclarator(
                     break :incomplete;
                 },
                 .@"struct", .@"union" => |recordTy| {
-                    _ = try p.tentativeDefs.getOrPutValue(p.gpa, recordTy.name, ID.d.name);
+                    _ = try p.tentativeDefs.getOrPutValue(gpa, recordTy.name, ID.d.name);
                     break :incomplete;
                 },
                 .@"enum" => |enumTy| {
-                    _ = try p.tentativeDefs.getOrPutValue(p.gpa, enumTy.name, ID.d.name);
+                    _ = try p.tentativeDefs.getOrPutValue(gpa, enumTy.name, ID.d.name);
                     break :incomplete;
                 },
                 else => {},
@@ -2150,6 +2150,8 @@ fn parseTypeSpec(p: *Parser, builder: *TypeBuilder) Error!bool {
             .KeywordAlignas, .KeywordC23Alignas => {
                 const alignToken = p.tokenIdx;
                 p.tokenIdx += 1;
+
+                const gpa = p.comp.gpa;
                 const lparen = try p.expectToken(.LParen);
                 const typenameStart = p.tokenIdx;
                 if (try p.parseTypeName()) |innerQt| {
@@ -2157,7 +2159,7 @@ fn parseTypeSpec(p: *Parser, builder: *TypeBuilder) Error!bool {
                         try p.err(.invalid_alignof, typenameStart, .{innerQt});
 
                     const alignment = Attribute.Alignment{ .requested = innerQt.alignof(p.comp) };
-                    try p.attrBuffer.append(p.gpa, .{
+                    try p.attrBuffer.append(gpa, .{
                         .attr = .{
                             .tag = .aligned,
                             .args = .{ .aligned = .{ .alignment = alignment, .__name_token = alignToken } },
@@ -2175,7 +2177,7 @@ fn parseTypeSpec(p: *Parser, builder: *TypeBuilder) Error!bool {
                             return error.ParsingFailed;
                         }
                         args.aligned.alignment.?.node = .pack(res.node);
-                        try p.attrBuffer.append(p.gpa, .{
+                        try p.attrBuffer.append(gpa, .{
                             .attr = .{ .tag = .aligned, .args = args, .syntax = .keyword },
                             .tok = alignToken,
                         });
@@ -2191,7 +2193,7 @@ fn parseTypeSpec(p: *Parser, builder: *TypeBuilder) Error!bool {
             .KeywordThisCall2,
             .KeywordVectorCall,
             .KeywordVectorCall2,
-            => try p.attrBuffer.append(p.gpa, .{
+            => try p.attrBuffer.append(p.comp.gpa, .{
                 .attr = .{
                     .tag = .calling_convention,
                     .args = .{
@@ -2286,7 +2288,7 @@ fn getAnonymousName(p: *Parser, kindToken: TokenIndex) !StringId {
         else => "record field",
     };
 
-    var arena = p.comp.typeStore.annoNameArena.promote(p.gpa);
+    var arena = p.comp.typeStore.annoNameArena.promote(p.comp.gpa);
     defer p.comp.typeStore.annoNameArena = arena.state;
 
     const str = try std.fmt.allocPrint(
@@ -2306,6 +2308,7 @@ fn getAnonymousName(p: *Parser, kindToken: TokenIndex) !StringId {
 ///  : 'struct'
 ///  | 'union'
 fn parseRecordSpec(p: *Parser) Error!QualType {
+    const gpa = p.comp.gpa;
     const startingPragmaPack = p.pragmaPack;
     const kindToken = p.tokenIdx;
     const isStruct = p.tokenIds[kindToken] == .KeywordStruct;
@@ -2334,7 +2337,7 @@ fn parseRecordSpec(p: *Parser) Error!QualType {
                 .layout = null,
                 .fields = &.{},
             };
-            const recordQt = try p.comp.typeStore.put(p.gpa, if (isStruct)
+            const recordQt = try p.comp.typeStore.put(gpa, if (isStruct)
                 .{ .@"struct" = recordTy }
             else
                 .{ .@"union" = recordTy });
@@ -2353,7 +2356,7 @@ fn parseRecordSpec(p: *Parser) Error!QualType {
                 .containerQt = attributedQt,
                 .definition = null,
             };
-            try p.declBuffer.append(try p.addNode(if (isStruct)
+            try p.declBuffer.append(gpa, try p.addNode(if (isStruct)
                 .{ .structForwardDecl = fw }
             else
                 .{ .unionForwardDecl = fw }));
@@ -2389,7 +2392,7 @@ fn parseRecordSpec(p: *Parser) Error!QualType {
             .layout = null,
             .fields = &.{},
         };
-        const recordQt = try p.comp.typeStore.put(p.gpa, if (isStruct)
+        const recordQt = try p.comp.typeStore.put(gpa, if (isStruct)
             .{ .@"struct" = recordTy }
         else
             .{ .@"union" = recordTy });
@@ -2409,7 +2412,7 @@ fn parseRecordSpec(p: *Parser) Error!QualType {
     };
 
     // reserve space for this record
-    try p.declBuffer.append(undefined);
+    try p.declBuffer.append(gpa, undefined);
     const declBufferTop = p.declBuffer.items.len;
     const recordBufferTop = p.recordBuffer.items.len;
 
@@ -2469,10 +2472,10 @@ fn parseRecordSpec(p: *Parser) Error!QualType {
         const baseType = qt.base(p.comp);
         if (isStruct) {
             std.debug.assert(baseType.type.@"struct".name == recordType.name);
-            try p.comp.typeStore.set(p.gpa, .{ .@"struct" = recordType }, @intFromEnum(baseType.qt._index));
+            try p.comp.typeStore.set(gpa, .{ .@"struct" = recordType }, @intFromEnum(baseType.qt._index));
         } else {
             std.debug.assert(baseType.type.@"union".name == recordType.name);
-            try p.comp.typeStore.set(p.gpa, .{ .@"union" = recordType }, @intFromEnum(baseType.qt._index));
+            try p.comp.typeStore.set(gpa, .{ .@"union" = recordType }, @intFromEnum(baseType.qt._index));
         }
         break :blk false;
     };
@@ -2565,6 +2568,8 @@ fn parseRecordDecls(p: *Parser) Error!void {
 /// record-declaration : type-specifier+ (record-declarator (',' record-declarator)*)?
 /// record-declarator : declarator (':' integer-constant-expression)?
 fn parseRecordDecl(p: *Parser) Error!bool {
+    const gpa = p.comp.gpa;
+
     const attrBufferTop = p.attrBuffer.len;
     defer p.attrBuffer.len = attrBufferTop;
 
@@ -2658,7 +2663,7 @@ fn parseRecordDecl(p: *Parser) Error!bool {
 
         const attrIndex: u32 = @intCast(p.comp.typeStore.attributes.items.len);
         const attrLen: u32 = @intCast(toAppend.len);
-        try p.comp.typeStore.attributes.appendSlice(p.gpa, toAppend);
+        try p.comp.typeStore.attributes.appendSlice(gpa, toAppend);
 
         if (nameToken == 0 and bits == null) unnamed: {
             // don't allow incompelete size fields in anonymous record.
@@ -2666,7 +2671,7 @@ fn parseRecordDecl(p: *Parser) Error!bool {
                 .@"enum" => break :unnamed,
                 .@"struct", .@"union" => |recordTy| if (recordTy.isAnonymous(p.comp)) {
                     // An anonymous record appears as indirect fields on the parent
-                    try p.recordBuffer.append(.{
+                    try p.recordBuffer.append(gpa, .{
                         .name = try p.getAnonymousName(firstToken),
                         .qt = qt,
                         ._attr_index = attrIndex,
@@ -2679,7 +2684,7 @@ fn parseRecordDecl(p: *Parser) Error!bool {
                             .bitWidth = null,
                         },
                     });
-                    try p.declBuffer.append(node);
+                    try p.declBuffer.append(gpa, node);
                     try p.record.addFieldsFromAnonymous(p, recordTy);
                     break; // must be followed by a semicolon
                 },
@@ -2695,7 +2700,7 @@ fn parseRecordDecl(p: *Parser) Error!bool {
             continue;
         } else {
             const internedName = if (nameToken != 0) try p.getInternString(nameToken) else try p.getAnonymousName(firstToken);
-            try p.recordBuffer.append(.{
+            try p.recordBuffer.append(gpa, .{
                 .name = internedName,
                 .qt = qt,
                 .nameToken = nameToken,
@@ -2714,7 +2719,7 @@ fn parseRecordDecl(p: *Parser) Error!bool {
                     .bitWidth = bitsNode,
                 },
             });
-            try p.declBuffer.append(node);
+            try p.declBuffer.append(gpa, node);
         }
 
         if (!qt.isInvalid()) {
@@ -2806,6 +2811,7 @@ fn checkEnumFixedTy(p: *Parser, fixedQt: ?QualType, identToken: TokenIndex, prev
 ///  : `enum` identifier? (':', type-name)? { enumerator (',' enumerator)? ',') }
 ///  | `enum` identifier (':', type-name)?
 fn parseEnumSpec(p: *Parser) Error!QualType {
+    const gpa = p.comp.gpa;
     const enumToken = p.tokenIdx;
     p.tokenIdx += 1;
 
@@ -2852,7 +2858,7 @@ fn parseEnumSpec(p: *Parser) Error!QualType {
             return prev.qt;
         } else {
             // this is a forward declaration
-            const enumQt = try p.comp.typeStore.put(p.gpa, .{ .@"enum" = .{
+            const enumQt = try p.comp.typeStore.put(gpa, .{ .@"enum" = .{
                 .name = internedName,
                 .tag = fixedQt orelse .int,
                 .fixed = fixedQt != null,
@@ -2869,7 +2875,7 @@ fn parseEnumSpec(p: *Parser) Error!QualType {
                 .value = .{},
             });
 
-            try p.declBuffer.append(try p.addNode(.{
+            try p.declBuffer.append(gpa, try p.addNode(.{
                 .enumForwardDecl = .{
                     .nameOrKindToken = ident,
                     .containerQt = attributedQt,
@@ -2913,12 +2919,12 @@ fn parseEnumSpec(p: *Parser) Error!QualType {
             .fixed = fixedQt != null,
             .fields = &.{},
         };
-        const enumQt = try p.comp.typeStore.put(p.gpa, .{ .@"enum" = enumTy });
+        const enumQt = try p.comp.typeStore.put(gpa, .{ .@"enum" = enumTy });
         break :blk .{ enumTy, enumQt };
     };
 
     // reserve space for this enum
-    try p.declBuffer.append(undefined);
+    try p.declBuffer.append(gpa, undefined);
     const declBufferTop = p.declBuffer.items.len;
     const listBufferTop = p.listBuffer.items.len;
     const enumBufferTop = p.enumBuffer.items.len;
@@ -2932,8 +2938,8 @@ fn parseEnumSpec(p: *Parser) Error!QualType {
 
     var e = Enumerator.init(fixedQt);
     while (try p.enumerator(&e)) |fieldAndNode| {
-        try p.enumBuffer.append(fieldAndNode.field);
-        try p.listBuffer.append(fieldAndNode.node);
+        try p.enumBuffer.append(gpa, fieldAndNode.field);
+        try p.listBuffer.append(gpa, fieldAndNode.node);
         if (p.eat(.Comma) == null) break;
     }
 
@@ -2997,7 +3003,7 @@ fn parseEnumSpec(p: *Parser) Error!QualType {
         enumType.incomplete = false;
         const baseType = attributedQt.base(p.comp);
         std.debug.assert(baseType.type.@"enum".name == enumType.name);
-        try p.comp.typeStore.set(p.gpa, .{ .@"enum" = enumType }, @intFromEnum(baseType.qt._index));
+        try p.comp.typeStore.set(gpa, .{ .@"enum" = enumType }, @intFromEnum(baseType.qt._index));
     }
 
     // declare a symbol for the type
@@ -3191,7 +3197,7 @@ fn enumerator(p: *Parser, e: *Enumerator) Error!?EnumFieldAndNode {
         },
     });
 
-    try p.tree.valueMap.put(p.gpa, node, e.value);
+    try p.tree.valueMap.put(p.comp.gpa, node, e.value);
 
     const internedName = try p.getInternString(nameToken);
     try p.symStack.defineEnumeration(internedName, attributedQt, nameToken, e.value, node);
@@ -3381,7 +3387,7 @@ fn declarator(p: *Parser, baseQt: QualType, kind: Declarator.Kind) Error!?Declar
         var builder: TypeBuilder = .{ .parser = p };
         _ = try p.parseTypeQual(&builder);
 
-        const pointer_qt = try p.comp.typeStore.put(p.gpa, .{ .pointer = .{
+        const pointer_qt = try p.comp.typeStore.put(p.comp.gpa, .{ .pointer = .{
             .child = d.qt,
             .decayed = null,
         } });
@@ -3504,6 +3510,7 @@ fn directDeclarator(
     baseDeclarator: *Declarator,
     kind: Declarator.Kind,
 ) Error!QualType {
+    const gpa = p.comp.gpa;
     if (p.eat(.LBracket)) |lb| {
         // Check for C23 attribute
         if (p.currToken() == .LBracket) {
@@ -3572,7 +3579,7 @@ fn directDeclarator(
                 if (p.func.qt == null and kind != .param and p.record.kind == .Invalid)
                     try p.err(.variable_len_array_file_scope, baseDeclarator.name, .{});
 
-                const arrayQt = try p.comp.typeStore.put(p.gpa, .{ .array = .{
+                const arrayQt = try p.comp.typeStore.put(gpa, .{ .array = .{
                     .elem = outer,
                     .len = .{ .variable = size.node },
                 } });
@@ -3588,7 +3595,7 @@ fn directDeclarator(
                 }
 
                 const len = size.value.toInt(u64, p.comp) orelse std.math.maxInt(u64);
-                const arrayQt = try p.comp.typeStore.put(p.gpa, .{ .array = .{
+                const arrayQt = try p.comp.typeStore.put(gpa, .{ .array = .{
                     .elem = outer,
                     .len = if (static != null)
                         .{ .static = len }
@@ -3598,13 +3605,13 @@ fn directDeclarator(
                 return builder.finishQuals(arrayQt);
             }
         } else if (star) |_| {
-            const arrayQt = try p.comp.typeStore.put(p.gpa, .{ .array = .{
+            const arrayQt = try p.comp.typeStore.put(gpa, .{ .array = .{
                 .elem = outer,
                 .len = .unspecifiedVariable,
             } });
             return builder.finishQuals(arrayQt);
         } else {
-            const arrayQt = try p.comp.typeStore.put(p.gpa, .{ .array = .{
+            const arrayQt = try p.comp.typeStore.put(gpa, .{ .array = .{
                 .elem = outer,
                 .len = .incomplete,
             } });
@@ -3627,7 +3634,7 @@ fn directDeclarator(
             // Set after call to `directDeclarator` since we will return
             // a function type from here.
             baseDeclarator.declaratorType = .func;
-            return p.comp.typeStore.put(p.gpa, .{ .func = funcType });
+            return p.comp.typeStore.put(gpa, .{ .func = funcType });
         }
 
         // Set here so the call to directDeclarator for the return type
@@ -3653,7 +3660,7 @@ fn directDeclarator(
                 const nameToken = try p.expectIdentifier();
                 const internedName = try p.getInternString(nameToken);
                 try p.symStack.defineParam(internedName, undefined, nameToken, null);
-                try p.paramBuffer.append(.{
+                try p.paramBuffer.append(gpa, .{
                     .name = internedName,
                     .nameToken = nameToken,
                     .qt = .int,
@@ -3676,7 +3683,7 @@ fn directDeclarator(
         // a function type from here.
         baseDeclarator.declaratorType = .func;
 
-        return p.comp.typeStore.put(p.gpa, .{ .func = funcType });
+        return p.comp.typeStore.put(gpa, .{ .func = funcType });
     } else {
         return baseDeclarator.qt;
     }
@@ -3689,6 +3696,7 @@ fn parseParamDecls(p: *Parser) Error!?[]Type.Func.Param {
     defer p.symStack.popScope();
 
     const paramBufferTop = p.paramBuffer.items.len;
+    const gpa = p.comp.gpa;
 
     while (true) {
         const attrBufferTop = p.attrBuffer.len;
@@ -3703,7 +3711,7 @@ fn parseParamDecls(p: *Parser) Error!?[]Type.Func.Param {
             const identifier = try p.expectIdentifier();
             try p.err(.unknown_type_name, identifier, .{p.getTokenText(identifier)});
 
-            try p.paramBuffer.append(.{
+            try p.paramBuffer.append(gpa, .{
                 .name = try p.comp.internString(p.getTokenText(identifier)),
                 .nameToken = identifier,
                 .qt = .int,
@@ -3789,7 +3797,7 @@ fn parseParamDecls(p: *Parser) Error!?[]Type.Func.Param {
             try p.symStack.defineParam(internedName, paramQt, nameToken, node);
         }
 
-        try p.paramBuffer.append(.{
+        try p.paramBuffer.append(gpa, .{
             .name = internedName,
             .nameToken = if (nameToken == 0) firstToken else nameToken,
             .qt = paramQt,
@@ -3912,7 +3920,7 @@ pub fn initializer(p: *Parser, initQt: QualType) Error!Result {
         return p.complexInitializer(finalInitQt);
 
     var il: InitList = .{};
-    defer il.deinit(p.gpa);
+    defer il.deinit(p.comp.gpa);
 
     _ = try p.initializerItem(&il, finalInitQt);
 
@@ -3926,6 +3934,7 @@ pub fn initializer(p: *Parser, initQt: QualType) Error!Result {
 /// designator : '[' integer-constant-expression ']'
 ///            | '.' identifier
 pub fn initializerItem(p: *Parser, il: *InitList, initQt: QualType) Error!bool {
+    const gpa = p.comp.gpa;
     const lb = p.eat(.LBrace) orelse {
         const token = p.tokenIdx;
         var res = (try p.parseAssignExpr()) orelse return false;
@@ -4008,7 +4017,7 @@ pub fn initializerItem(p: *Parser, il: *InitList, initQt: QualType) Error!bool {
                 }
 
                 curIndexHint = curIndexHint orelse indexInt;
-                curIL = try curIL.find(p.gpa, indexInt);
+                curIL = try curIL.find(gpa, indexInt);
                 curQt = arrayTy.elem;
             } else if (p.eat(.Period)) |period| {
                 const fieldToken = try p.expectIdentifier();
@@ -4035,14 +4044,14 @@ pub fn initializerItem(p: *Parser, il: *InitList, initQt: QualType) Error!bool {
                             if (!rec.hasField(p.comp, targetName)) continue;
 
                             curQt = f.qt;
-                            curIL = try il.find(p.gpa, fieldIndex);
+                            curIL = try il.find(gpa, fieldIndex);
                             curIndexHint = curIndexHint orelse fieldIndex;
                             break;
                         }
                     }
 
                     if (f.name == targetName) {
-                        curIL = try curIL.find(p.gpa, fieldIndex);
+                        curIL = try curIL.find(gpa, fieldIndex);
                         curQt = f.qt;
                         curIndexHint = curIndexHint orelse fieldIndex;
                         break;
@@ -4063,7 +4072,7 @@ pub fn initializerItem(p: *Parser, il: *InitList, initQt: QualType) Error!bool {
         var saw = false;
         if (isStrInit and p.isStringInit(initQt)) {
             var tempIL: InitList = .{};
-            defer tempIL.deinit(p.gpa);
+            defer tempIL.deinit(p.comp.gpa);
             saw = try p.initializerItem(&tempIL, .void);
         } else if (count == 0 and p.isStringInit(initQt)) {
             isStrInit = true;
@@ -4071,7 +4080,7 @@ pub fn initializerItem(p: *Parser, il: *InitList, initQt: QualType) Error!bool {
         } else if (isScalar and count >= scalarInitsNeeds) {
             // discard further scalars
             var tempIL: InitList = .{};
-            defer tempIL.deinit(p.gpa);
+            defer tempIL.deinit(gpa);
             saw = try p.initializerItem(&tempIL, .void);
         } else if (p.currToken() == .LBrace) {
             if (designation) {
@@ -4082,7 +4091,7 @@ pub fn initializerItem(p: *Parser, il: *InitList, initQt: QualType) Error!bool {
             } else {
                 // discard further values
                 var tempIL: InitList = .{};
-                defer tempIL.deinit(p.gpa);
+                defer tempIL.deinit(gpa);
 
                 saw = try p.initializerItem(curIL, curQt);
                 saw = try p.initializerItem(&tempIL, .void);
@@ -4161,6 +4170,7 @@ fn findScalarInitializerAt(
     firstToken: TokenIndex,
     startIdx: *u64,
 ) Error!bool {
+    const gpa = p.comp.gpa;
     switch (qt.base(p.comp).type) {
         .array => |arrayTy| {
             if (il.*.node != .null) return false;
@@ -4179,7 +4189,7 @@ fn findScalarInitializerAt(
             const arrIL = il.*;
             if (startIdx.* < maxLen) {
                 qt.* = arrayTy.elem;
-                il.* = try arrIL.find(p.gpa, startIdx.*);
+                il.* = try arrIL.find(gpa, startIdx.*);
                 _ = try p.findScalarInitializer(il, qt, res, firstToken);
                 return true;
             }
@@ -4198,7 +4208,7 @@ fn findScalarInitializerAt(
             const structIL = il.*;
             if (startIdx.* < structTy.fields.len) {
                 qt.* = structTy.fields[@intCast(startIdx.*)].qt;
-                il.* = try structIL.find(p.gpa, startIdx.*);
+                il.* = try structIL.find(gpa, startIdx.*);
                 _ = try p.findScalarInitializer(il, qt, res, firstToken);
                 return true;
             }
@@ -4221,6 +4231,8 @@ fn findScalarInitializer(
     const actualQt = res.qt;
     if (qt.isInvalid()) return il.*.node == .null;
 
+    const gpa = p.comp.gpa;
+
     switch (qt.base(p.comp).type) {
         .array => |arrayTy| {
             if (il.*.node != .null) return false;
@@ -4242,7 +4254,7 @@ fn findScalarInitializer(
             const elemTy = arrayTy.elem;
             while (index < maxLen) : (index += 1) {
                 qt.* = elemTy;
-                il.* = try arrayIL.find(p.gpa, index);
+                il.* = try arrayIL.find(gpa, index);
                 if (il.*.node == .null and actualQt.eql(elemTy, p.comp))
                     return true;
                 if (try p.findScalarInitializer(il, qt, res, firstToken))
@@ -4267,7 +4279,7 @@ fn findScalarInitializer(
             while (index < structTy.fields.len) : (index += 1) {
                 const field = structTy.fields[@intCast(index)];
                 qt.* = field.qt;
-                il.* = try structIL.find(p.gpa, index);
+                il.* = try structIL.find(gpa, index);
 
                 if (il.*.node == .null and actualQt.eql(field.qt, p.comp)) return true;
                 if (il.*.node == .null and try p.coerceArrayInitExtra(res, firstToken, qt.*, false)) return true;
@@ -4286,7 +4298,7 @@ fn findScalarInitializer(
             }
 
             qt.* = unionTy.fields[0].qt;
-            il.* = try il.*.find(p.gpa, 0);
+            il.* = try il.*.find(gpa, 0);
 
             if (try p.coerceArrayInitExtra(res, firstToken, qt.*, false)) return true;
             if (try p.findScalarInitializer(il, qt, res, firstToken)) return true;
@@ -4299,6 +4311,8 @@ fn findScalarInitializer(
 
 fn findAggregateInitializer(p: *Parser, il: **InitList, qt: *QualType, startIdx: *?u64) Error!bool {
     if (qt.isInvalid()) return il.*.node == .null;
+
+    const gpa = p.comp.gpa;
     switch (qt.base(p.comp).type) {
         .array => |arrayTy| {
             if (il.*.node != .null) return false;
@@ -4319,7 +4333,7 @@ fn findAggregateInitializer(p: *Parser, il: **InitList, qt: *QualType, startIdx:
 
             if (index < maxLen) {
                 qt.* = arrayTy.elem;
-                il.* = try il.*.find(p.gpa, index);
+                il.* = try il.*.find(gpa, index);
                 return true;
             }
             return false;
@@ -4340,7 +4354,7 @@ fn findAggregateInitializer(p: *Parser, il: **InitList, qt: *QualType, startIdx:
             const fieldCount = structTy.fields.len;
             if (index < fieldCount) {
                 qt.* = structTy.fields[@intCast(index)].qt;
-                il.* = try il.*.find(p.gpa, index);
+                il.* = try il.*.find(gpa, index);
                 return true;
             }
             return false;
@@ -4352,7 +4366,7 @@ fn findAggregateInitializer(p: *Parser, il: **InitList, qt: *QualType, startIdx:
             if (unionTy.fields.len == 0) return false;
 
             qt.* = unionTy.fields[0].qt;
-            il.* = try il.*.find(p.gpa, 0);
+            il.* = try il.*.find(gpa, 0);
             return true;
         },
 
@@ -4487,6 +4501,7 @@ fn convertInitList(p: *Parser, il: InitList, initQt: QualType) Error!Node.Index 
             });
     }
 
+    const gpa = p.comp.gpa;
     switch (initQt.base(p.comp).type) {
         .array => |arrayTy| {
             if (il.node.unpack()) |some| return some;
@@ -4515,12 +4530,12 @@ fn convertInitList(p: *Parser, il: InitList, initQt: QualType) Error!Node.Index 
                             .qt = elemType,
                         },
                     });
-                    try p.listBuffer.append(elem);
+                    try p.listBuffer.append(gpa, elem);
                 }
                 start = init.index + 1;
 
                 const elem = try p.convertInitList(init.list, elemType);
-                try p.listBuffer.append(elem);
+                try p.listBuffer.append(gpa, elem);
             }
 
             const maxElems = p.comp.maxArrayBytes() / (@max(1, elemType.sizeofOrNull(p.comp) orelse 1));
@@ -4531,7 +4546,7 @@ fn convertInitList(p: *Parser, il: InitList, initQt: QualType) Error!Node.Index 
 
             var arrInitTy = initQt;
             if (arrayTy.len == .incomplete) {
-                arrInitTy = try p.comp.typeStore.put(p.gpa, .{ .array = .{
+                arrInitTy = try p.comp.typeStore.put(gpa, .{ .array = .{
                     .elem = arrayTy.elem,
                     .len = .{ .fixed = start },
                 } });
@@ -4543,7 +4558,7 @@ fn convertInitList(p: *Parser, il: InitList, initQt: QualType) Error!Node.Index 
                         .qt = elemType,
                     },
                 });
-                try p.listBuffer.append(elem);
+                try p.listBuffer.append(gpa, elem);
             }
 
             return try p.addNode(.{
@@ -4567,11 +4582,11 @@ fn convertInitList(p: *Parser, il: InitList, initQt: QualType) Error!Node.Index 
             for (structTy.fields, 0..) |field, i| {
                 if (initIndex < il.list.items.len and il.list.items[initIndex].index == i) {
                     const item = try p.convertInitList(il.list.items[initIndex].list, field.qt);
-                    try p.listBuffer.append(item);
+                    try p.listBuffer.append(gpa, item);
                     initIndex += 1;
                 } else {
                     const item = try p.addNode(.{ .defaultInitExpr = .{ .lastToken = il.tok, .qt = field.qt } });
-                    try p.listBuffer.append(item);
+                    try p.listBuffer.append(gpa, item);
                 }
             }
 
@@ -4624,6 +4639,7 @@ fn parseMSVCAsmStmt(p: *Parser) Error!?Node.Index {
 
 /// asmOperand : ('[' Identifier ']')? asmStr '(' expr ')'
 fn parseAsmOperands(p: *Parser, names: *std.ArrayList(?TokenIndex), constraints: *NodeList, exprs: *NodeList) Error!void {
+    const gpa = p.comp.gpa;
     if (!p.currToken().isStringLiteral() and p.currToken() != .LBracket) {
         // Empty
         return;
@@ -4635,14 +4651,14 @@ fn parseAsmOperands(p: *Parser, names: *std.ArrayList(?TokenIndex), constraints:
                 try p.err(.expected_identifier, p.tokenIdx, .{});
                 return error.ParsingFailed;
             };
-            try names.append(ident);
+            try names.append(gpa, ident);
             try p.expectClosing(lbracket, .RBracket);
         } else {
-            try names.append(null);
+            try names.append(gpa, null);
         }
 
         const constraint = try p.parseAsmString();
-        try constraints.append(constraint.node);
+        try constraints.append(gpa, constraint.node);
 
         const lparen = p.eat(.LParen) orelse {
             try p.err(.expected_token, p.tokenIdx, .{ p.currToken(), TokenType.LParen });
@@ -4651,7 +4667,7 @@ fn parseAsmOperands(p: *Parser, names: *std.ArrayList(?TokenIndex), constraints:
         const maybeRes = try p.parseExpr();
         try p.expectClosing(lparen, .RParen);
         const res = try p.expectResult(maybeRes);
-        try exprs.append(res.node);
+        try exprs.append(gpa, res.node);
         if (p.eat(.Comma) == null) return;
     }
 }
@@ -4668,6 +4684,7 @@ fn parseGNUAsmStmt(
     asmToken: TokenIndex,
     lparen: TokenIndex,
 ) Error!Node.Index {
+    const gpa = p.comp.gpa;
     const asmString = try p.parseAsmString();
     try p.checkAsmStr(asmString.value, lparen);
 
@@ -4683,19 +4700,24 @@ fn parseGNUAsmStmt(
     const expectedItems = 8; // arbitrarily chosen, most assembly will have fewer than 8 inputs/outputs/constraints/names
     const bytesNeeded = expectedItems * @sizeOf(?TokenIndex) + expectedItems * 3 * @sizeOf(Node.Index);
 
-    var stackFallback = std.heap.stackFallback(bytesNeeded, p.gpa);
+    var stackFallback = std.heap.stackFallback(bytesNeeded, gpa);
     const allocator = stackFallback.get();
 
-    var names = std.ArrayList(?TokenIndex).initCapacity(allocator, expectedItems) catch unreachable;
-    var constraints = NodeList.initCapacity(allocator, expectedItems) catch unreachable;
-    var exprs = NodeList.initCapacity(allocator, expectedItems) catch unreachable;
-    var clobbers = NodeList.initCapacity(allocator, expectedItems) catch unreachable;
+    var names: std.ArrayList(?TokenIndex) = .empty;
+    var constraints: NodeList = .empty;
+    var clobbers: NodeList = .empty;
+    var exprs: NodeList = .empty;
+
+    names.ensureUnusedCapacity(allocator, expectedItems) catch unreachable; // stack allocation already succeeded
+    constraints.ensureUnusedCapacity(allocator, expectedItems) catch unreachable; // stack allocation already succeeded
+    exprs.ensureUnusedCapacity(allocator, expectedItems) catch unreachable; //stack allocation already succeeded
+    clobbers.ensureUnusedCapacity(allocator, expectedItems) catch unreachable; //stack allocation already succeeded
 
     defer {
-        names.deinit();
-        constraints.deinit();
-        exprs.deinit();
-        clobbers.deinit();
+        names.deinit(allocator);
+        constraints.deinit(allocator);
+        exprs.deinit(allocator);
+        clobbers.deinit(allocator);
     }
 
     // Outputs
@@ -4749,7 +4771,7 @@ fn parseGNUAsmStmt(
         if (!ateExtraColor and p.currToken().isStringLiteral()) {
             while (true) {
                 const clobber = try p.parseAsmString();
-                try clobbers.append(clobber.node);
+                try clobbers.append(allocator, clobber.node);
                 if (p.eat(.Comma) == null) break;
             }
         }
@@ -4773,10 +4795,10 @@ fn parseGNUAsmStmt(
             };
             const identStr = p.getTokenText(ident);
             const label = p.findLabel(identStr) orelse blk: {
-                try p.labels.append(.{ .unresolvedGoto = ident });
+                try p.labels.append(gpa, .{ .unresolvedGoto = ident });
                 break :blk ident;
             };
-            try names.append(ident);
+            try names.append(allocator, ident);
 
             const labelAddrNode = try p.addNode(.{
                 .addrOfLabel = .{
@@ -4784,7 +4806,7 @@ fn parseGNUAsmStmt(
                     .qt = .voidPointer,
                 },
             });
-            try exprs.append(labelAddrNode);
+            try exprs.append(allocator, labelAddrNode);
 
             numLabels += 1;
             if (p.eat(.Comma) == null) break;
@@ -4860,7 +4882,7 @@ fn parseAssembly(p: *Parser, kind: enum { global, declLabel, stmt }) Error!?Node
 
             const args = Attribute.Arguments{ .asm_label = .{ .name = str } };
             const attr = Attribute{ .tag = .asm_label, .args = args, .syntax = .keyword };
-            try p.attrBuffer.append(p.gpa, .{ .attr = attr, .tok = asmToken });
+            try p.attrBuffer.append(p.comp.gpa, .{ .attr = attr, .tok = asmToken });
         },
         .global => {
             const asmString = try p.parseAsmString();
@@ -5173,6 +5195,7 @@ fn parseDoWhileStmt(p: *Parser, kwDo: TokenIndex) Error!Node.Index {
 
 /// goto-statement : `goto` ( identifier | ( '*' expr)) ';'
 fn parseGotoStmt(p: *Parser, gotoToken: TokenIndex) Error!Node.Index {
+    const gpa = p.comp.gpa;
     if (p.eat(.Asterisk)) |_| {
         const exprToken = p.tokenIdx;
         var gotoExpr = try p.expect(parseExpr);
@@ -5181,7 +5204,7 @@ fn parseGotoStmt(p: *Parser, gotoToken: TokenIndex) Error!Node.Index {
 
         const scalarKind = gotoExpr.qt.scalarKind(p.comp);
         if (!gotoExpr.qt.isInvalid() and !scalarKind.isPointer()) {
-            const resultQt = try p.comp.typeStore.put(p.gpa, .{ .pointer = .{
+            const resultQt = try p.comp.typeStore.put(gpa, .{ .pointer = .{
                 .child = .{ .@"const" = true, ._index = .Void },
                 .decayed = null,
             } });
@@ -5205,7 +5228,7 @@ fn parseGotoStmt(p: *Parser, gotoToken: TokenIndex) Error!Node.Index {
     const nameToken = try p.expectIdentifier();
     const str = p.getTokenText(nameToken);
     if (p.findLabel(str) == null) {
-        try p.labels.append(.{ .unresolvedGoto = nameToken });
+        try p.labels.append(gpa, .{ .unresolvedGoto = nameToken });
     }
     _ = try p.expectToken(.Semicolon);
     return try p.addNode(.{ .gotoStmt = .{ .labelToken = nameToken } });
@@ -5227,15 +5250,14 @@ fn parseSwitchStmt(p: *Parser, kwSwitch: TokenIndex) Error!Node.Index {
     try p.expectClosing(lp, .RParen);
 
     const oldSwitch = p.@"switch";
-    var @"switch" = Switch{
-        .ranges = std.ArrayList(Switch.Range).init(p.gpa),
+    var @"switch": Switch = .{
         .qt = cond.qt,
         .comp = p.comp,
     };
     p.@"switch" = &@"switch";
 
     defer {
-        @"switch".ranges.deinit();
+        @"switch".ranges.deinit(p.comp.gpa);
         p.@"switch" = oldSwitch;
     }
 
@@ -5347,7 +5369,7 @@ fn parseLabeledStmt(p: *Parser) Error!?Node.Index {
             try p.err(.previous_label, some, .{str});
         } else {
             p.labelCount += 1;
-            try p.labels.append(.{ .label = nameToken });
+            try p.labels.append(p.comp.gpa, .{ .label = nameToken });
 
             var i: usize = 0;
             while (i < p.labels.items.len) {
@@ -5389,16 +5411,15 @@ const StmtExprState = struct {
 /// : '{' ( decl | GccExtensionDecl | static-assert-declaration | statememt)* '}'
 fn parseCompoundStmt(p: *Parser, isFnBody: bool, stmtExprState: ?*StmtExprState) Error!?Node.Index {
     const lBrace = p.eat(.LBrace) orelse return null;
+
     const declBufferTop = p.declBuffer.items.len;
+    defer p.declBuffer.items.len = declBufferTop;
+
+    const gpa = p.comp.gpa;
 
     // the parameters of a function are in the same scope as the body
-    if (!isFnBody)
-        try p.symStack.pushScope();
-
-    defer {
-        p.declBuffer.items.len = declBufferTop;
-        if (!isFnBody) p.symStack.popScope();
-    }
+    if (!isFnBody) try p.symStack.pushScope();
+    defer if (!isFnBody) p.symStack.popScope();
 
     var noreturnIdx: ?TokenIndex = null;
     var noreturnLabelCount: u32 = 0;
@@ -5441,7 +5462,7 @@ fn parseCompoundStmt(p: *Parser, isFnBody: bool, stmtExprState: ?*StmtExprState)
                 .lastExprType = s.qt(&p.tree),
             };
         }
-        try p.declBuffer.append(s);
+        try p.declBuffer.append(gpa, s);
 
         if (noreturnIdx == null and p.nodeIsNoreturn(s) == .yes) {
             noreturnIdx = p.tokenIdx;
@@ -5495,11 +5516,11 @@ fn parseCompoundStmt(p: *Parser, isFnBody: bool, stmtExprState: ?*StmtExprState)
                     .operand = .{ .implicit = returnZero },
                 },
             });
-            try p.declBuffer.append(implicitRet);
+            try p.declBuffer.append(gpa, implicitRet);
         }
 
-        if (p.func.ident) |some| try p.declBuffer.insert(declBufferTop, some.node);
-        if (p.func.prettyIdent) |some| try p.declBuffer.insert(declBufferTop, some.node);
+        if (p.func.ident) |some| try p.declBuffer.insert(gpa, declBufferTop, some.node);
+        if (p.func.prettyIdent) |some| try p.declBuffer.insert(gpa, declBufferTop, some.node);
     }
 
     return try p.addNode(.{
@@ -6600,6 +6621,7 @@ fn computeOffset(p: *Parser, res: Result) !Value {
 ///  | `sizeof` '(' type-name ')'
 ///  | (`keyword-alignof` | `keyword-c23-alignof`) '(' type-name ')'
 fn parseUnaryExpr(p: *Parser) Error!?Result {
+    const gpa = p.comp.gpa;
     const token = p.tokenIdx;
     switch (p.currToken()) {
         .Ampersand => {
@@ -6625,7 +6647,7 @@ fn parseUnaryExpr(p: *Parser) Error!?Result {
 
                 addrValue = try p.computeOffset(operand);
 
-                operand.qt = try p.comp.typeStore.put(p.gpa, .{
+                operand.qt = try p.comp.typeStore.put(gpa, .{
                     .pointer = .{ .child = operand.qt, .decayed = null },
                 });
             }
@@ -6660,7 +6682,7 @@ fn parseUnaryExpr(p: *Parser) Error!?Result {
 
             const str = p.getTokenText(nameToken);
             if (p.findLabel(str) == null)
-                try p.labels.append(.{ .unresolvedGoto = nameToken });
+                try p.labels.append(gpa, .{ .unresolvedGoto = nameToken });
 
             return .{
                 .node = try p.addNode(.{ .addrOfLabel = .{ .labelToken = nameToken, .qt = .voidPointer } }),
@@ -7625,6 +7647,7 @@ const CallExpr = union(enum) {
 };
 
 fn parseCallExpr(p: *Parser, lhs: Result) Error!Result {
+    const gpa = p.comp.gpa;
     const lParen = p.tokenIdx;
     p.tokenIdx += 1;
 
@@ -7676,7 +7699,7 @@ fn parseCallExpr(p: *Parser, lhs: Result) Error!Result {
 
             try callExpr.checkVarArg(p, firstAfter, paramToken, &arg, argCount);
             try arg.saveValue(p);
-            try p.listBuffer.append(arg.node);
+            try p.listBuffer.append(gpa, arg.node);
             argCount += 1;
 
             _ = p.eat(.Comma) orelse {
@@ -7714,7 +7737,7 @@ fn parseCallExpr(p: *Parser, lhs: Result) Error!Result {
         }
 
         try arg.saveValue(p);
-        try p.listBuffer.append(arg.node);
+        try p.listBuffer.append(gpa, arg.node);
         argCount += 1;
         _ = p.eat(.Comma) orelse {
             try p.expectClosing(lParen, .RParen);
@@ -7805,6 +7828,7 @@ fn parsePrimaryExpr(p: *Parser) Error!?Result {
         return groupedExpr;
     }
 
+    const gpa = p.comp.gpa;
     switch (p.currToken()) {
         .Identifier, .ExtendedIdentifier => {
             const nameToken = try p.expectIdentifier();
@@ -7896,7 +7920,7 @@ fn parsePrimaryExpr(p: *Parser) Error!?Result {
                 else
                     try p.err(.implicit_func_decl, nameToken, .{name});
 
-                const funcQt = try p.comp.typeStore.put(p.gpa, .{ .func = .{
+                const funcQt = try p.comp.typeStore.put(gpa, .{ .func = .{
                     .returnType = .int,
                     .kind = .OldStyle,
                     .params = &.{},
@@ -7911,7 +7935,7 @@ fn parsePrimaryExpr(p: *Parser) Error!?Result {
                     },
                 });
 
-                try p.declBuffer.append(node);
+                try p.declBuffer.append(gpa, node);
                 try p.symStack.declareSymbol(internedName, funcQt, nameToken, node);
 
                 return .{
@@ -7975,8 +7999,11 @@ fn parsePrimaryExpr(p: *Parser) Error!?Result {
                 const stringsTop = p.strings.items.len;
                 defer p.strings.items.len = stringsTop;
 
-                try p.strings.appendSlice(p.getTokenText(p.func.name));
-                try p.strings.append(0);
+                const name = p.getTokenText(p.func.name);
+                try p.strings.ensureUnusedCapacity(gpa, name.len + 1);
+
+                p.strings.appendSliceAssumeCapacity(name);
+                p.strings.appendAssumeCapacity(0);
 
                 const predef = try p.makePredefinedIdentifier(p.strings.items[stringsTop..]);
                 qt = predef.qt;
@@ -7985,7 +8012,7 @@ fn parsePrimaryExpr(p: *Parser) Error!?Result {
                 const predef = try p.makePredefinedIdentifier("\x00");
                 qt = predef.qt;
                 p.func.ident = predef;
-                try p.declBuffer.append(predef.node);
+                try p.declBuffer.append(gpa, predef.node);
             }
 
             if (p.func.qt == null)
@@ -8009,21 +8036,21 @@ fn parsePrimaryExpr(p: *Parser) Error!?Result {
             if (p.func.prettyIdent) |some| {
                 qt = some.qt;
             } else if (p.func.qt) |funcQt| {
-                var sf = std.heap.stackFallback(1024, p.gpa);
+                var sf = std.heap.stackFallback(1024, gpa);
                 var allocating: std.Io.Writer.Allocating = .init(sf.get());
                 defer allocating.deinit();
 
                 funcQt.printNamed(p.getTokenText(p.func.name), p.comp, &allocating.writer) catch return error.OutOfMemory;
                 allocating.writer.writeByte(0) catch return error.OutOfMemory;
 
-                const predef = try p.makePredefinedIdentifier(allocating.getWritten());
+                const predef = try p.makePredefinedIdentifier(allocating.written());
                 qt = predef.qt;
                 p.func.prettyIdent = predef;
             } else {
                 const predef = try p.makePredefinedIdentifier("top level\x00");
                 qt = predef.qt;
                 p.func.prettyIdent = predef;
-                try p.declBuffer.append(predef.node);
+                try p.declBuffer.append(gpa, predef.node);
             }
 
             if (p.func.qt == null)
@@ -8124,7 +8151,8 @@ fn parsePrimaryExpr(p: *Parser) Error!?Result {
 }
 
 fn makePredefinedIdentifier(p: *Parser, slice: []const u8) !Result {
-    const arrayQt = try p.comp.typeStore.put(p.gpa, .{ .array = .{
+    const gpa = p.comp.gpa;
+    const arrayQt = try p.comp.typeStore.put(gpa, .{ .array = .{
         .elem = .{ .@"const" = true, ._index = .Char },
         .len = .{ .fixed = slice.len },
     } });
@@ -8132,7 +8160,7 @@ fn makePredefinedIdentifier(p: *Parser, slice: []const u8) !Result {
     const val = try Value.intern(p.comp, .{ .bytes = slice });
 
     const strLit = try p.addNode(.{ .stringLiteralExpr = .{ .qt = arrayQt, .literalToken = p.tokenIdx } });
-    if (!p.inMacro) try p.tree.valueMap.put(p.gpa, strLit, val);
+    if (!p.inMacro) try p.tree.valueMap.put(gpa, strLit, val);
 
     return .{
         .qt = arrayQt,
@@ -8161,7 +8189,7 @@ fn parseFloat(p: *Parser, buf: []const u8, suffix: NumberSuffix, tokenIdx: Token
     };
 
     const val = try Value.intern(p.comp, key: {
-        try p.strings.ensureUnusedCapacity(buf.len);
+        try p.strings.ensureUnusedCapacity(p.comp.gpa, buf.len);
 
         const stringsTop = p.strings.items.len;
         defer p.strings.items.len = stringsTop;
@@ -8358,10 +8386,11 @@ fn parseInt(
 }
 
 fn bitInt(p: *Parser, base: u8, buf: []const u8, suffix: NumberSuffix, tokenIdx: TokenIndex) Error!Result {
+    const gpa = p.comp.gpa;
     try p.err(.pre_c23_compat, tokenIdx, .{"'_BitInt' suffix for literals"});
     try p.err(.bitint_suffix, tokenIdx, .{});
 
-    var managed = try big.int.Managed.init(p.gpa);
+    var managed = try big.int.Managed.init(gpa);
     defer managed.deinit();
 
     managed.setString(base, buf) catch |e| switch (e) {
@@ -8378,7 +8407,7 @@ fn bitInt(p: *Parser, base: u8, buf: []const u8, suffix: NumberSuffix, tokenIdx:
         break :blk @intCast(bitsNeeded);
     };
 
-    const intQt = try p.comp.typeStore.put(p.gpa, .{ .bitInt = .{
+    const intQt = try p.comp.typeStore.put(gpa, .{ .bitInt = .{
         .bits = bitsNeeded,
         .signedness = suffix.signedness(),
     } });
@@ -8518,6 +8547,8 @@ fn parseCharLiteral(p: *Parser) Error!?Result {
 
     if (charKind == .utf8) try p.err(.u8_char_lit, p.tokenIdx, .{});
     var val: u32 = 0;
+
+    const gpa = p.comp.gpa;
     const slice = charKind.contentSlice(p.getTokenText(p.tokenIdx));
 
     if (slice.len == 1 and std.ascii.isAscii(slice[0])) {
@@ -8534,16 +8565,20 @@ fn parseCharLiteral(p: *Parser) Error!?Result {
         };
         const maxCharsExpected = 4;
 
-        var stackFallback = std.heap.stackFallback(maxCharsExpected * @sizeOf(u32), p.comp.gpa);
-        var chars = std.ArrayList(u32).initCapacity(stackFallback.get(), maxCharsExpected) catch unreachable;
-        defer chars.deinit();
+        var sf = std.heap.stackFallback(maxCharsExpected * @sizeOf(u32), gpa);
+        const allocator = sf.get();
+
+        var chars: std.ArrayList(u32) = .empty;
+        defer chars.deinit(allocator);
+
+        chars.ensureUnusedCapacity(allocator, maxCharsExpected) catch unreachable; // stack allocation already succeeded
 
         while (try CharLiteralParser.next()) |item|
             switch (item) {
-                .value => |v| try chars.append(v),
-                .codepoint => |c| try chars.append(c),
+                .value => |v| try chars.append(allocator, v),
+                .codepoint => |c| try chars.append(allocator, c),
                 .improperlyEncoded => |s| {
-                    try chars.ensureUnusedCapacity(s.len);
+                    try chars.ensureUnusedCapacity(allocator, s.len);
                     for (s) |c| chars.appendAssumeCapacity(c);
                 },
                 .utf8Text => |view| {
@@ -8551,7 +8586,7 @@ fn parseCharLiteral(p: *Parser) Error!?Result {
                     var maxcodepointSeen: u21 = 0;
                     while (it.nextCodepoint()) |c| {
                         maxcodepointSeen = @max(maxcodepointSeen, c);
-                        try chars.append(c);
+                        try chars.append(allocator, c);
                     }
                     if (maxcodepointSeen > maxCodepoint)
                         try CharLiteralParser.err(.char_too_large, .{});
@@ -8596,17 +8631,18 @@ fn parseCharLiteral(p: *Parser) Error!?Result {
     else
         p.comp.typeStore.intmax;
 
-    const res = Result{
+    const res: Result = .{
         .qt = if (p.inMacro) macroQt else charliteralQt,
         .value = try Value.int(val, p.comp),
         .node = try p.addNode(.{ .charLiteral = .{ .qt = charliteralQt, .literalToken = p.tokenIdx } }),
     };
 
-    if (!p.inMacro) try p.tree.valueMap.put(p.gpa, res.node, res.value);
+    if (!p.inMacro) try p.tree.valueMap.put(gpa, res.node, res.value);
     return res;
 }
 
 fn parseStringLiteral(p: *Parser) Error!Result {
+    const gpa = p.comp.gpa;
     const stringStart = p.tokenIdx;
     var stringEnd = p.tokenIdx;
     var stringKind: TextLiteral.Kind = .char;
@@ -8633,7 +8669,7 @@ fn parseStringLiteral(p: *Parser) Error!Result {
     defer p.strings.items.len = stringsTop;
 
     const literalStart = std.mem.alignForward(usize, stringsTop, @intFromEnum(charWidth));
-    try p.strings.resize(literalStart);
+    try p.strings.resize(gpa, literalStart);
 
     while (p.tokenIdx < stringEnd) : (p.tokenIdx += 1) {
         const thisKind = TextLiteral.Kind.classify(p.currToken(), .StringLiteral).?;
@@ -8648,7 +8684,7 @@ fn parseStringLiteral(p: *Parser) Error!Result {
             .incorrectEncodingIsError = count > 1,
         };
 
-        try p.strings.ensureUnusedCapacity((slice.len + 1) * @intFromEnum(charWidth));
+        try p.strings.ensureUnusedCapacity(gpa, (slice.len + 1) * @intFromEnum(charWidth));
         while (try charLiteralParser.next()) |item| switch (item) {
             .value => |v| {
                 switch (charWidth) {
@@ -8694,7 +8730,7 @@ fn parseStringLiteral(p: *Parser) Error!Result {
                         const destLen = std.mem.alignBackward(usize, capacitySlice.len, 2);
                         const dest = std.mem.bytesAsSlice(u16, capacitySlice[0..destLen]);
                         const wordsWritten = std.unicode.utf8ToUtf16Le(dest, view.bytes) catch unreachable;
-                        p.strings.resize(p.strings.items.len + wordsWritten * 2) catch unreachable;
+                        p.strings.resize(gpa, p.strings.items.len + wordsWritten * 2) catch unreachable;
                     },
                     .@"4" => {
                         var it = view.iterator();
@@ -8716,10 +8752,10 @@ fn parseStringLiteral(p: *Parser) Error!Result {
         p.comp.interner.strings.items.len,
         stringKind.internalStorageAlignment(p.comp),
     );
-    try p.comp.interner.strings.resize(p.gpa, internedAlign);
+    try p.comp.interner.strings.resize(gpa, internedAlign);
 
     const val = try Value.intern(p.comp, .{ .bytes = slice });
-    const arrayQt = try p.comp.typeStore.put(p.gpa, .{ .array = .{
+    const arrayQt = try p.comp.typeStore.put(gpa, .{ .array = .{
         .elem = stringKind.elementType(p.comp),
         .len = .{ .fixed = @divExact(slice.len, @intFromEnum(charWidth)) },
     } });
@@ -8756,6 +8792,7 @@ fn parseNoEval(p: *Parser, comptime func: fn (*Parser) Error!?Result) Error!Resu
 ////  : type-name ':' assign-expression
 ////  | `default` ':' assign-expression
 fn parseGenericSelection(p: *Parser) Error!?Result {
+    const gpa = p.comp.gpa;
     const kwGeneric = p.tokenIdx;
     p.tokenIdx += 1;
     const lp = try p.expectToken(.LParen);
@@ -8801,8 +8838,8 @@ fn parseGenericSelection(p: *Parser) Error!?Result {
                 },
             });
 
-            try p.listBuffer.append(res.node);
-            try p.paramBuffer.append(.{ .name = undefined, .qt = qt, .nameToken = start, .node = undefined });
+            try p.listBuffer.append(gpa, res.node);
+            try p.paramBuffer.append(gpa, .{ .name = undefined, .qt = qt, .nameToken = start, .node = undefined });
 
             if (qt.eql(controllingQt, p.comp)) {
                 if (chosenToken == null) {
@@ -8857,7 +8894,7 @@ fn parseGenericSelection(p: *Parser) Error!?Result {
             return error.ParsingFailed;
         }
     } else if (defaultToken != null) {
-        try p.listBuffer.append(default.node);
+        try p.listBuffer.append(gpa, default.node);
     }
 
     for (p.listBuffer.items[listBufferTop..], listBufferTop..) |item, i| {

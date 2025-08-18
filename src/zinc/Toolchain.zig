@@ -11,7 +11,7 @@ const TargetUtil = @import("Basic/Target.zig");
 
 const Toolchain = @This();
 
-pub const PathList = std.ArrayListUnmanaged([]const u8);
+pub const PathList = std.ArrayList([]const u8);
 
 pub const RuntimeLibKind = enum {
     compiler_rt,
@@ -158,8 +158,12 @@ pub fn getLinkerPath(tc: *const Toolchain, buf: []u8) ![]const u8 {
         if (tc.filesystem.canExecute(useLinker))
             return useLinker;
     } else {
-        var linkerName = try std.ArrayList(u8).initCapacity(tc.driver.comp.gpa, 5 + useLinker.len); // "ld64." ++ use_linker
-        defer linkerName.deinit();
+        const gpa = tc.driver.comp.gpa;
+
+        var linkerName: std.ArrayList(u8) = .empty;
+        defer linkerName.deinit(gpa);
+
+        try linkerName.ensureUnusedCapacity(tc.driver.comp.gpa, 5 + useLinker.len); // "ld64." ++ use_linker
 
         if (tc.getTarget().os.tag.isDarwin())
             linkerName.appendSliceAssumeCapacity("ld64.")
@@ -207,7 +211,7 @@ fn possibleProgramNames(
 
 /// Add toolchain `file_paths` to argv as `-L` arguments
 pub fn addFilePathLibArgs(tc: *const Toolchain, argv: *std.ArrayList([]const u8)) !void {
-    try argv.ensureUnusedCapacity(tc.filePaths.items.len);
+    try argv.ensureUnusedCapacity(tc.driver.comp.gpa, tc.filePaths.items.len);
 
     var bytesNeeded: usize = 0;
     for (tc.filePaths.items) |path| {
@@ -428,14 +432,15 @@ fn getAsNeededOption(isSolaris: bool, needed: bool) []const u8 {
 }
 
 fn addLibGCC(tc: *const Toolchain, argv: *std.ArrayList([]const u8)) !void {
+    const gpa = tc.driver.comp.gpa;
     const libgccKind = tc.getLibGCCKind();
     if (libgccKind == .static or libgccKind == .unspecified)
-        try argv.append("-lgcc");
+        try argv.append(gpa, "-lgcc");
 
     try tc.addUnwindLibrary(argv);
 
     if (libgccKind == .shared)
-        try argv.append("-lgcc");
+        try argv.append(gpa, "-lgcc");
 }
 
 fn addUnwindLibrary(tc: *const Toolchain, argv: *std.ArrayList([]const u8)) !void {
@@ -449,29 +454,31 @@ fn addUnwindLibrary(tc: *const Toolchain, argv: *std.ArrayList([]const u8)) !voi
 
     const lgk = tc.getLibGCCKind();
     const asNeeded = (lgk == .unspecified) and !isAndroid and !TargetUtil.isCygwinMinGW(target) and target.os.tag != .aix;
+
+    try argv.ensureUnusedCapacity(tc.driver.comp.gpa, 3);
     if (asNeeded)
-        try argv.append(getAsNeededOption(target.os.tag == .solaris, true));
+        argv.appendAssumeCapacity(getAsNeededOption(target.os.tag == .solaris, true));
 
     switch (unw) {
         .none => return,
-        .libgcc => if (lgk == .static) try argv.append("-lgcc_eh") else try argv.append("-lgcc_s"),
+        .libgcc => argv.appendAssumeCapacity(if (lgk == .static) "-lgcc_eh" else "-lgcc_s"),
         .compiler_rt => if (target.os.tag == .aix) {
             if (lgk != .static)
-                try argv.append("-lunwind");
+                argv.appendAssumeCapacity("-lunwind");
         } else if (lgk == .static) {
-            try argv.append("-l:libunwind.a");
+            argv.appendAssumeCapacity("-l:libunwind.a");
         } else if (lgk == .shared) {
             if (TargetUtil.isCygwinMinGW(target))
-                try argv.append("-l:libunwind.dll.a")
+                argv.appendAssumeCapacity("-l:libunwind.dll.a")
             else
-                try argv.append("-l:libunwind.so");
+                argv.appendAssumeCapacity("-l:libunwind.so");
         } else {
-            try argv.append("-lunwind");
+            argv.appendAssumeCapacity("-lunwind");
         },
     }
 
     if (asNeeded)
-        try argv.append(getAsNeededOption(target.os.tag == .solaris, false));
+        argv.appendAssumeCapacity(getAsNeededOption(target.os.tag == .solaris, false));
 }
 
 pub fn addRuntimeLibs(tc: *const Toolchain, argv: *std.ArrayList([]const u8)) !void {
@@ -493,7 +500,7 @@ pub fn addRuntimeLibs(tc: *const Toolchain, argv: *std.ArrayList([]const u8)) !v
     }
 
     if (target.abi.isAndroid() and !tc.driver.static and !tc.driver.staticPie)
-        try argv.append("-ldl");
+        try argv.append(tc.driver.comp.gpa, "-ldl");
 }
 
 pub fn defineSystemIncludes(tc: *Toolchain) !void {

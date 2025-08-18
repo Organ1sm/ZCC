@@ -12,7 +12,7 @@ const Toolchain = @import("../Toolchain.zig");
 const Linux = @This();
 
 distro: Distro.Tag = .unknown,
-extraOpts: std.ArrayListUnmanaged([]const u8) = .{},
+extraOpts: std.ArrayList([]const u8) = .empty,
 gccDetector: GCCDetector = .{},
 
 pub fn discover(self: *Linux, tc: *Toolchain) !void {
@@ -157,6 +157,7 @@ pub fn getDefaultLinker(self: *const Linux, target: std.Target) []const u8 {
 
 pub fn buildLinkerArgs(self: *const Linux, tc: *const Toolchain, argv: *std.ArrayList([]const u8)) Compilation.Error!void {
     const d = tc.driver;
+    const gpa = d.comp.gpa;
     const target = tc.getTarget();
 
     const isPie = self.getPIE(d);
@@ -166,49 +167,49 @@ pub fn buildLinkerArgs(self: *const Linux, tc: *const Toolchain, argv: *std.Arra
     const isVe = target.cpu.arch == .ve;
     const hasCrtBeginEndFiles = target.abi != .none; // TODO: clang checks for MIPS vendor
 
-    if (isPie) try argv.append("-pie");
+    if (isPie) try argv.append(gpa, "-pie");
 
     if (isStaticPie)
-        try argv.appendSlice(&.{ "-static", "-pie", "--no-dynamic-linker", "-z", "text" });
+        try argv.appendSlice(gpa, &.{ "-static", "-pie", "--no-dynamic-linker", "-z", "text" });
 
-    if (d.rdynamic) try argv.append("-export-dynamic");
-    if (d.strip) try argv.append("-s");
+    if (d.rdynamic) try argv.append(gpa, "-export-dynamic");
+    if (d.strip) try argv.append(gpa, "-s");
 
-    try argv.appendSlice(self.extraOpts.items);
-    try argv.append("--eh-frame-hdr");
+    try argv.appendSlice(gpa, self.extraOpts.items);
+    try argv.append(gpa, "--eh-frame-hdr");
 
     // Todo: Driver should parse `-EL`/`-EB` for arm to set endianness for arm targets
     if (TargetUtil.ldEmulationOption(target, null)) |emulation| {
-        try argv.appendSlice(&.{ "-m", emulation });
+        try argv.appendSlice(gpa, &.{ "-m", emulation });
     } else {
         try d.err("Unknown target triple", .{});
         return;
     }
 
     if (target.cpu.arch.isRISCV())
-        try argv.append("-X");
+        try argv.append(gpa, "-X");
 
     if (d.shared)
-        try argv.append("-shared");
+        try argv.append(gpa, "-shared");
 
     if (isStatic) {
-        try argv.append("-static");
+        try argv.append(gpa, "-static");
     } else {
         if (d.rdynamic)
-            try argv.append("-export-dynamic");
+            try argv.append(gpa, "-export-dynamic");
 
         if (!d.shared and !isStaticPie and !d.relocatable) {
             const dynamicLinker = target.standardDynamicLinkerPath();
             // todo: check for --dyld-prefix
             if (dynamicLinker.get()) |path| {
-                try argv.appendSlice(&.{ "-dynamic-linker", try d.comp.arena.dupe(u8, path) });
+                try argv.appendSlice(gpa, &.{ "-dynamic-linker", try d.comp.arena.dupe(u8, path) });
             } else {
                 try d.err("Could not find dynamic linker path", .{});
             }
         }
     }
 
-    try argv.appendSlice(&.{ "-o", d.outputName orelse "a.out" });
+    try argv.appendSlice(gpa, &.{ "-o", d.outputName orelse "a.out" });
 
     if (!d.nostdlib and !d.nostartfiles and !d.relocatable) {
         if (!isAndroid) {
@@ -219,13 +220,13 @@ pub fn buildLinkerArgs(self: *const Linux, tc: *const Toolchain, argv: *std.Arra
                     "rcrt1.o"
                 else
                     "crt1.o";
-                try argv.append(try tc.getFilePath(crt1));
+                try argv.append(gpa, try tc.getFilePath(crt1));
             }
-            try argv.append(try tc.getFilePath("crti.o"));
+            try argv.append(gpa, try tc.getFilePath("crti.o"));
         }
 
         if (isVe)
-            try argv.appendSlice(&.{ "-z", "max-page-size=0x4000000" });
+            try argv.appendSlice(gpa, &.{ "-z", "max-page-size=0x4000000" });
 
         if (hasCrtBeginEndFiles) {
             var path: []const u8 = "";
@@ -246,7 +247,7 @@ pub fn buildLinkerArgs(self: *const Linux, tc: *const Toolchain, argv: *std.Arra
 
                 path = try tc.getFilePath(crtBegin);
             }
-            try argv.append(path);
+            try argv.append(gpa, path);
         }
     }
 
@@ -257,21 +258,21 @@ pub fn buildLinkerArgs(self: *const Linux, tc: *const Toolchain, argv: *std.Arra
 
     // TODO handle LTO
 
-    try argv.appendSlice(d.linkObjects.items);
+    try argv.appendSlice(gpa, d.linkObjects.items);
 
     if (!d.nostdlib and !d.relocatable) {
         if (!d.nodefaultlibs) {
             if (isStatic or isStaticPie)
-                try argv.append("--start-group");
+                try argv.append(gpa, "--start-group");
 
             try tc.addRuntimeLibs(argv);
 
             // TODO: add pthread if needed
             if (!d.nolibc)
-                try argv.append("-lc");
+                try argv.append(gpa, "-lc");
 
             if (isStatic or isStaticPie)
-                try argv.append("--end-group")
+                try argv.append(gpa, "--end-group")
             else
                 try tc.addRuntimeLibs(argv);
         }
@@ -294,11 +295,11 @@ pub fn buildLinkerArgs(self: *const Linux, tc: *const Toolchain, argv: *std.Arra
                     path = try tc.getFilePath(crtEnd);
                 }
 
-                try argv.append(path);
+                try argv.append(gpa, path);
             }
 
             if (!isAndroid)
-                try argv.append(try tc.getFilePath("crtn.o"));
+                try argv.append(gpa, try tc.getFilePath("crtn.o"));
         }
     }
 
@@ -404,12 +405,13 @@ pub fn defineSystemIncludes(self: *const Linux, tc: *const Toolchain) !void {
 test Linux {
     if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
 
-    var arenaInstance = std.heap.ArenaAllocator.init(std.testing.allocator);
+    const gpa = std.testing.allocator;
+    var arenaInstance = std.heap.ArenaAllocator.init(gpa);
     defer arenaInstance.deinit();
 
     const arena = arenaInstance.allocator();
 
-    var comp = Compilation.init(std.testing.allocator, arena, undefined, std.fs.cwd());
+    var comp = Compilation.init(gpa, arena, undefined, std.fs.cwd());
     defer comp.deinit();
 
     comp.environment = .{
@@ -461,12 +463,12 @@ test Linux {
 
     try toolchain.discover();
 
-    var argv = std.ArrayList([]const u8).init(driver.comp.gpa);
-    defer argv.deinit();
+    var argv: std.ArrayList([]const u8) = .empty;
+    defer argv.deinit(gpa);
 
     var linkerPathBuffer: [std.fs.max_name_bytes]u8 = undefined;
     const linkerPath = try toolchain.getLinkerPath(&linkerPathBuffer);
-    try argv.append(linkerPath);
+    try argv.append(gpa, linkerPath);
 
     try toolchain.buildLinkerArgs(&argv);
 

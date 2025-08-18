@@ -12,7 +12,7 @@ decls: std.StringArrayHashMapUnmanaged(Decl),
 
 pub const Decl = struct {
     instructions: std.MultiArrayList(Inst),
-    body: std.ArrayListUnmanaged(Ref),
+    body: std.ArrayList(Ref),
     arena: std.heap.ArenaAllocator.State,
 
     pub fn deinit(decl: *Decl, gpa: Allocator) void {
@@ -25,11 +25,12 @@ pub const Decl = struct {
 pub const Builder = struct {
     gpa: Allocator,
     arena: std.heap.ArenaAllocator,
-    decls: std.StringArrayHashMapUnmanaged(Decl) = .{},
     interner: *Interner,
 
-    instructions: std.MultiArrayList(IR.Inst) = .{},
-    body: std.ArrayListUnmanaged(Ref) = .{},
+    decls: std.StringArrayHashMapUnmanaged(Decl) = .empty,
+    instructions: std.MultiArrayList(IR.Inst) = .empty,
+    body: std.ArrayList(Ref) = .empty,
+
     argCount: u32 = 0,
     allocCount: u32 = 0,
     currentLabel: Ref = undefined,
@@ -382,7 +383,7 @@ const REF = std.Io.tty.Color.bright_blue;
 const LITERAL = std.Io.tty.Color.bright_green;
 const ATTRIBUTE = std.Io.tty.Color.bright_yellow;
 
-const RefMap = std.AutoArrayHashMap(Ref, void);
+const RefMap = std.AutoArrayHashMapUnmanaged(Ref, void);
 
 pub fn dump(
     ir: *const IR,
@@ -407,12 +408,12 @@ fn dumpDecl(
     const tags = decl.instructions.items(.tag);
     const data = decl.instructions.items(.data);
 
-    var refMap = RefMap.init(gpa);
-    var labelMap = RefMap.init(gpa);
+    var refMap: RefMap = .empty;
+    var labelMap: RefMap = .empty;
 
     defer {
-        refMap.deinit();
-        labelMap.deinit();
+        refMap.deinit(gpa);
+        labelMap.deinit(gpa);
     }
 
     const retInst = decl.body.items[decl.body.items.len - 1];
@@ -430,7 +431,7 @@ fn dumpDecl(
         const tag = tags[@intFromEnum(ref)];
         if (tag != .Arg) break;
         if (argCount != 0) try w.writeAll(", ");
-        try refMap.put(ref, {});
+        try refMap.put(gpa, ref, {});
         try ir.writeRef(decl, &refMap, ref, config, w);
         try config.setColor(w, .reset);
     }
@@ -449,7 +450,7 @@ fn dumpDecl(
 
     for (decl.body.items[argCount..]) |ref| {
         switch (tags[@intFromEnum(ref)]) {
-            .Label => try labelMap.put(ref, {}),
+            .Label => try labelMap.put(gpa, ref, {}),
             else => {},
         }
     }
@@ -501,7 +502,7 @@ fn dumpDecl(
 
             .Select => {
                 const br = data[i].branch;
-                try ir.writeNewRef(decl, &refMap, ref, config, w);
+                try ir.writeNewRef(gpa, decl, &refMap, ref, config, w);
                 try w.writeAll("Select ");
                 try ir.writeRef(decl, &refMap, br.cond, config, w);
                 try config.setColor(w, .reset);
@@ -544,7 +545,7 @@ fn dumpDecl(
 
             .Call => {
                 const call = data[i].call;
-                try ir.writeNewRef(decl, &refMap, ref, config, w);
+                try ir.writeNewRef(gpa, decl, &refMap, ref, config, w);
                 try w.writeAll("Call ");
                 try ir.writeRef(decl, &refMap, call.func, config, w);
                 try config.setColor(w, .reset);
@@ -560,7 +561,7 @@ fn dumpDecl(
 
             .Alloc => {
                 const alloc = data[i].alloc;
-                try ir.writeNewRef(decl, &refMap, ref, config, w);
+                try ir.writeNewRef(gpa, decl, &refMap, ref, config, w);
                 try w.writeAll("Alloc ");
                 try config.setColor(w, ATTRIBUTE);
                 try w.writeAll("size ");
@@ -574,7 +575,7 @@ fn dumpDecl(
             },
 
             .Phi => {
-                try ir.writeNewRef(decl, &refMap, ref, config, w);
+                try ir.writeNewRef(gpa, decl, &refMap, ref, config, w);
                 try w.writeAll("phi");
                 try config.setColor(w, .reset);
                 try w.writeAll(" {");
@@ -610,7 +611,7 @@ fn dumpDecl(
             },
 
             .Load => {
-                try ir.writeNewRef(decl, &refMap, ref, config, w);
+                try ir.writeNewRef(gpa, decl, &refMap, ref, config, w);
                 try w.writeAll("Load ");
                 try ir.writeRef(decl, &refMap, data[i].un, config, w);
                 try w.writeByte('\n');
@@ -634,7 +635,7 @@ fn dumpDecl(
             .Mod,
             => {
                 const bin = data[i].bin;
-                try ir.writeNewRef(decl, &refMap, ref, config, w);
+                try ir.writeNewRef(gpa, decl, &refMap, ref, config, w);
                 try w.print("{s} ", .{@tagName(tag)});
                 try ir.writeRef(decl, &refMap, bin.lhs, config, w);
                 try config.setColor(w, .reset);
@@ -650,7 +651,7 @@ fn dumpDecl(
             .Sext,
             => {
                 const un = data[i].un;
-                try ir.writeNewRef(decl, &refMap, ref, config, w);
+                try ir.writeNewRef(gpa, decl, &refMap, ref, config, w);
                 try w.print("{s} ", .{@tagName(tag)});
                 try ir.writeRef(decl, &refMap, un, config, w);
                 try w.writeByte('\n');
@@ -753,13 +754,14 @@ fn writeRef(
 
 fn writeNewRef(
     ir: IR,
+    gpa: Allocator,
     decl: *const Decl,
     refMap: *RefMap,
     ref: Ref,
     config: std.Io.tty.Config,
     w: *std.Io.Writer,
 ) !void {
-    try refMap.put(ref, {});
+    try refMap.put(gpa, ref, {});
     try w.writeAll("    ");
     try ir.writeRef(decl, refMap, ref, config, w);
     try config.setColor(w, .reset);

@@ -33,7 +33,7 @@ pub const Detected = struct {
                 } else multilibFlag;
 
                 if (matched[0] != multilibFlag[0]) break;
-            } else if (selected) |_| {
+            } else if (selected != null) {
                 return error.TooManyMultilibs;
             } else {
                 selected = multilib;
@@ -77,7 +77,6 @@ pub fn init(gccSuffix: []const u8, osSuffix: []const u8, initFlags: []const []co
     };
 
     @memcpy(self.flagBuffer[0..initFlags.len], initFlags);
-    self.flagCount = @intCast(initFlags.len);
     return self;
 }
 

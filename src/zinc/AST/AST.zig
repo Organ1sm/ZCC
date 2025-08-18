@@ -23,8 +23,8 @@ tokens: Token.List.Slice,
 
 // Values owned by this Tree
 nodes: std.MultiArrayList(Node.Repr) = .empty,
-extra: std.ArrayListUnmanaged(u32) = .empty,
-rootDecls: std.ArrayListUnmanaged(Node.Index) = .empty,
+extra: std.ArrayList(u32) = .empty,
+rootDecls: std.ArrayList(Node.Index) = .empty,
 valueMap: ValueMap = .empty,
 
 pub const genIR = CodeGen.generateIR;
@@ -89,7 +89,7 @@ pub const TokenWithExpansionLocs = struct {
 
     pub fn addExpansionLocation(tok: *TokenWithExpansionLocs, gpa: std.mem.Allocator, new: []const Source.Location) !void {
         if (new.len == 0 or tok.id == .WhiteSpace or tok.id == .MacroWS or tok.id == .PlaceMarker) return;
-        var list = std.ArrayList(Source.Location).init(gpa);
+        var list: std.ArrayList(Source.Location) = .empty;
         defer {
             @memset(list.items.ptr[list.items.len..list.capacity], .{});
             // add a sentinel since the allocator is not guaranteed
@@ -110,7 +110,7 @@ pub const TokenWithExpansionLocs = struct {
         const minLen = @max(list.items.len + new.len + 1, 4);
         const wantedLen = std.math.ceilPowerOfTwo(usize, minLen) catch
             return error.OutOfMemory;
-        try list.ensureTotalCapacity(wantedLen);
+        try list.ensureTotalCapacity(gpa, wantedLen);
 
         for (new) |newLoc| {
             if (newLoc.id == .generated) continue;

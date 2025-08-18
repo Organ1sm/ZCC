@@ -1674,8 +1674,8 @@ pub const Type = union(enum) {
 };
 
 types: std.MultiArrayList(Repr) = .empty,
-extra: std.ArrayListUnmanaged(u32) = .empty,
-attributes: std.ArrayListUnmanaged(Attribute) = .empty,
+extra: std.ArrayList(u32) = .empty,
+attributes: std.ArrayList(Attribute) = .empty,
 annoNameArena: std.heap.ArenaAllocator.State = .{},
 
 wchar: QualType = .invalid,
@@ -2380,7 +2380,7 @@ pub const Builder = struct {
                 }
                 if (b.complexToken) |tok| try b.parser.err(.complex_int, tok, .{});
 
-                const qt = try b.parser.comp.typeStore.put(b.parser.gpa, .{
+                const qt = try b.parser.comp.typeStore.put(b.parser.comp.gpa, .{
                     .bitInt = .{
                         .signedness = if (unsigned) .unsigned else .signed,
                         .bits = @intCast(bits),
@@ -2424,6 +2424,8 @@ pub const Builder = struct {
     pub fn finishQuals(b: Builder, qt: QualType) !QualType {
         if (qt.isInvalid()) return .invalid;
 
+        const gpa = b.parser.comp.gpa;
+
         var resultQt = qt;
         if (b.atomicType orelse b.atomic) |atomicToken| {
             if (resultQt.isAutoType()) return b.parser.todo("_Atomic __auto_type");
@@ -2453,7 +2455,7 @@ pub const Builder = struct {
                     return .invalid;
                 },
                 else => {
-                    resultQt = try b.parser.comp.typeStore.put(b.parser.gpa, .{ .atomic = resultQt });
+                    resultQt = try b.parser.comp.typeStore.put(gpa, .{ .atomic = resultQt });
                 },
             }
         }

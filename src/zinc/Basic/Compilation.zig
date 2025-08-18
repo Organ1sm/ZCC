@@ -132,15 +132,15 @@ diagnostics: *Diagnostics,
 
 codegenOptions: CodeGenOptions = .default,
 environment: Environment = .{},
-sources: std.StringArrayHashMapUnmanaged(Source) = .{},
+sources: std.StringArrayHashMapUnmanaged(Source) = .empty,
 /// Allocated into `gpa`, but keys are externally managed.
-includeDirs: std.ArrayListUnmanaged([]const u8) = .{},
+includeDirs: std.ArrayList([]const u8) = .empty,
 /// Allocated into `gpa`, but keys are externally managed.
-systemIncludeDirs: std.ArrayListUnmanaged([]const u8) = .{},
+systemIncludeDirs: std.ArrayList([]const u8) = .empty,
 target: std.Target = @import("builtin").target,
-pragmaHandlers: std.StringArrayHashMapUnmanaged(*Pragma) = .{},
+pragmaHandlers: std.StringArrayHashMapUnmanaged(*Pragma) = .empty,
 langOpts: LangOpts = .{},
-generatedBuffer: std.ArrayListUnmanaged(u8) = .{},
+generatedBuffer: std.ArrayList(u8) = .empty,
 builtins: Builtins = .{},
 
 stringInterner: StringInterner = .{},
@@ -529,7 +529,7 @@ pub fn generateBuiltinMacros(comp: *Compilation, systemDefinesMode: SystemDefine
         error.WriteFailed, error.OutOfMemory => return error.OutOfMemory,
     };
 
-    if (allocating.getWritten().len > std.math.maxInt(u32)) return error.FileTooBig;
+    if (allocating.written().len > std.math.maxInt(u32)) return error.FileTooBig;
 
     const contents = try allocating.toOwnedSlice();
     errdefer comp.gpa.free(contents);
@@ -960,8 +960,8 @@ pub fn addSourceFromOwnedBuffer(
     const dupedPath = try comp.gpa.dupe(u8, path);
     errdefer comp.gpa.free(dupedPath);
 
-    var spliceList = std.ArrayList(u32).init(comp.gpa);
-    defer spliceList.deinit();
+    var spliceList: std.ArrayList(u32) = .empty;
+    defer spliceList.deinit(comp.gpa);
 
     const sourceId: Source.ID = @enumFromInt(comp.sources.count() + 2);
 
@@ -994,7 +994,7 @@ pub fn addSourceFromOwnedBuffer(
                     },
                     .back_slash, .trailing_ws, .back_slash_cr => {
                         i = backslashLoc;
-                        try spliceList.append(i);
+                        try spliceList.append(comp.gpa, i);
                         if (state == .trailing_ws) {
                             try comp.addNewlineEscapeError(path, buffer, spliceList.items, i, line);
                         }
@@ -1014,7 +1014,7 @@ pub fn addSourceFromOwnedBuffer(
                     .back_slash, .trailing_ws => {
                         i = backslashLoc;
                         if (state == .back_slash or state == .trailing_ws) {
-                            try spliceList.append(i);
+                            try spliceList.append(comp.gpa, i);
                         }
                         if (state == .trailing_ws) {
                             try comp.addNewlineEscapeError(path, buffer, spliceList.items, i, line);
@@ -1067,11 +1067,11 @@ pub fn addSourceFromOwnedBuffer(
         }
     }
 
-    const spliceLocs = try spliceList.toOwnedSlice();
+    const spliceLocs = try spliceList.toOwnedSlice(comp.gpa);
     errdefer comp.gpa.free(spliceLocs);
 
     if (i != contents.len) {
-        var list: std.ArrayListUnmanaged(u8) = .{
+        var list: std.ArrayList(u8) = .{
             .items = contents[0..i],
             .capacity = contents.len,
         };
@@ -1164,7 +1164,9 @@ pub fn addSourceFromPathExtra(comp: *Compilation, path: []const u8, kind: Source
 pub fn addSourceFromFile(comp: *Compilation, file: std.fs.File, path: []const u8, kind: Source.Kind) !Source {
     var fileBuffer: [4096]u8 = undefined;
     var fileReader = file.reader(&fileBuffer);
-    if (try fileReader.getSize() > std.math.maxInt(u32)) return error.FileTooBig;
+    if (fileReader.getSize()) |size| {
+        if (size > std.math.maxInt(u32)) return error.FileTooBig;
+    } else |_| {}
 
     var allocating: std.Io.Writer.Allocating = .init(comp.gpa);
     _ = allocating.writer.sendFileAll(&fileReader, .limited(std.math.maxInt(u32))) catch |e| switch (e) {
@@ -1315,7 +1317,9 @@ fn getFileContents(comp: *Compilation, path: []const u8, limit: std.Io.Limit) ![
 
     var fileBuffer: [4096]u8 = undefined;
     var fileReader = file.reader(&fileBuffer);
-    if (limit.minInt64(try fileReader.getSize()) > std.math.maxInt(u32)) return error.FileTooBig;
+    if (fileReader.getSize()) |size| {
+        if (limit.minInt64(size) > std.math.maxInt(u32)) return error.FileTooBig;
+    } else |_| {}
 
     _ = allocating.writer.sendFileAll(&fileReader, limit) catch |err| switch (err) {
         error.WriteFailed => return error.OutOfMemory,

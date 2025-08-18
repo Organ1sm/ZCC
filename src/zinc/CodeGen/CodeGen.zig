@@ -57,10 +57,12 @@ returnLabel: IR.Ref = undefined,
 
 fn fail(c: *CodeGen, comptime fmt: []const u8, args: anytype) error{ FatalError, OutOfMemory } {
     var sf = std.heap.stackFallback(1024, c.comp.gpa);
-    var buf = std.ArrayList(u8).init(sf.get());
-    defer buf.deinit();
+    const allocator = sf.get();
 
-    try buf.writer().print(fmt, args);
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(allocator);
+
+    try buf.print(allocator, fmt, args);
     try c.comp.diagnostics.add(.{ .text = buf.items, .kind = .@"fatal error", .location = null });
 
     return error.FatalError;

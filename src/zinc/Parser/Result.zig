@@ -138,6 +138,7 @@ pub fn implicitCast(operand: *Result, p: *Parser, kind: Node.Cast.Kind, token: T
 
 pub fn adjustCondExprPtrs(lhs: *Result, token: TokenIndex, rhs: *Result, p: *Parser) !bool {
     assert(lhs.qt.isPointer(p.comp) and rhs.qt.isPointer(p.comp));
+    const gpa = p.comp.gpa;
 
     const lhsElem = lhs.qt.childType(p.comp);
     const rhsElem = rhs.qt.childType(p.comp);
@@ -160,7 +161,7 @@ pub fn adjustCondExprPtrs(lhs: *Result, token: TokenIndex, rhs: *Result, p: *Par
     }
 
     if (!adjustedElemQt.eqlQualified(lhsElem, p.comp)) {
-        lhs.qt = try p.comp.typeStore.put(p.gpa, .{ .pointer = .{
+        lhs.qt = try p.comp.typeStore.put(gpa, .{ .pointer = .{
             .child = adjustedElemQt,
             .decayed = null,
         } });
@@ -168,7 +169,7 @@ pub fn adjustCondExprPtrs(lhs: *Result, token: TokenIndex, rhs: *Result, p: *Par
     }
 
     if (!adjustedElemQt.eqlQualified(rhsElem, p.comp)) {
-        rhs.qt = try p.comp.typeStore.put(p.gpa, .{ .pointer = .{
+        rhs.qt = try p.comp.typeStore.put(gpa, .{ .pointer = .{
             .child = adjustedElemQt,
             .decayed = null,
         } });
@@ -799,7 +800,7 @@ pub fn saveValue(res: *Result, p: *Parser) !void {
         return;
 
     if (!p.inMacro)
-        try p.tree.valueMap.put(p.gpa, res.node, res.value);
+        try p.tree.valueMap.put(p.comp.gpa, res.node, res.value);
 
     res.value = .{};
 }
@@ -807,7 +808,7 @@ pub fn saveValue(res: *Result, p: *Parser) !void {
 /// Saves value without altering the result.
 pub fn putValue(res: *const Result, p: *Parser) !void {
     if (res.value.isNone() or res.value.isNull()) return;
-    if (!p.inMacro) try p.tree.valueMap.put(p.gpa, res.node, res.value);
+    if (!p.inMacro) try p.tree.valueMap.put(p.comp.gpa, res.node, res.value);
 }
 
 pub fn castType(res: *Result, p: *Parser, destQt: QualType, operandToken: TokenIndex, lparen: TokenIndex) !void {

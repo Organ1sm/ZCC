@@ -4,8 +4,8 @@ const Object = @import("../Object.zig");
 const Elf = @This();
 
 const Section = struct {
-    data: std.ArrayList(u8),
-    relocations: std.ArrayListUnmanaged(Relocation) = .{},
+    data: std.ArrayList(u8) = .empty,
+    relocations: std.ArrayList(Relocation) = .empty,
     flags: u64,
     type: u32,
     index: u16 = undefined,
@@ -35,9 +35,9 @@ const SymbolTableName = "\x00.strtab\x00".len;
 
 obj: Object,
 /// The keys are owned by the Codegen.tree
-sections: std.StringHashMapUnmanaged(*Section) = .{},
-localSymbols: std.StringHashMapUnmanaged(*Symbol) = .{},
-globalSymbols: std.StringHashMapUnmanaged(*Symbol) = .{},
+sections: std.StringHashMapUnmanaged(*Section) = .empty,
+localSymbols: std.StringHashMapUnmanaged(*Symbol) = .empty,
+globalSymbols: std.StringHashMapUnmanaged(*Symbol) = .empty,
 unnamedSymbolMangle: u32 = 0,
 stringTabLen: u64 = DefaultStringTable.len,
 arena: std.heap.ArenaAllocator,
@@ -57,7 +57,7 @@ pub fn deinit(elf: *Elf) void {
     {
         var it = elf.sections.valueIterator();
         while (it.next()) |sect| {
-            sect.*.data.deinit();
+            sect.*.data.deinit(gpa);
             sect.*.relocations.deinit(gpa);
         }
     }

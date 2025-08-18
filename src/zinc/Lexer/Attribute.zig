@@ -807,6 +807,8 @@ fn ignoredAttrErr(p: *Parser, token: TokenIndex, attr: Attribute.Tag, context: [
 pub const applyParameterAttributes = applyVariableAttributes;
 
 pub fn applyVariableAttributes(p: *Parser, qt: QualType, attrBufferStart: usize, diag: ?Parser.Diagnostic) !QualType {
+    const gpa = p.comp.gpa;
+
     const attrs = p.attrBuffer.items(.attr)[attrBufferStart..];
     const toks = p.attrBuffer.items(.tok)[attrBufferStart..];
     p.attrApplicationBuffer.items.len = 0;
@@ -818,20 +820,20 @@ pub fn applyVariableAttributes(p: *Parser, qt: QualType, attrBufferStart: usize,
         // zig fmt: off
         .alias, .may_alias, .deprecated, .unavailable, .unused, .warn_if_not_aligned, .weak, .used,
         .noinit, .retain, .persistent, .section, .mode, .asm_label,
-         => try p.attrApplicationBuffer.append(p.gpa, attr),
+         => try p.attrApplicationBuffer.append(gpa, attr),
         // zig fmt: on
 
         .common => if (nocommon) {
             try p.err(.ignore_common, tok, .{});
         } else {
-            try p.attrApplicationBuffer.append(p.gpa, attr);
+            try p.attrApplicationBuffer.append(gpa, attr);
             common = true;
         },
 
         .nocommon => if (common) {
             try p.err(.ignore_nocommon, tok, .{});
         } else {
-            try p.attrApplicationBuffer.append(p.gpa, attr);
+            try p.attrApplicationBuffer.append(gpa, attr);
             nocommon = true;
         },
 
@@ -842,7 +844,7 @@ pub fn applyVariableAttributes(p: *Parser, qt: QualType, attrBufferStart: usize,
             if (baseQt.get(p.comp, .array)) |arrayTy| {
                 if (arrayTy.elem.get(p.comp, .int)) |intTy| switch (intTy) {
                     .Char, .UChar, .SChar => {
-                        try p.attrApplicationBuffer.append(p.gpa, attr);
+                        try p.attrApplicationBuffer.append(gpa, attr);
                         continue;
                     },
                     else => {},
@@ -853,13 +855,13 @@ pub fn applyVariableAttributes(p: *Parser, qt: QualType, attrBufferStart: usize,
         .uninitialized => if (p.func.qt == null) {
             try p.err(.local_variable_attribute, tok, .{"uninitialized"});
         } else {
-            try p.attrApplicationBuffer.append(p.gpa, attr);
+            try p.attrApplicationBuffer.append(gpa, attr);
         },
 
         .cleanup => if (p.func.qt == null) {
             try p.err(.local_variable_attribute, tok, .{"cleanup"});
         } else {
-            try p.attrApplicationBuffer.append(p.gpa, attr);
+            try p.attrApplicationBuffer.append(gpa, attr);
         },
 
         .alloc_size,
@@ -881,7 +883,7 @@ pub fn applyFieldAttributes(p: *Parser, fieldTy: *QualType, attrBufferStart: usi
     for (attrs, toks) |attr, tok| switch (attr.tag) {
         // zig fmt: off
         .@"packed", .may_alias, .deprecated, .unavailable, .unused, .warn_if_not_aligned, .mode,.warn_unused_result, .nodiscard,
-        => try p.attrApplicationBuffer.append(p.gpa, attr),
+        => try p.attrApplicationBuffer.append(p.comp.gpa, attr),
         // zig fmt: on
 
         .vector_size => try attr.applyVectorSize(p, tok, fieldTy),
@@ -893,6 +895,7 @@ pub fn applyFieldAttributes(p: *Parser, fieldTy: *QualType, attrBufferStart: usi
 }
 
 pub fn applyTypeAttributes(p: *Parser, qt: QualType, attrBufferStart: usize, diag: ?Parser.Diagnostic) !QualType {
+    const gpa = p.comp.gpa;
     const attrs = p.attrBuffer.items(.attr)[attrBufferStart..];
     const toks = p.attrBuffer.items(.tok)[attrBufferStart..];
     p.attrApplicationBuffer.items.len = 0;
@@ -906,14 +909,14 @@ pub fn applyTypeAttributes(p: *Parser, qt: QualType, attrBufferStart: usize, dia
         .unused,
         .warn_if_not_aligned,
         .mode,
-        => try p.attrApplicationBuffer.append(p.gpa, attr),
+        => try p.attrApplicationBuffer.append(gpa, attr),
 
         .transparent_union => try attr.applyTransparentUnion(p, tok, baseQt),
         .vector_size => try attr.applyVectorSize(p, tok, &baseQt),
         .aligned => try attr.applyAligned(p, baseQt, diag),
 
         .designated_init => if (baseQt.is(p.comp, .@"struct")) {
-            try p.attrApplicationBuffer.append(p.gpa, attr);
+            try p.attrApplicationBuffer.append(gpa, attr);
         } else {
             try p.err(.designated_init_invalid, tok, .{});
         },
@@ -931,6 +934,7 @@ pub fn applyTypeAttributes(p: *Parser, qt: QualType, attrBufferStart: usize, dia
 }
 
 pub fn applyFunctionAttributes(p: *Parser, qt: QualType, attrBufferStart: usize) !QualType {
+    const gpa = p.comp.gpa;
     const attrs = p.attrBuffer.items(.attr)[attrBufferStart..];
     const toks = p.attrBuffer.items(.tok)[attrBufferStart..];
     p.attrApplicationBuffer.items.len = 0;
@@ -946,34 +950,34 @@ pub fn applyFunctionAttributes(p: *Parser, qt: QualType, attrBufferStart: usize)
         .@"const", .warn_unused_result, .section, .returns_nonnull, .returns_twice, .@"error",
         .externally_visible, .retain, .flatten, .gnu_inline, .alias, .asm_label, .nodiscard,
         .reproducible, .unsequenced,
-         => try p.attrApplicationBuffer.append(p.gpa, attr),
+         => try p.attrApplicationBuffer.append(gpa, attr),
         // zig fmt: on
 
         .hot => if (cold) {
             try p.err(.ignore_hot, tok, .{});
         } else {
-            try p.attrApplicationBuffer.append(p.gpa, attr);
+            try p.attrApplicationBuffer.append(gpa, attr);
             hot = true;
         },
 
         .cold => if (hot) {
             try p.err(.ignore_cold, tok, .{});
         } else {
-            try p.attrApplicationBuffer.append(p.gpa, attr);
+            try p.attrApplicationBuffer.append(gpa, attr);
             cold = true;
         },
 
         .always_inline => if (@"noinline") {
             try p.err(.ignore_always_inline, tok, .{});
         } else {
-            try p.attrApplicationBuffer.append(p.gpa, attr);
+            try p.attrApplicationBuffer.append(gpa, attr);
             alwaysInline = true;
         },
 
         .@"noinline" => if (alwaysInline) {
             try p.err(.ignore_noinline, tok, .{});
         } else {
-            try p.attrApplicationBuffer.append(p.gpa, attr);
+            try p.attrApplicationBuffer.append(gpa, attr);
             @"noinline" = true;
         },
 
@@ -983,11 +987,11 @@ pub fn applyFunctionAttributes(p: *Parser, qt: QualType, attrBufferStart: usize)
         .calling_convention => switch (attr.args.calling_convention.cc) {
             .C => continue,
             .stdcall, .thiscall => switch (p.comp.target.cpu.arch) {
-                .x86 => try p.attrApplicationBuffer.append(p.gpa, attr),
+                .x86 => try p.attrApplicationBuffer.append(gpa, attr),
                 else => try p.err(.callconv_not_supported, tok, .{p.tokenIds[tok].lexeme().?}),
             },
             .vectorcall => switch (p.comp.target.cpu.arch) {
-                .x86, .aarch64, .aarch64_be => try p.attrApplicationBuffer.append(p.gpa, attr),
+                .x86, .aarch64, .aarch64_be => try p.attrApplicationBuffer.append(gpa, attr),
                 else => try p.err(.callconv_not_supported, tok, .{p.tokenIds[tok].lexeme().?}),
             },
         },
@@ -1004,7 +1008,7 @@ pub fn applyFunctionAttributes(p: *Parser, qt: QualType, attrBufferStart: usize)
                     if (!argSk.isInt() or !argSk.isReal()) {
                         try p.err(.alloc_align_required_int_param, tok, .{});
                     } else {
-                        try p.attrApplicationBuffer.append(p.gpa, attr);
+                        try p.attrApplicationBuffer.append(gpa, attr);
                     }
                 }
             } else {
@@ -1064,7 +1068,7 @@ pub fn applyLabelAttributes(p: *Parser, attrBufferStart: usize) !QualType {
     p.attrApplicationBuffer.items.len = 0;
 
     for (attrs, toks) |attr, tok| switch (attr.tag) {
-        .cold, .hot, .unused => try p.attrApplicationBuffer.append(p.gpa, attr),
+        .cold, .hot, .unused => try p.attrApplicationBuffer.append(p.comp.gpa, attr),
         else => try ignoredAttrErr(p, tok, attr.tag, "labels"),
     };
     return applySelected(.void, p);
@@ -1082,7 +1086,7 @@ pub fn applyStatementAttributes(p: *Parser, exprStart: TokenIndex, attrBufferSta
             // but only if they close a compound statement)
             try p.err(.invalid_fallthrough, exprStart, .{});
         } else {
-            try p.attrApplicationBuffer.append(p.gpa, attr);
+            try p.attrApplicationBuffer.append(p.comp.gpa, attr);
         },
         else => try p.err(.cannot_apply_attribute_to_statement, tok, .{@tagName(attr.tag)}),
     };
@@ -1095,7 +1099,7 @@ pub fn applyEnumeratorAttributes(p: *Parser, qt: QualType, attrBufferStart: usiz
     p.attrApplicationBuffer.items.len = 0;
 
     for (attrs, toks) |attr, tok| switch (attr.tag) {
-        .deprecated, .unavailable => try p.attrApplicationBuffer.append(p.gpa, attr),
+        .deprecated, .unavailable => try p.attrApplicationBuffer.append(p.comp.gpa, attr),
         else => try ignoredAttrErr(p, tok, attr.tag, "enums"),
     };
     return applySelected(qt, p);
@@ -1118,7 +1122,7 @@ fn applyAligned(attr: Attribute, p: *Parser, qt: QualType, diag: ?Parser.Diagnos
             try p.err(.minimum_alignment, alignToken, .{defaultAlign});
         }
     }
-    try p.attrApplicationBuffer.append(p.gpa, attr);
+    try p.attrApplicationBuffer.append(p.comp.gpa, attr);
 }
 
 fn applyTransparentUnion(attr: Attribute, p: *Parser, token: TokenIndex, qt: QualType) !void {
@@ -1141,7 +1145,7 @@ fn applyTransparentUnion(attr: Attribute, p: *Parser, token: TokenIndex, qt: Qua
         return p.err(.transparent_union_size_note, unionTy.fields[0].nameToken, .{firstFieldSize});
     }
 
-    try p.attrApplicationBuffer.append(p.gpa, attr);
+    try p.attrApplicationBuffer.append(p.comp.gpa, attr);
 }
 
 fn applyVectorSize(attr: Attribute, p: *Parser, tok: TokenIndex, qt: *QualType) !void {
@@ -1162,7 +1166,7 @@ fn applyVectorSize(attr: Attribute, p: *Parser, tok: TokenIndex, qt: *QualType) 
     if (vecBytes % elemSize != 0)
         return p.err(.vec_size_not_multiple, tok, .{});
 
-    qt.* = try p.comp.typeStore.put(p.gpa, .{
+    qt.* = try p.comp.typeStore.put(p.comp.gpa, .{
         .vector = .{
             .elem = qt.*,
             .len = @intCast(vecBytes / elemSize),
@@ -1173,12 +1177,12 @@ fn applyVectorSize(attr: Attribute, p: *Parser, tok: TokenIndex, qt: *QualType) 
 fn applyFormat(attr: Attribute, p: *Parser, qt: QualType) !void {
     // TODO validate
     _ = qt;
-    try p.attrApplicationBuffer.append(p.gpa, attr);
+    try p.attrApplicationBuffer.append(p.comp.gpa, attr);
 }
 
 fn applySelected(qt: QualType, p: *Parser) !QualType {
     if (p.attrApplicationBuffer.items.len == 0 or qt.isInvalid()) return qt;
-    return (try p.comp.typeStore.put(p.gpa, .{
+    return (try p.comp.typeStore.put(p.comp.gpa, .{
         .attributed = .{
             .base = qt,
             .attributes = p.attrApplicationBuffer.items,

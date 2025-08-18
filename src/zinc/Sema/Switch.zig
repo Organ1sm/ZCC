@@ -8,9 +8,9 @@ const Value = @import("../AST/Value.zig");
 
 pub const Switch = @This();
 
-comp: *Compilation,
+comp: *const Compilation,
 default: ?TokenIndex = null,
-ranges: std.ArrayList(Range),
+ranges: std.ArrayList(Range) = .empty,
 qt: QualType,
 
 pub const Range = struct {
@@ -19,15 +19,15 @@ pub const Range = struct {
     token: TokenIndex,
 };
 
-pub fn add(self: *Switch, first: Value, last: Value, token: TokenIndex) !?Range {
-    for (self.ranges.items) |range| {
-        if (last.compare(.gte, range.first, self.comp) and
-            first.compare(.lte, range.last, self.comp))
+pub fn add(s: *Switch, first: Value, last: Value, token: TokenIndex) !?Range {
+    for (s.ranges.items) |range| {
+        if (last.compare(.gte, range.first, s.comp) and
+            first.compare(.lte, range.last, s.comp))
         {
             return range; // They overlap.
         }
     }
-    try self.ranges.append(.{
+    try s.ranges.append(s.comp.gpa, .{
         .first = first,
         .last = last,
         .token = token,

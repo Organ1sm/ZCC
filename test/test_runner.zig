@@ -32,12 +32,12 @@ fn addCommandLineArgs(
     comp.langOpts.gnucVersion = 40201;
 
     if (std.mem.startsWith(u8, file.buffer, "//zinc-args")) {
-        var testArgs = std.ArrayList([]const u8).init(comp.gpa);
-        defer testArgs.deinit();
+        var testArgs: std.ArrayList([]const u8) = .empty;
+        defer testArgs.deinit(comp.gpa);
 
         const nl = std.mem.indexOfAny(u8, file.buffer, "\n\r") orelse file.buffer.len;
         var it = std.mem.tokenizeScalar(u8, file.buffer[0..nl], ' ');
-        while (it.next()) |some| try testArgs.append(some);
+        while (it.next()) |some| try testArgs.append(comp.gpa, some);
 
         var driver = zinc.Driver{ .comp = comp, .diagnostics = comp.diagnostics };
         defer driver.deinit();
@@ -154,11 +154,11 @@ pub fn main() !void {
     const testDir = args[1];
 
     var buffer: std.ArrayListUnmanaged(u8) = .empty;
-    var cases = std.ArrayList([]const u8).init(gpa);
+    var cases: std.ArrayList([]const u8) = .empty;
 
     defer {
         buffer.deinit(gpa);
-        cases.deinit();
+        cases.deinit(gpa);
     }
 
     // collect all cases
@@ -175,7 +175,7 @@ pub fn main() !void {
                 print("skipping non file entry '{s}'\n", .{entry.name});
                 continue;
             }
-            try cases.append(try std.fmt.allocPrint(arena, "{s}{c}{s}", .{ args[1], std.fs.path.sep, entry.name }));
+            try cases.append(gpa, try std.fmt.allocPrint(arena, "{s}{c}{s}", .{ args[1], std.fs.path.sep, entry.name }));
         }
     }
 
@@ -300,7 +300,7 @@ pub fn main() !void {
         }
 
         if (onlyPreprocess) {
-            if (try checkExpectedErrors(&pp, &buffer, diagBuffer.getWritten(), case)) |some| {
+            if (try checkExpectedErrors(&pp, &buffer, diagBuffer.written(), case)) |some| {
                 if (!some) {
                     failCount += 1;
                     continue;
@@ -308,7 +308,7 @@ pub fn main() !void {
             } else {
                 var stderrBuffer: [4096]u8 = undefined;
                 var stderr = std.fs.File.stderr().writer(&stderrBuffer);
-                try stderr.interface.writeAll(diagBuffer.getWritten());
+                try stderr.interface.writeAll(diagBuffer.written());
                 try stderr.interface.flush();
 
                 if (comp.diagnostics.errors != 0) {
@@ -334,7 +334,7 @@ pub fn main() !void {
 
             try pp.prettyPrintTokens(&output.writer, dumpNode);
             if (pp.defines.contains("CHECK_PARTIAL_MATCH")) {
-                const index = std.mem.indexOf(u8, output.getWritten(), expectedOutput);
+                const index = std.mem.indexOf(u8, output.written(), expectedOutput);
                 if (index != null) {
                     passCount += 1;
                 } else {
@@ -342,11 +342,11 @@ pub fn main() !void {
                     std.debug.print("\n====== expected to find: =========\n", .{});
                     std.debug.print("{s}", .{expectedOutput});
                     std.debug.print("\n======== but did not find it in this: =========\n", .{});
-                    std.debug.print("{s}", .{output.getWritten()});
+                    std.debug.print("{s}", .{output.written()});
                     std.debug.print("\n======================================\n", .{});
                 }
             } else {
-                if (std.testing.expectEqualStrings(expectedOutput, output.getWritten()))
+                if (std.testing.expectEqualStrings(expectedOutput, output.written()))
                     passCount += 1
                 else |_|
                     failCount += 1;
@@ -358,7 +358,7 @@ pub fn main() !void {
 
         var tree = zinc.Parser.parse(&pp) catch |err| switch (err) {
             error.FatalError => {
-                if (try checkExpectedErrors(&pp, &buffer, diagBuffer.getWritten(), case)) |some| {
+                if (try checkExpectedErrors(&pp, &buffer, diagBuffer.written(), case)) |some| {
                     if (some) passCount += 1 else failCount += 1;
                 }
                 continue;
@@ -377,7 +377,7 @@ pub fn main() !void {
             defer actualAST.deinit();
 
             try tree.dump(.no_color, &actualAST.writer);
-            std.testing.expectEqualStrings(expectedAST, actualAST.getWritten()) catch {
+            std.testing.expectEqualStrings(expectedAST, actualAST.written()) catch {
                 failCount += 1;
                 break;
             };
@@ -398,10 +398,10 @@ pub fn main() !void {
                 break;
             };
 
-            var actual = StmtTypeDumper.init(gpa);
+            var actual: StmtTypeDumper = .{};
             defer actual.deinit(gpa);
 
-            try actual.dump(&tree, testFn.body);
+            try actual.dump(gpa, &tree, testFn.body);
 
             var i: usize = 0;
             for (types.tokens) |str| {
@@ -439,7 +439,7 @@ pub fn main() !void {
             }
         }
 
-        if (try checkExpectedErrors(&pp, &buffer, diagBuffer.getWritten(), case)) |some| {
+        if (try checkExpectedErrors(&pp, &buffer, diagBuffer.written(), case)) |some| {
             if (some) passCount += 1 else {
                 std.debug.print("in case {s}\n", .{case});
                 failCount += 1;
@@ -452,7 +452,7 @@ pub fn main() !void {
         {
             var stderrBuffer: [4096]u8 = undefined;
             var stderr = std.fs.File.stderr().writer(&stderrBuffer);
-            try stderr.interface.writeAll(diagBuffer.getWritten());
+            try stderr.interface.writeAll(diagBuffer.written());
             try stderr.interface.flush();
         }
 
@@ -475,7 +475,7 @@ pub fn main() !void {
 
             defer buffer.items.len = 0;
             {
-                var allocating: std.Io.Writer.Allocating = .fromArrayList(pp.gpa, &buffer);
+                var allocating: std.Io.Writer.Allocating = .fromArrayList(gpa, &buffer);
                 defer buffer = allocating.toArrayList();
                 assert((try std.zig.string_literal.parseWrite(&allocating.writer, pp.getTokenSlice(macro.tokens[0]))) == .success);
             }
@@ -575,11 +575,11 @@ fn checkExpectedErrors(
         const start = buf.items.len;
         // realistically the strings will only contain \" if any escapes so we can use Zig's string parsing
         {
-            var allocating: std.Io.Writer.Allocating = .fromArrayList(pp.gpa, buf);
+            var allocating: std.Io.Writer.Allocating = .fromArrayList(pp.comp.gpa, buf);
             defer buf.* = allocating.toArrayList();
             std.debug.assert((try std.zig.string_literal.parseWrite(&allocating.writer, pp.getTokenSlice(macro.tokens[0]))) == .success);
         }
-        try buf.append(pp.gpa, '\n');
+        try buf.append(pp.comp.gpa, '\n');
         const expectedError = buf.items[start..];
 
         const index = std.mem.indexOf(u8, errors, expectedError);
@@ -625,26 +625,25 @@ fn checkExpectedErrors(
 }
 
 const StmtTypeDumper = struct {
-    types: std.ArrayList([]const u8),
+    types: std.ArrayList([]const u8) = .empty,
 
     fn deinit(self: *StmtTypeDumper, allocator: std.mem.Allocator) void {
         for (self.types.items) |t| {
             allocator.free(t);
         }
-        self.types.deinit();
+        self.types.deinit(allocator);
     }
 
-    fn init(allocator: std.mem.Allocator) StmtTypeDumper {
-        return .{
-            .types = std.ArrayList([]const u8).init(allocator),
-        };
-    }
-
-    fn dumpNode(self: *StmtTypeDumper, tree: *const Tree, node: Node.Index) AllocatorError!void {
+    fn dumpNode(
+        self: *StmtTypeDumper,
+        gpa: std.mem.Allocator,
+        tree: *const Tree,
+        node: Node.Index,
+    ) AllocatorError!void {
         const maybeRet = node.get(tree);
         if (maybeRet == .returnStmt and maybeRet.returnStmt.operand == .implicit) return;
 
-        var allocating: std.Io.Writer.Allocating = .init(self.types.allocator);
+        var allocating: std.Io.Writer.Allocating = .init(gpa);
         defer allocating.deinit();
 
         node.qt(tree)
@@ -652,13 +651,18 @@ const StmtTypeDumper = struct {
         const owned = try allocating.toOwnedSlice();
         errdefer allocating.allocator.free(owned);
 
-        try self.types.append(owned);
+        try self.types.append(gpa, owned);
     }
 
-    fn dump(self: *StmtTypeDumper, tree: *const Tree, body: Node.Index) AllocatorError!void {
+    fn dump(
+        self: *StmtTypeDumper,
+        gpa: std.mem.Allocator,
+        tree: *const Tree,
+        body: Node.Index,
+    ) AllocatorError!void {
         const compound = body.get(tree).compoundStmt;
         for (compound.body) |stmt| {
-            try self.dumpNode(tree, stmt);
+            try self.dumpNode(gpa, tree, stmt);
         }
     }
 };

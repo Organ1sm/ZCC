@@ -81,7 +81,7 @@ fn parserHandler(pragma: *Pragma, p: *Parser, startIdx: TokenIndex) Compilation.
                         }
                     }
                     if (action == .push) {
-                        try pack.stack.append(p.gpa, .{ .label = label orelse "", .val = p.pragmaPack orelse 8 });
+                        try pack.stack.append(p.comp.gpa, .{ .label = label orelse "", .val = p.pragmaPack orelse 8 });
                     } else {
                         pack.pop(p, label);
                         if (newVal != null) {

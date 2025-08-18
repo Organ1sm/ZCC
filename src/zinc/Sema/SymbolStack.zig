@@ -45,8 +45,8 @@ pub const Kind = enum {
 // zig fmt: on
 
 const Scope = struct {
-    vars: std.AutoHashMapUnmanaged(StringId, Symbol) = .{},
-    tags: std.AutoHashMapUnmanaged(StringId, Symbol) = .{},
+    vars: std.AutoHashMapUnmanaged(StringId, Symbol) = .empty,
+    tags: std.AutoHashMapUnmanaged(StringId, Symbol) = .empty,
 
     fn deinit(self: *Scope, allocator: Allocator) void {
         self.vars.deinit(allocator);
@@ -62,7 +62,7 @@ const Scope = struct {
 /// allocations from nested scopes are retained after popping;
 /// `activeLen` is the number of currently-active items in `scopes`.
 activeLen: usize = 0,
-scopes: std.ArrayListUnmanaged(Scope) = .{},
+scopes: std.ArrayList(Scope) = .empty,
 p: *Parser = undefined,
 
 pub fn deinit(self: *SymbolStack, gpa: Allocator) void {
@@ -76,7 +76,7 @@ pub fn deinit(self: *SymbolStack, gpa: Allocator) void {
 
 pub fn pushScope(self: *SymbolStack) !void {
     if (self.activeLen + 1 > self.scopes.items.len) {
-        try self.scopes.append(self.p.gpa, .{});
+        try self.scopes.append(self.p.comp.gpa, .{});
         self.activeLen = self.scopes.items.len;
     } else {
         self.scopes.items[self.activeLen].clearRetainingCapacity();
@@ -188,12 +188,13 @@ fn lookup(s: *SymbolStack, name: StringId, kind: ScopeKind) ?Symbol {
 /// Define a symbol in the innermost scope. Does not issue diagnostics or check correctness
 /// with regard to the C standard.
 pub fn define(self: *SymbolStack, symbol: Symbol) !void {
+    const gpa = self.p.comp.gpa;
     switch (symbol.kind) {
         .constexpr, .definition, .declaration, .enumeration, .typedef => {
-            try self.scopes.items[self.activeLen - 1].vars.put(self.p.gpa, symbol.name, symbol);
+            try self.scopes.items[self.activeLen - 1].vars.put(gpa, symbol.name, symbol);
         },
         .@"struct", .@"union", .@"enum" => {
-            try self.scopes.items[self.activeLen - 1].tags.put(self.p.gpa, symbol.name, symbol);
+            try self.scopes.items[self.activeLen - 1].tags.put(gpa, symbol.name, symbol);
         },
     }
 }

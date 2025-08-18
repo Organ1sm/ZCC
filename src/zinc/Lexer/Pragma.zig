@@ -65,7 +65,7 @@ pub fn pasteTokens(pp: *Preprocessor, startIdx: TokenIndex) ![]const u8 {
                 if (rparenCount != 0)
                     return error.ExpectedStringLiteral;
                 const str = pp.expandedSlice(tok);
-                try pp.charBuffer.appendSlice(str[1 .. str.len - 1]);
+                try pp.charBuffer.appendSlice(pp.comp.gpa, str[1 .. str.len - 1]);
             },
             else => return error.ExpectedStringLiteral,
         }
@@ -199,7 +199,7 @@ pub const Diagnostic = struct {
 };
 
 pub fn err(pp: *Preprocessor, tokenIdx: TokenIndex, diagnostic: Diagnostic, args: anytype) Compilation.Error!void {
-    var sf = std.heap.stackFallback(1024, pp.gpa);
+    var sf = std.heap.stackFallback(1024, pp.comp.gpa);
     var allocating: std.Io.Writer.Allocating = .init(sf.get());
     defer allocating.deinit();
 
@@ -208,7 +208,7 @@ pub fn err(pp: *Preprocessor, tokenIdx: TokenIndex, diagnostic: Diagnostic, args
     try pp.diagnostics.addWithLocation(pp.comp, .{
         .kind = diagnostic.kind,
         .opt = diagnostic.opt,
-        .text = allocating.getWritten(),
+        .text = allocating.written(),
         .location = pp.tokens.items(.loc)[tokenIdx].expand(pp.comp),
     }, pp.expansionSlice(tokenIdx), true);
 }
