@@ -56,9 +56,9 @@ pub fn build(b: *std.Build) !void {
                 const commitHeight = it.next().?;
                 const commitID = it.next().?;
 
-                const ancestor_ver = try std.SemanticVersion.parse(taggedAncestor);
-                if (!ZincVersion.order(ancestor_ver).compare(.gte)) {
-                    std.debug.print("Zinc version '{f}' must be greater than tagged ancestor '{f}'\n", .{ ZincVersion, ancestor_ver });
+                const ancestoroVer = try std.SemanticVersion.parse(taggedAncestor);
+                if (!ZincVersion.order(ancestoroVer).compare(.gte)) {
+                    std.debug.print("Zinc version '{f}' must be greater than tagged ancestor '{f}'\n", .{ ZincVersion, ancestoroVer });
                     std.process.exit(1);
                 }
 
@@ -113,6 +113,15 @@ pub fn build(b: *std.Build) !void {
             GenerateDef.create(b, .{ .name = "Builtins/Builtin.def", .needs_large_dafsa_node = true }),
         },
     });
+    const assemblyBackend = b.addModule("assembly-backend", .{
+        .root_source_file = b.path("src/assembly-backend.zig"),
+        .imports = &.{
+            .{
+                .name = "zinc",
+                .module = zincModule,
+            },
+        },
+    });
 
     const exe = b.addExecutable(.{
         .name = "zincc",
@@ -126,6 +135,7 @@ pub fn build(b: *std.Build) !void {
         .use_lld = UseLLVM,
     });
     exe.root_module.addImport("zinc", zincModule);
+    exe.root_module.addImport("assembly-backend", assemblyBackend);
 
     if (target.result.os.tag == .windows)
         exe.root_module.linkSystemLibrary("advapi32", .{});

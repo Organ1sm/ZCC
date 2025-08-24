@@ -2,12 +2,13 @@ const std = @import("std");
 const process = std.process;
 const builtin = @import("builtin");
 
+const zinc = @import("zinc");
 const Compilation = zinc.Compilation;
 const Diagnostics = zinc.Diagnostics;
 const Driver = zinc.Driver;
 const Target = zinc.TargetUtil;
 const Toolchain = zinc.ToolChain;
-const zinc = @import("zinc");
+const AssemblyBackend = @import("assembly-backend");
 
 var GeneralPurposeAllocator = std.heap.GeneralPurposeAllocator(.{}){};
 
@@ -59,7 +60,7 @@ pub fn main() u8 {
     var toolChain: Toolchain = .{ .driver = &driver, .filesystem = .{ .real = comp.cwd } };
     defer toolChain.deinit();
 
-    driver.main(&toolChain, args, fastExit) catch |er| switch (er) {
+    driver.main(&toolChain, args, fastExit, AssemblyBackend.genAsm) catch |er| switch (er) {
         error.OutOfMemory => {
             std.debug.print("Out of Memory\n", .{});
             if (fastExit) process.exit(1);

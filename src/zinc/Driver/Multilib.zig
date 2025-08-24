@@ -74,6 +74,7 @@ pub fn init(gccSuffix: []const u8, osSuffix: []const u8, initFlags: []const []co
     var self: Multilib = .{
         .gccSuffix = gccSuffix,
         .osSuffix = osSuffix,
+        .flagCount = @intCast(initFlags.len),
     };
 
     @memcpy(self.flagBuffer[0..initFlags.len], initFlags);

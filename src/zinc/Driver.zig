@@ -164,6 +164,7 @@ const usage =
     \\                          Allow '$' in identifiers(default)
     \\  -fno-dollars-in-identifiers     
     \\                          Disallow '$' in identifiers
+    \\  -g                      Generate debug information
     \\  -fshort-enums           Use the narrowest possible integer type for enums.
     \\  -fno-short-enums        Use "int" as the tag type for enums.
     \\  -fsigned-char           "char" is signed
@@ -302,6 +303,11 @@ pub fn parseArgs(
                     macro = args[i];
                 }
                 try macroBuffer.print(d.comp.gpa, "#undef {s} \n", .{macro});
+            } else if (mem.startsWith(u8, arg, "-O")) {
+                d.comp.codegenOptions.optimizationLevel = backend.CodeGenOptions.OptimizationLevel.fromString(arg["-O".len..]) orelse {
+                    try d.err("invalid optimization level '{s}'", .{arg});
+                    continue;
+                };
             } else if (mem.eql(u8, arg, "-undef")) {
                 d.systemDefines = .NoSystemDefines;
             } else if (std.mem.eql(u8, arg, "-c") or std.mem.eql(u8, arg, "--compile")) {
@@ -379,6 +385,10 @@ pub fn parseArgs(
                 d.comp.langOpts.dollarsInIdentifiers = true;
             } else if (std.mem.eql(u8, arg, "-fno-dollars-in-identifiers")) {
                 d.comp.langOpts.dollarsInIdentifiers = false;
+            } else if (mem.eql(u8, arg, "-g")) {
+                d.comp.codegenOptions.debug = true;
+            } else if (mem.eql(u8, arg, "-g0")) {
+                d.comp.codegenOptions.debug = false;
             } else if (option(arg, "-fmacro-backtrace-limit=")) |limitStr| {
                 var limit = std.fmt.parseInt(u32, limitStr, 10) catch {
                     try d.err("-fmacro-backtrace-limit takes a number argument", .{});
@@ -726,7 +736,7 @@ pub fn errorDescription(e: anyerror) []const u8 {
 
 /// The entry point of the Zinc compiler.
 /// **MAY call `exit` if `fast_exit` is set.**
-pub fn main(d: *Driver, tc: *Toolchain, args: []const []const u8, comptime fastExit: bool) !void {
+pub fn main(d: *Driver, tc: *Toolchain, args: []const []const u8, comptime fastExit: bool, asmGenFn: anytype) !void {
     const userDefinedMacros = macros: {
         var macroBuffer: std.ArrayList(u8) = .empty;
         defer macroBuffer.deinit(d.comp.gpa);
@@ -782,7 +792,7 @@ pub fn main(d: *Driver, tc: *Toolchain, args: []const []const u8, comptime fastE
     }
 
     for (d.inputs.items) |source| {
-        try d.processSource(tc, source, builtinMacros, userDefinedMacros, fastExit);
+        try d.processSource(tc, source, builtinMacros, userDefinedMacros, fastExit, asmGenFn);
     }
 
     if (d.diagnostics.errors != 0) {
@@ -797,6 +807,65 @@ pub fn main(d: *Driver, tc: *Toolchain, args: []const []const u8, comptime fastE
         std.process.exit(0);
 }
 
+fn getRandomFilename(d: *Driver, buffer: *[std.fs.max_name_bytes]u8, extension: []const u8) ![]const u8 {
+    const randomBytesCount = 12;
+    const subPathLen = comptime std.fs.base64_encoder.calcSize(randomBytesCount);
+
+    var randomBytes: [randomBytesCount]u8 = undefined;
+    std.crypto.random.bytes(&randomBytes);
+    var randomName: [subPathLen]u8 = undefined;
+    _ = std.fs.base64_encoder.encode(&randomName, &randomBytes);
+
+    const fmtTemplate = "/tmp/{s}{s}";
+    const fmtArgs = .{
+        randomName,
+        extension,
+    };
+    return std.fmt.bufPrint(buffer, fmtTemplate, fmtArgs) catch return d.fatal("Filename too long for filesystem: " ++ fmtTemplate, fmtArgs);
+}
+
+/// If it's used, buf will either hold a filename or `/tmp/<12 random bytes with base-64 encoding>.<extension>`
+/// both of which should fit into max_name_bytes for all systems
+fn getOutFileName(d: *Driver, source: Source, buffer: *[std.fs.max_name_bytes]u8) ![]const u8 {
+    if (d.onlyCompile or d.onlyPreprocessAndCompile) {
+        const fmtTemplate = "{s}{s}";
+        const fmtArgs = .{
+            std.fs.path.stem(source.path),
+            if (d.onlyPreprocessAndCompile) ".s" else d.comp.target.ofmt.fileExt(d.comp.target.cpu.arch),
+        };
+        return d.outputName orelse
+            std.fmt.bufPrint(buffer, fmtTemplate, fmtArgs) catch return d.fatal("Filename too long for filesystem: " ++ fmtTemplate, fmtArgs);
+    }
+
+    return d.getRandomFilename(buffer, d.comp.target.ofmt.fileExt(d.comp.target.cpu.arch));
+}
+
+fn invokeAssembler(d: *Driver, tc: *Toolchain, inputPath: []const u8, outputPath: []const u8) !void {
+    var assemblerPathBuffer: [std.fs.max_path_bytes]u8 = undefined;
+    const assemblerPath = try tc.getAssemblerPath(&assemblerPathBuffer);
+    const argv = [_][]const u8{ assemblerPath, inputPath, "-o", outputPath };
+
+    var child = std.process.Child.init(&argv, d.comp.gpa);
+    // TODO handle better
+    child.stdin_behavior = .Inherit;
+    child.stdout_behavior = .Inherit;
+    child.stderr_behavior = .Inherit;
+
+    const term = child.spawnAndWait() catch |er| {
+        return d.fatal("unable to spawn linker: {s}", .{errorDescription(er)});
+    };
+    switch (term) {
+        .Exited => |code| if (code != 0) {
+            const e = d.fatal("assembler exited with an error code", .{});
+            return e;
+        },
+        else => {
+            const e = d.fatal("assembler crashed", .{});
+            return e;
+        },
+    }
+}
+
 fn processSource(
     d: *Driver,
     tc: *Toolchain,
@@ -804,6 +873,7 @@ fn processSource(
     builtinMacro: Source,
     userDefinedMacros: Source,
     comptime fastExit: bool,
+    asmGenFn: anytype,
 ) !void {
     d.comp.generatedBuffer.items.len = 0;
     const prevErrors = d.comp.diagnostics.errors;
@@ -917,72 +987,85 @@ fn processSource(
         );
     }
 
-    var ir = try tree.genIR();
-    defer ir.deinit(d.comp.gpa);
-
-    if (d.dumpIR) {
-        var stdoutBuffer: [4096]u8 = undefined;
-        var stdout = std.fs.File.stdout().writer(&stdoutBuffer);
-        ir.dump(d.comp.gpa, d.detectConfig(stdout.file), &stdout.interface) catch {};
-    }
-
-    var renderErrorList: IR.Renderer.ErrorList = .{};
-    defer {
-        for (renderErrorList.values()) |msg| d.comp.gpa.free(msg);
-        renderErrorList.deinit(d.comp.gpa);
-    }
-
-    var obj = ir.render(d.comp.gpa, d.comp.target, &renderErrorList) catch |e| switch (e) {
-        error.OutOfMemory => return error.OutOfMemory,
-        error.LowerFail => {
-            return d.fatal(
-                "unable to render Ir to machine code: {s}",
-                .{renderErrorList.values()[0]},
-            );
-        },
-    };
-    defer obj.deinit();
-
-    // If it's used, name_buf will either hold a filename or `/tmp/<12 random bytes with base-64 encoding>.<extension>`
-    // both of which should fit into MAX_NAME_BYTES for all systems
     var nameBuffer: [std.fs.max_name_bytes]u8 = undefined;
+    const outFileName = try d.getOutFileName(source, &nameBuffer);
 
-    const outFileName = if (d.onlyCompile) blk: {
-        const fmtTemplate = "{s}{s}";
-        const fmtArgs = .{
-            std.fs.path.stem(source.path),
-            d.comp.target.ofmt.fileExt(d.comp.target.cpu.arch),
+    if (d.comp.codegenOptions.optimizationLevel == .@"0") {
+        const assembly = asmGenFn(d.comp.target, &tree) catch |er| switch (er) {
+            error.CodegenFailed => {
+                d.exitWithCleanup(1);
+            },
+            else => |e| return e,
         };
-        break :blk d.outputName orelse std.fmt.bufPrint(&nameBuffer, fmtTemplate, fmtArgs) catch return d.fatal("Filename too long for filesystem: " ++ fmtTemplate, fmtArgs);
-    } else blk: {
-        const randomBytesCount = 12;
-        const subPathLen = comptime std.fs.base64_encoder.calcSize(randomBytesCount);
+        defer assembly.deinit(d.comp.gpa);
 
-        var randomBytes: [randomBytesCount]u8 = undefined;
-        std.crypto.random.bytes(&randomBytes);
-        var randomName: [subPathLen]u8 = undefined;
-        _ = std.fs.base64_encoder.encode(&randomName, &randomBytes);
+        if (d.onlyPreprocessAndCompile) {
+            const outFile = d.comp.cwd.createFile(outFileName, .{}) catch |er|
+                return d.fatal("unable to create output file '{s}': {s}", .{ outFileName, errorDescription(er) });
+            defer outFile.close();
 
-        const fmtTemplate = "/tmp/{s}{s}";
-        const fmtArgs = .{
-            randomName,
-            d.comp.target.ofmt.fileExt(d.comp.target.cpu.arch),
+            assembly.writeToFile(outFile) catch |er|
+                return d.fatal("unable to write to output file '{s}': {s}", .{ outFileName, errorDescription(er) });
+            if (fastExit) std.process.exit(0); // Not linking, no need for cleanup.
+            return;
+        }
+
+        // write to assembly outfile name
+        // then assemble to outfile name
+        var assemblyNameBuffer: [std.fs.max_name_bytes]u8 = undefined;
+        const assemblyOutfileName = try d.getRandomFilename(&assemblyNameBuffer, ".s");
+        const outFile = d.comp.cwd.createFile(assemblyOutfileName, .{}) catch |er|
+            return d.fatal("unable to create output file '{s}': {s}", .{ assemblyOutfileName, errorDescription(er) });
+        defer outFile.close();
+
+        assembly.writeToFile(outFile) catch |er|
+            return d.fatal("unable to write to output file '{s}': {s}", .{ assemblyOutfileName, errorDescription(er) });
+        try d.invokeAssembler(tc, assemblyOutfileName, outFileName);
+        if (d.onlyCompile) {
+            if (fastExit) std.process.exit(0); // Not linking, no need for cleanup.
+            return;
+        }
+    } else {
+        var ir = try tree.genIR();
+        defer ir.deinit(d.comp.gpa);
+
+        if (d.dumpIR) {
+            var stdoutBuffer: [4096]u8 = undefined;
+            var stdout = std.fs.File.stdout().writer(&stdoutBuffer);
+            ir.dump(d.comp.gpa, d.detectConfig(stdout.file), &stdout.interface) catch {};
+        }
+
+        var renderErrorList: IR.Renderer.ErrorList = .{};
+        defer {
+            for (renderErrorList.values()) |msg| d.comp.gpa.free(msg);
+            renderErrorList.deinit(d.comp.gpa);
+        }
+
+        var obj = ir.render(d.comp.gpa, d.comp.target, &renderErrorList) catch |e| switch (e) {
+            error.OutOfMemory => return error.OutOfMemory,
+            error.LowerFail => {
+                return d.fatal(
+                    "unable to render Ir to machine code: {s}",
+                    .{renderErrorList.values()[0]},
+                );
+            },
         };
-        break :blk std.fmt.bufPrint(&nameBuffer, fmtTemplate, fmtArgs) catch return d.fatal("Filename too long for filesystem: " ++ fmtTemplate, fmtArgs);
-    };
+        defer obj.deinit();
 
-    const outFile = std.fs.cwd().createFile(outFileName, .{}) catch |er|
-        return d.fatal("unable to create output file '{s}': {s}", .{ outFileName, errorDescription(er) });
-    defer outFile.close();
+        // If it's used, name_buf will either hold a filename or `/tmp/<12 random bytes with base-64 encoding>.<extension>`
+        // both of which should fit into MAX_NAME_BYTES for all systems
+        const outFile = std.fs.cwd().createFile(outFileName, .{}) catch |er|
+            return d.fatal("unable to create output file '{s}': {s}", .{ outFileName, errorDescription(er) });
+        defer outFile.close();
 
-    var fileBuffer: [4096]u8 = undefined;
-    var fileWriter = outFile.writer(&fileBuffer);
-    obj.finish(&fileWriter.interface) catch
-        return d.fatal("could not output to object file '{s}': {s}", .{ outFileName, errorDescription(fileWriter.err.?) });
+        var fileBuffer: [4096]u8 = undefined;
+        var fileWriter = outFile.writer(&fileBuffer);
+        obj.finish(&fileWriter.interface) catch
+            return d.fatal("could not output to object file '{s}': {s}", .{ outFileName, errorDescription(fileWriter.err.?) });
+    }
 
-    if (d.onlyCompile) {
-        if (fastExit)
-            std.process.exit(0); // Not linking, no need clean up.
+    if (d.onlyCompile or d.onlyPreprocessAndCompile) {
+        if (fastExit) std.process.exit(0); // Not linking, no need clean up.
         return;
     }
 

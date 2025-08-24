@@ -151,12 +151,12 @@ pub const QualType = packed struct(u32) {
         return .{ ._index = qt._index };
     }
 
-    pub fn withQualifiers(target: QualType, quals_from: QualType) QualType {
+    pub fn withQualifiers(target: QualType, qualsFrom: QualType) QualType {
         return .{
             ._index = target._index,
-            .@"const" = quals_from.@"const",
-            .@"volatile" = quals_from.@"volatile",
-            .restrict = quals_from.restrict,
+            .@"const" = qualsFrom.@"const",
+            .@"volatile" = qualsFrom.@"volatile",
+            .restrict = qualsFrom.restrict,
         };
     }
 
@@ -868,7 +868,7 @@ pub const QualType = packed struct(u32) {
     pub fn promoteInt(qt: QualType, comp: *const Compilation) QualType {
         return loop: switch (qt.base(comp).type) {
             .bool => return .int,
-            .@"enum" => |enum_ty| continue :loop enum_ty.tag.base(comp).type,
+            .@"enum" => |enumTy| continue :loop enumTy.tag.base(comp).type,
             .bitInt => return qt,
             .complex => return qt, // Assume complex integer type
             .int => |intTy| switch (intTy) {
@@ -1245,7 +1245,7 @@ pub const QualType = packed struct(u32) {
             .void => try w.writeAll("void"),
             .bool => try w.writeAll(if (comp.langOpts.standard.atLeast(.c23)) "bool" else "_Bool"),
             .nullptrTy => try w.writeAll("nullptr_t"),
-            .int => |int_ty| switch (int_ty) {
+            .int => |intType| switch (intType) {
                 .Char => try w.writeAll("char"),
                 .SChar => try w.writeAll("signed char"),
                 .UChar => try w.writeAll("unsigned char"),
@@ -1290,13 +1290,13 @@ pub const QualType = packed struct(u32) {
                 try w.writeAll("' values)");
             },
 
-            .@"struct" => |struct_ty| try w.print("struct {s}", .{struct_ty.name.lookup(comp)}),
-            .@"union" => |union_ty| try w.print("union {s}", .{union_ty.name.lookup(comp)}),
-            .@"enum" => |enum_ty| if (enum_ty.fixed) {
-                try w.print("enum {s}: ", .{enum_ty.name.lookup(comp)});
-                _ = try enum_ty.tag.printPrologue(comp, w);
+            .@"struct" => |structTy| try w.print("struct {s}", .{structTy.name.lookup(comp)}),
+            .@"union" => |unionTy| try w.print("union {s}", .{unionTy.name.lookup(comp)}),
+            .@"enum" => |enumTy| if (enumTy.fixed) {
+                try w.print("enum {s}: ", .{enumTy.name.lookup(comp)});
+                _ = try enumTy.tag.printPrologue(comp, w);
             } else {
-                try w.print("enum {s}", .{enum_ty.name.lookup(comp)});
+                try w.print("enum {s}", .{enumTy.name.lookup(comp)});
             },
         }
         return true;

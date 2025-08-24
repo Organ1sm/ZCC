@@ -21,6 +21,7 @@ pub const CallingConvention = backend.CallingConvention;
 pub const IR = backend.Ir;
 pub const Interner = backend.Interner;
 pub const Object = backend.Object;
+pub const Assembly = backend.Assembly;
 
 pub const VersionStr = backend.VersionStr;
 pub const version = backend.Version;

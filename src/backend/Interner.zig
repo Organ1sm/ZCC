@@ -119,8 +119,8 @@ pub const Key = union(enum) {
                 std.hash.autoHash(&hasher, big.positive);
                 for (big.limbs) |limb| std.hash.autoHash(&hasher, limb);
             },
-            inline else => |a_info| {
-                std.hash.autoHash(&hasher, a_info);
+            inline else => |aInfo| {
+                std.hash.autoHash(&hasher, aInfo);
             },
         }
         return @truncate(hasher.final());
@@ -380,10 +380,10 @@ pub const Tag = enum(u8) {
         piece2: u32, // u16 part, top bits
 
         pub fn get(self: F80) f80 {
-            const int_bits = @as(u80, self.piece0) |
+            const intBits = @as(u80, self.piece0) |
                 (@as(u80, self.piece1) << 32) |
                 (@as(u80, self.piece2) << 64);
-            return @bitCast(int_bits);
+            return @bitCast(intBits);
         }
 
         fn pack(val: f80) F80 {
@@ -403,11 +403,11 @@ pub const Tag = enum(u8) {
         piece3: u32,
 
         pub fn get(self: F128) f128 {
-            const int_bits = @as(u128, self.piece0) |
+            const intBits = @as(u128, self.piece0) |
                 (@as(u128, self.piece1) << 32) |
                 (@as(u128, self.piece2) << 64) |
                 (@as(u128, self.piece3) << 96);
-            return @bitCast(int_bits);
+            return @bitCast(intBits);
         }
 
         fn pack(val: f128) F128 {
@@ -898,8 +898,8 @@ fn extraData(interner: *const Interner, comptime T: type, index: usize) T {
 fn extraDataTrail(interner: *const Interner, comptime T: type, index: usize) struct { data: T, end: u32 } {
     var result: T = undefined;
     const fields = @typeInfo(T).@"struct".fields;
-    inline for (fields, 0..) |field, field_i| {
-        const int32 = interner.extra.items[field_i + index];
+    inline for (fields, 0..) |field, fieldIdx| {
+        const int32 = interner.extra.items[fieldIdx + index];
         @field(result, field.name) = switch (field.type) {
             Ref => @enumFromInt(int32),
             u32 => int32,

@@ -1166,8 +1166,8 @@ fn genBoolExpr(c: *CodeGen, base: Node.Index, trueLabel: IR.Ref, falseLabel: IR.
     try c.addBranch(cmp, trueLabel, falseLabel);
 }
 
-fn genBuiltinCall(c: *CodeGen, builtin: Builtin, arg_nodes: []const Node.Index, ty: QualType) Error!IR.Ref {
-    _ = arg_nodes;
+fn genBuiltinCall(c: *CodeGen, builtin: Builtin, argNodes: []const Node.Index, ty: QualType) Error!IR.Ref {
+    _ = argNodes;
     _ = ty;
     return c.fail("TODO CodeGen.genBuiltinCall {s}\n", .{Builtin.nameFromTag(builtin.tag).span()});
 }

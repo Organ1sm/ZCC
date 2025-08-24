@@ -511,6 +511,12 @@ pub fn toInt(v: Value, comptime T: type, comp: *const Compilation) ?T {
     return bigInt.toInt(T) catch null;
 }
 
+pub fn toBytes(v: Value, comp: *const Compilation) []const u8 {
+    assert(!v.isNone());
+    const key = comp.interner.get(v.ref());
+    return key.bytes;
+}
+
 const ComplexOp = enum {
     add,
     sub,

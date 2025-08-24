@@ -137,9 +137,9 @@ pub const Builder = struct {
         const @"switch" = try a.create(IR.Inst.Switch);
         @"switch".* = .{
             .target = target,
-            .cases_len = @intCast(values.len),
-            .case_vals = (try a.dupe(Interner.Ref, values)).ptr,
-            .case_labels = (try a.dupe(Ref, labels)).ptr,
+            .casesLen = @intCast(values.len),
+            .caseVals = (try a.dupe(Interner.Ref, values)).ptr,
+            .caseLabels = (try a.dupe(Ref, labels)).ptr,
             .default = default,
         };
         _ = try b.addInst(.Switch, .{ .@"switch" = @"switch" }, .noreturn);
