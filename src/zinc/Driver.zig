@@ -98,6 +98,8 @@ zincName: []const u8 = "",
 
 /// Value of --triple= passed via CLI
 rawTargetTriple: ?[]const u8 = null,
+/// Non-optimizing assembly backend is currently selected by passing `-O0`
+useAssemblyBackend: bool = false,
 
 // linker options
 useLinker: ?[]const u8 = null,
@@ -303,11 +305,14 @@ pub fn parseArgs(
                     macro = args[i];
                 }
                 try macroBuffer.print(d.comp.gpa, "#undef {s} \n", .{macro});
+            } else if (mem.eql(u8, arg, "-O")) {
+                d.comp.codegenOptions.optimizationLevel = .@"0";
             } else if (mem.startsWith(u8, arg, "-O")) {
                 d.comp.codegenOptions.optimizationLevel = backend.CodeGenOptions.OptimizationLevel.fromString(arg["-O".len..]) orelse {
                     try d.err("invalid optimization level '{s}'", .{arg});
                     continue;
                 };
+                d.useAssemblyBackend = d.comp.codegenOptions.optimizationLevel == .@"0";
             } else if (mem.eql(u8, arg, "-undef")) {
                 d.systemDefines = .NoSystemDefines;
             } else if (std.mem.eql(u8, arg, "-c") or std.mem.eql(u8, arg, "--compile")) {
@@ -990,7 +995,7 @@ fn processSource(
     var nameBuffer: [std.fs.max_name_bytes]u8 = undefined;
     const outFileName = try d.getOutFileName(source, &nameBuffer);
 
-    if (d.comp.codegenOptions.optimizationLevel == .@"0") {
+    if (d.useAssemblyBackend) {
         const assembly = asmGenFn(d.comp.target, &tree) catch |er| switch (er) {
             error.CodegenFailed => {
                 d.exitWithCleanup(1);

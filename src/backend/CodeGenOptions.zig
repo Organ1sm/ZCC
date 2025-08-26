@@ -15,7 +15,6 @@ optimizationLevel: OptimizationLevel,
 debug: bool,
 
 pub const OptimizationLevel = enum {
-    unspecified,
     @"0",
     @"1",
     @"2",
@@ -61,6 +60,6 @@ pub const default: @This() = .{
     .dataSections = false,
     .picLevel = .none,
     .isPie = false,
-    .optimizationLevel = .unspecified,
+    .optimizationLevel = .@"0",
     .debug = false,
 };
