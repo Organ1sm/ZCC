@@ -5,6 +5,7 @@ const process = std.process;
 const StaticStringSet = std.StaticStringMap(void);
 
 const backend = @import("backend");
+const Assembly = backend.Assembly;
 const IR = backend.Ir;
 const Object = backend.Object;
 
@@ -18,6 +19,9 @@ const Preprocessor = @import("Lexer/Preprocessor.zig");
 const Source = @import("Basic/Source.zig");
 const Target = @import("Basic/Target.zig");
 const Toolchain = @import("Toolchain.zig");
+const Tree = @import("AST/AST.zig");
+
+const AsmCodeGenFn = fn (target: std.Target, tree: *const Tree) Compilation.Error!Assembly;
 
 const PicRelatedOptions = StaticStringSet.initComptime(.{
     .{"-fpic"},
@@ -741,7 +745,7 @@ pub fn errorDescription(e: anyerror) []const u8 {
 
 /// The entry point of the Zinc compiler.
 /// **MAY call `exit` if `fast_exit` is set.**
-pub fn main(d: *Driver, tc: *Toolchain, args: []const []const u8, comptime fastExit: bool, asmGenFn: anytype) !void {
+pub fn main(d: *Driver, tc: *Toolchain, args: []const []const u8, comptime fastExit: bool, asmGenFn: ?AsmCodeGenFn) !void {
     const userDefinedMacros = macros: {
         var macroBuffer: std.ArrayList(u8) = .empty;
         defer macroBuffer.deinit(d.comp.gpa);
@@ -878,7 +882,7 @@ fn processSource(
     builtinMacro: Source,
     userDefinedMacros: Source,
     comptime fastExit: bool,
-    asmGenFn: anytype,
+    asmGenFn: ?AsmCodeGenFn,
 ) !void {
     d.comp.generatedBuffer.items.len = 0;
     const prevErrors = d.comp.diagnostics.errors;
@@ -996,12 +1000,10 @@ fn processSource(
     const outFileName = try d.getOutFileName(source, &nameBuffer);
 
     if (d.useAssemblyBackend) {
-        const assembly = asmGenFn(d.comp.target, &tree) catch |er| switch (er) {
-            error.CodegenFailed => {
-                d.exitWithCleanup(1);
-            },
-            else => |e| return e,
-        };
+        const asmFn = asmGenFn orelse
+            return d.fatal("Assembly codegen not supported", .{});
+
+        const assembly = try asmFn(d.comp.target, &tree);
         defer assembly.deinit(d.comp.gpa);
 
         if (d.onlyPreprocessAndCompile) {
