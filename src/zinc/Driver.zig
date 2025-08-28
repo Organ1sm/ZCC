@@ -745,7 +745,13 @@ pub fn errorDescription(e: anyerror) []const u8 {
 
 /// The entry point of the Zinc compiler.
 /// **MAY call `exit` if `fast_exit` is set.**
-pub fn main(d: *Driver, tc: *Toolchain, args: []const []const u8, comptime fastExit: bool, asmGenFn: ?AsmCodeGenFn) !void {
+pub fn main(
+    d: *Driver,
+    tc: *Toolchain,
+    args: []const []const u8,
+    comptime fastExit: bool,
+    asmGenFn: ?AsmCodeGenFn,
+) Compilation.Error !void {
     const userDefinedMacros = macros: {
         var macroBuffer: std.ArrayList(u8) = .empty;
         defer macroBuffer.deinit(d.comp.gpa);
