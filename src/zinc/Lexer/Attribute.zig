@@ -1080,13 +1080,20 @@ pub fn applyStatementAttributes(p: *Parser, exprStart: TokenIndex, attrBufferSta
     p.attrApplicationBuffer.items.len = 0;
 
     for (attrs, toks) |attr, tok| switch (attr.tag) {
-        .fallthrough => if (p.currToken() != .KeywordCase and p.currToken() != .KeywordDefault) {
-            // TODO: this condition is not completely correct; the last statement of a compound
-            // statement is also valid if it precedes a switch label (so intervening '}' are ok,
-            // but only if they close a compound statement)
-            try p.err(.invalid_fallthrough, exprStart, .{});
-        } else {
-            try p.attrApplicationBuffer.append(p.comp.gpa, attr);
+        .fallthrough => {
+            for (p.tokenIds[p.tokenIdx..]) |tokenId| {
+                switch (tokenId) {
+                    .KeywordCase, .KeywordDefault, .Eof => {
+                        try p.attrApplicationBuffer.append(p.comp.gpa, attr);
+                        break;
+                    },
+                    .RBrace => {},
+                    else => {
+                        try p.err(.invalid_fallthrough, exprStart, .{});
+                        break;
+                    },
+                }
+            }
         },
         else => try p.err(.cannot_apply_attribute_to_statement, tok, .{@tagName(attr.tag)}),
     };

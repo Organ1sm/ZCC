@@ -95,7 +95,7 @@ pub fn pointer(r: Interner.Key.Pointer, comp: *Compilation) !Value {
 }
 
 pub fn ref(v: Value) Interner.Ref {
-    std.debug.assert(v.optRef != .none);
+    std.debug.assert(!v.isNone());
     return @enumFromInt(@intFromEnum(v.optRef));
 }
 
