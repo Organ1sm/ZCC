@@ -1,4 +1,4 @@
-//zinc-args -std=c23
+//zinc-args -std=c23 --target=x86_64-linux-gnu
 auto a();
 
 void bad() {

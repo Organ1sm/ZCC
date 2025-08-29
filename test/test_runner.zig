@@ -482,7 +482,7 @@ pub fn main() !void {
             const expectedOutput = buffer.items;
 
             const objName = "testObject.o";
-            if (true) break :blk;
+            if (true) @panic("no backend available");
             // {
             // const obj = try CodeGen.generateTree(&comp, tree);
             // defer obj.deinit();
