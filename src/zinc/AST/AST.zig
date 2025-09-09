@@ -3473,10 +3473,7 @@ fn dumpNode(
 
             var baseQualTy = access.base.qt(tree);
             if (baseQualTy.get(tree.comp, .pointer)) |some| baseQualTy = some.child;
-            const fields = switch (baseQualTy.base(tree.comp).type) {
-                .@"struct", .@"union" => |record| record.fields,
-                else => unreachable,
-            };
+            const fields = (baseQualTy.getRecord(tree.comp) orelse return).fields;
 
             try w.splatByteAll(' ', level + 1);
             try w.writeAll("name: ");
