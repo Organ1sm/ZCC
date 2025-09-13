@@ -869,6 +869,8 @@ pub fn applyVariableAttributes(p: *Parser, qt: QualType, attrBufferStart: usize,
         .tls_model,
         .visibility,
         => |t| try p.err(.attribute_todo, tok, .{ @tagName(t), "variables" }),
+
+        .noreturn => if (attr.syntax != .keyword) try ignoredAttrErr(p, tok, attr.tag, "variables"),
         else => try ignoredAttrErr(p, tok, attr.tag, "variables"),
     };
 

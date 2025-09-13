@@ -1944,7 +1944,7 @@ fn parseInitDeclarator(
     var applyVarAttributes = false;
     if (declSpec.storageClass == .typedef) {
         ID.d.qt = try Attribute.applyTypeAttributes(p, ID.d.qt, attrBufferTop, null);
-    } else if (ID.d.declaratorType == .func and ID.d.qt.is(p.comp, .func)) {
+    } else if (ID.d.declaratorType == .func or ID.d.qt.is(p.comp, .func)) {
         ID.d.qt = try Attribute.applyFunctionAttributes(p, ID.d.qt, attrBufferTop);
     } else {
         applyVarAttributes = true;
