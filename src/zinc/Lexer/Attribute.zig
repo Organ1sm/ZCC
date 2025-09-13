@@ -574,6 +574,7 @@ const attributes = struct {
     pub const nonstring = struct {};
     pub const noplt = struct {};
     pub const @"noreturn" = struct {};
+    pub const nothrow = struct {};
     // TODO: union args ?
     //    const optimize = struct {
     //            optimize, // u32 | []const u8 -- optimize?
@@ -951,7 +952,7 @@ pub fn applyFunctionAttributes(p: *Parser, qt: QualType, attrBufferStart: usize)
         .noreturn, .unused, .used, .warning, .deprecated, .unavailable, .weak, .pure, .leaf,
         .@"const", .warn_unused_result, .section, .returns_nonnull, .returns_twice, .@"error",
         .externally_visible, .retain, .flatten, .gnu_inline, .alias, .asm_label, .nodiscard,
-        .reproducible, .unsequenced,
+        .reproducible, .unsequenced, .nothrow,
          => try p.attrApplicationBuffer.append(gpa, attr),
         // zig fmt: on
 
