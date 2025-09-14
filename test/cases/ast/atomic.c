@@ -50,8 +50,14 @@ variable: '_Atomic(int *)'
 variable: '_Atomic(int (*)[2])'
  name: j
 
+variable: '_Atomic(int)'
+ name: k
+
+variable: 'invalid'
+ name: l
+
 fnDef: 'fn () void'
- name: test_func
+ name: test_coerce
  body:
   compoundStmt
     variable: '_Atomic(int)'
@@ -111,12 +117,49 @@ fnDef: 'fn () void'
           declRefExpr: '_Atomic(int)' lvalue
            name: a
 
+    implicit returnStmt: 'void'
+
+fnDef: 'fn () void'
+ name: test_member_access
+ body:
+  compoundStmt
     structDecl: 'struct B'
       recordField: 'int'
        name: a
 
     variable: '_Atomic(struct B)'
-     name: s
+     name: a
+
+    variable: '_Atomic(struct B *)'
+     name: b
+
+    variable: '*_Atomic(struct B)'
+     name: c
+
+    memberAccessExpr: 'int' lvalue
+     lhs:
+      declRefExpr: '_Atomic(struct B)' lvalue
+       name: a
+
+    memberAccessExpr: 'int' lvalue
+     lhs:
+      declRefExpr: '_Atomic(struct B *)' lvalue
+       name: b
+
+    memberAccessPtrExpr: 'int' lvalue
+     lhs:
+      declRefExpr: '_Atomic(struct B *)' lvalue
+       name: b
+
+    memberAccessExpr: 'int' lvalue
+     lhs:
+      declRefExpr: '*_Atomic(struct B)' lvalue
+       name: c
+
+    memberAccessPtrExpr: 'int' lvalue
+     lhs:
+      declRefExpr: '*_Atomic(struct B)' lvalue
+       name: c
 
     implicit returnStmt: 'void'
 
