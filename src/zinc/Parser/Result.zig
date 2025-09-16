@@ -380,7 +380,10 @@ pub fn adjustTypes(lhs: *Result, token: TokenIndex, rhs: *Result, p: *Parser, ki
             if (rhsSK == .NullptrTy) try rhs.nullToPointer(p, .voidPointer, token);
 
             if (lhsSK.isPointer() and rhsSK.isPointer()) {
-                if (!lhs.qt.eql(rhs.qt, p.comp))
+                const lhsChildQt = lhs.qt.get(p.comp, .pointer).?.child;
+                const rhsChildQt = rhs.qt.get(p.comp, .pointer).?.child;
+
+                if (!lhsChildQt.eql(rhsChildQt, p.comp))
                     try p.err(.incompatible_pointers, token, .{ lhs.qt, rhs.qt });
 
                 if (lhs.qt.childType(p.comp).sizeofOrNull(p.comp) orelse 1 == 0)
