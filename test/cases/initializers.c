@@ -206,5 +206,5 @@ void array_members(void) {
     "initializers.c:131:15: warning: incompatible pointer types initializing 'long *' from incompatible type 'int *' [-Wincompatible-pointer-types]" \
     "initializers.c:132:23: warning: incompatible pointer types initializing 'unsigned int *' from incompatible type 'int *' converts between pointers to integer types with different sign [-Wpointer-sign]" \
     "initializers.c:149:35: error: array designator used for non-array type 'struct S'" \
-    "initializers.c:151:30: warning: implicit pointer to integer conversion from 'char *' to 'int' [-Wint-conversion]" \
+    "initializers.c:151:30: warning: implicit pointer to integer conversion from 'char [4]' to 'int' [-Wint-conversion]" \
 

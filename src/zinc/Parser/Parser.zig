@@ -387,6 +387,8 @@ pub fn err(p: *Parser, diagnostic: Diagnostic, tokenIdx: TokenIndex, args: anyty
     var allocating: std.Io.Writer.Allocating = .init(sf.get());
     defer allocating.deinit();
 
+    p.formatArgs(&allocating.writer, diagnostic.fmt, args) catch return error.OutOfMemory;
+
     const tok = p.pp.tokens.get(tokenIdx);
     var loc = tok.loc;
     if (tokenIdx != 0 and tok.is(.Eof)) {
@@ -395,8 +397,6 @@ pub fn err(p: *Parser, diagnostic: Diagnostic, tokenIdx: TokenIndex, args: anyty
         loc = prev.loc;
         loc.byteOffset += @intCast(p.getTokenText(tokenIdx - 1).len);
     }
-
-    p.formatArgs(&allocating.writer, diagnostic.fmt, args) catch return error.OutOfMemory;
 
     try p.diagnostics.addWithLocation(p.comp, .{
         .kind = diagnostic.kind,
@@ -4002,7 +4002,7 @@ pub fn initializerItem(p: *Parser, il: *InitList, initQt: QualType) Error!bool {
                     try p.err(.expected_integer_constant_expr, exprToken, .{});
                     return error.ParsingFailed;
                 } else if (indexRes.value.compare(.lt, .zero, p.comp)) {
-                    try p.err(.negative_array_designator, lb + 1, .{indexRes});
+                    try p.err(.negative_array_designator, lbr + 1, .{indexRes});
                     return error.ParsingFailed;
                 }
 
