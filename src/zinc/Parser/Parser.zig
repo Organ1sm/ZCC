@@ -4063,8 +4063,10 @@ pub fn initializerItem(p: *Parser, il: *InitList, initQt: QualType) Error!bool {
         if (designation) indexHint = null;
         defer indexHint = curIndexHint orelse null;
 
-        if (designation)
-            _ = try p.expectToken(.Equal);
+        if (designation) {
+            if (p.eat(.Equal) == null)
+                try p.err(.gnu_missing_eq_designator, p.tokenIdx, .{});
+        }
 
         if (!designation and curQt.hasAttribute(p.comp, .designated_init))
             try p.err(.designated_init_needed, p.tokenIdx, .{});
