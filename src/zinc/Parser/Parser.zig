@@ -5045,6 +5045,16 @@ fn parseIfStmt(p: *Parser, kwIf: TokenIndex) Error!Node.Index {
 
     const thenBody = try p.parseStmt();
     const elseBody = if (p.eat(.KeywordElse)) |_| try p.parseStmt() else null;
+    if (p.nodeIs(thenBody, .nullStmt) and elseBody == null) {
+        const semicolon = thenBody.get(&p.tree).nullStmt.semicolonOrRbraceToken;
+        const locs = p.pp.tokens.items(.loc);
+        const ifLoc = locs[kwIf];
+        const semiLoc = locs[semicolon];
+        if (ifLoc.line == semiLoc.line) {
+            try p.err(.empty_if_body, semicolon, .{});
+            try p.err(.empty_if_body_note, semicolon, .{});
+        }
+    }
 
     return try p.addNode(.{
         .ifStmt = .{
