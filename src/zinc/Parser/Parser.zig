@@ -5136,8 +5136,8 @@ fn parseForStmt(p: *Parser, kwFor: TokenIndex) Error!Node.Index {
     return p.addNode(.{
         .forStmt = .{
             .forToken = kwFor,
-            .init = if (init) |some|
-                .{ .expr = some }
+            .init = if (declBufferTop == p.declBuffer.items.len)
+                .{ .expr = init }
             else
                 .{ .decls = p.declBuffer.items[declBufferTop..] },
             .cond = cond,
