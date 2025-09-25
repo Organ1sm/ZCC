@@ -8171,7 +8171,13 @@ fn makePredefinedIdentifier(p: *Parser, slice: []const u8) !Result {
 
     const val = try Value.intern(p.comp, .{ .bytes = slice });
 
-    const strLit = try p.addNode(.{ .stringLiteralExpr = .{ .qt = arrayQt, .literalToken = p.tokenIdx } });
+    const strLit = try p.addNode(.{
+        .stringLiteralExpr = .{
+            .qt = arrayQt,
+            .literalToken = p.tokenIdx,
+            .kind = .ascii,
+        },
+    });
     if (!p.inMacro) try p.tree.valueMap.put(gpa, strLit, val);
 
     return .{
@@ -8553,7 +8559,7 @@ fn parseCharLiteral(p: *Parser) Error!?Result {
         return .{
             .qt = .int,
             .value = .zero,
-            .node = try p.addNode(.{ .charLiteral = .{ .qt = .int, .literalToken = p.tokenIdx } }),
+            .node = try p.addNode(.{ .charLiteral = .{ .qt = .int, .literalToken = p.tokenIdx, .kind = .ascii } }),
         };
     };
 
@@ -8646,7 +8652,13 @@ fn parseCharLiteral(p: *Parser) Error!?Result {
     const res: Result = .{
         .qt = if (p.inMacro) macroQt else charliteralQt,
         .value = try Value.int(val, p.comp),
-        .node = try p.addNode(.{ .charLiteral = .{ .qt = charliteralQt, .literalToken = p.tokenIdx } }),
+        .node = try p.addNode(.{ .charLiteral = .{ .qt = charliteralQt, .literalToken = p.tokenIdx, .kind = switch (charKind) {
+            .char, .unterminated => .ascii,
+            .wide => .wide,
+            .utf8 => .utf8,
+            .utf16 => .utf16,
+            .utf32 => .utf32,
+        } } }),
     };
 
     if (!p.inMacro) try p.tree.valueMap.put(gpa, res.node, res.value);
@@ -8779,6 +8791,13 @@ fn parseStringLiteral(p: *Parser) Error!Result {
             .stringLiteralExpr = .{
                 .literalToken = stringStart,
                 .qt = arrayQt,
+                .kind = switch (stringKind) {
+                    .char, .unterminated => .ascii,
+                    .wide => .wide,
+                    .utf8 => .utf8,
+                    .utf16 => .utf16,
+                    .utf32 => .utf32,
+                },
             },
         }),
     };

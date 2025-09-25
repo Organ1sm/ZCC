@@ -276,10 +276,10 @@ pub const Node = union(enum) {
     /// integer literal, always unsigned
     intLiteral: Literal,
     /// Same as int_literal, but originates from a char literal
-    charLiteral: Literal,
+    charLiteral: CharLiteral,
     /// a floating point literal
     floatLiteral: Literal,
-    stringLiteralExpr: Literal,
+    stringLiteralExpr: CharLiteral,
     /// wraps a float or double literal: un
     imaginaryLiteral: Unary,
     /// A compound literal (type){ init }
@@ -618,6 +618,18 @@ pub const Node = union(enum) {
     pub const Literal = struct {
         literalToken: TokenIndex,
         qt: QualType,
+    };
+
+    pub const CharLiteral = struct {
+        literalToken: TokenIndex,
+        qt: QualType,
+        kind: enum {
+            ascii,
+            wide,
+            utf8,
+            utf16,
+            utf32,
+        },
     };
 
     pub const CompoundLiteral = struct {
@@ -1447,6 +1459,7 @@ pub const Node = union(enum) {
                     .charLiteral = .{
                         .literalToken = nodeToken,
                         .qt = @bitCast(nodeData[0]),
+                        .kind = @enumFromInt(nodeData[1]),
                     },
                 },
                 .FloatLiteral => .{
@@ -1459,6 +1472,7 @@ pub const Node = union(enum) {
                     .stringLiteralExpr = .{
                         .literalToken = nodeToken,
                         .qt = @bitCast(nodeData[0]),
+                        .kind = @enumFromInt(nodeData[1]),
                     },
                 },
                 .ImaginaryLiteral => .{
@@ -2496,6 +2510,7 @@ pub fn setNode(tree: *Tree, index: usize, node: Node) !void {
         .charLiteral => |literal| {
             repr.tag = .CharLiteral;
             repr.data[0] = @bitCast(literal.qt);
+            repr.data[1] = @intFromEnum(literal.kind);
             repr.tok = literal.literalToken;
         },
         .floatLiteral => |literal| {
@@ -2506,6 +2521,7 @@ pub fn setNode(tree: *Tree, index: usize, node: Node) !void {
         .stringLiteralExpr => |literal| {
             repr.tag = .StringLiteralExpr;
             repr.data[0] = @bitCast(literal.qt);
+            repr.data[1] = @intFromEnum(literal.kind);
             repr.tok = literal.literalToken;
         },
         .imaginaryLiteral => |un| {
