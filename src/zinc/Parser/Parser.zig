@@ -740,6 +740,7 @@ fn addImplicitTypedef(p: *Parser, name: []const u8, qt: QualType) !void {
     const typedefQt = (try p.comp.typeStore.put(gpa, .{ .typedef = .{
         .base = qt,
         .name = internedName,
+        .declNode = node,
     } })).withQualifiers(qt);
     try p.symStack.defineTypedef(internedName, typedefQt, nameToken, node);
     try p.declBuffer.append(gpa, node);
@@ -1360,6 +1361,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
                 (try p.comp.typeStore.put(gpa, .{ .typedef = .{
                     .base = initDeclarator.d.qt,
                     .name = internedName,
+                    .declNode = declNode,
                 } })).withQualifiers(initDeclarator.d.qt);
 
             try p.symStack.defineTypedef(internedName, typedefQt, initDeclarator.d.name, declNode);
@@ -2319,6 +2321,8 @@ fn parseRecordSpec(p: *Parser) Error!QualType {
 
     try p.parseAttrSpec();
 
+    const reservedIndex = try p.tree.nodes.addOne(gpa);
+
     const maybeIdent = try p.eatIdentifier();
     const lb = p.eat(.LBrace) orelse {
         const ident = maybeIdent orelse {
@@ -2335,6 +2339,7 @@ fn parseRecordSpec(p: *Parser) Error!QualType {
             const recordTy: Type.Record = .{
                 .name = internedName,
                 .layout = null,
+                .declNode = @enumFromInt(reservedIndex),
                 .fields = &.{},
             };
             const recordQt = try p.comp.typeStore.put(gpa, if (isStruct)
@@ -2356,10 +2361,11 @@ fn parseRecordSpec(p: *Parser) Error!QualType {
                 .containerQt = attributedQt,
                 .definition = null,
             };
-            try p.declBuffer.append(gpa, try p.addNode(if (isStruct)
+            try p.tree.setNode(reservedIndex, if (isStruct)
                 .{ .structForwardDecl = fw }
             else
-                .{ .unionForwardDecl = fw }));
+                .{ .unionForwardDecl = fw });
+            try p.declBuffer.append(gpa, @enumFromInt(reservedIndex));
             return attributedQt;
         }
     };
@@ -2389,6 +2395,7 @@ fn parseRecordSpec(p: *Parser) Error!QualType {
         // can be specified after the closing rbrace, which we haven't encountered yet.
         const recordTy: Type.Record = .{
             .name = internedName,
+            .declNode = @enumFromInt(reservedIndex),
             .layout = null,
             .fields = &.{},
         };
@@ -2411,8 +2418,7 @@ fn parseRecordSpec(p: *Parser) Error!QualType {
         break :blk .{ recordTy, recordQt };
     };
 
-    // reserve space for this record
-    try p.declBuffer.append(gpa, undefined);
+    try p.declBuffer.append(gpa, @enumFromInt(reservedIndex));
     const declBufferTop = p.declBuffer.items.len;
     const recordBufferTop = p.recordBuffer.items.len;
 
@@ -2468,6 +2474,7 @@ fn parseRecordSpec(p: *Parser) Error!QualType {
             .pointerAlignmentBits = 8,
             .requiredAlignmentBits = 8,
         };
+        recordType.declNode = @enumFromInt(reservedIndex);
 
         const baseType = qt.base(p.comp);
         if (isStruct) {
@@ -2514,6 +2521,7 @@ fn parseRecordSpec(p: *Parser) Error!QualType {
         const fieldSize = 10;
         comptime std.debug.assert(@sizeOf(Type.Record.Field) == @sizeOf(u32) * fieldSize);
 
+        extraIndex += 1; // For declNode
         const castedLayout: *const [layoutSize]u32 = @ptrCast(&recordType.layout);
         ts.extra.items[extraIndex..][0..layoutSize].* = castedLayout.*;
         extraIndex += layoutSize;
@@ -2533,7 +2541,7 @@ fn parseRecordSpec(p: *Parser) Error!QualType {
         .fields = p.declBuffer.items[declBufferTop..],
     };
 
-    p.declBuffer.items[declBufferTop - 1] = try p.addNode(if (isStruct) .{ .structDecl = cd } else .{ .unionDecl = cd });
+    try p.tree.setNode(reservedIndex, if (isStruct) .{ .structDecl = cd } else .{ .unionDecl = cd });
     if (p.func.qt == null)
         _ = p.tentativeDefs.remove(recordType.name);
 
@@ -2795,8 +2803,8 @@ fn checkEnumFixedTy(p: *Parser, fixedQt: ?QualType, identToken: TokenIndex, prev
             return error.ParsingFailed;
         }
 
-        if (!enumTy.tag.eql(some, p.comp)) {
-            try p.err(.enum_different_explicit_ty, identToken, .{ some, enumTy.tag });
+        if (!enumTy.tag.?.eql(some, p.comp)) {
+            try p.err(.enum_different_explicit_ty, identToken, .{ some, enumTy.tag.? });
             try p.err(.previous_definition, prev.token, .{});
             return error.ParsingFailed;
         }
@@ -2844,6 +2852,8 @@ fn parseEnumSpec(p: *Parser) Error!QualType {
         break :fixed fixed;
     } else null;
 
+    const reservedIndex = try p.tree.nodes.addOne(gpa);
+
     const lb = p.eat(.LBrace) orelse {
         const ident = maybeIdent orelse {
             try p.err(.ident_or_l_brace, p.tokenIdx, .{});
@@ -2860,9 +2870,10 @@ fn parseEnumSpec(p: *Parser) Error!QualType {
             // this is a forward declaration
             const enumQt = try p.comp.typeStore.put(gpa, .{ .@"enum" = .{
                 .name = internedName,
-                .tag = fixedQt orelse .int,
+                .tag = fixedQt,
                 .fixed = fixedQt != null,
                 .incomplete = true,
+                .declNode = @enumFromInt(reservedIndex),
                 .fields = &.{},
             } });
             const attributedQt = try Attribute.applyTypeAttributes(p, enumQt, attrBufferTop, null);
@@ -2914,7 +2925,8 @@ fn parseEnumSpec(p: *Parser) Error!QualType {
         // can be specified after the closing rbrace, which we haven't encountered yet.
         const enumTy: Type.Enum = .{
             .name = internedName,
-            .tag = fixedQt orelse undefined,
+            .declNode = @enumFromInt(reservedIndex),
+            .tag = fixedQt,
             .incomplete = true,
             .fixed = fixedQt != null,
             .fields = &.{},
@@ -2924,7 +2936,7 @@ fn parseEnumSpec(p: *Parser) Error!QualType {
     };
 
     // reserve space for this enum
-    try p.declBuffer.append(gpa, undefined);
+    try p.declBuffer.append(gpa, @enumFromInt(reservedIndex));
     const declBufferTop = p.declBuffer.items.len;
     const listBufferTop = p.listBuffer.items.len;
     const enumBufferTop = p.enumBuffer.items.len;
@@ -2972,8 +2984,8 @@ fn parseEnumSpec(p: *Parser) Error!QualType {
                 some
             else if (try res.intFitsInType(p, .int))
                 .int
-            else if (!res.qt.eql(enumType.tag, p.comp))
-                enumType.tag
+            else if (!res.qt.eql(enumType.tag.?, p.comp))
+                enumType.tag.?
             else
                 continue;
 
@@ -3001,6 +3013,8 @@ fn parseEnumSpec(p: *Parser) Error!QualType {
     { // Override previous incomplete type
         enumType.fields = enumFields;
         enumType.incomplete = false;
+        enumType.declNode = @enumFromInt(reservedIndex);
+
         const baseType = attributedQt.base(p.comp);
         std.debug.assert(baseType.type.@"enum".name == enumType.name);
         try p.comp.typeStore.set(gpa, .{ .@"enum" = enumType }, @intFromEnum(baseType.qt._index));
@@ -3017,14 +3031,13 @@ fn parseEnumSpec(p: *Parser) Error!QualType {
         });
     }
     // finish by creating a node
-    const node = try p.addNode(.{
+    try p.tree.setNode(reservedIndex, .{
         .enumDecl = .{
             .nameOrKindToken = maybeIdent orelse enumToken,
             .containerQt = attributedQt,
             .fields = fieldNodes,
         },
     });
-    p.declBuffer.items[declBufferTop - 1] = node;
 
     if (p.func.qt == null)
         _ = p.tentativeDefs.remove(enumType.name);
@@ -3207,7 +3220,6 @@ fn enumerator(p: *Parser, e: *Enumerator) Error!?EnumFieldAndNode {
             .name = internedName,
             .qt = attributedQt,
             .nameToken = nameToken,
-            .init = .packOpt(fieldInit),
         },
         .node = node,
     };
@@ -7572,7 +7584,7 @@ const CallExpr = union(enum) {
                 if (p.listBuffer.items.len != 3) return .invalid;
                 const firstParam = p.listBuffer.items[1];
                 const qt = firstParam.qt(&p.tree);
-                if (!qt.scalarKind(p.comp).isPointer()) return .invalid;
+                if (!qt.isPointer(p.comp)) return .invalid;
                 return qt.childType(p.comp);
             },
 

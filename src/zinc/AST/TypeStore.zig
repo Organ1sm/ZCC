@@ -313,12 +313,13 @@ pub const QualType = packed struct(u32) {
                 comptime std.debug.assert(@sizeOf(Type.Record.Layout) == @sizeOf(u32) * layoutSize);
                 comptime std.debug.assert(@sizeOf(Type.Record.Field) == @sizeOf(u32) * fieldSize);
 
-                const layout = @as(*Type.Record.Layout, @ptrCast(@alignCast(extra[repr.data[1]..][0..layoutSize]))).*;
-                const fieldsLen = extra[repr.data[1] + layoutSize] * fieldSize;
-                const extraFields = extra[repr.data[1] + layoutSize + 1 ..][0..fieldsLen];
+                const layout = @as(*Type.Record.Layout, @ptrCast(extra[repr.data[1] + 1 ..][0..layoutSize])).*;
+                const fieldsLen = extra[repr.data[1] + layoutSize + 1];
+                const extraFields = extra[repr.data[1] + layoutSize + 2 ..][0 .. fieldsLen * fieldSize];
 
                 const record: Type.Record = .{
                     .name = @enumFromInt(repr.data[0]),
+                    .declNode = @enumFromInt(extra[repr.data[1]]),
                     .layout = layout,
                     .fields = std.mem.bytesAsSlice(Type.Record.Field, std.mem.sliceAsBytes(extraFields)),
                 };
@@ -331,6 +332,7 @@ pub const QualType = packed struct(u32) {
             .StructIncomplete => .{
                 .@"struct" = .{
                     .name = @enumFromInt(repr.data[0]),
+                    .declNode = @enumFromInt(repr.data[1]),
                     .layout = null,
                     .fields = &.{},
                 },
@@ -338,20 +340,22 @@ pub const QualType = packed struct(u32) {
             .UnionIncomplete => .{
                 .@"union" = .{
                     .name = @enumFromInt(repr.data[0]),
+                    .declNode = @enumFromInt(repr.data[1]),
                     .layout = null,
                     .fields = &.{},
                 },
             },
             .Enum, .EnumFixed => {
-                const fieldSize = 4;
+                const fieldSize = 3;
                 comptime std.debug.assert(@sizeOf(Type.Enum.Field) == @sizeOf(u32) * fieldSize);
 
-                const fieldsLen = extra[repr.data[1] + 1] * fieldSize;
-                const extraFields = extra[repr.data[1] + 2 ..][0..fieldsLen];
+                const fieldsLen = extra[repr.data[1] + 2];
+                const extraFields = extra[repr.data[1] + 3 ..][0 .. fieldsLen * fieldSize];
 
                 return .{
                     .@"enum" = .{
                         .name = @enumFromInt(extra[repr.data[1]]),
+                        .declNode = @enumFromInt(extra[repr.data[1] + 1]),
                         .tag = @bitCast(repr.data[0]),
                         .fixed = repr.tag == .EnumFixed,
                         .incomplete = false,
@@ -359,12 +363,23 @@ pub const QualType = packed struct(u32) {
                     },
                 };
             },
-            .EnumIncomplete, .EnumIncompleteFixed => .{
+            .EnumIncomplete => .{
+                .@"enum" = .{
+                    .tag = null,
+                    .name = @enumFromInt(repr.data[0]),
+                    .declNode = @enumFromInt(repr.data[1]),
+                    .incomplete = true,
+                    .fixed = false,
+                    .fields = &.{},
+                },
+            },
+            .EnumIncompleteFixed => .{
                 .@"enum" = .{
                     .tag = @bitCast(repr.data[0]),
-                    .name = @enumFromInt(repr.data[1]),
+                    .name = @enumFromInt(comp.typeStore.extra.items[repr.data[1]]),
+                    .declNode = @enumFromInt(comp.typeStore.extra.items[repr.data[1] + 1]),
                     .incomplete = true,
-                    .fixed = repr.tag == .EnumIncompleteFixed,
+                    .fixed = true,
                     .fields = &.{},
                 },
             },
@@ -382,7 +397,8 @@ pub const QualType = packed struct(u32) {
             },
             .Typedef => .{ .typedef = .{
                 .base = @bitCast(repr.data[0]),
-                .name = @enumFromInt(repr.data[1]),
+                .name = @enumFromInt(comp.typeStore.extra.items[repr.data[1]]),
+                .declNode = @enumFromInt(comp.typeStore.extra.items[repr.data[1] + 1]),
             } },
             .Attributed => .{
                 .attributed = .{
@@ -441,11 +457,9 @@ pub const QualType = packed struct(u32) {
         if (qt.isInvalid()) return .invalid;
         return switch (qt.base(comp).type) {
             .complex => |complex| complex,
-            .func => |func| func.returnType,
             .pointer => |pointer| pointer.child,
             .array => |array| array.elem,
             .vector => |vector| vector.elem,
-            .@"enum" => |@"enum"| @"enum".tag,
             else => unreachable,
         };
     }
@@ -527,8 +541,8 @@ pub const QualType = packed struct(u32) {
                 return layout.sizeBits / 8;
             },
             .@"enum" => |enumTy| {
-                if (enumTy.incomplete and !enumTy.fixed) return null;
-                continue :loop enumTy.tag.base(comp).type;
+                const tag = enumTy.tag orelse return null;
+                continue :loop tag.base(comp).type;
             },
             .typeof => unreachable,
             .typedef => unreachable,
@@ -663,8 +677,8 @@ pub const QualType = packed struct(u32) {
                 return layout.fieldAlignmentBits / 8;
             },
             .@"enum" => |enumTy| {
-                if (enumTy.incomplete and !enumTy.fixed) return 0;
-                continue :loop enumTy.tag.base(comp).type;
+                const tag = enumTy.tag orelse return 0;
+                continue :loop tag.base(comp).type;
             },
             .typeof => unreachable,
             .typedef => unreachable,
@@ -831,7 +845,7 @@ pub const QualType = packed struct(u32) {
             },
             .complex => |complex| continue :loop complex.base(comp).type,
             .atomic => |atomic| continue :loop atomic.base(comp).type,
-            .@"enum" => |enumTy| continue :loop enumTy.tag.base(comp).type,
+            .@"enum" => |enumTy| continue :loop enumTy.tag.?.base(comp).type,
             else => unreachable,
         };
     }
@@ -868,7 +882,7 @@ pub const QualType = packed struct(u32) {
     pub fn promoteInt(qt: QualType, comp: *const Compilation) QualType {
         return loop: switch (qt.base(comp).type) {
             .bool => return .int,
-            .@"enum" => |enumTy| continue :loop enumTy.tag.base(comp).type,
+            .@"enum" => |enumTy| if (enumTy.tag) |tag| continue :loop tag.base(comp).type else return .int,
             .bitInt => return qt,
             .complex => return qt, // Assume complex integer type
             .int => |intTy| switch (intTy) {
@@ -1004,9 +1018,9 @@ pub const QualType = packed struct(u32) {
         // Alignment check also guards against comparing incomplete enums to ints.
         if (aTypeQt.qt.alignof(comp) != bTypeQt.qt.alignof(comp)) return false;
         if (aType == .@"enum" and bType != .@"enum") {
-            return aType.@"enum".tag.eql(bQualTy, comp);
+            return aType.@"enum".tag.?.eql(bQualTy, comp);
         } else if (aType != .@"enum" and bType == .@"enum") {
-            return bType.@"enum".tag.eql(aQualTy, comp);
+            return bType.@"enum".tag.?.eql(aQualTy, comp);
         }
 
         if (std.meta.activeTag(aType) != bType) return false;
@@ -1294,7 +1308,7 @@ pub const QualType = packed struct(u32) {
             .@"union" => |unionTy| try w.print("union {s}", .{unionTy.name.lookup(comp)}),
             .@"enum" => |enumTy| if (enumTy.fixed) {
                 try w.print("enum {s}: ", .{enumTy.name.lookup(comp)});
-                _ = try enumTy.tag.printPrologue(comp, w);
+                _ = try enumTy.tag.?.printPrologue(comp, w);
             } else {
                 try w.print("enum {s}", .{enumTy.name.lookup(comp)});
             },
@@ -1424,7 +1438,11 @@ pub const QualType = packed struct(u32) {
             },
             .@"enum" => |enumTy| {
                 try w.print("enum {s}: ", .{enumTy.name.lookup(comp)});
-                try enumTy.tag.dump(comp, w);
+                if (enumTy.tag) |some| {
+                    try some.dump(comp, w);
+                } else {
+                    try w.writeAll("<incomplete>");
+                }
             },
             else => try qt.unqualified().print(comp, w),
         }
@@ -1560,6 +1578,7 @@ pub const Type = union(enum) {
 
     pub const Record = struct {
         name: StringId,
+        declNode: Node.Index,
         layout: ?Layout = null,
         fields: []const Field,
 
@@ -1643,17 +1662,18 @@ pub const Type = union(enum) {
     };
 
     pub const Enum = struct {
-        tag: QualType,
+        /// null if the enum is incomplete and not fixed
+        tag: ?QualType,
         fixed: bool,
         incomplete: bool,
         name: StringId,
+        declNode: Node.Index,
         fields: []const Field,
 
         pub const Field = extern struct {
             qt: QualType,
             name: StringId,
             nameToken: TokenIndex,
-            init: Node.OptIndex,
         };
     };
 
@@ -1665,6 +1685,7 @@ pub const Type = union(enum) {
     pub const TypeDef = struct {
         base: QualType,
         name: StringId,
+        declNode: Node.Index,
     };
 
     pub const Attributed = struct {
@@ -1850,6 +1871,7 @@ pub fn set(ts: *TypeStore, gpa: std.mem.Allocator, ty: Type, index: usize) !void
                     .@"union" => .UnionIncomplete,
                     else => unreachable,
                 };
+                repr.data[1] = @intFromEnum(record.declNode);
                 break :record;
             };
             repr.tag = switch (ty) {
@@ -1865,8 +1887,9 @@ pub fn set(ts: *TypeStore, gpa: std.mem.Allocator, ty: Type, index: usize) !void
             comptime std.debug.assert(@sizeOf(Type.Record.Layout) == @sizeOf(u32) * layoutSize);
             const fieldSize = 10;
             comptime std.debug.assert(@sizeOf(Type.Record.Field) == @sizeOf(u32) * fieldSize);
-            try ts.extra.ensureUnusedCapacity(gpa, record.fields.len * fieldSize + layoutSize + 1);
+            try ts.extra.ensureUnusedCapacity(gpa, record.fields.len * fieldSize + layoutSize + 2);
 
+            ts.extra.appendAssumeCapacity(@intFromEnum(record.declNode));
             const castedLayout: *const [layoutSize]u32 = @ptrCast(&layout);
             ts.extra.appendSliceAssumeCapacity(castedLayout);
             ts.extra.appendAssumeCapacity(@intCast(record.fields.len));
@@ -1877,23 +1900,35 @@ pub fn set(ts: *TypeStore, gpa: std.mem.Allocator, ty: Type, index: usize) !void
             }
         },
         .@"enum" => |@"enum"| @"enum": {
-            repr.data[0] = @bitCast(@"enum".tag);
             if (@"enum".incomplete) {
                 std.debug.assert(@"enum".fields.len == 0);
-                repr.tag = if (@"enum".fixed) .EnumIncompleteFixed else .EnumIncomplete;
-                repr.data[1] = @intFromEnum(@"enum".name);
+                if (@"enum".fixed) {
+                    repr.tag = .EnumIncompleteFixed;
+                    repr.data[0] = @bitCast(@"enum".tag.?);
+                    repr.data[1] = @intCast(ts.extra.items.len);
+                    try ts.extra.appendSlice(gpa, &.{
+                        @intFromEnum(@"enum".name),
+                        @intFromEnum(@"enum".declNode),
+                    });
+                } else {
+                    repr.tag = .EnumIncomplete;
+                    repr.data[0] = @intFromEnum(@"enum".name);
+                    repr.data[1] = @intFromEnum(@"enum".declNode);
+                }
                 break :@"enum";
             }
             repr.tag = if (@"enum".fixed) .EnumFixed else .Enum;
+            repr.data[0] = @bitCast(@"enum".tag.?);
 
             const extraIndex: u32 = @intCast(ts.extra.items.len);
             repr.data[1] = extraIndex;
 
-            const fieldSize = 4;
+            const fieldSize = 3;
             comptime std.debug.assert(@sizeOf(Type.Enum.Field) == @sizeOf(u32) * fieldSize);
-            try ts.extra.ensureUnusedCapacity(gpa, @"enum".fields.len * fieldSize + 1 + 1);
+            try ts.extra.ensureUnusedCapacity(gpa, @"enum".fields.len * fieldSize + 3);
 
             ts.extra.appendAssumeCapacity(@intFromEnum(@"enum".name));
+            ts.extra.appendAssumeCapacity(@intFromEnum(@"enum".declNode));
             ts.extra.appendAssumeCapacity(@intCast(@"enum".fields.len));
 
             for (@"enum".fields) |*field| {
@@ -1913,7 +1948,11 @@ pub fn set(ts: *TypeStore, gpa: std.mem.Allocator, ty: Type, index: usize) !void
         .typedef => |typedef| {
             repr.tag = .Typedef;
             repr.data[0] = @bitCast(typedef.base);
-            repr.data[1] = @intFromEnum(typedef.name);
+            repr.data[1] = @intCast(ts.extra.items.len);
+            try ts.extra.appendSlice(gpa, &.{
+                @intFromEnum(typedef.name),
+                @intFromEnum(typedef.declNode),
+            });
         },
         .attributed => |attributed| {
             repr.data[0] = @bitCast(attributed.base);
@@ -1990,6 +2029,7 @@ fn generateNsConstantStringType(ts: *TypeStore, comp: *Compilation) !QualType {
     var record: Type.Record = .{
         .name = try comp.internString("__NSConstantString_tag"),
         .layout = null,
+        .declNode = undefined, //TODO
         .fields = &.{},
     };
     const qt = try ts.put(comp.gpa, .{ .@"struct" = record });
@@ -2032,6 +2072,7 @@ fn generateVaListType(ts: *TypeStore, comp: *Compilation) !QualType {
         .aarch64_va_list => blk: {
             var record: Type.Record = .{
                 .name = try comp.internString("__va_list_tag"),
+                .declNode = undefined, //TODO
                 .layout = null,
                 .fields = &.{},
             };
@@ -2053,6 +2094,7 @@ fn generateVaListType(ts: *TypeStore, comp: *Compilation) !QualType {
         .x86_64_va_list => blk: {
             var record: Type.Record = .{
                 .name = try comp.internString("__va_list_tag"),
+                .declNode = undefined, //TODO
                 .layout = null,
                 .fields = &.{},
             };

@@ -155,7 +155,7 @@ fn genType(c: *CodeGen, qt: QualType) !Interner.Ref {
 
         .complex => return c.fail("TODO lower complex types", .{}),
         .atomic => return c.fail("TODO lower atomic types", .{}),
-        .@"enum" => |@"enum"| return c.genType(@"enum".tag),
+        .@"enum" => |@"enum"| return c.genType(@"enum".tag.?),
         .int => |int| .{ .intTy = int.bits(c.comp) },
         .bitInt => |bitInt| .{ .intTy = bitInt.bits },
         .float => |float| .{ .floatTy = float.bits(c.comp) },
