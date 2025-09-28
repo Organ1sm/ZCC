@@ -17,6 +17,7 @@ void foo(void) {
     if (!BAZ) return;
     int a, b;
     for (a=1,b=1;;);
+    for (int i = 2, b = 4; i + 2; i = 2);
 }
 
 void bar(int arg) {

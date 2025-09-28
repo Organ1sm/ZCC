@@ -5110,8 +5110,6 @@ fn parseForStmt(p: *Parser, kwFor: TokenIndex) Error!Node.Index {
 
     // cond
     const cond = cond: {
-        if (gotDecl) break :cond null;
-
         const condToken = p.tokenIdx;
         var cond = (try p.parseExpr()) orelse break :cond null;
         try cond.lvalConversion(p, condToken);
