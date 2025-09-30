@@ -5796,6 +5796,22 @@ fn eatTag(p: *Parser, id: TokenType) ?std.meta.Tag(Node) {
     } else return null;
 }
 
+fn removeAssignExpr(assignNode: std.meta.Tag(Node)) std.meta.Tag(Node) {
+    return switch (assignNode) {
+        .mulAssignExpr => .mulExpr,
+        .divAssignExpr => .divExpr,
+        .modAssignExpr => .modExpr,
+        .addAssignExpr => .addExpr,
+        .subAssignExpr => .subExpr,
+        .shlAssignExpr => .shlExpr,
+        .shrAssignExpr => .shrExpr,
+        .bitAndAssignExpr => .bitAndExpr,
+        .bitXorAssignExpr => .bitXorExpr,
+        .bitOrAssignExpr => .bitOrExpr,
+        else => unreachable,
+    };
+}
+
 /// assign-expression
 ///  : conditional-expression
 ///  | unary-expression assignment-operator  assign-expression
@@ -5825,16 +5841,25 @@ fn parseAssignExpr(p: *Parser) Error!?Result {
         lhs.qt = .invalid;
     }
 
-    // adjustTypes will do do lvalue conversion but we do not want that
-    var lhsCopy = lhs;
-    switch (tag) {
-        .assignExpr => {}, // handle plain assignment separately
+    if (tag == .assignExpr) {
+        try rhs.coerce(p, lhs.qt, token, .assign);
 
+        try lhs.bin(p, tag, rhs, token);
+        return lhs;
+    }
+
+    var lhsDummy = blk: {
+        var lhsCopy = lhs;
+        try lhsCopy.un(p, .compoundAssignDummyExpr, token);
+        try lhsCopy.lvalConversion(p, token);
+        break :blk lhsCopy;
+    };
+
+    switch (tag) {
         .mulAssignExpr,
         .divAssignExpr,
         .modAssignExpr,
         => {
-            try rhs.lvalConversion(p, token);
             if (!lhs.qt.isInvalid() and rhs.value.isZero(p.comp) and lhs.qt.isInt(p.comp) and rhs.qt.isInt(p.comp)) {
                 switch (tag) {
                     .divAssignExpr => try p.err(.division_by_zero, token, .{"division"}),
@@ -5842,22 +5867,17 @@ fn parseAssignExpr(p: *Parser) Error!?Result {
                     else => {},
                 }
             }
-            _ = try lhsCopy.adjustTypes(token, &rhs, p, if (tag == .modAssignExpr) .integer else .arithmetic);
-            try lhs.bin(p, tag, rhs, token);
-            return lhs;
+            _ = try lhsDummy.adjustTypes(token, &rhs, p, if (tag == .modAssignExpr) .integer else .arithmetic);
         },
 
         .subAssignExpr,
         .addAssignExpr,
         => {
-            try rhs.lvalConversion(p, token);
             if (!lhs.qt.isInvalid() and lhs.qt.isPointer(p.comp) and rhs.qt.isInt(p.comp)) {
                 try rhs.castToPointer(p, lhs.qt, token);
             } else {
-                _ = try lhsCopy.adjustTypes(token, &rhs, p, .arithmetic);
+                _ = try lhsDummy.adjustTypes(token, &rhs, p, .arithmetic);
             }
-            try lhs.bin(p, tag, rhs, token);
-            return lhs;
         },
 
         .shlAssignExpr,
@@ -5865,17 +5885,13 @@ fn parseAssignExpr(p: *Parser) Error!?Result {
         .bitAndAssignExpr,
         .bitXorAssignExpr,
         .bitOrAssignExpr,
-        => {
-            try rhs.lvalConversion(p, token);
-            _ = try lhsCopy.adjustTypes(token, &rhs, p, .integer);
-            try lhs.bin(p, tag, rhs, token);
-            return lhs;
-        },
+        => _ = try lhsDummy.adjustTypes(token, &rhs, p, .integer),
+
         else => unreachable,
     }
-
-    try rhs.coerce(p, lhs.qt, token, .assign);
-    try lhs.bin(p, tag, rhs, token);
+    _ = try lhsDummy.bin(p, removeAssignExpr(tag), rhs, token);
+    try lhsDummy.coerce(p, lhs.qt, token, .assign);
+    try lhs.bin(p, tag, lhsDummy, token);
     return lhs;
 }
 

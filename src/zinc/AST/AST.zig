@@ -205,7 +205,6 @@ pub const Node = union(enum) {
 
     gnuAsmSimple: SimpleAsm,
 
-    commaExpr: Binary,
     assignExpr: Binary,
     mulAssignExpr: Binary,
     divAssignExpr: Binary,
@@ -217,6 +216,8 @@ pub const Node = union(enum) {
     bitAndAssignExpr: Binary,
     bitXorAssignExpr: Binary,
     bitOrAssignExpr: Binary,
+
+    commaExpr: Binary,
     boolOrExpr: Binary,
     boolAndExpr: Binary,
     bitOrExpr: Binary,
@@ -239,6 +240,7 @@ pub const Node = union(enum) {
     cast: Cast,
 
     addrOfExpr: Unary,
+    compoundAssignDummyExpr: Unary,
     derefExpr: Unary,
     plusExpr: Unary,
     negateExpr: Unary,
@@ -1090,6 +1092,13 @@ pub const Node = union(enum) {
                         .rhs = @enumFromInt(nodeData[2]),
                     },
                 },
+                .CompoundAssignDummyExpr => .{
+                    .compoundAssignDummyExpr = .{
+                        .opToken = nodeToken,
+                        .qt = @bitCast(nodeData[0]),
+                        .operand = @enumFromInt(nodeData[1]),
+                    },
+                },
                 .BoolOrExpr => .{
                     .boolOrExpr = .{
                         .opToken = nodeToken,
@@ -1766,6 +1775,7 @@ pub const Node = union(enum) {
             BitAndAssignExpr,
             BitXorAssignExpr,
             BitOrAssignExpr,
+            CompoundAssignDummyExpr,
             BoolOrExpr,
             BoolAndExpr,
             BitOrExpr,
@@ -1842,7 +1852,7 @@ pub const Node = union(enum) {
 
     pub fn isImplicit(node: Node) bool {
         return switch (node) {
-            .arrayFillerExpr, .defaultInitExpr, .condDummyExpr => true,
+            .arrayFillerExpr, .defaultInitExpr, .condDummyExpr, .compoundAssignDummyExpr => true,
             .cast => |cast| cast.implicit,
             .variable => |info| info.implicit,
             .typedef => |info| info.implicit,
@@ -2113,13 +2123,6 @@ pub fn setNode(tree: *Tree, index: usize, node: Node) !void {
             repr.data[0] = @intFromEnum(gnuAsmSimple.asmString);
             repr.tok = gnuAsmSimple.asmToken;
         },
-        .commaExpr => |bin| {
-            repr.tag = .CommaExpr;
-            repr.data[0] = @bitCast(bin.qt);
-            repr.data[1] = @intFromEnum(bin.lhs);
-            repr.data[2] = @intFromEnum(bin.rhs);
-            repr.tok = bin.opToken;
-        },
         .assignExpr => |bin| {
             repr.tag = .AssignExpr;
             repr.data[0] = @bitCast(bin.qt);
@@ -2196,6 +2199,19 @@ pub fn setNode(tree: *Tree, index: usize, node: Node) !void {
             repr.data[1] = @intFromEnum(bin.lhs);
             repr.data[2] = @intFromEnum(bin.rhs);
             repr.tok = bin.opToken;
+        },
+        .commaExpr => |bin| {
+            repr.tag = .CommaExpr;
+            repr.data[0] = @bitCast(bin.qt);
+            repr.data[1] = @intFromEnum(bin.lhs);
+            repr.data[2] = @intFromEnum(bin.rhs);
+            repr.tok = bin.opToken;
+        },
+        .compoundAssignDummyExpr => |un| {
+            repr.tag = .CompoundAssignDummyExpr;
+            repr.data[0] = @bitCast(un.qt);
+            repr.data[1] = @intFromEnum(un.operand);
+            repr.tok = un.opToken;
         },
         .boolOrExpr => |bin| {
             repr.tag = .BoolOrExpr;
@@ -2765,6 +2781,7 @@ pub fn isLValueExtra(tree: *const Tree, node: Node.Index, isConst: *bool) bool {
             return false;
         },
 
+        .compoundAssignDummyExpr => return true,
         else => return false,
     }
 }
@@ -3393,7 +3410,6 @@ fn dumpNode(
             }
         },
 
-        .commaExpr,
         .assignExpr,
         .mulAssignExpr,
         .divAssignExpr,
@@ -3410,6 +3426,7 @@ fn dumpNode(
         .bitOrExpr,
         .bitXorExpr,
         .bitAndExpr,
+        .commaExpr,
         .equalExpr,
         .notEqualExpr,
         .lessThanExpr,
@@ -3562,6 +3579,7 @@ fn dumpNode(
         .enumForwardDecl,
         .defaultInitExpr,
         .condDummyExpr,
+        .compoundAssignDummyExpr,
         => {},
     }
 }

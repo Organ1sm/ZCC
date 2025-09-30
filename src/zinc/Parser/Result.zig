@@ -117,7 +117,7 @@ pub fn un(operand: *Result, p: *Parser, rtTag: std.meta.Tag(Node), token: TokenI
             inline .addrOfExpr, .derefExpr, .plusExpr, .negateExpr,
             .bitNotExpr, .boolNotExpr, .preIncExpr, .preDecExpr,
             .imagExpr, .realExpr, .postIncExpr,.postDecExpr,
-            .parenExpr, .stmtExpr, .imaginaryLiteral, 
+            .parenExpr, .stmtExpr, .imaginaryLiteral, .compoundAssignDummyExpr,
             // zig fmt: on
         => |tag| operand.node = try p.addNode(@unionInit(Node, @tagName(tag), unData)),
         else => unreachable,
@@ -833,6 +833,9 @@ pub fn castType(res: *Result, p: *Parser, destQt: QualType, operandToken: TokenI
         // everything can cast to void
         explicitCK = .ToVoid;
         res.value = .{};
+    } else if (res.qt.is(p.comp, .void)) {
+        try p.err(.invalid_cast_operand_type, operandToken, .{res.qt});
+        return error.ParsingFailed;
     } else if (destSK == .NullptrTy) {
         res.value = .{};
         if (srcSK == .NullptrTy) {
@@ -949,7 +952,7 @@ pub fn castType(res: *Result, p: *Parser, destQt: QualType, operandToken: TokenI
             } else if (res.qt.is(p.comp, .func)) {
                 explicitCK = .FunctionToPointer;
             } else {
-                try p.err(.cond_expr_type, operandToken, .{res.qt});
+                try p.err(.invalid_cast_operand_type, operandToken, .{res.qt});
                 return error.ParsingFailed;
             }
         } else if (destSK.isFloat()) {
