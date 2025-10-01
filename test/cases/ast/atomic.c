@@ -91,8 +91,13 @@ fnDef: 'fn () void'
       declRefExpr: '_Atomic(int)' lvalue
        name: a
      rhs:
-      implicit cast: (IntCast) '_Atomic(int)' (value: 1)
-        intLiteral: 'int' (value: 1)
+      addExpr: '_Atomic(int)'
+       lhs:
+        implicit cast: (LValToRVal) '_Atomic(int)'
+          implicit compoundAssignDummyExpr: '_Atomic(int)' lvalue
+       rhs:
+        implicit cast: (IntCast) '_Atomic(int)' (value: 1)
+          intLiteral: 'int' (value: 1)
 
     variable: '_Atomic(float)'
      name: f

@@ -5874,7 +5874,8 @@ fn parseAssignExpr(p: *Parser) Error!?Result {
         .addAssignExpr,
         => {
             if (!lhs.qt.isInvalid() and lhs.qt.isPointer(p.comp) and rhs.qt.isInt(p.comp)) {
-                try rhs.castToPointer(p, lhs.qt, token);
+                try rhs.lvalConversion(p, token);
+                try rhs.castToPointer(p, lhsDummy.qt, token);
             } else {
                 _ = try lhsDummy.adjustTypes(token, &rhs, p, .arithmetic);
             }

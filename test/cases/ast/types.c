@@ -65,16 +65,26 @@ fnDef: 'fn (a: decayed *const I: [2]int, b: decayed *const I: [2]int) void'
       declRefExpr: 'decayed *const I: [2]int' lvalue
        name: b
      rhs:
-      implicit cast: (IntToPointer) 'decayed *const I: [2]int'
-        intLiteral: 'int' (value: 1)
+      addExpr: 'decayed *const I: [2]int'
+       lhs:
+        implicit cast: (LValToRVal) 'decayed *const I: [2]int'
+          implicit compoundAssignDummyExpr: 'decayed *const I: [2]int' lvalue
+       rhs:
+        implicit cast: (IntToPointer) 'decayed *const I: [2]int'
+          intLiteral: 'int' (value: 1)
 
     addAssignExpr: 'decayed *const I: [2]int'
      lhs:
       declRefExpr: 'decayed *const I: [2]int' lvalue
        name: a
      rhs:
-      implicit cast: (IntToPointer) 'decayed *const I: [2]int'
-        intLiteral: 'int' (value: 1)
+      addExpr: 'decayed *const I: [2]int'
+       lhs:
+        implicit cast: (LValToRVal) 'decayed *const I: [2]int'
+          implicit compoundAssignDummyExpr: 'decayed *const I: [2]int' lvalue
+       rhs:
+        implicit cast: (IntToPointer) 'decayed *const I: [2]int'
+          intLiteral: 'int' (value: 1)
 
     implicit returnStmt: 'void'
 

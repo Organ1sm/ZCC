@@ -1118,7 +1118,13 @@ fn coerceExtra(
     const srcSK = res.qt.scalarKind(p.comp);
     const destSK = destUnqual.scalarKind(p.comp);
 
-    if (destSK == .NullptrTy) {
+    if (destQt.is(p.comp, .vector) and res.qt.is(p.comp, .vector)) {
+        if (destUnqual.eql(res.qt, p.comp)) return; // ok
+        if (destUnqual.sizeCompare(res.qt, p.comp) == .eq) {
+            res.qt = destUnqual;
+            return res.implicitCast(p, .Bitcast, tok);
+        }
+    } else if (destSK == .NullptrTy) {
         if (srcSK == .NullptrTy) return;
     }
     // dest type is bool
