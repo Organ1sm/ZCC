@@ -5870,16 +5870,8 @@ fn parseAssignExpr(p: *Parser) Error!?Result {
             _ = try lhsDummy.adjustTypes(token, &rhs, p, if (tag == .modAssignExpr) .integer else .arithmetic);
         },
 
-        .subAssignExpr,
-        .addAssignExpr,
-        => {
-            if (!lhs.qt.isInvalid() and lhs.qt.isPointer(p.comp) and rhs.qt.isInt(p.comp)) {
-                try rhs.lvalConversion(p, token);
-                try rhs.castToPointer(p, lhsDummy.qt, token);
-            } else {
-                _ = try lhsDummy.adjustTypes(token, &rhs, p, .arithmetic);
-            }
-        },
+        .subAssignExpr => _ = try lhsDummy.adjustTypes(token, &rhs, p, .sub),
+        .addAssignExpr => _ = try lhsDummy.adjustTypes(token, &rhs, p, .add),
 
         .shlAssignExpr,
         .shrAssignExpr,
