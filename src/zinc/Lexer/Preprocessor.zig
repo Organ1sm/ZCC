@@ -18,7 +18,7 @@ const Tree = @import("../AST/AST.zig");
 const Token = Tree.Token;
 const TokenWithExpansionLocs = Tree.TokenWithExpansionLocs;
 
-const DefineMap = std.StringHashMapUnmanaged(Macro);
+const DefineMap = std.StringArrayHashMapUnmanaged(Macro);
 const RawTokenList = std.ArrayList(RawToken);
 const MaxIncludeDepth = 200;
 
@@ -470,7 +470,7 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!TokenWithExpans
                     .KeywordUndef => {
                         const macroName = (try pp.expectMacroName(&lexer)) orelse continue;
                         if (pp.storeMacroTokens) try pp.addToken(tokenFromRaw(directive));
-                        _ = pp.defines.remove(macroName);
+                        _ = pp.defines.orderedRemove(macroName);
                         try pp.expectNewLine(&lexer);
                     },
 
@@ -3550,8 +3550,7 @@ fn prettyPrintMacro(
 }
 
 fn prettyPrintMacrosOnly(pp: *Preprocessor, w: *std.Io.Writer) !void {
-    var it = pp.defines.valueIterator();
-    while (it.next()) |macro| {
+    for (pp.defines.values()) |macro| {
         if (macro.isBuiltin) continue;
 
         try w.writeAll("#define ");
