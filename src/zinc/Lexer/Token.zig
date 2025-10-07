@@ -232,6 +232,12 @@ pub const Token = struct {
         .{ "__vectorcall", .KeywordVectorCall },
         .{ "_vectorcall", .KeywordVectorCall2 },
 
+        // Type nullability
+        .{ "_Nonnull", .KeywordNonnull },
+        .{ "_Nullable", .KeywordNullable },
+        .{ "_Nullable_result", .KeywordNullableResult },
+        .{ "_Null_unspecified", .KeywordNullUnspecified },
+
         // gcc builtins
         .{ "__builtin_choose_expr", .BuiltinChooseExpr },
         .{ "__builtin_va_arg", .BuiltinVaArg },

@@ -3271,6 +3271,52 @@ fn parseTypeQual(p: *Parser, b: *TypeBuilder) Error!bool {
                     b.atomic = p.tokenIdx;
             },
 
+            .KeywordNonnull,
+            .KeywordNullable,
+            .KeywordNullableResult,
+            .KeywordNullUnspecified,
+            => |tokenId| {
+                const symStr = p.currToken().symbol();
+                try p.err(.nullability_extension, p.tokenIdx, .{symStr});
+
+                const new: @FieldType(TypeStore.Builder, "nullability") = switch (tokenId) {
+                    .KeywordNonnull => .{ .nonnull = p.tokenIdx },
+                    .KeywordNullable => .{ .nullable = p.tokenIdx },
+                    .KeywordNullableResult => .{ .nullableResult = p.tokenIdx },
+                    .KeywordNullUnspecified => .{ .nullUnspecified = p.tokenIdx },
+                    else => unreachable,
+                };
+
+                if (std.meta.activeTag(b.nullability) == new) {
+                    try p.err(.duplicate_nullability, p.tokenIdx, .{symStr});
+                } else switch (b.nullability) {
+                    .none => {
+                        b.nullability = new;
+                        try p.attrBuffer.append(p.comp.gpa, .{
+                            .attr = .{
+                                .tag = .nullability,
+                                .args = .{
+                                    .nullability = .{
+                                        .kind = switch (tokenId) {
+                                            .KeywordNonnull => .nonnull,
+                                            .KeywordNullable => .nullable,
+                                            .KeywordNullableResult => .nullableResult,
+                                            .KeywordNullUnspecified => .unspecified,
+                                            else => unreachable,
+                                        },
+                                    },
+                                },
+                                .syntax = .keyword,
+                            },
+                            .tok = p.tokenIdx,
+                        });
+                    },
+                    .nonnull, .nullable, .nullableResult, .nullUnspecified => |prev| {
+                        try p.err(.conflicting_nullability, p.tokenIdx, .{ p.currToken(), p.tokenIds[prev] });
+                    },
+                }
+            },
+
             else => break,
         }
         p.tokenIdx += 1;

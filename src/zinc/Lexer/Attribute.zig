@@ -711,6 +711,18 @@ const attributes = struct {
     pub const calling_convention = struct {
         cc: CallingConvention,
     };
+    pub const nullability = struct {
+        kind: enum {
+            nonnull,
+            nullable,
+            nullableResult,
+            unspecified,
+
+            const opts = struct {
+                const enum_kind = .identifier;
+            };
+        },
+    };
 };
 
 /// The Attributes enum tag
@@ -820,7 +832,7 @@ pub fn applyVariableAttributes(p: *Parser, qt: QualType, attrBufferStart: usize,
     for (attrs, toks) |attr, tok| switch (attr.tag) {
         // zig fmt: off
         .alias, .may_alias, .deprecated, .unavailable, .unused, .warn_if_not_aligned, .weak, .used,
-        .noinit, .retain, .persistent, .section, .mode, .asm_label,
+        .noinit, .retain, .persistent, .section, .mode, .asm_label, .nullability,
          => try p.attrApplicationBuffer.append(gpa, attr),
         // zig fmt: on
 
@@ -885,7 +897,8 @@ pub fn applyFieldAttributes(p: *Parser, fieldTy: *QualType, attrBufferStart: usi
 
     for (attrs, toks) |attr, tok| switch (attr.tag) {
         // zig fmt: off
-        .@"packed", .may_alias, .deprecated, .unavailable, .unused, .warn_if_not_aligned, .mode,.warn_unused_result, .nodiscard,
+        .@"packed", .may_alias, .deprecated, .unavailable, .unused, .warn_if_not_aligned,
+        .mode,.warn_unused_result, .nodiscard, .nullability,
         => try p.attrApplicationBuffer.append(p.comp.gpa, attr),
         // zig fmt: on
 
@@ -912,6 +925,7 @@ pub fn applyTypeAttributes(p: *Parser, qt: QualType, attrBufferStart: usize, dia
         .unused,
         .warn_if_not_aligned,
         .mode,
+        .nullability,
         => try p.attrApplicationBuffer.append(gpa, attr),
 
         .transparent_union => try attr.applyTransparentUnion(p, tok, baseQt),
@@ -952,7 +966,7 @@ pub fn applyFunctionAttributes(p: *Parser, qt: QualType, attrBufferStart: usize)
         .noreturn, .unused, .used, .warning, .deprecated, .unavailable, .weak, .pure, .leaf,
         .@"const", .warn_unused_result, .section, .returns_nonnull, .returns_twice, .@"error",
         .externally_visible, .retain, .flatten, .gnu_inline, .alias, .asm_label, .nodiscard,
-        .reproducible, .unsequenced, .nothrow,
+        .reproducible, .unsequenced, .nothrow, .nullability,
          => try p.attrApplicationBuffer.append(gpa, attr),
         // zig fmt: on
 

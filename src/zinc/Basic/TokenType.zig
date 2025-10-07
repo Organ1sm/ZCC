@@ -282,6 +282,11 @@ pub const TokenType = enum(u8) {
     KeywordVectorCall,
     KeywordVectorCall2,
 
+    KeywordNonnull,
+    KeywordNullable,
+    KeywordNullableResult,
+    KeywordNullUnspecified,
+
     // Preprocessor directives
     KeywordInclude,
     KeywordIncludeNext,
@@ -462,6 +467,10 @@ pub const TokenType = enum(u8) {
             .KeywordThisCall2,
             .KeywordVectorCall,
             .KeywordVectorCall2,
+            .KeywordNonnull,
+            .KeywordNullable,
+            .KeywordNullableResult,
+            .KeywordNullUnspecified,
             .KeywordBitInt,
             .KeywordC23Alignas,
             .KeywordC23Alignof,
@@ -769,6 +778,10 @@ pub const TokenType = enum(u8) {
             .BuiltinTypesCompatibleP => "__builtin_types_compatible_p",
             .KeywordAttribute1 => "__attribute",
             .KeywordAttribute2 => "__attribute__",
+            .KeywordNonnull => "_Nonnull",
+            .KeywordNullable => "_Nullable",
+            .KeywordNullableResult => "_Nullable_result",
+            .KeywordNullUnspecified => "_Null_unspecified",
         };
     }
 
