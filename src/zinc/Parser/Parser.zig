@@ -1603,6 +1603,15 @@ fn parseDeclSpec(p: *Parser) Error!?DeclSpec {
                 continue;
             },
 
+            .KeywordForceInline, .KeywordForceInline2 => {
+                try p.attrBuffer.append(p.comp.gpa, .{
+                    .tok = p.tokenIdx,
+                    .attr = .{ .tag = .always_inline, .args = .{ .always_inline = .{} }, .syntax = .keyword },
+                });
+                p.tokenIdx += 1;
+                continue;
+            },
+
             else => {},
         }
 
@@ -2099,7 +2108,7 @@ fn parseTypeSpec(p: *Parser, builder: *TypeBuilder) Error!bool {
             continue;
         }
 
-        if (try p.parseTypeQual(builder))
+        if (try p.parseTypeQual(builder, true))
             continue;
 
         switch (p.currToken()) {
@@ -2188,30 +2197,6 @@ fn parseTypeSpec(p: *Parser, builder: *TypeBuilder) Error!bool {
                 try p.expectClosing(lparen, .RParen);
                 continue;
             },
-
-            .KeywordStdCall,
-            .KeywordStdCall2,
-            .KeywordThisCall,
-            .KeywordThisCall2,
-            .KeywordVectorCall,
-            .KeywordVectorCall2,
-            => try p.attrBuffer.append(p.comp.gpa, .{
-                .attr = .{
-                    .tag = .calling_convention,
-                    .args = .{
-                        .calling_convention = .{
-                            .cc = switch (p.currToken()) {
-                                .KeywordStdCall, .KeywordStdCall2 => .stdcall,
-                                .KeywordThisCall, .KeywordThisCall2 => .thiscall,
-                                .KeywordVectorCall, .KeywordVectorCall2 => .vectorcall,
-                                else => unreachable,
-                            },
-                        },
-                    },
-                    .syntax = .keyword,
-                },
-                .tok = p.tokenIdx,
-            }),
 
             .KeywordEnum => {
                 const tagToken = p.tokenIdx;
@@ -3231,7 +3216,7 @@ fn enumerator(p: *Parser, e: *Enumerator) Error!?EnumFieldAndNode {
 /// | keyword-restrict
 /// | keyword-volatile
 /// | keyword-atomic
-fn parseTypeQual(p: *Parser, b: *TypeBuilder) Error!bool {
+fn parseTypeQual(p: *Parser, b: *TypeBuilder, allowCCAttr: bool) Error!bool {
     var any = false;
     while (true) {
         switch (p.currToken()) {
@@ -3269,6 +3254,48 @@ fn parseTypeQual(p: *Parser, b: *TypeBuilder) Error!bool {
                     try p.err(.duplicate_decl_spec, p.tokenIdx, .{"atomic"})
                 else
                     b.atomic = p.tokenIdx;
+            },
+
+            .KeywordUnaligned, .KeywordUnaligned2 => {
+                if (b.unaligned != null)
+                    try p.err(.duplicate_decl_spec, p.tokenIdx, .{"__unaligned"})
+                else
+                    b.unaligned = p.tokenIdx;
+            },
+
+            .KeywordStdCall,
+            .KeywordStdCall2,
+            .KeywordThisCall,
+            .KeywordThisCall2,
+            .KeywordVectorCall,
+            .KeywordVectorCall2,
+            .KeywordFastcall,
+            .KeywordFastcall2,
+            .KeywordRegcall,
+            .KeywordCdecl,
+            .KeywordCdecl2,
+            => {
+                if (!allowCCAttr) break;
+                try p.attrBuffer.append(p.comp.gpa, .{
+                    .attr = .{
+                        .tag = .calling_convention,
+                        .args = .{
+                            .calling_convention = .{
+                                .cc = switch (p.currToken()) {
+                                    .KeywordStdCall, .KeywordStdCall2 => .stdcall,
+                                    .KeywordThisCall, .KeywordThisCall2 => .thiscall,
+                                    .KeywordVectorCall, .KeywordVectorCall2 => .vectorcall,
+                                    .KeywordFastcall, .KeywordFastcall2 => .fastcall,
+                                    .KeywordRegcall => .regcall,
+                                    .KeywordCdecl, .KeywordCdecl2 => .c,
+                                    else => unreachable,
+                                },
+                            },
+                        },
+                        .syntax = .keyword,
+                    },
+                    .tok = p.tokenIdx,
+                });
             },
 
             .KeywordNonnull,
@@ -3443,13 +3470,13 @@ fn declarator(p: *Parser, baseQt: QualType, kind: Declarator.Kind) Error!?Declar
     while (p.eat(.Asterisk)) |_| {
         d.declaratorType = .pointer;
         var builder: TypeBuilder = .{ .parser = p };
-        _ = try p.parseTypeQual(&builder);
+        _ = try p.parseTypeQual(&builder, true);
 
-        const pointer_qt = try p.comp.typeStore.put(p.comp.gpa, .{ .pointer = .{
+        const pointerQt = try p.comp.typeStore.put(p.comp.gpa, .{ .pointer = .{
             .child = d.qt,
             .decayed = null,
         } });
-        d.qt = try builder.finishQuals(pointer_qt);
+        d.qt = try builder.finishQuals(pointerQt);
     }
 
     const maybeIdent = p.tokenIdx;
@@ -3584,11 +3611,11 @@ fn directDeclarator(
         }
 
         var builder: TypeBuilder = .{ .parser = p };
-        var gotQuals = try p.parseTypeQual(&builder);
+        var gotQuals = try p.parseTypeQual(&builder, false);
         var static = p.eat(.KeywordStatic);
 
         if (static != null and !gotQuals)
-            gotQuals = try p.parseTypeQual(&builder);
+            gotQuals = try p.parseTypeQual(&builder, false);
 
         var star = p.eat(.Asterisk);
         const sizeToken = p.tokenIdx;

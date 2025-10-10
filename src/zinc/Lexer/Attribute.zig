@@ -65,6 +65,7 @@ pub const Iterator = struct {
         }
         if (self.source) |*source| {
             var cur = source.qt;
+            std.debug.print("cur: {}\n", .{cur._index});
             if (cur.isInvalid()) {
                 self.source = null;
                 return null;
@@ -723,6 +724,7 @@ const attributes = struct {
             };
         },
     };
+    pub const unaligned = struct {};
 };
 
 /// The Attributes enum tag
@@ -832,7 +834,7 @@ pub fn applyVariableAttributes(p: *Parser, qt: QualType, attrBufferStart: usize,
     for (attrs, toks) |attr, tok| switch (attr.tag) {
         // zig fmt: off
         .alias, .may_alias, .deprecated, .unavailable, .unused, .warn_if_not_aligned, .weak, .used,
-        .noinit, .retain, .persistent, .section, .mode, .asm_label, .nullability,
+        .noinit, .retain, .persistent, .section, .mode, .asm_label, .nullability, .unaligned,
          => try p.attrApplicationBuffer.append(gpa, attr),
         // zig fmt: on
 
@@ -898,7 +900,7 @@ pub fn applyFieldAttributes(p: *Parser, fieldTy: *QualType, attrBufferStart: usi
     for (attrs, toks) |attr, tok| switch (attr.tag) {
         // zig fmt: off
         .@"packed", .may_alias, .deprecated, .unavailable, .unused, .warn_if_not_aligned,
-        .mode,.warn_unused_result, .nodiscard, .nullability,
+        .mode,.warn_unused_result, .nodiscard, .nullability, .unaligned,
         => try p.attrApplicationBuffer.append(p.comp.gpa, attr),
         // zig fmt: on
 
@@ -926,6 +928,7 @@ pub fn applyTypeAttributes(p: *Parser, qt: QualType, attrBufferStart: usize, dia
         .warn_if_not_aligned,
         .mode,
         .nullability,
+        .unaligned,
         => try p.attrApplicationBuffer.append(gpa, attr),
 
         .transparent_union => try attr.applyTransparentUnion(p, tok, baseQt),
@@ -966,7 +969,7 @@ pub fn applyFunctionAttributes(p: *Parser, qt: QualType, attrBufferStart: usize)
         .noreturn, .unused, .used, .warning, .deprecated, .unavailable, .weak, .pure, .leaf,
         .@"const", .warn_unused_result, .section, .returns_nonnull, .returns_twice, .@"error",
         .externally_visible, .retain, .flatten, .gnu_inline, .alias, .asm_label, .nodiscard,
-        .reproducible, .unsequenced, .nothrow, .nullability,
+        .reproducible, .unsequenced, .nothrow, .nullability, .unaligned, 
          => try p.attrApplicationBuffer.append(gpa, attr),
         // zig fmt: on
 
@@ -1002,8 +1005,8 @@ pub fn applyFunctionAttributes(p: *Parser, qt: QualType, attrBufferStart: usize)
         .format => try attr.applyFormat(p, baseQt),
 
         .calling_convention => switch (attr.args.calling_convention.cc) {
-            .C => continue,
-            .stdcall, .thiscall => switch (p.comp.target.cpu.arch) {
+            .c => continue,
+            .stdcall, .thiscall, .fastcall, .regcall => switch (p.comp.target.cpu.arch) {
                 .x86 => try p.attrApplicationBuffer.append(gpa, attr),
                 else => try p.err(.callconv_not_supported, tok, .{p.tokenIds[tok].lexeme().?}),
             },

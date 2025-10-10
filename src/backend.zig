@@ -5,10 +5,12 @@ pub const Ir = @import("backend/IR.zig");
 pub const Object = @import("backend/Object.zig");
 
 pub const CallingConvention = enum {
-    C,
+    c,
     stdcall,
     thiscall,
     vectorcall,
+    fastcall,
+    regcall,
 };
 
 pub const VersionStr = @import("build-options").version_str;

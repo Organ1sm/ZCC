@@ -85,6 +85,12 @@ pub const Token = struct {
             .KeywordStdCall2,
             .KeywordThisCall2,
             .KeywordVectorCall2,
+            .KeywordFastcall2,
+            .KeywordCdecl2,
+            .KeywordForceInline,
+            .KeywordForceInline2,
+            .KeywordUnaligned,
+            .KeywordUnaligned2,
             => if (langOpts.msExtensions) kw else .Identifier,
             else => kw,
         };
@@ -231,6 +237,15 @@ pub const Token = struct {
         .{ "_thiscall", .KeywordThisCall2 },
         .{ "__vectorcall", .KeywordVectorCall },
         .{ "_vectorcall", .KeywordVectorCall2 },
+        .{ "__fastcall", .KeywordFastcall },
+        .{ "_fastcall", .KeywordFastcall2 },
+        .{ "_regcall", .KeywordRegcall },
+        .{ "__cdecl", .KeywordCdecl },
+        .{ "_cdecl", .KeywordCdecl2 },
+        .{ "__forceinline", .KeywordForceInline },
+        .{ "_forceinline", .KeywordForceInline2 },
+        .{ "__unaligned", .KeywordUnaligned },
+        .{ "_unaligned", .KeywordUnaligned2 },
 
         // Type nullability
         .{ "_Nonnull", .KeywordNonnull },

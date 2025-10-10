@@ -95,6 +95,12 @@ const Index = enum(u29) {
 
 const TypeStore = @This();
 
+/// bit: 31                           3 2 1 0
+///   [        _index (29bit)     ][r][v][c]
+///                                │  │  │
+///                                │  │  └─ const
+///                                │  └── volatile
+///                                └── restrict
 pub const QualType = packed struct(u32) {
     @"const": bool = false,
     @"volatile": bool = false,
@@ -197,6 +203,7 @@ pub const QualType = packed struct(u32) {
         const ts = comp.typeStore;
         const extra = ts.extra.items;
         const repr = ts.types.get(@intFromEnum(qt._index));
+        std.debug.print("repr tag: {}\n", .{repr.tag});
         return switch (repr.tag) {
             .Complex => .{ .complex = @bitCast(repr.data[0]) },
             .Atomic => .{ .atomic = @bitCast(repr.data[0]) },
@@ -2129,6 +2136,7 @@ pub const Builder = struct {
     @"volatile": ?TokenIndex = null,
     restrict: ?TokenIndex = null,
 
+    unaligned: ?TokenIndex = null,
     nullability: union(enum) {
         none,
         nonnull: TokenIndex,
@@ -2508,6 +2516,19 @@ pub const Builder = struct {
                     resultQt = try b.parser.comp.typeStore.put(gpa, .{ .atomic = resultQt });
                 },
             }
+        }
+
+        if (b.unaligned != null and !qt.isPointer(b.parser.comp)) {
+            resultQt = (try b.parser.comp.typeStore.put(gpa, .{
+                .attributed = .{
+                    .base = resultQt,
+                    .attributes = &.{.{
+                        .tag = .unaligned,
+                        .args = .{ .unaligned = .{} },
+                        .syntax = .keyword,
+                    }},
+                },
+            })).withQualifiers(resultQt);
         }
 
         switch (b.nullability) {
