@@ -725,6 +725,19 @@ const attributes = struct {
         },
     };
     pub const unaligned = struct {};
+    pub const pcs = struct {
+        kind: enum {
+            aapcs,
+            @"aapcs-vfp",
+
+            const opts = struct {
+                const enum_kind = .string;
+            };
+        },
+    };
+    pub const riscv_vector_cc = struct {};
+    pub const aarch64_sve_pcs = struct {};
+    pub const aarch64_vector_pcs = struct {};
 };
 
 /// The Attributes enum tag
@@ -1014,6 +1027,59 @@ pub fn applyFunctionAttributes(p: *Parser, qt: QualType, attrBufferStart: usize)
                 .x86, .aarch64, .aarch64_be => try p.attrApplicationBuffer.append(gpa, attr),
                 else => try p.err(.callconv_not_supported, tok, .{p.tokenIds[tok].lexeme().?}),
             },
+            .riscv_vector,
+            .aarch64_sve_pcs,
+            .aarch64_vector_pcs,
+            .arm_aapcs,
+            .arm_aapcs_vfp,
+            => unreachable,
+        },
+
+        .pcs => if (p.comp.target.cpu.arch.isArm()) {
+            try p.attrApplicationBuffer.append(gpa, .{
+                .tag = .calling_convention,
+                .args = .{
+                    .calling_convention = .{
+                        .cc = switch (attr.args.pcs.kind) {
+                            .aapcs => .arm_aapcs,
+                            .@"aapcs-vfp" => .arm_aapcs_vfp,
+                        },
+                    },
+                },
+                .syntax = attr.syntax,
+            });
+        } else {
+            try p.err(.callconv_not_supported, tok, .{"pcs"});
+        },
+
+        .riscv_vector_cc => if (p.comp.target.cpu.arch.isRISCV()) {
+            try p.attrApplicationBuffer.append(gpa, .{
+                .tag = .calling_convention,
+                .args = .{ .calling_convention = .{ .cc = .riscv_vector } },
+                .syntax = attr.syntax,
+            });
+        } else {
+            try p.err(.callconv_not_supported, tok, .{"riscv_vector_cc"});
+        },
+
+        .aarch64_sve_pcs => if (p.comp.target.cpu.arch.isAARCH64()) {
+            try p.attrApplicationBuffer.append(gpa, .{
+                .tag = .calling_convention,
+                .args = .{ .calling_convention = .{ .cc = .aarch64_sve_pcs } },
+                .syntax = attr.syntax,
+            });
+        } else {
+            try p.err(.callconv_not_supported, tok, .{"pcs"});
+        },
+
+        .aarch64_vector_pcs => if (p.comp.target.cpu.arch.isAARCH64()) {
+            try p.attrApplicationBuffer.append(gpa, .{
+                .tag = .calling_convention,
+                .args = .{ .calling_convention = .{ .cc = .aarch64_vector_pcs } },
+                .syntax = attr.syntax,
+            });
+        } else {
+            try p.err(.callconv_not_supported, tok, .{"pcs"});
         },
 
         .alloc_align => {
