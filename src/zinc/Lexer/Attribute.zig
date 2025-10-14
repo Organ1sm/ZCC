@@ -738,6 +738,11 @@ const attributes = struct {
     pub const riscv_vector_cc = struct {};
     pub const aarch64_sve_pcs = struct {};
     pub const aarch64_vector_pcs = struct {};
+    pub const fastcall = struct {};
+    pub const stdcall = struct {};
+    pub const vectorcall = struct {};
+    pub const cdecl = struct {};
+    pub const thiscall = struct {};
 };
 
 /// The Attributes enum tag
@@ -1034,6 +1039,44 @@ pub fn applyFunctionAttributes(p: *Parser, qt: QualType, attrBufferStart: usize)
             .arm_aapcs_vfp,
             => unreachable,
         },
+
+        .fastcall => if (p.comp.target.cpu.arch == .x86) {
+            try p.attrApplicationBuffer.append(gpa, .{
+                .tag = .calling_convention,
+                .args = .{ .calling_convention = .{ .cc = .fastcall } },
+                .syntax = attr.syntax,
+            });
+        } else {
+            try p.err(.callconv_not_supported, tok, .{"fastcall"});
+        },
+        .stdcall => if (p.comp.target.cpu.arch == .x86) {
+            try p.attrApplicationBuffer.append(gpa, .{
+                .tag = .calling_convention,
+                .args = .{ .calling_convention = .{ .cc = .stdcall } },
+                .syntax = attr.syntax,
+            });
+        } else {
+            try p.err(.callconv_not_supported, tok, .{"stdcall"});
+        },
+        .thiscall => if (p.comp.target.cpu.arch == .x86) {
+            try p.attrApplicationBuffer.append(gpa, .{
+                .tag = .calling_convention,
+                .args = .{ .calling_convention = .{ .cc = .thiscall } },
+                .syntax = attr.syntax,
+            });
+        } else {
+            try p.err(.callconv_not_supported, tok, .{"thiscall"});
+        },
+        .vectorcall => if (p.comp.target.cpu.arch == .x86 or p.comp.target.cpu.arch.isAARCH64()) {
+            try p.attrApplicationBuffer.append(gpa, .{
+                .tag = .calling_convention,
+                .args = .{ .calling_convention = .{ .cc = .vectorcall } },
+                .syntax = attr.syntax,
+            });
+        } else {
+            try p.err(.callconv_not_supported, tok, .{"vectorcall"});
+        },
+        .cdecl => {},
 
         .pcs => if (p.comp.target.cpu.arch.isArm()) {
             try p.attrApplicationBuffer.append(gpa, .{
