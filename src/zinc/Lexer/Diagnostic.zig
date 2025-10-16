@@ -194,12 +194,14 @@ pub const empty_char_literal_warning: Diagnostic = .{
     .fmt = "empty character constant",
     .kind = .warning,
     .opt = .@"invalid-pp-token",
+    .extension = true,
 };
 
 pub const unterminated_char_literal_warning: Diagnostic = .{
     .fmt = "missing terminating ' character",
     .kind = .warning,
     .opt = .@"invalid-pp-token",
+    .extension = true,
 };
 
 pub const unterminated_comment: Diagnostic = .{
@@ -292,10 +294,17 @@ pub const comma_deletion_va_args: Diagnostic = .{
     .extension = true,
 };
 
-pub const expansion_to_defined: Diagnostic = .{
+pub const expansion_to_defined_obj: Diagnostic = .{
     .fmt = "macro expansion producing 'defined' has undefined behavior",
     .kind = .off,
     .opt = .@"expansion-to-defined",
+};
+
+pub const expansion_to_defined_func: Diagnostic = .{
+    .fmt = expansion_to_defined_obj.fmt,
+    .kind = .off,
+    .opt = .@"expansion-to-defined",
+    .extension = true,
 };
 
 pub const invalid_pp_stringify_escape: Diagnostic = .{
@@ -324,12 +333,14 @@ pub const newline_eof: Diagnostic = .{
     .fmt = "no newline at end of file",
     .opt = .@"newline-eof",
     .kind = .off,
+    .extension = true,
 };
 
 pub const malformed_warning_check: Diagnostic = .{
     .fmt = "{s} expected option name (e.g. \"-Wundef\")",
     .opt = .@"malformed-warning-check",
     .kind = .warning,
+    .extension = true,
 };
 
 pub const feature_check_requires_identifier: Diagnostic = .{
@@ -347,6 +358,7 @@ pub const macro_redefined: Diagnostic = .{
     .fmt = "'{s}' macro redefined",
     .opt = .@"macro-redefined",
     .kind = .warning,
+    .extension = true,
 };
 
 pub const previous_definition: Diagnostic = .{
@@ -403,6 +415,7 @@ pub const unterminated_string_literal_warning: Diagnostic = .{
     .fmt = "missing terminating '\"' character",
     .kind = .warning,
     .opt = .@"invalid-pp-token",
+    .extension = true,
 };
 
 pub const invalid_source_epoch: Diagnostic = .{

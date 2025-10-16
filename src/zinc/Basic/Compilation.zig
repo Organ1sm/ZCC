@@ -1402,6 +1402,7 @@ pub fn findInclude(
                     .text = diagnostic.fmt,
                     .kind = diagnostic.kind,
                     .opt = diagnostic.opt,
+                    .extension = diagnostic.extension,
                     .location = (Source.Location{
                         .id = includeToken.source,
                         .byteOffset = includeToken.start,
@@ -1531,6 +1532,7 @@ pub const Diagnostic = struct {
     fmt: []const u8,
     kind: Diagnostics.Message.Kind,
     opt: ?Diagnostics.Option = null,
+    extension: bool = false,
 
     pub const backslash_newline_escape: Diagnostic = .{
         .fmt = "backslash and newline separated by space",
@@ -1542,12 +1544,14 @@ pub const Diagnostic = struct {
         .fmt = "#include resolved using non-portable Microsoft search rules as: {s}",
         .kind = .warning,
         .opt = .@"microsoft-include",
+        .extension = true,
     };
 
     pub const ctrl_z_eof: Diagnostic = .{
         .fmt = "treating Ctrl-Z as end-of-file is a Microsoft extension",
         .kind = .off,
         .opt = .@"microsoft-end-of-file",
+        .extension = true,
     };
 };
 

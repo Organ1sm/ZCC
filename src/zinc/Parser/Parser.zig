@@ -8770,7 +8770,6 @@ fn parseStringLiteral(p: *Parser) Error!Result {
         };
 
         if (stringKind == .unterminated) {
-            try p.err(.unterminated_string_literal_error, stringEnd, .{});
             p.tokenIdx = stringEnd + 1;
             return error.ParsingFailed;
         }

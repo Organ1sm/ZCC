@@ -65,7 +65,7 @@ pub const Iterator = struct {
         }
         if (self.source) |*source| {
             var cur = source.qt;
-            std.debug.print("cur: {}\n", .{cur._index});
+            // std.debug.print("cur: {}\n", .{cur._index});
             if (cur.isInvalid()) {
                 self.source = null;
                 return null;

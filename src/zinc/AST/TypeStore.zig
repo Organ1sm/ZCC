@@ -203,7 +203,7 @@ pub const QualType = packed struct(u32) {
         const ts = comp.typeStore;
         const extra = ts.extra.items;
         const repr = ts.types.get(@intFromEnum(qt._index));
-        std.debug.print("repr tag: {}\n", .{repr.tag});
+        // std.debug.print("repr tag: {}\n", .{repr.tag});
         return switch (repr.tag) {
             .Complex => .{ .complex = @bitCast(repr.data[0]) },
             .Atomic => .{ .atomic = @bitCast(repr.data[0]) },

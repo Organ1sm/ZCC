@@ -2510,7 +2510,10 @@ fn expandMacroExhaustive(
                         try pp.hideSet.put(tok.loc, newHideList);
 
                         if (tok.is(.KeywordDefined) and evalCtx == .Expr) {
-                            try pp.err(tok, .expansion_to_defined, .{});
+                            if (macro.isFunc)
+                                try pp.err(tok, .expansion_to_defined_func, .{})
+                            else
+                                try pp.err(tok, .expansion_to_defined_obj, .{});
                         }
                         if (i < incrementIdxBy and (tok.is(.KeywordDefined) or pp.defines.contains(pp.expandedSlice(tok.*)))) {
                             incrementIdxBy = i;
