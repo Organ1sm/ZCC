@@ -1908,8 +1908,14 @@ pub const ptr_arithmetic_incomplete: Diagnostic = .{
 
 pub const callconv_not_supported: Diagnostic = .{
     .fmt = "'{s}' calling convention is not supported for this target",
-    .opt = .@"ignored-attributes",
     .kind = .warning,
+    .opt = .@"ignored-attributes",
+};
+
+pub const callconv_non_func: Diagnostic = .{
+    .fmt = "'{s}' only applies to function types; type here is '{qt}'",
+    .kind = .warning,
+    .opt = .@"ignored-attributes",
 };
 
 pub const pointer_arith_void: Diagnostic = .{
@@ -1984,10 +1990,7 @@ pub const auto_type_requires_initializer: Diagnostic = .{
     .kind = .@"error",
 };
 
-pub const auto_type_requires_single_declarator: Diagnostic = .{
-    .fmt = "'__auto_type' may only be used with a single declarator",
-    .kind = .@"error",
-};
+pub const auto_type_requires_single_declarator: Diagnostic = .{ .fmt = "'__auto_type' may only be used with a single declarator", .kind = .@"error" };
 
 pub const auto_type_requires_plain_declarator: Diagnostic = .{
     .fmt = "'__auto_type' requires a plain identifier as declarator",

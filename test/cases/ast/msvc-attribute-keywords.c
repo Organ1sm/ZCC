@@ -30,3 +30,6 @@ fnProto: 'attributed(kr (...) *int)'
 fnProto: 'fn (decayed *[]attributed(int), decayed *attributed([]int)) int'
  name: baz
 
+fnProto: 'fn (fn_ptr: *fn () void) void'
+ name: quux
+

@@ -897,6 +897,8 @@ pub fn applyVariableAttributes(p: *Parser, qt: QualType, attrBufferStart: usize,
             try p.attrApplicationBuffer.append(gpa, attr);
         },
 
+        .calling_convention => try applyCallingConvention(attr, p, tok, baseQt),
+
         .alloc_size,
         .copy,
         .tls_model,
@@ -910,7 +912,7 @@ pub fn applyVariableAttributes(p: *Parser, qt: QualType, attrBufferStart: usize,
     return applySelected(baseQt, p);
 }
 
-pub fn applyFieldAttributes(p: *Parser, fieldTy: *QualType, attrBufferStart: usize) ![]const Attribute {
+pub fn applyFieldAttributes(p: *Parser, fieldQt: *QualType, attrBufferStart: usize) ![]const Attribute {
     const attrs = p.attrBuffer.items(.attr)[attrBufferStart..];
     const toks = p.attrBuffer.items(.tok)[attrBufferStart..];
     p.attrApplicationBuffer.items.len = 0;
@@ -922,8 +924,8 @@ pub fn applyFieldAttributes(p: *Parser, fieldTy: *QualType, attrBufferStart: usi
         => try p.attrApplicationBuffer.append(p.comp.gpa, attr),
         // zig fmt: on
 
-        .vector_size => try attr.applyVectorSize(p, tok, fieldTy),
-        .aligned => try attr.applyAligned(p, fieldTy.*, null),
+        .vector_size => try attr.applyVectorSize(p, tok, fieldQt),
+        .aligned => try attr.applyAligned(p, fieldQt.*, null),
         else => try ignoredAttrErr(p, tok, attr.tag, "fields"),
     };
 
@@ -959,6 +961,7 @@ pub fn applyTypeAttributes(p: *Parser, qt: QualType, attrBufferStart: usize, dia
             try p.err(.designated_init_invalid, tok, .{});
         },
 
+        .calling_convention => try applyCallingConvention(attr, p, tok, baseQt),
         .alloc_size,
         .copy,
         .scalar_storage_order,
@@ -1022,23 +1025,7 @@ pub fn applyFunctionAttributes(p: *Parser, qt: QualType, attrBufferStart: usize)
         .aligned => try attr.applyAligned(p, baseQt, null),
         .format => try attr.applyFormat(p, baseQt),
 
-        .calling_convention => switch (attr.args.calling_convention.cc) {
-            .c => continue,
-            .stdcall, .thiscall, .fastcall, .regcall => switch (p.comp.target.cpu.arch) {
-                .x86 => try p.attrApplicationBuffer.append(gpa, attr),
-                else => try p.err(.callconv_not_supported, tok, .{p.tokenIds[tok].lexeme().?}),
-            },
-            .vectorcall => switch (p.comp.target.cpu.arch) {
-                .x86, .aarch64, .aarch64_be => try p.attrApplicationBuffer.append(gpa, attr),
-                else => try p.err(.callconv_not_supported, tok, .{p.tokenIds[tok].lexeme().?}),
-            },
-            .riscv_vector,
-            .aarch64_sve_pcs,
-            .aarch64_vector_pcs,
-            .arm_aapcs,
-            .arm_aapcs_vfp,
-            => unreachable,
-        },
+        .calling_convention => try applyCallingConvention(attr, p, tok, baseQt),
 
         .fastcall => if (p.comp.target.cpu.arch == .x86) {
             try p.attrApplicationBuffer.append(gpa, .{
@@ -1314,6 +1301,34 @@ fn applyFormat(attr: Attribute, p: *Parser, qt: QualType) !void {
     // TODO validate
     _ = qt;
     try p.attrApplicationBuffer.append(p.comp.gpa, attr);
+}
+
+fn applyCallingConvention(attr: Attribute, p: *Parser, token: TokenIndex, qt: QualType) !void {
+    const comp = p.comp;
+    const gpa = comp.gpa;
+    const symbol = p.tokenIds[token].symbol();
+    if (!qt.is(comp, .func)) {
+        return p.err(.callconv_non_func, token, .{ symbol, qt });
+    }
+    switch (attr.args.calling_convention.cc) {
+        .c => {},
+        .stdcall, .thiscall, .fastcall, .regcall => switch (comp.target.cpu.arch) {
+            .x86 => try p.attrApplicationBuffer.append(gpa, attr),
+            else => try p.err(.callconv_not_supported, token, .{symbol}),
+        },
+
+        .vectorcall => switch (comp.target.cpu.arch) {
+            .x86, .aarch64, .aarch64_be => try p.attrApplicationBuffer.append(gpa, attr),
+            else => try p.err(.callconv_not_supported, token, .{symbol}),
+        },
+
+        .riscv_vector,
+        .aarch64_sve_pcs,
+        .aarch64_vector_pcs,
+        .arm_aapcs,
+        .arm_aapcs_vfp,
+        => unreachable, // These can't come from keyword syntax
+    }
 }
 
 fn applySelected(qt: QualType, p: *Parser) !QualType {
