@@ -216,7 +216,24 @@ pub const SystemDefinesMode = enum {
 
 /// Generate builtin macros that will be available to each source file.
 pub fn generateSystemDefines(comp: *Compilation, w: *std.Io.Writer) !void {
+    const define = struct {
+        fn define(_w: anytype, name: []const u8) !void {
+            try _w.print("#define {s} 1\n", .{name});
+        }
+    }.define;
+    const defineStd = struct {
+        fn defineStd(_w: anytype, name: []const u8, isGnu: bool) !void {
+            if (isGnu) try define(_w, name);
+
+            try _w.print(
+                \\#define __{s} 1
+                \\#define __{s}__ 1
+                \\
+            , .{ name, name });
+        }
+    }.defineStd;
     const ptrWidth = comp.target.ptrBitWidth();
+    const isGnu = comp.langOpts.standard.isGNU();
 
     if (comp.langOpts.gnucVersion > 0) {
         try w.print("#define __GNUC__ {d}\n", .{comp.langOpts.gnucVersion / 10_000});
@@ -225,46 +242,55 @@ pub fn generateSystemDefines(comp: *Compilation, w: *std.Io.Writer) !void {
     }
 
     switch (comp.target.os.tag) {
-        .linux => try w.writeAll(
-            \\#define linux 1
-            \\#define __linux 1
-            \\#define __linux__ 1
-            \\
-        ),
-        .windows => if (ptrWidth == 32)
-            try w.writeAll(
-                \\#define WIN32 1
-                \\#define _WIN32 1
-                \\#define __WIN32 1
-                \\#define __WIN32__ 1
-                \\
-            )
-        else
-            try w.writeAll(
-                \\#define WIN32 1
-                \\#define WIN64 1
-                \\#define _WIN32 1
-                \\#define _WIN64 1
-                \\#define __WIN32 1
-                \\#define __WIN64 1
-                \\#define __WIN32__ 1
-                \\#define __WIN64__ 1
-                \\
-            ),
+        .linux => try defineStd(w, "linux", isGnu),
+        .windows => {
+            try define(w, "_WIN32");
+            if (ptrWidth == 64)
+                try define(w, "_WIN64");
+
+            if (comp.target.isMinGW()) {
+                try defineStd(w, "WIN32", isGnu);
+                try defineStd(w, "WINNT", isGnu);
+                if (ptrWidth == 64) {
+                    try defineStd(w, "WIN64", isGnu);
+                }
+                try define(w, "__MSVCRT__");
+                try define(w, "__MINGW32__");
+            }
+        },
+        .uefi => try define(w, "__UEFI__"),
         .freebsd => try w.print("#define __FreeBSD__ {d}\n", .{comp.target.os.version_range.semver.min.major}),
-        .netbsd => try w.writeAll("#define __NetBSD__ 1\n"),
-        .openbsd => try w.writeAll("#define __OpenBSD__ 1\n"),
-        .dragonfly => try w.writeAll("#define __DragonFly__ 1\n"),
-        .solaris => try w.writeAll(
-            \\#define sun 1
-            \\#define __sun 1
-            \\
-        ),
-        .macos => try w.writeAll(
-            \\#define __APPLE__ 1
-            \\#define __MACH__ 1
-            \\
-        ),
+        .netbsd => try define(w, "__NetBSD__"),
+        .openbsd => try define(w, "__OpenBSD__"),
+        .dragonfly => try define(w, "__DragonFly__"),
+        .solaris => try defineStd(w, "sun", isGnu),
+
+        .macos,
+        .tvos,
+        .ios,
+        .driverkit,
+        .visionos,
+        .watchos,
+        => try define(w, "__APPLE__"),
+
+        .wasi => try define(w, "__wasi__"),
+        .emscripten => try define(w, "__EMSCRIPTEN__"),
+        else => {},
+    }
+
+    // unix and other additional os macros
+    switch (comp.target.os.tag) {
+        .freebsd,
+        .netbsd,
+        .openbsd,
+        .dragonfly,
+        .linux,
+        .haiku,
+        .hurd,
+        .solaris,
+        .aix,
+        .emscripten,
+        => try defineStd(w, "unix", isGnu),
         else => {},
     }
 
@@ -273,103 +299,105 @@ pub fn generateSystemDefines(comp: *Compilation, w: *std.Io.Writer) !void {
     }
 
     switch (comp.target.cpu.arch) {
-        .x86_64 => try w.writeAll(
-            \\#define __amd64__ 1
-            \\#define __amd64 1
-            \\#define __x86_64 1
-            \\#define __x86_64__ 1
-            \\
-        ),
+        .x86_64 => {
+            try define(w, "__amd64__");
+            try define(w, "__amd64");
+            try define(w, "__x86_64__");
+            try define(w, "__x86_64");
+        },
 
-        .x86 => try w.writeAll(
-            \\#define i386 1
-            \\#define __i386 1
-            \\#define __i386__ 1
-            \\
-        ),
+        .x86 => try defineStd(w, "i3286", isGnu),
 
         .mips,
         .mipsel,
         .mips64,
         .mips64el,
-        => try w.writeAll(
-            \\#define __mips__ 1
-            \\#define mips 1
-            \\
-        ),
+        => {
+            try define(w, "__mips__");
+            try define(w, "_mips");
+        },
 
         .powerpc,
         .powerpcle,
-        => try w.writeAll(
-            \\#define __powerpc__ 1
-            \\#define __POWERPC__ 1
-            \\#define __ppc__ 1
-            \\#define __PPC__ 1
-            \\#define _ARCH_PPC 1
-            \\
-        ),
+        => {
+            try define(w, "__powerpc__");
+            try define(w, "__POWERPC__");
+            try define(w, "__ppc__");
+            try define(w, "__PPC__");
+            try define(w, "_ARCH_PPC");
+        },
 
         .powerpc64,
         .powerpc64le,
-        => try w.writeAll(
-            \\#define __powerpc 1
-            \\#define __powerpc__ 1
-            \\#define __powerpc64__ 1
-            \\#define __POWERPC__ 1
-            \\#define __ppc__ 1
-            \\#define __ppc64__ 1
-            \\#define __PPC__ 1
-            \\#define __PPC64__ 1
-            \\#define _ARCH_PPC 1
-            \\#define _ARCH_PPC64 1
-            \\
-        ),
+        => {
+            try define(w, "__powerpc");
+            try define(w, "__powerpc__");
+            try define(w, "__powerpc64__");
+            try define(w, "__POWERPC__");
+            try define(w, "__ppc__");
+            try define(w, "__ppc64__");
+            try define(w, "__PPC__");
+            try define(w, "__PPC64__");
+            try define(w, "_ARCH_PPC");
+            try define(w, "_ARCH_PPC64");
+        },
 
-        .sparc64 => try w.writeAll(
-            \\#define __sparc__ 1
-            \\#define __sparc 1
-            \\#define __sparc_v9__ 1
-            \\
-        ),
+        .sparc64 => {
+            try defineStd(w, "sparc", isGnu);
+            try define(w, "__sparc_v9__");
+            try define(w, "__arch64__");
+            if (comp.target.os.tag != .solaris) {
+                try define(w, "__sparc64__");
+                try define(w, "__sparc_v9__");
+                try define(w, "__sparcv9__");
+            }
+        },
 
-        .sparc => try w.writeAll(
-            \\#define __sparc__ 1
-            \\#define __sparc 1
-            \\
-        ),
+        .sparc => {
+            try defineStd(w, "sparc", isGnu);
+            if (comp.target.os.tag == .solaris) {
+                try define(w, "__sparcv8");
+            }
+        },
 
-        .arm, .armeb => try w.writeAll(
-            \\#define __arm__ 1
-            \\#define __arm 1
-            \\
-        ),
+        .arm, .armeb, .thumb, .thumbeb => {
+            try define(w, "__arm__");
+            try define(w, "__arm");
+            if (comp.target.cpu.arch.isThumb()) {
+                try define(w, "__thumb__");
+            }
+        },
+        .aarch64, .aarch64_be => {
+            try define(w, "__aarch64__");
+            if (comp.target.os.tag == .macos) {
+                try define(w, "__AARCH64_SIMD__");
+                if (ptrWidth == 32) {
+                    try define(w, "__ARM64_ARCH_8_32__");
+                } else {
+                    try define(w, "__ARM64_ARCH_8__");
+                }
+                try define(w, "__ARM_NEON__");
+                try define(w, "__arm64");
+                try define(w, "__arm64__");
+            }
+        },
 
-        .thumb, .thumbeb => try w.writeAll(
-            \\#define __arm__ 1
-            \\#define __arm 1
-            \\#define __thumb__ 1
-            \\
-        ),
-
-        .aarch64, .aarch64_be => try w.writeAll("#define __aarch64__ 1\n"),
-
-        .msp430 => try w.writeAll(
-            \\#define MSP430 1
-            \\#define __MSP430__ 1
-            \\
-        ),
+        .msp430 => {
+            try define(w, "MSP430");
+            try define(w, "__MSP430__");
+        },
         else => {},
     }
 
-    if (comp.target.os.tag != .windows) switch (ptrWidth) {
-        64 => try w.writeAll(
-            \\#define _LP64 1
-            \\#define __LP64__ 1
-            \\
-        ),
-        32 => try w.writeAll("#define _ILP32 1\n"),
-        else => {},
-    };
+    if (ptrWidth == 64 and comp.target.cTypeBitSize(.long) == 32) {
+        try define(w, "_LP64");
+        try define(w, "__LP64__");
+    } else if (ptrWidth == 32 and comp.target.cTypeBitSize(.long) == 32 and
+        comp.target.cTypeBitSize(.int) == 32)
+    {
+        try define(w, "_ILP32");
+        try define(w, "__ILP32__");
+    }
 
     try w.writeAll(
         \\#define __ORDER_LITTLE_ENDIAN__ 1234
@@ -390,6 +418,21 @@ pub fn generateSystemDefines(comp: *Compilation, w: *std.Io.Writer) !void {
             \\#define __BIG_ENDIAN__ 1
             \\
         );
+
+    switch (comp.target.ofmt) {
+        .elf => try define(w, "__ELF__"),
+        .macho => try define(w, "__MACH__"),
+        else => {},
+    }
+
+    if (comp.target.os.tag.isDarwin()) {
+        try w.writeAll(
+            \\#define __nonnull _Nonnull
+            \\#define __null_unspecified _Null_unspecified
+            \\#define __nullable _Nullable
+            \\
+        );
+    }
 
     // atomics
     try w.writeAll(
