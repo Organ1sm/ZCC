@@ -21,6 +21,7 @@ pub fn build(b: *std.Build) !void {
         if (std.mem.eql(u8, DefaultRtlib, "libgcc")) "libgcc" else "";
     const GCCInstallPrefix = b.option([]const u8, "gcc-install-prefix", "Directory where gcc is installed.") orelse "";
     const UseLLVM = b.option(bool, "llvm", "Use LLVM backend to generate aro executable");
+    const noBin = b.option(bool, "no-bin", "skip emitting compiler binary") orelse false;
 
     const systemDefaults = b.addOptions();
     systemDefaults.addOption(bool, "enableLinkerBuildId", EnableLinkerBuildId);
@@ -143,7 +144,11 @@ pub fn build(b: *std.Build) !void {
     if (LinkLibc)
         exe.linkLibC();
 
-    b.installArtifact(exe);
+    if (noBin) {
+        b.getInstallStep().dependOn(&exe.step);
+    } else {
+        b.installArtifact(exe);
+    }
 
     const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());
