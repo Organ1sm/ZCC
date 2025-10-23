@@ -22,6 +22,7 @@ pub fn build(b: *std.Build) !void {
     const GCCInstallPrefix = b.option([]const u8, "gcc-install-prefix", "Directory where gcc is installed.") orelse "";
     const UseLLVM = b.option(bool, "llvm", "Use LLVM backend to generate aro executable");
     const noBin = b.option(bool, "no-bin", "skip emitting compiler binary") orelse false;
+    const testFilter = b.option([]const []const u8, "test-filter", "Test filter for unit tests") orelse &.{};
 
     const systemDefaults = b.addOptions();
     systemDefaults.addOption(bool, "enableLinkerBuildId", EnableLinkerBuildId);
@@ -162,6 +163,7 @@ pub fn build(b: *std.Build) !void {
                 .target = target,
                 .root_source_file = b.path("src/zinc.zig"),
             }),
+            .filters = testFilter,
         });
 
         for (zincModule.import_table.keys(), zincModule.import_table.values()) |name, module| {
