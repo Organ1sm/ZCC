@@ -2259,7 +2259,8 @@ fn parseTypeSpec(p: *Parser, builder: *TypeBuilder) Error!bool {
             else => break,
         }
 
-        if (try p.eatIdentifier()) |_| {} else p.tokenIdx += 1;
+        // consume single token specifier here.
+        p.tokenIdx += 1;
     }
 
     return p.tokenIdx != start;
@@ -3219,6 +3220,7 @@ fn enumerator(p: *Parser, e: *Enumerator) Error!?EnumFieldAndNode {
 fn parseTypeQual(p: *Parser, b: *TypeBuilder, allowCCAttr: bool) Error!bool {
     var any = false;
     while (true) {
+        if (allowCCAttr and try p.msTypeAttribute()) continue;
         switch (p.currToken()) {
             .KeywordRestrict,
             .KeywordGccRestrict1,
@@ -3261,41 +3263,6 @@ fn parseTypeQual(p: *Parser, b: *TypeBuilder, allowCCAttr: bool) Error!bool {
                     try p.err(.duplicate_decl_spec, p.tokenIdx, .{"__unaligned"})
                 else
                     b.unaligned = p.tokenIdx;
-            },
-
-            .KeywordStdCall,
-            .KeywordStdCall2,
-            .KeywordThisCall,
-            .KeywordThisCall2,
-            .KeywordVectorCall,
-            .KeywordVectorCall2,
-            .KeywordFastcall,
-            .KeywordFastcall2,
-            .KeywordRegcall,
-            .KeywordCdecl,
-            .KeywordCdecl2,
-            => {
-                if (!allowCCAttr) break;
-                try p.attrBuffer.append(p.comp.gpa, .{
-                    .attr = .{
-                        .tag = .calling_convention,
-                        .args = .{
-                            .calling_convention = .{
-                                .cc = switch (p.currToken()) {
-                                    .KeywordStdCall, .KeywordStdCall2 => .stdcall,
-                                    .KeywordThisCall, .KeywordThisCall2 => .thiscall,
-                                    .KeywordVectorCall, .KeywordVectorCall2 => .vectorcall,
-                                    .KeywordFastcall, .KeywordFastcall2 => .fastcall,
-                                    .KeywordRegcall => .regcall,
-                                    .KeywordCdecl, .KeywordCdecl2 => .c,
-                                    else => unreachable,
-                                },
-                            },
-                        },
-                        .syntax = .keyword,
-                    },
-                    .tok = p.tokenIdx,
-                });
             },
 
             .KeywordNonnull,
@@ -3349,7 +3316,51 @@ fn parseTypeQual(p: *Parser, b: *TypeBuilder, allowCCAttr: bool) Error!bool {
         p.tokenIdx += 1;
         any = true;
     }
+    return any;
+}
 
+fn msTypeAttribute(p: *Parser) !bool {
+    var any = false;
+    while (true) {
+        switch (p.currToken()) {
+            .KeywordStdCall,
+            .KeywordStdCall2,
+            .KeywordThisCall,
+            .KeywordThisCall2,
+            .KeywordVectorCall,
+            .KeywordVectorCall2,
+            .KeywordFastcall,
+            .KeywordFastcall2,
+            .KeywordRegcall,
+            .KeywordCdecl,
+            .KeywordCdecl2,
+            => {
+                try p.attrBuffer.append(p.comp.gpa, .{
+                    .attr = .{
+                        .tag = .calling_convention,
+                        .args = .{
+                            .calling_convention = .{
+                                .cc = switch (p.currToken()) {
+                                    .KeywordStdCall, .KeywordStdCall2 => .stdcall,
+                                    .KeywordThisCall, .KeywordThisCall2 => .thiscall,
+                                    .KeywordVectorCall, .KeywordVectorCall2 => .vectorcall,
+                                    .KeywordFastcall, .KeywordFastcall2 => .fastcall,
+                                    .KeywordRegcall => .regcall,
+                                    .KeywordCdecl, .KeywordCdecl2 => .c,
+                                    else => unreachable,
+                                },
+                            },
+                        },
+                        .syntax = .keyword,
+                    },
+                    .tok = p.tokenIdx,
+                });
+                any = true;
+                p.tokenIdx += 1;
+            },
+            else => break,
+        }
+    }
     return any;
 }
 
@@ -3487,6 +3498,9 @@ fn declarator(p: *Parser, baseQt: QualType, kind: Declarator.Kind) Error!?Declar
         try d.validate(p, combineToken);
         return d;
     } else if (p.eat(.LParen)) |lp| blk: {
+        // parse Microsoft-style attributes
+        _ = try p.msTypeAttribute();
+
         const specialMarker: QualType = .{ ._index = .DeclaratorCombine };
         var res = (try p.declarator(specialMarker, kind)) orelse {
             p.tokenIdx = lp;

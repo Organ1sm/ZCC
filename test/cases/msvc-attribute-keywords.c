@@ -2,7 +2,7 @@
 int __unaligned * __unaligned a;
 int __unaligned b;
 int _cdecl foo();
-int *__stdcall bar();
+int *__stdcall bar(void);
 
 int baz(int __unaligned [], int [__unaligned]);
 int qux(int __stdcall [], int [__cdecl]);
