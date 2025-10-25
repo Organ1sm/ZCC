@@ -58,10 +58,7 @@ fn createType(
     for (desc.prefix) |prefix| {
         switch (prefix) {
             .L => builder.combine(.Long, 0) catch unreachable,
-            .LL => {
-                builder.combine(.Long, 0) catch unreachable;
-                builder.combine(.Long, 0) catch unreachable;
-            },
+            .LL => builder.combine(.LongLong, 0) catch unreachable,
             .LLL => {
                 switch (builder.type) {
                     .None => builder.type = .Int128,
