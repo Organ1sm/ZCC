@@ -79,7 +79,7 @@ pub fn pasteTokens(pp: *Preprocessor, startIdx: TokenIndex) ![]const u8 {
 
 pub fn shouldPreserveTokens(self: *Pragma, pp: *Preprocessor, startIdx: TokenIndex) bool {
     if (self.preserveTokens) |func| return func(self, pp, startIdx);
-    return false;
+    return true;
 }
 
 pub fn preprocessorCB(self: *Pragma, pp: *Preprocessor, startIdx: TokenIndex) Error!void {
