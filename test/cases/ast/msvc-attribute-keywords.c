@@ -20,7 +20,8 @@ variable: 'attributed(int)'
  attr: unaligned
  name: b
 
-fnProto: 'kr (...) int'
+fnProto: 'attributed(kr (...) int)'
+ attr: calling_convention cc: c
  name: foo
 
 fnProto: 'attributed(kr (...) *int)'

@@ -1311,8 +1311,7 @@ fn applyCallingConvention(attr: Attribute, p: *Parser, token: TokenIndex, qt: Qu
         return p.err(.callconv_non_func, token, .{ symbol, qt });
     }
     switch (attr.args.calling_convention.cc) {
-        .c => {},
-        .stdcall, .thiscall, .fastcall, .regcall => switch (comp.target.cpu.arch) {
+        .c, .stdcall, .thiscall, .fastcall, .regcall => switch (comp.target.cpu.arch) {
             .x86 => try p.attrApplicationBuffer.append(gpa, attr),
             else => try p.err(.callconv_not_supported, token, .{symbol}),
         },
