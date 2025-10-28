@@ -751,7 +751,7 @@ pub fn main(
     args: []const []const u8,
     comptime fastExit: bool,
     asmGenFn: ?AsmCodeGenFn,
-) Compilation.Error !void {
+) Compilation.Error!void {
     const userDefinedMacros = macros: {
         var macroBuffer: std.ArrayList(u8) = .empty;
         defer macroBuffer.deinit(d.comp.gpa);

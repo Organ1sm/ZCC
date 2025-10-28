@@ -2977,6 +2977,7 @@ fn parseEnumSpec(p: *Parser) Error!QualType {
 
             const symbol = p.symStack.getPtr(field.name, .vars);
             _ = try symbol.value.intCast(destTy, p.comp);
+            try p.tree.valueMap.put(gpa, fieldNode, sym.value);
 
             symbol.qt = destTy;
             field.qt = destTy;
@@ -7992,11 +7993,13 @@ fn parsePrimaryExpr(p: *Parser) Error!?Result {
                 else
                     .{ .declRefExpr = dr });
 
-                return Result{
+                const res: Result = .{
                     .value = if (p.constDeclFolding == .NoConstDeclFolding and sym.kind != .enumeration) Value{} else sym.value,
                     .qt = sym.qt,
                     .node = node,
                 };
+                try res.putValue(p);
+                return res;
             }
 
             // check if this is a builtin call
