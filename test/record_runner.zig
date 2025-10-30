@@ -87,9 +87,9 @@ const ExpectedFailure = struct {
 
 const builtin = @import("builtin");
 pub fn main() !void {
-    var general_purpose_allocator = std.heap.GeneralPurposeAllocator(.{}){};
-    const gpa = general_purpose_allocator.allocator();
-    defer if (general_purpose_allocator.deinit() == .leak) std.process.exit(1);
+    var debugAllocator: std.heap.DebugAllocator(.{}) = .init();
+    const gpa = debugAllocator.allocator();
+    defer if (debugAllocator.deinit() == .leak) std.process.exit(1);
 
     // max file size < 2M. max total use < 12M
     const args = try std.process.argsAlloc(gpa);

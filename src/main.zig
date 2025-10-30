@@ -10,12 +10,15 @@ const Target = zinc.TargetUtil;
 const Toolchain = zinc.ToolChain;
 const AssemblyBackend = @import("assembly-backend");
 
-var GeneralPurposeAllocator = std.heap.GeneralPurposeAllocator(.{}){};
+var DebugAllocator: std.heap.DebugAllocator(.{}) = .init();
 
 pub fn main() u8 {
-    const gpa = if (builtin.link_libc) std.heap.raw_c_allocator else GeneralPurposeAllocator.allocator();
+    const gpa = if (builtin.link_libc)
+        std.heap.raw_c_allocator
+    else
+        DebugAllocator.allocator();
     defer if (!builtin.link_libc) {
-        _ = GeneralPurposeAllocator.deinit();
+        _ = DebugAllocator.deinit();
     };
 
     var arenaInstance = std.heap.ArenaAllocator.init(gpa);
