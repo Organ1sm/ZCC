@@ -1192,6 +1192,10 @@ pub const QualType = packed struct(u32) {
     }
 
     pub fn print(qt: QualType, comp: *const Compilation, w: *std.Io.Writer) std.Io.Writer.Error!void {
+        if (qt.isC23Auto()) {
+            try w.writeAll("auto");
+            return;
+        }
         _ = try qt.printPrologue(comp, w);
         try qt.printEpilogue(comp, w);
     }
@@ -1202,6 +1206,10 @@ pub const QualType = packed struct(u32) {
         comp: *const Compilation,
         w: *std.Io.Writer,
     ) std.Io.Writer.Error!void {
+        if (qt.isC23Auto()) {
+            try w.print("auto {s}", .{name});
+            return;
+        }
         const simple = try qt.printPrologue(comp, w);
         if (simple) try w.writeByte(' ');
         try w.writeAll(name);
@@ -2482,44 +2490,48 @@ pub const Builder = struct {
     pub fn finishQuals(b: Builder, qt: QualType) !QualType {
         if (qt.isInvalid()) return .invalid;
 
-        const gpa = b.parser.comp.gpa;
+        const parser = b.parser;
+        const comp = parser.comp;
+        const gpa = comp.gpa;
 
         var resultQt = qt;
         if (b.atomicType orelse b.atomic) |atomicToken| {
-            if (resultQt.isAutoType()) return b.parser.todo("_Atomic __auto_type");
+            if (resultQt.isAutoType()) return parser.todo("_Atomic __auto_type");
             if (resultQt.isC23Auto()) {
                 try b.parser.err(.atomic_auto, atomicToken, .{});
                 return .invalid;
             }
-            if (resultQt.hasIncompleteSize(b.parser.comp)) {
-                try b.parser.err(.atomic_incomplete, atomicToken, .{qt});
+            if (resultQt.hasIncompleteSize(comp)) {
+                try parser.err(.atomic_incomplete, atomicToken, .{qt});
                 return .invalid;
             }
-            switch (resultQt.base(b.parser.comp).type) {
+            switch (resultQt.base(comp).type) {
                 .array => {
-                    try b.parser.err(.atomic_array, atomicToken, .{qt});
+                    try parser.err(.atomic_array, atomicToken, .{qt});
                     return .invalid;
                 },
                 .func => {
-                    try b.parser.err(.atomic_func, atomicToken, .{qt});
+                    try parser.err(.atomic_func, atomicToken, .{qt});
                     return .invalid;
                 },
                 .atomic => {
-                    try b.parser.err(.atomic_atomic, atomicToken, .{qt});
+                    try parser.err(.atomic_atomic, atomicToken, .{qt});
                     return .invalid;
                 },
                 .complex => {
-                    try b.parser.err(.atomic_complex, atomicToken, .{qt});
+                    try parser.err(.atomic_complex, atomicToken, .{qt});
                     return .invalid;
                 },
                 else => {
-                    resultQt = try b.parser.comp.typeStore.put(gpa, .{ .atomic = resultQt });
+                    resultQt = try comp.typeStore.put(gpa, .{ .atomic = resultQt });
                 },
             }
         }
 
-        if (b.unaligned != null and !qt.isPointer(b.parser.comp)) {
-            resultQt = (try b.parser.comp.typeStore.put(gpa, .{
+        const isPtr = qt.isAutoType() or qt.isC23Auto() or qt.base(comp).type == .pointer;
+
+        if (b.unaligned != null and !isPtr) {
+            resultQt = (try comp.typeStore.put(gpa, .{
                 .attributed = .{
                     .base = resultQt,
                     .attributes = &.{.{
@@ -2534,7 +2546,7 @@ pub const Builder = struct {
         switch (b.nullability) {
             .none => {},
             .nonnull, .nullable, .nullableResult, .nullUnspecified => |token| {
-                if (!qt.isPointer(b.parser.comp)) {
+                if (!isPtr) {
                     try b.parser.err(.invalid_nullability, token, .{qt});
                 }
             },
@@ -2544,10 +2556,15 @@ pub const Builder = struct {
         if (b.@"volatile" != null) resultQt.@"volatile" = true;
 
         if (b.restrict) |restrictToken| {
-            switch (qt.base(b.parser.comp).type) {
+            if (resultQt.isAutoType()) return parser.todo("restrict __auto_type");
+            if (resultQt.isC23Auto()) {
+                try parser.err(.restrict_non_pointer, restrictToken, .{});
+                return resultQt;
+            }
+            switch (qt.base(comp).type) {
                 .array, .pointer => resultQt.restrict = true,
                 else => {
-                    try b.parser.err(.restrict_non_pointer, restrictToken, .{qt});
+                    try parser.err(.restrict_non_pointer, restrictToken, .{qt});
                 },
             }
         }

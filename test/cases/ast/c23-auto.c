@@ -54,6 +54,11 @@ fnDef: 'fn () void'
      init:
       implicit defaultInitExpr: 'invalid'
 
+    variable: 'int'
+     name: g
+     init:
+      intLiteral: 'int' (value: 1)
+
     implicit returnStmt: 'void'
 
 fnDef: 'fn () void'
