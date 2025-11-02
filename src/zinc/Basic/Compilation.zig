@@ -1663,7 +1663,7 @@ test "addSourceFromBuffer - exhaustive check for carriage return elimination" {
 
     const alphabet = [_]u8{ '\r', '\n', ' ', '\\', 'a' };
     const alen = alphabet.len;
-    var buffer: [alphabet.len]u8 = [1]u8{alphabet[0]} ** alen;
+    var buffer: [alen]u8 = @splat(alphabet[0]);
 
     var diagnostics: Diagnostics = .{ .output = .ignore };
     var comp = Compilation.init(std.testing.allocator, arena.allocator(), &diagnostics, std.fs.cwd());
