@@ -9,7 +9,14 @@ const Token = Tree.Token;
 const Node = Tree.Node;
 const AllocatorError = std.mem.Allocator.Error;
 
-var DebugAllocator: std.heap.DebugAllocator(.{}) = .init();
+var DebugAllocator: std.heap.DebugAllocator(.{
+    .stack_trace_frames = if (buildOptions.DebugAllocations and std.debug.sys_can_stack_trace) 10 else 0,
+    .resize_stack_traces = buildOptions.DebugAllocations,
+    // A unique value so that when a default-constructed
+    // GeneralPurposeAllocator is incorrectly passed to testing allocator, or
+    // vice versa, panic occurs.
+    .canary = @truncate(0xc647026dc6875134),
+}) = .init();
 
 const AddCommandLineArgsResult = struct {
     bool,

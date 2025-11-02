@@ -23,6 +23,7 @@ pub fn build(b: *std.Build) !void {
     const UseLLVM = b.option(bool, "llvm", "Use LLVM backend to generate aro executable");
     const noBin = b.option(bool, "no-bin", "skip emitting compiler binary") orelse false;
     const testFilter = b.option([]const []const u8, "test-filter", "Test filter for unit tests") orelse &.{};
+    const debugAllocations = b.option(bool, "debug-allocations", "Collect detailed debug info for all allocations (slow)") orelse false;
 
     const systemDefaults = b.addOptions();
     systemDefaults.addOption(bool, "enableLinkerBuildId", EnableLinkerBuildId);
@@ -33,6 +34,8 @@ pub fn build(b: *std.Build) !void {
     systemDefaults.addOption([]const u8, "unwindlib", DefaultUnwindlib);
 
     const zincOptions = b.addOptions();
+    zincOptions.addOption(bool, "debugAllocations", debugAllocations);
+
     const versionStr = v: {
         const versionString = b.fmt("{d}.{d}.{d}", .{ ZincVersion.major, ZincVersion.minor, ZincVersion.patch });
         var code: u8 = undefined;
@@ -192,6 +195,7 @@ pub fn build(b: *std.Build) !void {
         const test_runner_options = b.addOptions();
         integration_tests.root_module.addOptions("build_options", test_runner_options);
         test_runner_options.addOption(bool, "TestAllAllocationFailures", TestAllAllocationFailures);
+        test_runner_options.addOption(bool, "DebugAllocations", debugAllocations);
 
         const integration_test_runner = b.addRunArtifact(integration_tests);
         integration_test_runner.addArg(b.pathFromRoot("test/cases"));

@@ -2,6 +2,8 @@ const std = @import("std");
 const process = std.process;
 const builtin = @import("builtin");
 
+const buildOpts = @import("build_options");
+
 const zinc = @import("zinc");
 const Compilation = zinc.Compilation;
 const Diagnostics = zinc.Diagnostics;
@@ -10,7 +12,14 @@ const Target = zinc.TargetUtil;
 const Toolchain = zinc.ToolChain;
 const AssemblyBackend = @import("assembly-backend");
 
-var DebugAllocator: std.heap.DebugAllocator(.{}) = .init();
+var DebugAllocator: std.heap.DebugAllocator(.{
+    .stack_trace_frames = if (buildOpts.DebugAllocations and std.debug.sys_can_stack_trace) 10 else 0,
+    .resize_stack_traces = buildOpts.DebugAllocations,
+    // A unique value so that when a default-constructed
+    // GeneralPurposeAllocator is incorrectly passed to testing allocator, or
+    // vice versa, panic occurs.
+    .canary = @truncate(0xc647026dc6875134),
+}) = .init();
 
 pub fn main() u8 {
     const gpa = if (builtin.link_libc)
