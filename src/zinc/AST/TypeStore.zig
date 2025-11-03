@@ -2070,12 +2070,21 @@ fn generateVaListType(ts: *TypeStore, comp: *Compilation) !QualType {
             .ios, .macos, .tvos, .watchos => return .charPointer,
             else => .aarch64_va_list,
         },
-        .sparc, .wasm32, .wasm64, .bpfel, .bpfeb, .riscv32, .riscv64, .avr, .spirv32, .spirv64 => return .voidPointer,
-        .powerpc => switch (comp.target.os.tag) {
-            .ios, .macos, .tvos, .watchos, .aix => return .charPointer,
-            else => return .void, // unknown
-        },
-        .x86, .msp430 => return .charPointer,
+
+        .sparc,
+        .wasm32,
+        .wasm64,
+        .bpfel,
+        .bpfeb,
+        .riscv32,
+        .riscv64,
+        .avr,
+        .spirv32,
+        .spirv64,
+        => return .voidPointer,
+
+        .powerpc, .powerpcle => .x86_64_va_list,
+        .msp430 => return .charPointer,
         .x86_64 => switch (comp.target.os.tag) {
             .windows => return .charPointer,
             else => .x86_64_va_list,

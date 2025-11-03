@@ -33,7 +33,6 @@ test "simple test" {
     _ = @import("zinc/Basic/Target.zig");
     _ = @import("zinc/Driver/Distro.zig");
     _ = @import("zinc/Driver/GCCVersion.zig");
-    _ = @import("zinc/Driver/Filesystem.zig");
     _ = @import("zinc/Lexer/Lexer.zig");
     _ = @import("zinc/Lexer/Preprocessor.zig");
     _ = @import("zinc/Parser/InitList.zig");

@@ -525,7 +525,7 @@ pub fn parseArgs(
                     try d.err("invalid target '{s}'", .{arg});
                     continue;
                 };
-                const target = std.zig.system.resolveTargetQuery(query) catch |e| {
+                const target = std.zig.system.resolveTargetQuery(d.comp.io, query) catch |e| {
                     return d.fatal("unable to resolve target: {s}", .{errorDescription(e)});
                 };
                 d.comp.target = target;

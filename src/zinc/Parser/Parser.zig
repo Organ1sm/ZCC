@@ -9059,12 +9059,15 @@ fn parseGenericSelection(p: *Parser) Error!?Result {
 }
 
 test "Node locations" {
-    var arenaState: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    const allocator = std.testing.allocator;
+    const io = std.testing.io;
+
+    var arenaState: std.heap.ArenaAllocator = .init(allocator);
     defer arenaState.deinit();
     const arena = arenaState.allocator();
 
     var diagnostics: Diagnostics = .{ .output = .ignore };
-    var comp = Compilation.init(std.testing.allocator, arena, &diagnostics, std.fs.cwd());
+    var comp = Compilation.init(allocator, arena, io, &diagnostics, std.fs.cwd());
     defer comp.deinit();
 
     const file = try comp.addSourceFromBuffer("file.c",

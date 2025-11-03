@@ -12,9 +12,8 @@ pub fn deinit(self: *const Assembly, gpa: Allocator) void {
 }
 
 pub fn writeToFile(self: Assembly, file: std.fs.File) !void {
-    var vec: [2]std.posix.iovec_const = .{
-        .{ .base = self.data.ptr, .len = self.data.len },
-        .{ .base = self.text.ptr, .len = self.text.len },
-    };
-    return file.writevAll(&vec);
+    var fileWriter = file.writer(&.{});
+
+    var buffers = [_][]const u8{ self.data, self.text };
+    try fileWriter.interface.writeSplatAll(&buffers, 1);
 }

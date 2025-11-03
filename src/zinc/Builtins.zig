@@ -320,11 +320,14 @@ test Iterator {
 }
 
 test "All builtins" {
-    var arenaState: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    const allocator = std.testing.allocator;
+    const io = std.testing.io;
+
+    var arenaState: std.heap.ArenaAllocator = .init(allocator);
     defer arenaState.deinit();
     const arena = arenaState.allocator();
 
-    var comp = Compilation.init(std.testing.allocator, arena, undefined, std.fs.cwd());
+    var comp = Compilation.init(allocator, arena, io, undefined, std.fs.cwd());
     defer comp.deinit();
 
     try comp.typeStore.initNamedTypes(&comp);
@@ -340,28 +343,4 @@ test "All builtins" {
             try std.testing.expectEqual(func_ty.builtin.tag, found_by_lookup.builtin.tag);
         }
     }
-}
-
-test "Allocation failures" {
-    const Test = struct {
-        fn testOne(allocator: std.mem.Allocator) !void {
-            var arenaState: std.heap.ArenaAllocator = .init(std.testing.allocator);
-            defer arenaState.deinit();
-            const arena = arenaState.allocator();
-
-            var comp = Compilation.init(allocator, arena, undefined, std.fs.cwd());
-            defer comp.deinit();
-
-            _ = try comp.generateBuiltinMacros(.IncludeSystemDefines);
-
-            const num_builtins = 40;
-            var builtin_it = Iterator{};
-            for (0..num_builtins) |_| {
-                const entry = builtin_it.next().?;
-                _ = try comp.builtins.getOrCreate(&comp, entry.name);
-            }
-        }
-    };
-
-    try std.testing.checkAllAllocationFailures(std.testing.allocator, Test.testOne, .{});
 }

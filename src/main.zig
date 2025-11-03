@@ -30,16 +30,21 @@ pub fn main() u8 {
         _ = DebugAllocator.deinit();
     };
 
+    const fastExit = @import("builtin").mode != .Debug;
+
     var arenaInstance = std.heap.ArenaAllocator.init(gpa);
     defer arenaInstance.deinit();
 
     const arena = arenaInstance.allocator();
+
+    var threaded: std.Io.Threaded = .init(gpa);
+    defer threaded.deinit();
+    const io = threaded.io();
+
     const args = process.argsAlloc(arena) catch {
         std.debug.print("Out of Memory\n", .{});
         return 1;
     };
-
-    const fastExit = @import("builtin").mode != .Debug;
 
     const zincName = std.fs.selfExePathAlloc(gpa) catch {
         std.debug.print("unable to find Zinc executable path\n", .{});
@@ -57,7 +62,7 @@ pub fn main() u8 {
         } },
     };
 
-    var comp = Compilation.initDefault(gpa, arena, &diagnostics, std.fs.cwd()) catch |er| switch (er) {
+    var comp = Compilation.initDefault(gpa, arena, io, &diagnostics, std.fs.cwd()) catch |er| switch (er) {
         error.OutOfMemory => {
             std.debug.print("Out of Memory\n", .{});
             if (fastExit) process.exit(1);
@@ -69,7 +74,7 @@ pub fn main() u8 {
     var driver = Driver{ .comp = &comp, .zincName = zincName, .diagnostics = &diagnostics };
     defer driver.deinit();
 
-    var toolChain: Toolchain = .{ .driver = &driver, .filesystem = .{ .real = comp.cwd } };
+    var toolChain: Toolchain = .{ .driver = &driver };
     defer toolChain.deinit();
 
     driver.main(&toolChain, args, fastExit, AssemblyBackend.genAsm) catch |er| switch (er) {

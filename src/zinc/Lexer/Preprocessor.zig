@@ -218,8 +218,8 @@ pub fn init(comp: *Compilation, sourceEpoch: SourceEpoch) Preprocessor {
 
 /// Initialize Preprocessor with builtin macros.
 pub fn initDefault(comp: *Compilation) !Preprocessor {
-    const sourceEpoch: SourceEpoch = comp.environment.sourceEpoch() catch |er| switch (er) {
-        error.InvalidEpoch => blk: {
+    const sourceEpoch: SourceEpoch = comp.environment.sourceEpoch(comp.io) catch |er| switch (er) {
+        error.InvalidEpoch, error.UnsupportedClock, error.Unexpected => blk: {
             const diagnostic: Diagnostic = .invalid_source_epoch;
             try comp.diagnostics.add(.{ .text = diagnostic.fmt, .kind = diagnostic.kind, .opt = diagnostic.opt, .location = null });
             break :blk .default;
@@ -3742,13 +3742,14 @@ const FmtEscapes = struct {
 
 test "Preserve pragma tokens sometimes" {
     const gpa = std.testing.allocator;
+    const io = std.testing.io;
     const Test = struct {
         fn runPreprocessor(sourceText: []const u8) ![]const u8 {
             var arena: std.heap.ArenaAllocator = .init(gpa);
             defer arena.deinit();
 
             var diagnostics: Diagnostics = .{ .output = .ignore };
-            var comp = Compilation.init(gpa, arena.allocator(), &diagnostics, std.fs.cwd());
+            var comp = Compilation.init(gpa, arena.allocator(), io, &diagnostics, std.fs.cwd());
             defer comp.deinit();
 
             try comp.addDefaultPragmaHandlers();
@@ -3817,7 +3818,7 @@ test "destringify" {
     defer arena.deinit();
 
     var diagnostics: Diagnostics = .{ .output = .ignore };
-    var comp = Compilation.init(gpa, arena.allocator(), &diagnostics, std.fs.cwd());
+    var comp = Compilation.init(gpa, arena.allocator(), std.testing.io, &diagnostics, std.fs.cwd());
     defer comp.deinit();
 
     var pp = Preprocessor.init(&comp, .default);
@@ -3886,7 +3887,7 @@ test "Include guards" {
             const arena = arenaState.allocator();
 
             var diagnostics: Diagnostics = .{ .output = .ignore };
-            var comp = Compilation.init(gpa, arena, &diagnostics, std.fs.cwd());
+            var comp = Compilation.init(gpa, arena, std.testing.io, &diagnostics, std.fs.cwd());
             defer comp.deinit();
 
             var pp = Preprocessor.init(&comp, .default);

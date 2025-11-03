@@ -34,7 +34,7 @@ pub fn appendToolPath(self: *const GCCDetector, tc: *Toolchain) !void {
 fn addDefaultGCCPrefixes(prefixes: *std.ArrayListUnmanaged([]const u8), tc: *const Toolchain) !void {
     const sysroot = tc.getSysroot();
     const target = tc.getTarget();
-    if (sysroot.len == 0 and target.os.tag == .linux and tc.filesystem.exists("/opt/rh")) {
+    if (sysroot.len == 0 and target.os.tag == .linux and tc.exists("/opt/rh")) {
         prefixes.appendAssumeCapacity("/opt/rh/gcc-toolset-12/root/usr");
         prefixes.appendAssumeCapacity("/opt/rh/gcc-toolset-11/root/usr");
         prefixes.appendAssumeCapacity("/opt/rh/gcc-toolset-10/root/usr");
@@ -182,7 +182,7 @@ fn collectLibDirsAndTriples(
     };
 
     const target = tc.getTarget();
-    if (target.os.tag == .solaris) {
+    if (target.os.tag == .illumos) {
         // TODO
         return;
     }
@@ -453,15 +453,15 @@ pub fn discover(self: *GCCDetector, tc: *Toolchain) !void {
 
     const v0 = GCCVersion.parse("0.0.0");
     for (prefixes.items) |prefix| {
-        if (!tc.filesystem.exists(prefix)) continue;
+        if (!tc.exists(prefix)) continue;
 
         for (candidateLibDirs.items) |suffix| {
             defer fib.reset();
             const libDir = std.fs.path.join(fib.allocator(), &.{ prefix, suffix }) catch continue;
-            if (!tc.filesystem.exists(libDir)) continue;
+            if (!tc.exists(libDir)) continue;
 
-            const gccDirExists = tc.filesystem.joinedExists(&.{ libDir, "/gcc" });
-            const gccCrossDirExists = tc.filesystem.joinedExists(&.{ libDir, "/gcc-cross" });
+            const gccDirExists = tc.joinedExists(&.{ libDir, "/gcc" });
+            const gccCrossDirExists = tc.joinedExists(&.{ libDir, "/gcc-cross" });
 
             try self.scanLibDirForGCCTriple(tc, target, libDir, tripleStr, false, gccDirExists, gccCrossDirExists);
             for (candidateTripleAliases.items) |candidate| {
@@ -471,10 +471,10 @@ pub fn discover(self: *GCCDetector, tc: *Toolchain) !void {
 
         for (candidateBiarchLibDirs.items) |suffix| {
             const libDir = std.fs.path.join(fib.allocator(), &.{ prefix, suffix }) catch continue;
-            if (!tc.filesystem.exists(libDir)) continue;
+            if (!tc.exists(libDir)) continue;
 
-            const gccDirExists = tc.filesystem.joinedExists(&.{ libDir, "/gcc" });
-            const gccCrossDirExists = tc.filesystem.joinedExists(&.{ libDir, "/gcc-cross" });
+            const gccDirExists = tc.joinedExists(&.{ libDir, "/gcc" });
+            const gccCrossDirExists = tc.joinedExists(&.{ libDir, "/gcc-cross" });
 
             for (candidateBiarchTripleAliases.items) |candidate| {
                 try self.scanLibDirForGCCTriple(tc, target, libDir, candidate, true, gccDirExists, gccCrossDirExists);
@@ -493,7 +493,7 @@ fn findBiarchMultilibs(
     path: [2][]const u8,
     needsBiArchSuffix: bool,
 ) !bool {
-    const suff64 = if (target.os.tag == .solaris)
+    const suff64 = if (target.os.tag == .illumos)
         switch (target.cpu.arch) {
             .x86, .x86_64 => "/amd64",
             .sparc => "/sparcv9",
@@ -518,11 +518,11 @@ fn findBiarchMultilibs(
     };
     const isX32 = target.abi == .gnux32 or target.abi == .muslx32;
     const targetPtrWidth = target.ptrBitWidth();
-    const want: Want = if (targetPtrWidth == 32 and multilibFilter.exists(alt32, tc.filesystem))
+    const want: Want = if (targetPtrWidth == 32 and multilibFilter.exists(alt32, tc))
         .want64
-    else if (targetPtrWidth == 64 and isX32 and multilibFilter.exists(altX32, tc.filesystem))
+    else if (targetPtrWidth == 64 and isX32 and multilibFilter.exists(altX32, tc))
         .want64
-    else if (targetPtrWidth == 64 and !isX32 and multilibFilter.exists(alt64, tc.filesystem))
+    else if (targetPtrWidth == 64 and !isX32 and multilibFilter.exists(alt64, tc))
         .want32
     else if (targetPtrWidth == 32)
         if (needsBiArchSuffix) .want64 else .want32
@@ -543,7 +543,7 @@ fn findBiarchMultilibs(
         altX32,
     };
     result.multilibCount += 4;
-    result.filter(multilibFilter, tc.filesystem);
+    result.filter(multilibFilter, tc);
 
     return result.select(&.{
         if (targetPtrWidth == 64 and !isX32) "+m64" else "-m64",
@@ -590,7 +590,8 @@ fn scanLibDirForGCCTriple(
 ) !void {
     var pathBuffer: [std.fs.max_path_bytes]u8 = undefined;
     var fib = std.heap.FixedBufferAllocator.init(&pathBuffer);
-    const arena = tc.driver.comp.arena;
+    const comp = tc.driver.comp;
+    const arena = comp.arena;
 
     for (0..2) |i| {
         if (i == 0 and !gccDirExists) continue;
@@ -605,7 +606,7 @@ fn scanLibDirForGCCTriple(
         const libSuffix = std.fs.path.join(suffixBufferLib.allocator(), &.{ base, candidateTriple }) catch continue;
         const dirname = std.fs.path.join(fib.allocator(), &.{ libDir, libSuffix }) catch continue;
 
-        var parentDir = tc.filesystem.openDir(dirname) catch continue;
+        var parentDir = comp.cwd.openDir(dirname, .{ .access_sub_paths = false, .iterate = true }) catch continue;
         defer parentDir.close();
 
         var it = parentDir.iterate();

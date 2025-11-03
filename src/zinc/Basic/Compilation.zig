@@ -2,6 +2,7 @@
 /// and declared symbols as well and house all compiler operation
 const std = @import("std");
 const assert = std.debug.assert;
+const Io = std.Io;
 
 const backend = @import("backend");
 const Interner = backend.Interner;
@@ -111,7 +112,7 @@ pub const Environment = struct {
         self.* = undefined;
     }
 
-    pub fn sourceEpoch(self: *const Environment) !SourceEpoch {
+    pub fn sourceEpoch(self: *const Environment, io: Io) !SourceEpoch {
         const max_timestamp = 253402300799; // Dec 31 9999 23:59:59
 
         if (self.sourceDateEpoch) |epoch| {
@@ -119,8 +120,9 @@ pub const Environment = struct {
             if (parsed > max_timestamp) return error.InvalidEpoch;
             return .{ .provided = parsed };
         } else {
-            const timestamp = std.math.cast(u64, std.time.timestamp()) orelse return error.InvalidEpoch;
-            return .{ .system = std.math.clamp(timestamp, 0, max_timestamp) };
+            const timestamp = try Io.Clock.real.now(io);
+            const seconds = std.math.cast(u64, timestamp.toSeconds()) orelse return error.InvalidEpoch;
+            return .{ .system = std.math.clamp(seconds, 0, max_timestamp) };
         }
     }
 };
@@ -128,6 +130,8 @@ pub const Environment = struct {
 gpa: Allocator,
 /// Allocations in this arena live all the way until `Compilation.deinit`.
 arena: Allocator,
+io: Io,
+cwd: std.fs.Dir,
 diagnostics: *Diagnostics,
 
 codegenOptions: CodeGenOptions = .default,
@@ -150,12 +154,12 @@ typeStore: TypeStore = .{},
 /// If this is not null, the directory containing the specified Source will be searched for includes
 /// Used by MS extensions which allow searching for includes relative to the directory of the main source file.
 msCwdSourceId: ?Source.ID = null,
-cwd: std.fs.Dir,
 
-pub fn init(gpa: Allocator, arena: Allocator, diags: *Diagnostics, cwd: std.fs.Dir) Compilation {
+pub fn init(gpa: Allocator, arena: Allocator, io: Io, diags: *Diagnostics, cwd: std.fs.Dir) Compilation {
     return .{
         .gpa = gpa,
         .arena = arena,
+        .io = io,
         .diagnostics = diags,
         .cwd = cwd,
     };
@@ -163,10 +167,11 @@ pub fn init(gpa: Allocator, arena: Allocator, diags: *Diagnostics, cwd: std.fs.D
 
 /// Initialize Compilation with default environment,
 /// pragma handlers and emulation mode set to target.
-pub fn initDefault(gpa: Allocator, arena: Allocator, diags: *Diagnostics, cwd: std.fs.Dir) !Compilation {
+pub fn initDefault(gpa: Allocator, arena: Allocator, io: Io, diags: *Diagnostics, cwd: std.fs.Dir) !Compilation {
     var comp: Compilation = .{
         .gpa = gpa,
         .arena = arena,
+        .io = io,
         .environment = try Environment.loadAll(gpa),
         .diagnostics = diags,
         .cwd = cwd,
@@ -215,14 +220,14 @@ pub const SystemDefinesMode = enum {
 };
 
 /// Generate builtin macros that will be available to each source file.
-pub fn generateSystemDefines(comp: *Compilation, w: *std.Io.Writer) !void {
+pub fn generateSystemDefines(comp: *Compilation, w: *Io.Writer) !void {
     const define = struct {
-        fn define(_w: anytype, name: []const u8) !void {
+        fn define(_w: *Io.Writer, name: []const u8) !void {
             try _w.print("#define {s} 1\n", .{name});
         }
     }.define;
     const defineStd = struct {
-        fn defineStd(_w: anytype, name: []const u8, isGnu: bool) !void {
+        fn defineStd(_w: *Io.Writer, name: []const u8, isGnu: bool) !void {
             if (isGnu) try define(_w, name);
 
             try _w.print(
@@ -263,7 +268,10 @@ pub fn generateSystemDefines(comp: *Compilation, w: *std.Io.Writer) !void {
         .netbsd => try define(w, "__NetBSD__"),
         .openbsd => try define(w, "__OpenBSD__"),
         .dragonfly => try define(w, "__DragonFly__"),
-        .solaris => try defineStd(w, "sun", isGnu),
+        .illumos => {
+            try defineStd(w, "sun", isGnu);
+            try define(w, "__illumos__");
+        },
 
         .macos,
         .tvos,
@@ -289,8 +297,7 @@ pub fn generateSystemDefines(comp: *Compilation, w: *std.Io.Writer) !void {
         .linux,
         .haiku,
         .hurd,
-        .solaris,
-        .aix,
+        .illumos,
         .emscripten,
         => try defineStd(w, "unix", isGnu),
         else => {},
@@ -348,7 +355,7 @@ pub fn generateSystemDefines(comp: *Compilation, w: *std.Io.Writer) !void {
             try defineStd(w, "sparc", isGnu);
             try define(w, "__sparc_v9__");
             try define(w, "__arch64__");
-            if (comp.target.os.tag != .solaris) {
+            if (comp.target.os.tag != .illumos) {
                 try define(w, "__sparc64__");
                 try define(w, "__sparc_v9__");
                 try define(w, "__sparcv9__");
@@ -357,7 +364,7 @@ pub fn generateSystemDefines(comp: *Compilation, w: *std.Io.Writer) !void {
 
         .sparc => {
             try defineStd(w, "sparc", isGnu);
-            if (comp.target.os.tag == .solaris) {
+            if (comp.target.os.tag == .illumos) {
                 try define(w, "__sparcv8");
             }
         },
@@ -567,7 +574,7 @@ pub fn generateSystemDefines(comp: *Compilation, w: *std.Io.Writer) !void {
 pub fn generateBuiltinMacros(comp: *Compilation, systemDefinesMode: SystemDefinesMode) AddSourceError!Source {
     try comp.typeStore.initNamedTypes(comp);
 
-    var allocating: std.Io.Writer.Allocating = try .initCapacity(comp.gpa, 2 << 13);
+    var allocating: Io.Writer.Allocating = try .initCapacity(comp.gpa, 2 << 13);
     defer allocating.deinit();
 
     comp.writeBuiltinMacros(systemDefinesMode, &allocating.writer) catch |err| switch (err) {
@@ -581,7 +588,7 @@ pub fn generateBuiltinMacros(comp: *Compilation, systemDefinesMode: SystemDefine
     return comp.addSourceFromOwnedBuffer("<builtin>", contents, .User);
 }
 
-fn writeBuiltinMacros(comp: *Compilation, systemDefinesMode: SystemDefinesMode, w: *std.Io.Writer) !void {
+fn writeBuiltinMacros(comp: *Compilation, systemDefinesMode: SystemDefinesMode, w: *Io.Writer) !void {
     if (systemDefinesMode == .IncludeSystemDefines) {
         try w.writeAll(
             \\#define __VERSION__ "Zinc 
@@ -618,7 +625,7 @@ fn writeBuiltinMacros(comp: *Compilation, systemDefinesMode: SystemDefinesMode, 
     }
 }
 
-fn generateFloatMacros(w: *std.Io.Writer, prefix: []const u8, semantics: Target.FPSemantics, ext: []const u8) !void {
+fn generateFloatMacros(w: *Io.Writer, prefix: []const u8, semantics: Target.FPSemantics, ext: []const u8) !void {
     const denormMin = semantics.chooseValue(
         []const u8,
         .{
@@ -693,7 +700,7 @@ fn generateFloatMacros(w: *std.Io.Writer, prefix: []const u8, semantics: Target.
     try w.print("#define __{s}_MIN__ {s}{s}\n", .{ prefix, min, ext });
 }
 
-fn generateTypeMacro(comp: *const Compilation, w: *std.Io.Writer, name: []const u8, qt: QualType) !void {
+fn generateTypeMacro(comp: *const Compilation, w: *Io.Writer, name: []const u8, qt: QualType) !void {
     try w.print("#define {s} ", .{name});
     try qt.print(comp, w);
     try w.writeByte('\n');
@@ -717,7 +724,7 @@ fn generateFastOrLeastType(
     bits: usize,
     kind: enum { least, fast },
     signedness: std.builtin.Signedness,
-    w: *std.Io.Writer,
+    w: *Io.Writer,
 ) !void {
     const ty = comp.intLeastN(bits, signedness); // defining the fast types as the least types is permitted
 
@@ -747,7 +754,7 @@ fn generateFastOrLeastType(
     try comp.generateFmt(prefix, w, ty);
 }
 
-fn generateFastAndLeastWidthTypes(comp: *Compilation, w: *std.Io.Writer) !void {
+fn generateFastAndLeastWidthTypes(comp: *Compilation, w: *Io.Writer) !void {
     const sizes = [_]usize{ 8, 16, 32, 64 };
     for (sizes) |size| {
         try comp.generateFastOrLeastType(size, .least, .signed, w);
@@ -757,7 +764,7 @@ fn generateFastAndLeastWidthTypes(comp: *Compilation, w: *std.Io.Writer) !void {
     }
 }
 
-fn generateExactWidthTypes(comp: *Compilation, w: *std.Io.Writer) !void {
+fn generateExactWidthTypes(comp: *Compilation, w: *Io.Writer) !void {
     try comp.generateExactWidthType(w, .schar);
 
     if (QualType.short.sizeof(comp) > QualType.char.sizeof(comp))
@@ -801,7 +808,7 @@ fn generateExactWidthTypes(comp: *Compilation, w: *std.Io.Writer) !void {
     }
 }
 
-fn generateFmt(comp: *const Compilation, prefix: []const u8, w: *std.Io.Writer, qt: QualType) !void {
+fn generateFmt(comp: *const Compilation, prefix: []const u8, w: *Io.Writer, qt: QualType) !void {
     const unsigned = qt.isUnsigned(comp);
     const modifier = qt.formatModifier(comp);
     const formats = if (unsigned) "ouxX" else "di";
@@ -809,7 +816,7 @@ fn generateFmt(comp: *const Compilation, prefix: []const u8, w: *std.Io.Writer, 
         try w.print("#define {s}_FMT{c}__ \"{s}{c}\"\n", .{ prefix, c, modifier, c });
 }
 
-fn generateSuffixMacro(comp: *const Compilation, prefix: []const u8, w: *std.Io.Writer, qt: QualType) !void {
+fn generateSuffixMacro(comp: *const Compilation, prefix: []const u8, w: *Io.Writer, qt: QualType) !void {
     return w.print("#define {s}_C_SUFFIX__ {s}\n", .{ prefix, qt.intValueSuffix(comp) });
 }
 
@@ -817,7 +824,7 @@ fn generateSuffixMacro(comp: *const Compilation, prefix: []const u8, w: *std.Io.
 ///     Name macro (e.g. #define __UINT32_TYPE__ unsigned int)
 ///     Format strings (e.g. #define __UINT32_FMTu__ "u")
 ///     Suffix macro (e.g. #define __UINT32_C_SUFFIX__ U)
-fn generateExactWidthType(comp: *Compilation, w: *std.Io.Writer, originalQt: QualType) !void {
+fn generateExactWidthType(comp: *Compilation, w: *Io.Writer, originalQt: QualType) !void {
     var qt = originalQt;
     const width = qt.sizeof(comp) * 8;
     const unsigned = qt.isUnsigned(comp);
@@ -842,7 +849,7 @@ fn generateExactWidthType(comp: *Compilation, w: *std.Io.Writer, originalQt: Qua
     try comp.generateSuffixMacro(prefix, w, qt);
 }
 
-fn generateIntMax(comp: *const Compilation, w: *std.Io.Writer, name: []const u8, qt: QualType) !void {
+fn generateIntMax(comp: *const Compilation, w: *Io.Writer, name: []const u8, qt: QualType) !void {
     const unsigned = qt.isUnsigned(comp);
     const max: u128 = switch (qt.bitSizeof(comp)) {
         8 => if (unsigned) std.math.maxInt(u8) else std.math.maxInt(i8),
@@ -866,7 +873,7 @@ pub fn wcharMax(comp: *const Compilation) u32 {
     };
 }
 
-fn generateExactWidthIntMax(comp: *Compilation, w: *std.Io.Writer, orginalQt: QualType) !void {
+fn generateExactWidthIntMax(comp: *Compilation, w: *Io.Writer, orginalQt: QualType) !void {
     var qt = orginalQt;
     const bitCount: u8 = @intCast(qt.sizeof(comp) * 8);
     const unsigned = qt.isUnsigned(comp);
@@ -882,16 +889,16 @@ fn generateExactWidthIntMax(comp: *Compilation, w: *std.Io.Writer, orginalQt: Qu
     return comp.generateIntMax(w, name, qt);
 }
 
-fn generateIntWidth(comp: *Compilation, w: *std.Io.Writer, name: []const u8, qt: QualType) !void {
+fn generateIntWidth(comp: *Compilation, w: *Io.Writer, name: []const u8, qt: QualType) !void {
     try w.print("#define __{s}_WIDTH__ {d}\n", .{ name, 8 * qt.sizeof(comp) });
 }
 
-fn generateIntMaxAndWidth(comp: *Compilation, w: *std.Io.Writer, name: []const u8, qt: QualType) !void {
+fn generateIntMaxAndWidth(comp: *Compilation, w: *Io.Writer, name: []const u8, qt: QualType) !void {
     try comp.generateIntMax(w, name, qt);
     try comp.generateIntWidth(w, name, qt);
 }
 
-fn generateSizeofType(comp: *Compilation, w: *std.Io.Writer, name: []const u8, qt: QualType) !void {
+fn generateSizeofType(comp: *Compilation, w: *Io.Writer, name: []const u8, qt: QualType) !void {
     try w.print("#define {s} {d}\n", .{ name, qt.sizeof(comp) });
 }
 
@@ -1208,7 +1215,7 @@ pub fn addSourceFromPathExtra(comp: *Compilation, path: []const u8, kind: Source
 
 pub fn addSourceFromFile(comp: *Compilation, file: std.fs.File, path: []const u8, kind: Source.Kind) !Source {
     var fileBuffer: [4096]u8 = undefined;
-    var fileReader = file.reader(&fileBuffer);
+    var fileReader = file.reader(comp.io, &fileBuffer);
     if (fileReader.getSize()) |size| {
         if (size > std.math.maxInt(u32)) return error.FileTooBig;
     } else |_| {}
@@ -1350,7 +1357,7 @@ pub const IncludeType = enum {
     AngleBrackets, // `<`
 };
 
-fn getFileContents(comp: *Compilation, path: []const u8, limit: std.Io.Limit) ![]const u8 {
+fn getFileContents(comp: *Compilation, path: []const u8, limit: Io.Limit) ![]const u8 {
     if (std.mem.indexOfScalar(u8, path, 0) != null)
         return error.FileNotFound;
 
@@ -1361,7 +1368,7 @@ fn getFileContents(comp: *Compilation, path: []const u8, limit: std.Io.Limit) ![
     defer allocating.deinit();
 
     var fileBuffer: [4096]u8 = undefined;
-    var fileReader = file.reader(&fileBuffer);
+    var fileReader = file.reader(comp.io, &fileBuffer);
     if (fileReader.getSize()) |size| {
         if (limit.minInt64(size) > std.math.maxInt(u32)) return error.FileTooBig;
     } else |_| {}
@@ -1380,7 +1387,7 @@ pub fn findEmbed(
     includerTokenSource: Source.ID,
     /// angle bracket vs quotes
     includeType: IncludeType,
-    limit: std.Io.Limit,
+    limit: Io.Limit,
 ) !?[]const u8 {
     if (std.fs.path.isAbsolute(filename)) {
         return if (comp.getFileContents(filename, limit)) |some|
@@ -1552,8 +1559,7 @@ pub fn locSlice(comp: *const Compilation, loc: Source.Location) []const u8 {
 pub fn getSourceMTimeUncached(comp: *const Compilation, sourceId: Source.ID) ?u64 {
     const source = comp.getSource(sourceId);
     if (comp.cwd.statFile(source.path)) |stat| {
-        const mtime = @divTrunc(stat.mtime, std.time.ns_per_s);
-        return std.math.cast(u64, mtime);
+        return std.math.cast(u64, stat.mtime.toSeconds());
     } else |_| {
         return null;
     }
@@ -1603,11 +1609,14 @@ pub const Diagnostic = struct {
 test "addSourceFromBuffer" {
     const Test = struct {
         fn addSourceFromBuffer(str: []const u8, expected: []const u8, warningCount: u32, splices: []const u32) !void {
-            var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+            const allocator = std.testing.allocator;
+            const io = std.testing.io;
+
+            var arena: std.heap.ArenaAllocator = .init(allocator);
             defer arena.deinit();
 
             var diagnostics: Diagnostics = .{ .output = .ignore };
-            var comp = Compilation.init(std.testing.allocator, arena.allocator(), &diagnostics, std.fs.cwd());
+            var comp = Compilation.init(allocator, arena.allocator(), io, &diagnostics, std.fs.cwd());
             defer comp.deinit();
 
             const source = try comp.addSourceFromBuffer("path", str);
@@ -1622,7 +1631,7 @@ test "addSourceFromBuffer" {
             defer arena.deinit();
 
             var diagnostics: Diagnostics = .{ .output = .ignore };
-            var comp = Compilation.init(allocator, arena.allocator(), &diagnostics, std.fs.cwd());
+            var comp = Compilation.init(allocator, arena.allocator(), std.testing.io, &diagnostics, std.fs.cwd());
             defer comp.deinit();
 
             _ = try comp.addSourceFromBuffer("path", "spliced\\\nbuffer\n");
@@ -1660,7 +1669,10 @@ test "addSourceFromBuffer" {
 }
 
 test "addSourceFromBuffer - exhaustive check for carriage return elimination" {
-    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    const allocator = std.testing.allocator;
+    const io = std.testing.io;
+
+    var arena: std.heap.ArenaAllocator = .init(allocator);
     defer arena.deinit();
 
     const alphabet = [_]u8{ '\r', '\n', ' ', '\\', 'a' };
@@ -1668,7 +1680,7 @@ test "addSourceFromBuffer - exhaustive check for carriage return elimination" {
     var buffer: [alen]u8 = @splat(alphabet[0]);
 
     var diagnostics: Diagnostics = .{ .output = .ignore };
-    var comp = Compilation.init(std.testing.allocator, arena.allocator(), &diagnostics, std.fs.cwd());
+    var comp = Compilation.init(allocator, arena.allocator(), io, &diagnostics, std.fs.cwd());
     defer comp.deinit();
 
     var sourceCount: u32 = 0;
@@ -1697,7 +1709,7 @@ test "ignore BOM at beginning of file" {
     const Test = struct {
         fn run(arena: Allocator, buf: []const u8) !void {
             var diagnostics: Diagnostics = .{ .output = .ignore };
-            var comp = Compilation.init(std.testing.allocator, arena, &diagnostics, std.fs.cwd());
+            var comp = Compilation.init(std.testing.allocator, arena, std.testing.io, &diagnostics, std.fs.cwd());
             defer comp.deinit();
 
             const source = try comp.addSourceFromBuffer("file.c", buf);

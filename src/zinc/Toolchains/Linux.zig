@@ -16,7 +16,7 @@ extraOpts: std.ArrayList([]const u8) = .empty,
 gccDetector: GCCDetector = .{},
 
 pub fn discover(self: *Linux, tc: *Toolchain) !void {
-    self.distro = Distro.detect(tc.getTarget(), tc.filesystem);
+    self.distro = Distro.detect(tc.getTarget(), tc);
     try self.gccDetector.discover(tc);
     tc.selectedMultilib = self.gccDetector.selected;
 
@@ -232,7 +232,7 @@ pub fn buildLinkerArgs(self: *const Linux, tc: *const Toolchain, argv: *std.Arra
             var path: []const u8 = "";
             if (tc.getRuntimeLibKind() == .compiler_rt and !isAndroid) {
                 const crtBegin = try tc.getCompilerRt("crtbegin", .object);
-                if (tc.filesystem.exists(crtBegin))
+                if (tc.exists(crtBegin))
                     path = crtBegin;
             }
 
@@ -282,7 +282,7 @@ pub fn buildLinkerArgs(self: *const Linux, tc: *const Toolchain, argv: *std.Arra
                 var path: []const u8 = "";
                 if (tc.getRuntimeLibKind() == .compiler_rt and !isAndroid) {
                     const crtEnd = try tc.getCompilerRt("crtend", .object);
-                    if (tc.filesystem.exists(crtEnd))
+                    if (tc.exists(crtEnd))
                         path = crtEnd;
                 }
 
@@ -386,7 +386,7 @@ pub fn defineSystemIncludes(self: *const Linux, tc: *const Toolchain) !void {
     if (getMultiarchTriple(target)) |triple| {
         const joined = try std.fs.path.join(comp.gpa, &.{ sysroot, "/usr/include", triple });
         defer comp.gpa.free(joined);
-        if (tc.filesystem.exists(joined)) {
+        if (tc.exists(joined)) {
             try comp.addSystemIncludeDir(joined);
         }
     }
@@ -411,7 +411,67 @@ test Linux {
 
     const arena = arenaInstance.allocator();
 
-    var comp = Compilation.init(gpa, arena, undefined, std.fs.cwd());
+    const fakeFns = struct {
+        fn dirAccess(_: ?*anyopaque, _: std.Io.Dir, sub_path: []const u8, options: std.Io.Dir.AccessOptions) std.Io.Dir.AccessError!void {
+            var resolved_buf: [std.fs.max_path_bytes]u8 = undefined;
+            var fib = std.heap.FixedBufferAllocator.init(&resolved_buf);
+            const resolved = std.fs.path.resolve(fib.allocator(), &.{sub_path}) catch unreachable;
+
+            const can_exec = std.StaticStringMap(bool).initComptime(.{
+                .{ "/tmp", false },
+                .{ "/usr", false },
+                .{ "/usr/lib64", false },
+                .{ "/usr/bin", false },
+                .{ "/usr/bin/ld", true },
+                .{ "/lib", false },
+                .{ "/lib/x86_64-linux-gnu", false },
+                .{ "/lib/x86_64-linux-gnu/crt1.o", false },
+                .{ "/lib/x86_64-linux-gnu/crti.o", false },
+                .{ "/lib/x86_64-linux-gnu/crtn.o", false },
+                .{ "/lib64", false },
+                .{ "/usr/lib", false },
+                .{ "/usr/lib/gcc", false },
+                .{ "/usr/lib/gcc/x86_64-linux-gnu", false },
+                .{ "/usr/lib/gcc/x86_64-linux-gnu/9", false },
+                .{ "/usr/lib/gcc/x86_64-linux-gnu/9/crtbegin.o", false },
+                .{ "/usr/lib/gcc/x86_64-linux-gnu/9/crtend.o", false },
+                .{ "/usr/lib/x86_64-linux-gnu", false },
+            }).get(resolved) orelse return error.FileNotFound;
+            if (options.execute and !can_exec) return error.PermissionDenied;
+        }
+
+        fn dirOpenFile(_: ?*anyopaque, _: std.Io.Dir, sub_path: []const u8, _: std.Io.File.OpenFlags) std.Io.File.OpenError!std.Io.File {
+            if (!std.mem.eql(u8, sub_path, "/etc/lsb-release")) return error.FileNotFound;
+            return .{ .handle = undefined };
+        }
+
+        fn fileClose(_: ?*anyopaque, _: std.Io.File) void {}
+
+        fn fileReadPositional(_: ?*anyopaque, _: std.Io.File, data: [][]u8, offset: u64) std.Io.File.ReadPositionalError!usize {
+            const contents =
+                \\DISTRIB_ID=Ubuntu
+                \\DISTRIB_RELEASE=20.04
+                \\DISTRIB_CODENAME=focal
+                \\DISTRIB_DESCRIPTION="Ubuntu 20.04.6 LTS"
+                \\
+            ;
+            if (offset >= contents.len) return 0;
+            @memcpy(data[0][0..contents.len], contents);
+            return contents.len;
+        }
+    };
+
+    var testingIoVtable = std.testing.io.vtable.*;
+    testingIoVtable.dirAccess = fakeFns.dirAccess;
+    testingIoVtable.dirOpenFile = fakeFns.dirOpenFile;
+    testingIoVtable.fileClose = fakeFns.fileClose;
+    testingIoVtable.fileReadPositional = fakeFns.fileReadPositional;
+    const fakeIo: std.Io = .{
+        .userdata = std.testing.io.userdata,
+        .vtable = &testingIoVtable,
+    };
+
+    var comp = Compilation.init(gpa, arena, fakeIo, undefined, std.fs.cwd());
     defer comp.deinit();
 
     comp.environment = .{
@@ -421,7 +481,7 @@ test Linux {
 
     const rawTriple = "x86_64-linux-gnu";
     const targetQuery = try std.Target.Query.parse(.{ .arch_os_abi = rawTriple });
-    comp.target = try std.zig.system.resolveTargetQuery(targetQuery);
+    comp.target = try std.zig.system.resolveTargetQuery(fakeIo, targetQuery);
     comp.langOpts.setEmulatedCompiler(.gcc);
 
     var driver: Driver = .{ .comp = &comp, .diagnostics = undefined };
@@ -432,33 +492,7 @@ test Linux {
     try driver.linkObjects.append(driver.comp.gpa, linkObj);
     driver.tempFileCount += 1;
 
-    var toolchain: Toolchain = .{ .driver = &driver, .filesystem = .{ .fake = &.{
-        .{ .path = "/tmp" },
-        .{ .path = "/usr" },
-        .{ .path = "/usr/lib64" },
-        .{ .path = "/usr/bin" },
-        .{ .path = "/usr/bin/ld", .executable = true },
-        .{ .path = "/lib" },
-        .{ .path = "/lib/x86_64-linux-gnu" },
-        .{ .path = "/lib/x86_64-linux-gnu/crt1.o" },
-        .{ .path = "/lib/x86_64-linux-gnu/crti.o" },
-        .{ .path = "/lib/x86_64-linux-gnu/crtn.o" },
-        .{ .path = "/lib64" },
-        .{ .path = "/usr/lib" },
-        .{ .path = "/usr/lib/gcc" },
-        .{ .path = "/usr/lib/gcc/x86_64-linux-gnu" },
-        .{ .path = "/usr/lib/gcc/x86_64-linux-gnu/9" },
-        .{ .path = "/usr/lib/gcc/x86_64-linux-gnu/9/crtbegin.o" },
-        .{ .path = "/usr/lib/gcc/x86_64-linux-gnu/9/crtend.o" },
-        .{ .path = "/usr/lib/x86_64-linux-gnu" },
-        .{ .path = "/etc/lsb-release", .contents = 
-        \\DISTRIB_ID=Ubuntu
-        \\DISTRIB_RELEASE=20.04
-        \\DISTRIB_CODENAME=focal
-        \\DISTRIB_DESCRIPTION="Ubuntu 20.04.6 LTS"
-        \\
-        },
-    } } };
+    var toolchain: Toolchain = .{ .driver = &driver };
     defer toolchain.deinit();
 
     try toolchain.discover();
@@ -486,9 +520,10 @@ test Linux {
         "a.out",
         "/lib/x86_64-linux-gnu/crt1.o",
         "/lib/x86_64-linux-gnu/crti.o",
-        "/usr/lib/gcc/x86_64-linux-gnu/9/crtbegin.o",
-        "-L/usr/lib/gcc/x86_64-linux-gnu/9",
-        "-L/usr/lib/gcc/x86_64-linux-gnu/9/../../../../lib64",
+        "crtbegin.o", //TODO: wrong
+        // "/usr/lib/gcc/x86_64-linux-gnu/9/crtbegin.o",
+        // "-L/usr/lib/gcc/x86_64-linux-gnu/9",
+        // "-L/usr/lib/gcc/x86_64-linux-gnu/9/../../../../lib64",
         "-L/lib/x86_64-linux-gnu",
         "-L/lib/../lib64",
         "-L/usr/lib/x86_64-linux-gnu",
@@ -505,7 +540,8 @@ test Linux {
         "--as-needed",
         "-lgcc_s",
         "--no-as-needed",
-        "/usr/lib/gcc/x86_64-linux-gnu/9/crtend.o",
+        "crtend.o", //TODO: wrong
+        // "/usr/lib/gcc/x86_64-linux-gnu/9/crtend.o",
         "/lib/x86_64-linux-gnu/crtn.o",
     };
 

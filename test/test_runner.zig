@@ -207,7 +207,7 @@ pub fn main() !void {
     defer diagnostics.deinit();
 
     // prepare compiler
-    var initialComp = zinc.Compilation.init(gpa, arena, &diagnostics, std.fs.cwd());
+    var initialComp = zinc.Compilation.init(gpa, arena, std.testing.io, &diagnostics, std.fs.cwd());
     defer initialComp.deinit();
 
     const casesIncludeDir = try std.fs.path.join(gpa, &.{ args[1], "include" });
@@ -377,7 +377,7 @@ pub fn main() !void {
         const astPath = try std.fs.path.join(gpa, &.{ args[1], "ast", std.fs.path.basename(path) });
         defer gpa.free(astPath);
 
-        const maybeAST = std.fs.cwd().readFileAlloc(gpa, astPath, std.math.maxInt(u32)) catch null;
+        const maybeAST = std.fs.cwd().readFileAlloc(astPath, gpa, .unlimited) catch null;
         if (maybeAST) |expectedAST| {
             defer gpa.free(expectedAST);
             var actualAST: std.Io.Writer.Allocating = .init(gpa);
