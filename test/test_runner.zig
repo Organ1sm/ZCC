@@ -16,7 +16,7 @@ var DebugAllocator: std.heap.DebugAllocator(.{
     // GeneralPurposeAllocator is incorrectly passed to testing allocator, or
     // vice versa, panic occurs.
     .canary = @truncate(0xc647026dc6875134),
-}) = .init();
+}) = .{};
 
 const AddCommandLineArgsResult = struct {
     bool,
@@ -328,7 +328,7 @@ pub fn main() !void {
                 const expandedPath = try std.fs.path.join(gpa, &.{ args[1], "expanded", std.fs.path.basename(path) });
                 defer gpa.free(expandedPath);
 
-                break :blk std.fs.cwd().readFileAlloc(gpa, expandedPath, std.math.maxInt(u32)) catch |err| {
+                break :blk std.fs.cwd().readFileAlloc(expandedPath, gpa, .unlimited) catch |err| {
                     failCount += 1;
                     std.debug.print("could not open expanded file '{s}': {s}\n", .{ path, @errorName(err) });
                     continue;

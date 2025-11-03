@@ -151,7 +151,7 @@ pub fn main() !void {
     // Iterate over all cases
     for (cases.items) |path| {
         // Read the test into memory.
-        const source = try std.fs.cwd().readFileAlloc(arena, path, std.math.maxInt(u32));
+        const source = try std.fs.cwd().readFileAlloc(path, arena, .unlimited);
         try parseTargetsFromCode(&testCases, path, source);
     }
 

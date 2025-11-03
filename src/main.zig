@@ -2,7 +2,7 @@ const std = @import("std");
 const process = std.process;
 const builtin = @import("builtin");
 
-const buildOpts = @import("build_options");
+const buildOpts = @import("build-options");
 
 const zinc = @import("zinc");
 const Compilation = zinc.Compilation;
@@ -19,7 +19,7 @@ var DebugAllocator: std.heap.DebugAllocator(.{
     // GeneralPurposeAllocator is incorrectly passed to testing allocator, or
     // vice versa, panic occurs.
     .canary = @truncate(0xc647026dc6875134),
-}) = .init();
+}) = .{};
 
 pub fn main() u8 {
     const gpa = if (builtin.link_libc)

@@ -275,6 +275,8 @@ pub fn generateSystemDefines(comp: *Compilation, w: *std.Io.Writer) !void {
 
         .wasi => try define(w, "__wasi__"),
         .emscripten => try define(w, "__EMSCRIPTEN__"),
+        .@"3ds" => try define(w, "__3DS__"),
+        .vita => try define(w, "__vita__"),
         else => {},
     }
 
@@ -565,7 +567,7 @@ pub fn generateSystemDefines(comp: *Compilation, w: *std.Io.Writer) !void {
 pub fn generateBuiltinMacros(comp: *Compilation, systemDefinesMode: SystemDefinesMode) AddSourceError!Source {
     try comp.typeStore.initNamedTypes(comp);
 
-    var allocating: std.io.Writer.Allocating = try .initCapacity(comp.gpa, 2 << 13);
+    var allocating: std.Io.Writer.Allocating = try .initCapacity(comp.gpa, 2 << 13);
     defer allocating.deinit();
 
     comp.writeBuiltinMacros(systemDefinesMode, &allocating.writer) catch |err| switch (err) {

@@ -34,7 +34,7 @@ pub fn build(b: *std.Build) !void {
     systemDefaults.addOption([]const u8, "unwindlib", DefaultUnwindlib);
 
     const zincOptions = b.addOptions();
-    zincOptions.addOption(bool, "debugAllocations", debugAllocations);
+    zincOptions.addOption(bool, "DebugAllocations", debugAllocations);
 
     const versionStr = v: {
         const versionString = b.fmt("{d}.{d}.{d}", .{ ZincVersion.major, ZincVersion.minor, ZincVersion.patch });
@@ -141,6 +141,7 @@ pub fn build(b: *std.Build) !void {
     });
     exe.root_module.addImport("zinc", zincModule);
     exe.root_module.addImport("assembly-backend", assemblyBackend);
+    exe.root_module.addImport("build-options", zincOptionsModule);
 
     if (target.result.os.tag == .windows)
         exe.root_module.linkSystemLibrary("advapi32", .{});
