@@ -1214,19 +1214,7 @@ pub fn addSourceFromPathExtra(comp: *Compilation, path: []const u8, kind: Source
 }
 
 pub fn addSourceFromFile(comp: *Compilation, file: std.fs.File, path: []const u8, kind: Source.Kind) !Source {
-    var fileBuffer: [4096]u8 = undefined;
-    var fileReader = file.reader(comp.io, &fileBuffer);
-    if (fileReader.getSize()) |size| {
-        if (size > std.math.maxInt(u32)) return error.FileTooBig;
-    } else |_| {}
-
-    var allocating: std.Io.Writer.Allocating = .init(comp.gpa);
-    _ = allocating.writer.sendFileAll(&fileReader, .limited(std.math.maxInt(u32))) catch |e| switch (e) {
-        error.WriteFailed => return error.OutOfMemory,
-        error.ReadFailed => return fileReader.err.?,
-    };
-
-    const contents = try allocating.toOwnedSlice();
+    const contents = try comp.getFileContents(file, .unlimited);
     errdefer comp.gpa.free(contents);
     return comp.addSourceFromOwnedBuffer(path, contents, kind);
 }
@@ -1357,27 +1345,39 @@ pub const IncludeType = enum {
     AngleBrackets, // `<`
 };
 
-fn getFileContents(comp: *Compilation, path: []const u8, limit: Io.Limit) ![]const u8 {
-    if (std.mem.indexOfScalar(u8, path, 0) != null)
+fn getPathContents(comp: *Compilation, path: []const u8, limit: std.Io.Limit) ![]u8 {
+    if (std.mem.indexOfScalar(u8, path, 0) != null) {
         return error.FileNotFound;
+    }
 
     const file = try comp.cwd.openFile(path, .{});
     defer file.close();
+    return comp.getFileContents(file, limit);
+}
+
+fn getFileContents(comp: *Compilation, file: std.fs.File, limit: std.Io.Limit) ![]u8 {
+    var fileBuffer: [4096]u8 = undefined;
+    var fileReader = file.reader(comp.io, &fileBuffer);
 
     var allocating: std.Io.Writer.Allocating = .init(comp.gpa);
     defer allocating.deinit();
 
-    var fileBuffer: [4096]u8 = undefined;
-    var fileReader = file.reader(comp.io, &fileBuffer);
     if (fileReader.getSize()) |size| {
-        if (limit.minInt64(size) > std.math.maxInt(u32)) return error.FileTooBig;
+        const limitedSize = limit.minInt64(size);
+        if (limitedSize > std.math.maxInt(u32)) return error.FileTooBig;
+        try allocating.ensureUnusedCapacity(limitedSize);
     } else |_| {}
 
-    _ = allocating.writer.sendFileAll(&fileReader, limit) catch |err| switch (err) {
-        error.WriteFailed => return error.OutOfMemory,
-        error.ReadFailed => return fileReader.err.?,
-    };
-
+    var remaining = limit.min(.limited(std.math.maxInt(u32)));
+    while (remaining.nonzero()) {
+        const n = fileReader.interface.stream(&allocating.writer, remaining) catch |err| switch (err) {
+            error.EndOfStream => return allocating.toOwnedSlice(),
+            error.WriteFailed => return error.OutOfMemory,
+            error.ReadFailed => return fileReader.err.?,
+        };
+        remaining = remaining.subtract(n).?;
+    }
+    if (limit == .unlimited) return error.FileTooBig;
     return allocating.toOwnedSlice();
 }
 
@@ -1388,14 +1388,15 @@ pub fn findEmbed(
     /// angle bracket vs quotes
     includeType: IncludeType,
     limit: Io.Limit,
-) !?[]const u8 {
+) !?[]u8 {
     if (std.fs.path.isAbsolute(filename)) {
-        return if (comp.getFileContents(filename, limit)) |some|
-            some
-        else |err| switch (err) {
+        if (comp.getPathContents(filename, limit)) |some| {
+            errdefer comp.gpa.free(some);
+            return some;
+        } else |err| switch (err) {
             error.OutOfMemory => |e| return e,
-            else => null,
-        };
+            else => return null,
+        }
     }
 
     const cwdSourceId = switch (includeType) {
@@ -1409,9 +1410,10 @@ pub fn findEmbed(
 
     while (try it.nextWithFile(filename, sfAllocator)) |found| {
         defer sfAllocator.free(found.path);
-        if (comp.getFileContents(found.path, limit)) |some|
-            return some
-        else |err| switch (err) {
+        if (comp.getPathContents(found.path, limit)) |some| {
+            errdefer comp.gpa.free(some);
+            return some;
+        } else |err| switch (err) {
             error.OutOfMemory => return error.OutOfMemory,
             else => {},
         }

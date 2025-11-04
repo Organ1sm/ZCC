@@ -2065,10 +2065,15 @@ fn generateNsConstantStringType(ts: *TypeStore, comp: *Compilation) !QualType {
 fn generateVaListType(ts: *TypeStore, comp: *Compilation) !QualType {
     const Kind = enum { aarch64_va_list, x86_64_va_list };
     const kind: Kind = switch (comp.target.cpu.arch) {
-        .aarch64 => switch (comp.target.os.tag) {
+        .aarch64, .aarch64_be => switch (comp.target.os.tag) {
             .windows => return .charPointer,
             .ios, .macos, .tvos, .watchos => return .charPointer,
             else => .aarch64_va_list,
+        },
+
+        .arm, .armeb, .thumb, .thumbeb => switch (comp.target.os.tag) {
+            .ios, .macos, .tvos, .watchos, .visionos => return .charPointer,
+            else => return .voidPointer,
         },
 
         .sparc,
