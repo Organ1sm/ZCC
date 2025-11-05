@@ -1,6 +1,6 @@
 const std = @import("std");
 const assert = std.debug.assert;
-const buildOptions = @import("build_options");
+const buildOptions = @import("build-options");
 const print = std.debug.print;
 const zinc = @import("zinc");
 const CodeGen = zinc.CodeGen;
@@ -10,8 +10,8 @@ const Node = Tree.Node;
 const AllocatorError = std.mem.Allocator.Error;
 
 var DebugAllocator: std.heap.DebugAllocator(.{
-    .stack_trace_frames = if (buildOptions.DebugAllocations and std.debug.sys_can_stack_trace) 10 else 0,
-    .resize_stack_traces = buildOptions.DebugAllocations,
+    .stack_trace_frames = if (buildOptions.debugAllocations and std.debug.sys_can_stack_trace) 10 else 0,
+    .resize_stack_traces = buildOptions.debugAllocations,
     // A unique value so that when a default-constructed
     // GeneralPurposeAllocator is incorrectly passed to testing allocator, or
     // vice versa, panic occurs.
@@ -186,7 +186,7 @@ pub fn main() !void {
         }
     }
 
-    if (buildOptions.TestAllAllocationFailures) {
+    if (buildOptions.testAllAllocationFailures) {
         return testAllAllocationFailures(cases.items, testDir);
     }
 

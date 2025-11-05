@@ -21,9 +21,9 @@ pub fn build(b: *std.Build) !void {
         if (std.mem.eql(u8, DefaultRtlib, "libgcc")) "libgcc" else "";
     const GCCInstallPrefix = b.option([]const u8, "gcc-install-prefix", "Directory where gcc is installed.") orelse "";
     const UseLLVM = b.option(bool, "llvm", "Use LLVM backend to generate aro executable");
-    const noBin = b.option(bool, "no-bin", "skip emitting compiler binary") orelse false;
-    const testFilter = b.option([]const []const u8, "test-filter", "Test filter for unit tests") orelse &.{};
-    const debugAllocations = b.option(bool, "debug-allocations", "Collect detailed debug info for all allocations (slow)") orelse false;
+    const NoBin = b.option(bool, "no-bin", "skip emitting compiler binary") orelse false;
+    const TestFilter = b.option([]const []const u8, "test-filter", "Test filter for unit tests") orelse &.{};
+    const DebugAllocations = b.option(bool, "debug-allocations", "Collect detailed debug info for all allocations (slow)") orelse false;
 
     const systemDefaults = b.addOptions();
     systemDefaults.addOption(bool, "enableLinkerBuildId", EnableLinkerBuildId);
@@ -34,7 +34,7 @@ pub fn build(b: *std.Build) !void {
     systemDefaults.addOption([]const u8, "unwindlib", DefaultUnwindlib);
 
     const zincOptions = b.addOptions();
-    zincOptions.addOption(bool, "DebugAllocations", debugAllocations);
+    zincOptions.addOption(bool, "debugAllocations", DebugAllocations);
 
     const versionStr = v: {
         const versionString = b.fmt("{d}.{d}.{d}", .{ ZincVersion.major, ZincVersion.minor, ZincVersion.patch });
@@ -149,7 +149,7 @@ pub fn build(b: *std.Build) !void {
     if (LinkLibc)
         exe.linkLibC();
 
-    if (noBin) {
+    if (NoBin) {
         b.getInstallStep().dependOn(&exe.step);
     } else {
         b.installArtifact(exe);
@@ -167,7 +167,7 @@ pub fn build(b: *std.Build) !void {
                 .target = target,
                 .root_source_file = b.path("src/zinc.zig"),
             }),
-            .filters = testFilter,
+            .filters = TestFilter,
         });
 
         for (zincModule.import_table.keys(), zincModule.import_table.values()) |name, module| {
@@ -194,9 +194,9 @@ pub fn build(b: *std.Build) !void {
         integration_tests.root_module.addImport("zinc", zincModule);
 
         const test_runner_options = b.addOptions();
-        integration_tests.root_module.addOptions("build_options", test_runner_options);
-        test_runner_options.addOption(bool, "TestAllAllocationFailures", TestAllAllocationFailures);
-        test_runner_options.addOption(bool, "DebugAllocations", debugAllocations);
+        integration_tests.root_module.addOptions("build-options", test_runner_options);
+        test_runner_options.addOption(bool, "testAllAllocationFailures", TestAllAllocationFailures);
+        test_runner_options.addOption(bool, "debugAllocations", DebugAllocations);
 
         const integration_test_runner = b.addRunArtifact(integration_tests);
         integration_test_runner.addArg(b.pathFromRoot("test/cases"));
