@@ -139,6 +139,10 @@ pub const TokenType = enum(u8) {
     MacroCounter,
     /// Special token for implementing _Pragma
     MacroParamPragmaOperator,
+    /// Special token for implementing __identifier (MS extension)
+    MacroParamMsIdentifier,
+    /// Special token for implementing __pragma (MS extension)
+    MacroParamMsPragma,
     /// Special identifier for implementing __func__
     MacroFunc,
     /// Special identifier for implementing __FUNCTION__
@@ -599,6 +603,8 @@ pub const TokenType = enum(u8) {
             .MacroTime,
             .MacroTimestamp,
             .MacroParamPragmaOperator,
+            .MacroParamMsIdentifier,
+            .MacroParamMsPragma,
             .StringifyParam,
             .StringifyVarArgs,
             .PlaceMarker,
@@ -845,7 +851,7 @@ pub const TokenType = enum(u8) {
             .EmptyCharLiteral,
             => "a character literal",
 
-            .PPNumber, .EmbedByte => "A number",
+            .PPNumber, .EmbedByte => "a number",
 
             else => id.lexeme().?, // handled in getTokenText();
         };

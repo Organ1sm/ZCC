@@ -195,6 +195,11 @@ pub fn addBuiltinMacros(pp: *Preprocessor) !void {
     try pp.addBuiltinMacro("__is_identifier", true, .MacroParamIsIdentifier);
     try pp.addBuiltinMacro("_Pragma", true, .MacroParamPragmaOperator);
 
+    if (pp.comp.langOpts.msExtensions) {
+        try pp.addBuiltinMacro("__identifier", true, .MacroParamMsIdentifier);
+        try pp.addBuiltinMacro("__pragma", true, .MacroParamMsPragma);
+    }
+
     try pp.addBuiltinMacro("__FILE__", false, .MacroFile);
     try pp.addBuiltinMacro("__LINE__", false, .MacroLine);
     try pp.addBuiltinMacro("__COUNTER__", false, .MacroCounter);
@@ -1418,6 +1423,39 @@ fn pragmaOperator(pp: *Preprocessor, argToken: TokenWithExpansionLocs, operatorL
     try pp.pragma(&tempLexer, pragmaToken, operatorLoc, argToken.expansionSlice());
 }
 
+/// Handle Microsoft __pragma operator
+fn msPragmaOperator(pp: *Preprocessor, pragmaToken: TokenWithExpansionLocs, args: []const TokenWithExpansionLocs) !void {
+    if (args.len == 0) {
+        try pp.err(pragmaToken, .unknown_pragma, .{});
+        return;
+    }
+
+    {
+        var copy = try pragmaToken.dupe(pp.comp.gpa);
+        copy.id = .KeywordPragma;
+        try pp.addToken(copy);
+    }
+
+    const pragmaStart: u32 = @intCast(pp.tokens.len);
+    for (args) |tok| {
+        switch (tok.id) {
+            .MacroWS, .Comment => continue,
+            else => try pp.addToken(try tok.dupe(pp.comp.gpa)),
+        }
+    }
+    try pp.addToken(.{ .id = .NewLine, .loc = .{ .id = .generated } });
+
+    const name = pp.expandedSlice(pp.tokens.get(pragmaStart));
+    if (pp.comp.getPragma(name)) |prag| unknown: {
+        return prag.preprocessorCB(pp, pragmaStart) catch |er| switch (er) {
+            error.UnknownPragma => break :unknown,
+            else => |e| return e,
+        };
+    }
+
+    try pp.err(args[0], .unknown_pragma, .{});
+}
+
 /// Inverts the output of the preprocessor stringify (#) operation
 /// (except all whitespace is condensed to a single space)
 /// writes output to pp.char_buf; assumes capacity is sufficient
@@ -1661,7 +1699,7 @@ fn handleBuiltinMacro(
             };
             if (identifier == null and invalid == null) invalid = .{ .id = .Eof, .loc = srcLoc };
             if (invalid) |some| {
-                try pp.err(some, .builtin_missing_r_paren, .{});
+                try pp.err(some, .builtin_missing_r_paren, .{"builtin feature-check macro"});
                 return false;
             }
 
@@ -2032,29 +2070,63 @@ fn expandFuncMacro(
             },
 
             .MacroParamPragmaOperator => {
-                const paramTokens = expandedArgs.items[0];
                 // Clang and GCC require exactly one token (so, no parentheses or string pasting)
                 // even though their error messages indicate otherwise. Ours is slightly more
                 // descriptive.
                 var invalid: ?TokenWithExpansionLocs = null;
                 var string: ?TokenWithExpansionLocs = null;
-                for (paramTokens) |tok| switch (tok.id) {
-                    .StringLiteral => {
-                        if (string) |_| invalid = tok else string = tok;
-                    },
-                    .MacroWS => continue,
-                    .Comment => continue,
-                    else => {
-                        invalid = tok;
-                        break;
-                    },
-                };
-                if (string == null and invalid == null) invalid = .{ .loc = macroToken.loc, .id = .Eof };
+                for (expandedArgs.items[0]) |tok| {
+                    switch (tok.id) {
+                        .StringLiteral => {
+                            if (string) |_| {
+                                invalid = tok;
+                                break;
+                            }
+                            string = tok;
+                        },
+                        .MacroWS => continue,
+                        .Comment => continue,
+                        else => {
+                            invalid = tok;
+                            break;
+                        },
+                    }
+                }
+                if (string == null and invalid == null) invalid = macroToken;
                 if (invalid) |some|
                     try pp.err(some, .pragma_operator_string_literal, .{})
                 else
                     try pp.pragmaOperator(string.?, macroToken.loc);
             },
+
+            .MacroParamMsIdentifier => blk: {
+                // Expect '__identifier' '(' macro-identifier ')'
+                var ident: ?TokenWithExpansionLocs = null;
+                for (expandedArgs.items[0]) |tok| {
+                    switch (tok.id) {
+                        .MacroWS => continue,
+                        .Comment => continue,
+                        else => {},
+                    }
+                    if (ident) |_| {
+                        try pp.err(tok, .builtin_missing_r_paren, .{"identifier"});
+                        break :blk;
+                    } else if (tok.id.isMacroIdentifier()) {
+                        ident = tok;
+                    } else {
+                        try pp.err(tok, .cannot_convert_to_identifier, .{tok.id.symbol()});
+                        break :blk;
+                    }
+                }
+                if (ident) |*some| {
+                    some.id = .Identifier;
+                    try buf.append(gpa, some.*);
+                } else {
+                    try pp.err(macroToken, .expected_identifier, .{});
+                }
+            },
+
+            .MacroParamMsPragma => try pp.msPragmaOperator(macroToken, expandedArgs.items[0]),
 
             // GNU extension
             .Comma => {

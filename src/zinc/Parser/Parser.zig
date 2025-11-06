@@ -437,26 +437,19 @@ fn formatArgs(p: *Parser, w: *std.Io.Writer, fmt: []const u8, args: anytype) !vo
 }
 
 fn formatTokenType(w: *std.Io.Writer, fmt: []const u8, tokenTy: TokenType) !usize {
-    const template = "{tok_id}";
-    const i = std.mem.indexOf(u8, fmt, template).?;
-    try w.writeAll(fmt[0..i]);
+    const i = Diagnostics.templateIndex(w, fmt, "{tok_id}");
     try w.writeAll(tokenTy.symbol());
-    return i + template.len;
+    return i;
 }
 
 fn formatQualType(p: *Parser, w: *std.Io.Writer, fmt: []const u8, qt: QualType) !usize {
-    const template = "{qt}";
-    const i = std.mem.indexOf(u8, fmt, template).?;
-    try w.writeAll(fmt[0..i]);
+    const i = Diagnostics.templateIndex(w, fmt, "{qt}");
     try qt.print(p.comp, w);
-    return i + template.len;
+    return i;
 }
 
 fn formatResult(p: *Parser, w: *std.Io.Writer, fmt: []const u8, res: Result) !usize {
-    const template = "{value}";
-    const i = std.mem.indexOf(u8, fmt, template).?;
-    try w.writeAll(fmt[0..i]);
-
+    const i = Diagnostics.templateIndex(w, fmt, "{value}");
     switch (res.value.optRef) {
         .none => try w.writeAll("(none)"),
         .null => try w.writeAll("nullptr_t"),
@@ -469,7 +462,7 @@ fn formatResult(p: *Parser, w: *std.Io.Writer, fmt: []const u8, res: Result) !us
         },
     }
 
-    return i + template.len;
+    return i;
 }
 
 const Normalized = struct {
@@ -479,10 +472,8 @@ const Normalized = struct {
         return .{ .str = str };
     }
 
-    pub fn format(ctx: Normalized, w: *std.Io.Writer, fmtStr: []const u8) !usize {
-        const template = "{normalized}";
-        const i = std.mem.indexOf(u8, fmtStr, template).?;
-        try w.writeAll(fmtStr[0..i]);
+    pub fn format(ctx: Normalized, w: *std.Io.Writer, fmt: []const u8) !usize {
+        const i = Diagnostics.templateIndex(w, fmt, "{normalized}");
         var it: std.unicode.Utf8Iterator = .{
             .bytes = ctx.str,
             .i = 0,
@@ -504,7 +495,7 @@ const Normalized = struct {
                 });
             }
         }
-        return i + template.len;
+        return i;
     }
 };
 
@@ -515,12 +506,10 @@ const Codepoint = struct {
         return .{ .codepoint = codepoint };
     }
 
-    pub fn format(ctx: Codepoint, w: *std.Io.Writer, fmtStr: []const u8) !usize {
-        const template = "{codepoint}";
-        const i = std.mem.indexOf(u8, fmtStr, template).?;
-        try w.writeAll(fmtStr[0..i]);
+    pub fn format(ctx: Codepoint, w: *std.Io.Writer, fmt: []const u8) !usize {
+        const i = Diagnostics.templateIndex(w, fmt, "{codepoint}");
         try w.print("{X:0>4}", .{ctx.codepoint});
-        return i + template.len;
+        return i;
     }
 };
 
@@ -531,12 +520,10 @@ const Escaped = struct {
         return .{ .str = str };
     }
 
-    pub fn format(ctx: Escaped, w: *std.Io.Writer, fmtStr: []const u8) !usize {
-        const template = "{s}";
-        const i = std.mem.indexOf(u8, fmtStr, template).?;
-        try w.writeAll(fmtStr[0..i]);
+    pub fn format(ctx: Escaped, w: *std.Io.Writer, fmt: []const u8) !usize {
+        const i = Diagnostics.templateIndex(w, fmt, "{s}");
         try std.zig.stringEscape(ctx.str, w);
-        return i + template.len;
+        return i;
     }
 };
 

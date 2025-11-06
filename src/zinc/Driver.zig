@@ -833,7 +833,7 @@ fn getRandomFilename(d: *Driver, buffer: *[std.fs.max_name_bytes]u8, extension: 
 
     const fmtTemplate = "/tmp/{s}{s}";
     const fmtArgs = .{
-        randomName,
+        @as([]const u8, &randomName),
         extension,
     };
     return std.fmt.bufPrint(buffer, fmtTemplate, fmtArgs) catch return d.fatal("Filename too long for filesystem: " ++ fmtTemplate, fmtArgs);
