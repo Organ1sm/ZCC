@@ -1709,10 +1709,12 @@ fn parseStorageClassSpec(p: *Parser, d: *DeclSpec) Error!bool {
 ///  | attrIdentifier '(' (expr (',' expr)*)? ')'
 fn attribute(p: *Parser, kind: Attribute.Kind, namespace: ?[]const u8) Error!?TentativeAttribute {
     const nameToken = p.tokenIdx;
-    switch (p.currToken()) {
-        .KeywordConst, .KeywordGccConst1, .KeywordGccConst2 => p.tokenIdx += 1,
-        else => _ = try p.expectIdentifier(),
+    if (!p.currToken().isMacroIdentifier()) {
+        return p.errExpectedToken(.Identifier, p.currToken());
     }
+    _ = (try p.eatIdentifier()) orelse {
+        p.tokenIdx += 1;
+    };
 
     const name = p.getTokenText(nameToken);
     const attr = Attribute.fromString(kind, namespace, name) orelse {
