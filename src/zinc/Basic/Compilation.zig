@@ -313,9 +313,28 @@ pub fn generateSystemDefines(comp: *Compilation, w: *Io.Writer) !void {
             try define(w, "__amd64");
             try define(w, "__x86_64__");
             try define(w, "__x86_64");
+
+            if (comp.target.os.tag == .windows and comp.target.abi == .msvc) {
+                try w.writeAll(
+                    \\#define _M_X64 100
+                    \\#define _M_AMD64 100
+                    \\
+                );
+            }
         },
 
-        .x86 => try defineStd(w, "i3286", isGnu),
+        .x86 => {
+            try defineStd(w, "i3286", isGnu);
+
+            if (comp.target.os.tag == .windows and comp.target.abi == .msvc) {
+                try w.print("#define _M_IX86 {d}\n", .{blk: {
+                    if (comp.target.cpu.model == &std.Target.x86.cpu.i386) break :blk 300;
+                    if (comp.target.cpu.model == &std.Target.x86.cpu.i486) break :blk 400;
+                    if (comp.target.cpu.model == &std.Target.x86.cpu.i586) break :blk 500;
+                    break :blk @as(u32, 600);
+                }});
+            }
+        },
 
         .mips,
         .mipsel,
@@ -388,6 +407,9 @@ pub fn generateSystemDefines(comp: *Compilation, w: *Io.Writer) !void {
                 try define(w, "__ARM_NEON__");
                 try define(w, "__arm64");
                 try define(w, "__arm64__");
+            }
+            if (comp.target.os.tag == .windows and comp.target.abi == .msvc) {
+                try w.writeAll("#define _M_ARM64 100\n");
             }
         },
 
