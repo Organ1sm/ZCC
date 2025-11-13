@@ -253,7 +253,7 @@ pub fn generateSystemDefines(comp: *Compilation, w: *Io.Writer) !void {
             if (ptrWidth == 64)
                 try define(w, "_WIN64");
 
-            if (comp.target.isMinGW()) {
+            if (comp.target.abi.isGnu()) {
                 try defineStd(w, "WIN32", isGnu);
                 try defineStd(w, "WINNT", isGnu);
                 if (ptrWidth == 64) {
@@ -261,6 +261,34 @@ pub fn generateSystemDefines(comp: *Compilation, w: *Io.Writer) !void {
                 }
                 try define(w, "__MSVCRT__");
                 try define(w, "__MINGW32__");
+            } else if (comp.target.abi == .cygnus) {
+                try define(w, "__CYGWIN__");
+                if (ptrWidth == 64) {
+                    try define(w, "__CYGWIN64__");
+                } else {
+                    try define(w, "__CYGWIN32__");
+                }
+            }
+
+            if (comp.target.abi.isGnu() or comp.target.abi == .cygnus) {
+                // MinGW and Cygwin define __declspec(a) to __attribute((a)).
+                // Like Clang we make the define no op if -fdeclspec is enabled.
+                if (comp.langOpts.declSpecAttrs) {
+                    try w.writeAll("#define __declspec __declspec\n");
+                } else {
+                    try w.writeAll("#define __declspec(a) __attribute__((a))\n");
+                }
+
+                if (!comp.langOpts.msExtensions) {
+                    // Provide aliases for the calling convention keywords.
+                    for ([_][]const u8{ "cdecl", "stdcall", "fastcall", "thiscall" }) |keyword| {
+                        try w.print(
+                            \\#define _{[0]s} __attribute__((__{[0]s}__))
+                            \\#define __{[0]s} __attribute__((__{[0]s}__))
+                            \\
+                        , .{keyword});
+                    }
+                }
             }
         },
         .uefi => try define(w, "__UEFI__"),
@@ -300,6 +328,10 @@ pub fn generateSystemDefines(comp: *Compilation, w: *Io.Writer) !void {
         .illumos,
         .emscripten,
         => try defineStd(w, "unix", isGnu),
+
+        .windows => if (comp.target.abi.isGnu() or comp.target.abi == .cygnus) {
+            try defineStd(w, "unix", isGnu);
+        },
         else => {},
     }
 
