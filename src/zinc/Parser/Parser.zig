@@ -1861,7 +1861,7 @@ fn gnuAttribute(p: *Parser) !bool {
 }
 
 fn parseAttrSpec(p: *Parser) Error!void {
-    try p.attributeSpecifier(null);
+    return attributeSpecifier(p, null);
 }
 
 /// attribute-specifier : (KW-attribute '( '(' attribute-list ')' ')')*
@@ -3207,10 +3207,11 @@ fn enumerator(p: *Parser, e: *Enumerator) Error!?EnumFieldAndNode {
 /// | keyword-restrict
 /// | keyword-volatile
 /// | keyword-atomic
-fn parseTypeQual(p: *Parser, b: *TypeBuilder, allowCCAttr: bool) Error!bool {
+fn parseTypeQual(p: *Parser, b: *TypeBuilder, allowAttr: bool) Error!bool {
     var any = false;
     while (true) {
-        if (allowCCAttr and try p.msTypeAttribute()) continue;
+        if (allowAttr and try p.msTypeAttribute()) continue;
+        if (allowAttr) try p.parseAttrSpec();
         switch (p.currToken()) {
             .KeywordRestrict,
             .KeywordGccRestrict1,
