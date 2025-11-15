@@ -2804,7 +2804,9 @@ fn define(pp: *Preprocessor, lexer: *Lexer, defineToken: RawToken) Error!void {
     macroNameTokenID.simplifyMacroKeyword();
     switch (macroNameTokenID) {
         .Identifier, .ExtendedIdentifier => {},
-        else => if (macroNameTokenID.isMacroIdentifier()) {
+        else => if (macroNameTokenID.isMacroIdentifier() and
+            !std.mem.eql(u8, pp.comp.getSource(lexer.source).path, "<builtin>"))
+        {
             try pp.err(macroName, .keyword_macro, .{});
         },
     }
