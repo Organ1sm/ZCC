@@ -3461,10 +3461,12 @@ const Declarator = struct {
 };
 
 /// declarator: pointer? direct-declarator
+///
 /// abstract-declarator
 ///  : pointer
-///  : pointer? direct-abstract-declarator
-/// pointer : '*' typeQual* pointer?
+///  | pointer? direct-abstract-declarator
+///
+/// pointer : '*' type-qualifier * pointer?
 fn declarator(p: *Parser, baseQt: QualType, kind: Declarator.Kind) Error!?Declarator {
     var d = Declarator{ .name = 0, .qt = baseQt };
 
@@ -3489,6 +3491,9 @@ fn declarator(p: *Parser, baseQt: QualType, kind: Declarator.Kind) Error!?Declar
         try d.validate(p, combineToken);
         return d;
     } else if (p.eat(.LParen)) |lp| blk: {
+        // c23 abd declspec attributes are not allowed here
+        while (try p.gnuAttribute()) {}
+
         // parse Microsoft-style attributes
         _ = try p.msTypeAttribute();
 

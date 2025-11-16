@@ -113,6 +113,8 @@ __attribute__((void)) int a;
 
 __attribute__(()) // test attribute at eof
 
+int (__attribute__((aligned)) a);
+
 #define TESTS_SKIPPED 1
 
 #define EXPECTED_ERRORS \
