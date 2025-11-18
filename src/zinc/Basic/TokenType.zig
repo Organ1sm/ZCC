@@ -6,7 +6,7 @@ pub const TokenType = enum(u8) {
 
     /// identifier containing solely basic character set characters
     Identifier,
-    /// identifier with at least one extended character
+    /// identifier with at least one extended character or Ucn escape sequence
     ExtendedIdentifier,
 
     // string literals with prefixes
@@ -345,6 +345,9 @@ pub const TokenType = enum(u8) {
     /// A comment token if asked to preserve comments
     Comment,
 
+    /// Incomplete universal character name
+    IncompleteUcn,
+
     /// This function checks if the provided `id` matches any of the predefined macro-related token types,
     /// and returns `true` if it does, indicating that it is a macro identifier.
     ///
@@ -611,6 +614,8 @@ pub const TokenType = enum(u8) {
             => "",
 
             .MacroWS => " ",
+
+            .IncompleteUcn => "\\",
 
             .One => "1",
             .Zero => "0",

@@ -11,8 +11,9 @@ const Features = @import("Features.zig");
 const HideSet = @import("HideSet.zig");
 const Lexer = @import("Lexer.zig");
 const Parser = @import("../Parser/Parser.zig");
-const RawToken = @import("../Lexer/Token.zig").Token;
+const RawToken = @import("../Lexer/Lexer.zig").Token;
 const Source = @import("../Basic/Source.zig");
+const TextLiteral = @import("../Parser/TextLiteral.zig");
 const TokenType = @import("../Basic/TokenType.zig").TokenType;
 const Tree = @import("../AST/AST.zig");
 const Token = Tree.Token;
@@ -1027,7 +1028,7 @@ fn expr(pp: *Preprocessor, lexer: *Lexer) MacroError!bool {
                 }
             },
         }
-        pp.addTokenAssumeCapacity(token);
+        pp.addTokenAssumeCapacity(try pp.unescapeUcn(token));
     }
 
     try pp.addToken(.{
@@ -2612,6 +2613,63 @@ fn expandMacroExhaustive(
     buf.items.len = movingEndIdx;
 }
 
+fn unescapeUcn(pp: *Preprocessor, tok: TokenWithExpansionLocs) !TokenWithExpansionLocs {
+    const comp = pp.comp;
+    const gpa = comp.gpa;
+    switch (tok.id) {
+        .IncompleteUcn => {
+            @branchHint(.cold);
+            try pp.err(tok, .incomplete_ucn, .{});
+        },
+        .ExtendedIdentifier => {
+            @branchHint(.cold);
+            const identifier = pp.expandedSlice(tok);
+            if (std.mem.indexOfScalar(u8, identifier, '\\') != null) {
+                @branchHint(.cold);
+                const start = comp.generatedBuffer.items.len;
+                try comp.generatedBuffer.ensureUnusedCapacity(gpa, identifier.len + 1);
+                var identifierParser: TextLiteral.Parser = .{
+                    .comp = comp,
+                    .literal = pp.expandedSlice(tok), // re-expand since previous line may have caused a reallocation, invalidating `identifier`
+                    .kind = .utf8,
+                    .maxCodepoint = 0x10ffff,
+                    .loc = tok.loc,
+                    .expansionLocs = tok.expansionSlice(),
+                };
+
+                while (try identifierParser.next()) |decoded| {
+                    switch (decoded) {
+                        .value => unreachable, // validated by tokenizer
+                        .codepoint => |c| {
+                            var buf: [4]u8 = undefined;
+                            const written = std.unicode.utf8Encode(c, &buf) catch unreachable;
+                            comp.generatedBuffer.appendSliceAssumeCapacity(buf[0..written]);
+                        },
+                        .improperlyEncoded => |b| {
+                            std.debug.print("got improperly encoded {s}\n", .{b});
+                        },
+                        .utf8Text => |view| {
+                            comp.generatedBuffer.appendSliceAssumeCapacity(view.bytes);
+                        },
+                    }
+                }
+
+                // var offset: u32 = 0;
+                // while (it.next()) |decoded| {
+                //     try pp.writeUnescapedChar(decoded, tok.loc, offset);
+                //     std.debug.assert(decoded.consumed <= 10);
+                //     offset += @truncate(decoded.consumed);
+                // }
+                comp.generatedBuffer.appendAssumeCapacity('\n');
+                defer TokenWithExpansionLocs.free(tok.expansionLocs, gpa);
+                return pp.makeGeneratedToken(start, .ExtendedIdentifier, tok);
+            }
+        },
+        else => {},
+    }
+    return tok;
+}
+
 /// Try to expand a macro after a possible candidate has been read from the `lexer`
 /// into the `raw` token passed as argument
 fn expandMacro(pp: *Preprocessor, lexer: *Lexer, raw: RawToken) MacroError!void {
@@ -2644,7 +2702,7 @@ fn expandMacro(pp: *Preprocessor, lexer: *Lexer, raw: RawToken) MacroError!void 
             continue;
         }
         tok.id.simplifyMacroKeywordExtra(true);
-        pp.addTokenAssumeCapacity(tok.*);
+        pp.addTokenAssumeCapacity(try pp.unescapeUcn(tok.*));
     }
 
     if (pp.preserveWhitespace) {
@@ -3364,8 +3422,9 @@ fn makePragmaToken(
     return tok;
 }
 
-pub fn addToken(pp: *Preprocessor, tok: TokenWithExpansionLocs) !void {
+pub fn addToken(pp: *Preprocessor, tokenArg: TokenWithExpansionLocs) !void {
     const gpa = pp.comp.gpa;
+    const tok = try pp.unescapeUcn(tokenArg);
     if (tok.expansionLocs) |expansionLocs| {
         try pp.expansionEntries.append(gpa, .{ .idx = @intCast(pp.tokens.len), .locs = expansionLocs });
     }

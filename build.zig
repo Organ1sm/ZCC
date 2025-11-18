@@ -177,6 +177,7 @@ pub fn build(b: *std.Build) !void {
 
         const unit_test_step = b.step("test-unit", "run unit tests");
         unit_test_step.dependOn(&run_test.step);
+        b.installArtifact(unit_tests);
         break :step unit_test_step;
     };
 
