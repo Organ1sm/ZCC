@@ -2636,6 +2636,7 @@ fn unescapeUcn(pp: *Preprocessor, tok: TokenWithExpansionLocs) !TokenWithExpansi
                     .maxCodepoint = 0x10ffff,
                     .loc = tok.loc,
                     .expansionLocs = tok.expansionSlice(),
+                    .diagnoseIncorrectEncoding = false,
                 };
 
                 while (try identifierParser.next()) |decoded| {
@@ -2646,8 +2647,8 @@ fn unescapeUcn(pp: *Preprocessor, tok: TokenWithExpansionLocs) !TokenWithExpansi
                             const written = std.unicode.utf8Encode(c, &buf) catch unreachable;
                             comp.generatedBuffer.appendSliceAssumeCapacity(buf[0..written]);
                         },
-                        .improperlyEncoded => |b| {
-                            std.debug.print("got improperly encoded {s}\n", .{b});
+                        .improperlyEncoded => |bytes| {
+                            comp.generatedBuffer.appendSliceAssumeCapacity(bytes);
                         },
                         .utf8Text => |view| {
                             comp.generatedBuffer.appendSliceAssumeCapacity(view.bytes);
