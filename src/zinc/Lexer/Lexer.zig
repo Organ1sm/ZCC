@@ -1073,11 +1073,11 @@ pub fn next(self: *Lexer) Token {
     };
 }
 
-pub fn nextNoWhiteSpace(self: *Lexer) Token {
+pub fn nextNoWs(self: *Lexer) Token {
     return self.nextNoSpecificTokens(std.EnumSet(TokenType).initMany(&[_]TokenType{ .Comment, .WhiteSpace }));
 }
 
-pub fn nextNoWhiteSpaceComments(self: *Lexer) Token {
+pub fn nextNoWsComments(self: *Lexer) Token {
     return self.nextNoSpecificTokens(std.EnumSet(TokenType).initOne(.WhiteSpace));
 }
 
@@ -1094,7 +1094,7 @@ pub fn nextNoSpecificTokens(self: *Lexer, skipTokens: std.EnumSet(TokenType)) To
 
 /// Try to tokenize a '::' even if not supported by the current language standard.
 pub fn colonColon(self: *Lexer) Token {
-    var tok = self.nextNoWhiteSpace();
+    var tok = self.nextNoWs();
     if (tok.id == .Colon and self.index < self.buffer.len and self.buffer[self.index] == ':') {
         self.index += 1;
         tok.id = .ColonColon;

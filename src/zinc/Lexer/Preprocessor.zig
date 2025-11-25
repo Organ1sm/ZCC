@@ -298,15 +298,15 @@ fn findIncludeGuard(pp: *Preprocessor, source: Source) ?[]const u8 {
         .source = source.id,
     };
 
-    var hash = lexer.nextNoWhiteSpace();
+    var hash = lexer.nextNoWs();
     while (hash.is(.NewLine))
-        hash = lexer.nextNoWhiteSpace();
+        hash = lexer.nextNoWs();
     if (hash.isNot(.Hash)) return null;
 
-    const ifndef = lexer.nextNoWhiteSpace();
+    const ifndef = lexer.nextNoWs();
     if (ifndef.isNot(.KeywordIfndef)) return null;
 
-    const guard = lexer.nextNoWhiteSpace();
+    const guard = lexer.nextNoWs();
     if (guard.isNot(.Identifier)) return null;
 
     return pp.getTokenSlice(guard);
@@ -394,7 +394,7 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!TokenWithExpans
         var token = lexer.next();
         switch (token.id) {
             .Hash => if (!startOfLine) try pp.addToken(tokenFromRaw(token)) else {
-                const directive = lexer.nextNoWhiteSpace();
+                const directive = lexer.nextNoWs();
                 const directiveLoc: Source.Location = .{ .id = token.source, .byteOffset = directive.start, .line = directive.line };
                 switch (directive.id) {
                     .KeywordError, .KeywordWarning => {
@@ -621,8 +621,8 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!TokenWithExpans
                             const savedLexer = lexer;
                             defer lexer = savedLexer;
 
-                            var next = lexer.nextNoWhiteSpace();
-                            while (next.is(.NewLine)) : (next = lexer.nextNoWhiteSpace()) {}
+                            var next = lexer.nextNoWs();
+                            while (next.is(.NewLine)) : (next = lexer.nextNoWs()) {}
                             if (next.isNot(.Eof)) guardName = null;
                         }
                         ifContext.decrement();
@@ -650,14 +650,14 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!TokenWithExpans
                     },
 
                     .KeywordLine => {
-                        const digits = lexer.nextNoWhiteSpace();
+                        const digits = lexer.nextNoWs();
                         if (digits.isNot(.PPNumber))
                             try pp.err(digits, .line_simple_digit, .{});
 
                         if (digits.isOneOf(.{ .Eof, .NewLine }))
                             continue;
 
-                        const name = lexer.nextNoWhiteSpace();
+                        const name = lexer.nextNoWs();
                         if (name.isOneOf(.{ .Eof, .NewLine }))
                             continue;
 
@@ -671,17 +671,17 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!TokenWithExpans
                         // # number "file" flags
                         // TODO: validate that the pp_num token is solely digits
                         // if not, emit `GNU line marker directive requires a simple digit sequence`
-                        const name = lexer.nextNoWhiteSpace();
+                        const name = lexer.nextNoWs();
                         if (name.isOneOf(.{ .Eof, .NewLine })) continue;
                         if (name.isNot(.NewLine)) try pp.err(name, .line_invalid_filename, .{});
 
-                        const flag1 = lexer.nextNoWhiteSpace();
+                        const flag1 = lexer.nextNoWs();
                         if (flag1.isOneOf(.{ .Eof, .NewLine })) continue;
-                        const flag2 = lexer.nextNoWhiteSpace();
+                        const flag2 = lexer.nextNoWs();
                         if (flag2.isOneOf(.{ .Eof, .NewLine })) continue;
-                        const flag3 = lexer.nextNoWhiteSpace();
+                        const flag3 = lexer.nextNoWs();
                         if (flag3.isOneOf(.{ .Eof, .NewLine })) continue;
-                        const flag4 = lexer.nextNoWhiteSpace();
+                        const flag4 = lexer.nextNoWs();
                         if (flag4.isOneOf(.{ .Eof, .NewLine })) continue;
                         try pp.expectNewLine(&lexer);
                     },
@@ -881,7 +881,7 @@ fn verboseLog(pp: *Preprocessor, tok: TokenWithExpansionLocs, comptime fmt: []co
 
 /// Consume next token, error if it is not an identifier.
 fn expectMacroName(pp: *Preprocessor, lexer: *Lexer) Error!?[]const u8 {
-    const macroName = lexer.nextNoWhiteSpace();
+    const macroName = lexer.nextNoWs();
     if (!macroName.id.isMacroIdentifier()) {
         try pp.err(macroName, .macro_name_missing, .{});
         skipToNewLine(lexer);
@@ -1118,13 +1118,13 @@ fn skip(
     while (lexer.index < lexer.buffer.len) {
         if (lineStart) {
             const savedLexer = lexer.*;
-            const hash = lexer.nextNoWhiteSpace();
+            const hash = lexer.nextNoWs();
 
             if (hash.is(.NewLine)) continue;
             lineStart = false;
             if (hash.isNot(.Hash)) continue;
 
-            const directive = lexer.nextNoWhiteSpace();
+            const directive = lexer.nextNoWs();
             switch (directive.id) {
                 .KeywordElse => {
                     if (ifsSeen != 0) continue;
@@ -2782,8 +2782,8 @@ fn pasteTokens(pp: *Preprocessor, lhsTokens: *ExpandBuffer, rhsTokens: []const T
         .source = .generated,
     };
 
-    const pastedToken = lexer.nextNoWhiteSpaceComments();
-    const next = lexer.nextNoWhiteSpaceComments();
+    const pastedToken = lexer.nextNoWsComments();
+    const next = lexer.nextNoWsComments();
     const pastedId = if (lhs.is(.PlaceMarker) and rhs.is(.PlaceMarker))
         .PlaceMarker
     else
@@ -2843,7 +2843,7 @@ fn defineMacro(pp: *Preprocessor, defineToken: RawToken, nameToken: TokenWithExp
 fn define(pp: *Preprocessor, lexer: *Lexer, defineToken: RawToken) Error!void {
     const gpa = pp.comp.gpa;
     // get the macro name and validate.
-    const escapeMacroName = lexer.nextNoWhiteSpace();
+    const escapeMacroName = lexer.nextNoWs();
     if (escapeMacroName.is(.KeywordDefined)) {
         try pp.err(escapeMacroName, .defined_as_macro_name, .{});
         return skipToNewLine(lexer);
@@ -2899,7 +2899,7 @@ fn define(pp: *Preprocessor, lexer: *Lexer, defineToken: RawToken) Error!void {
         token.id.simplifyMacroKeyword();
         switch (token.id) {
             .HashHash => {
-                const next = lexer.nextNoWhiteSpaceComments();
+                const next = lexer.nextNoWsComments();
                 switch (next.id) {
                     .NewLine, .Eof => {
                         try pp.err(token, .hash_hash_at_end, .{});
@@ -2955,7 +2955,7 @@ fn define(pp: *Preprocessor, lexer: *Lexer, defineToken: RawToken) Error!void {
 /// embedParam : Identifier (:: Identifier)? '(' <tokens> ')'
 fn embed(pp: *Preprocessor, lexer: *Lexer) MacroError!void {
     const gpa = pp.comp.gpa;
-    const first = lexer.nextNoWhiteSpace();
+    const first = lexer.nextNoWs();
     const fileNameToken = pp.findIncludeFilenameToken(first, lexer, .IgnoreTrailingTokens) catch |er| switch (er) {
         error.InvalidInclude => return,
         else => |e| return e,
@@ -2995,7 +2995,7 @@ fn embed(pp: *Preprocessor, lexer: *Lexer) MacroError!void {
     var suffix: ?Range = null;
     var ifEmpty: ?Range = null;
     while (true) {
-        const paramFirst = lexer.nextNoWhiteSpace();
+        const paramFirst = lexer.nextNoWs();
         switch (paramFirst.id) {
             .NewLine, .Eof => break,
             .Identifier => {},
@@ -3012,12 +3012,12 @@ fn embed(pp: *Preprocessor, lexer: *Lexer) MacroError!void {
         const param = switch (maybeColon.id) {
             .ColonColon => blk: {
                 // vendor::param
-                const param = lexer.nextNoWhiteSpace();
+                const param = lexer.nextNoWs();
                 if (param.id != .Identifier) {
                     try pp.err(param, .malformed_embed_param, .{});
                     continue;
                 }
-                const lparen = lexer.nextNoWhiteSpace();
+                const lparen = lexer.nextNoWs();
                 if (lparen.id != .LParen) {
                     try pp.err(lparen, .malformed_embed_param, .{});
                     continue;
@@ -3042,7 +3042,7 @@ fn embed(pp: *Preprocessor, lexer: *Lexer) MacroError!void {
 
         const start: u32 = @intCast(pp.tokenBuffer.items.len);
         while (true) {
-            const next = lexer.nextNoWhiteSpace();
+            const next = lexer.nextNoWs();
             if (next.id == .RParen) break;
             try pp.tokenBuffer.append(gpa, next);
         }
@@ -3147,7 +3147,7 @@ fn defineFunc(
     var gnuVarArgs: []const u8 = ""; // gnu-named varargs
     var varArgs = false;
     while (true) {
-        var token = lexer.nextNoWhiteSpace();
+        var token = lexer.nextNoWs();
         if (token.is(.RParen)) break;
 
         if (token.is(.Eof))
@@ -3155,7 +3155,7 @@ fn defineFunc(
 
         if (token.is(.Ellipsis)) {
             varArgs = true;
-            const rParen = lexer.nextNoWhiteSpace();
+            const rParen = lexer.nextNoWs();
             if (rParen.isNot(.RParen)) {
                 try pp.err(rParen, .missing_paren_param_list, .{});
                 try pp.err(lParen, .to_match_paren, .{});
@@ -3172,11 +3172,11 @@ fn defineFunc(
 
         try params.append(gpa, pp.getTokenSlice(token));
 
-        token = lexer.nextNoWhiteSpace();
+        token = lexer.nextNoWs();
         if (token.is(.Ellipsis)) {
             try pp.err(token, .gnu_va_macro, .{});
             gnuVarArgs = params.pop().?;
-            const rParen = lexer.nextNoWhiteSpace();
+            const rParen = lexer.nextNoWs();
             if (rParen.id != .RParen) {
                 try pp.err(lParen, .missing_paren_param_list, .{});
                 try pp.err(lParen, .to_match_paren, .{});
@@ -3213,7 +3213,7 @@ fn defineFunc(
                     needWS = false;
                     try pp.tokenBuffer.append(gpa, .{ .id = .MacroWS, .source = .generated });
                 }
-                const param = lexer.nextNoWhiteSpace();
+                const param = lexer.nextNoWs();
                 blk: {
                     if (varArgs and param.is(.KeywordVarArgs)) {
                         token.id = .StringifyVarArgs;
@@ -3255,7 +3255,7 @@ fn defineFunc(
                 }
 
                 const savedLexer = lexer.*;
-                const next = lexer.nextNoWhiteSpaceComments();
+                const next = lexer.nextNoWsComments();
                 if (next.isOneOf(.{ .NewLine, .Eof })) {
                     try pp.err(token, .hash_hash_at_end, .{});
                     return;
@@ -3347,7 +3347,7 @@ fn defineFunc(
 }
 
 fn include(pp: *Preprocessor, lexer: *Lexer, which: Compilation.WhichInclude) MacroError!void {
-    const first = lexer.nextNoWhiteSpace();
+    const first = lexer.nextNoWs();
     const newSource = pp.findIncludeSource(lexer, first, which) catch |er| switch (er) {
         error.InvalidInclude => return,
         else => |e| return e,
@@ -3392,7 +3392,7 @@ fn include(pp: *Preprocessor, lexer: *Lexer, which: Compilation.WhichInclude) Ma
     var next = first;
     while (true) {
         var tmp = lexer.*;
-        next = tmp.nextNoWhiteSpace();
+        next = tmp.nextNoWs();
         if (next.id != .NewLine) break;
         lexer.* = tmp;
     }
@@ -3457,7 +3457,7 @@ fn pragma(
     operatorLoc: ?Source.Location,
     argLocs: []const Source.Location,
 ) !void {
-    const nameToken = lexer.nextNoWhiteSpace();
+    const nameToken = lexer.nextNoWs();
     if (nameToken.isOneOf(.{ .NewLine, .Eof }))
         return;
 
@@ -3551,7 +3551,7 @@ fn findIncludeFilenameToken(
     // error on the extra tokens.
     switch (trailingTokenBehavior) {
         .expectNlEof => {
-            const newLine = lexer.nextNoWhiteSpace();
+            const newLine = lexer.nextNoWs();
             if ((newLine.id != .NewLine and newLine.id != .Eof) or expandedTrailing) {
                 skipToNewLine(lexer);
                 try pp.err(filenameToken, .extra_tokens_directive_end, .{});
