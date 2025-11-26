@@ -2930,6 +2930,10 @@ fn define(pp: *Preprocessor, lexer: *Lexer, defineToken: RawToken) Error!void {
             .UnterminatedComment => try pp.err(token, .unterminated_comment, .{}),
 
             else => {
+                if (token.is(.IncompleteUcn)) {
+                    @branchHint(.cold);
+                    try pp.err(token, .incomplete_ucn, .{});
+                }
                 if (token.id != .WhiteSpace and needWS) {
                     needWS = false;
                     try pp.tokenBuffer.append(gpa, .{ .id = .MacroWS, .source = .generated });
