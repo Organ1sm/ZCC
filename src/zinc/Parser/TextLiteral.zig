@@ -178,6 +178,9 @@ pub const Parser = struct {
     /// Makes incorrect encoding always an error.
     /// Used when concatenating string literals.
     incorrectEncodingIsError: bool = false,
+    /// If this is false, don't issue any diagnostics for incorrect character encoding
+    /// Incorrect encoding is allowed if we are unescapeing an identifier in the preprocessor
+    diagnoseIncorrectEncoding: bool = true,
 
     fn prefixLen(self: *const Parser) usize {
         return switch (self.kind) {
@@ -353,17 +356,23 @@ pub const Parser = struct {
             const unescapedSlice = p.literal[start..p.idx];
 
             const view = std.unicode.Utf8View.init(unescapedSlice) catch {
+                if (!p.diagnoseIncorrectEncoding)
+                    return .{ .improperlyEncoded = p.literal[start..p.idx] };
+
                 if (p.incorrectEncodingIsError) {
                     try p.warn(.illegal_char_encoding_error, .{});
                     return .{ .improperlyEncoded = p.literal[start..p.idx] };
                 }
+
                 if (p.kind != .char) {
                     try p.err(.illegal_char_encoding_error, .{});
                     return null;
                 }
+
                 try p.warn(.illegal_char_encoding_warning, .{});
                 return .{ .improperlyEncoded = p.literal[start..p.idx] };
             };
+
             return .{ .utf8Text = view };
         }
 

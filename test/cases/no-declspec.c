@@ -1,3 +1,4 @@
+//zinc-args -fno-declspec --target=x86_64-linux
 __declspec(align(4)) int foo;
 
 #if __has_declspec_attribute(noreturn)
@@ -9,5 +10,5 @@ __declspec(align(4)) int foo;
 #endif
 
 #define EXPECTED_ERRORS \
-    "no-declspec.c:1:1: error: '__declspec' attributes are not enabled; use '-fdeclspec' or '-fms-extensions' to enable support for __declspec attributes" \
+    "no-declspec.c:2:1: error: '__declspec' attributes are not enabled; use '-fdeclspec' or '-fms-extensions' to enable support for __declspec attributes" \
 

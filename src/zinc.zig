@@ -7,7 +7,6 @@ pub const Parser = @import("zinc/Parser/Parser.zig");
 pub const Preprocessor = @import("zinc/Lexer/Preprocessor.zig");
 pub const Source = @import("zinc/Basic/Source.zig");
 pub const StringInterner = @import("zinc/Basic/StringInterner.zig");
-pub const Token = @import("zinc/Lexer/Token.zig").Token;
 pub const Tree = @import("zinc/AST/AST.zig");
 pub const TypeStore = @import("zinc/AST/TypeStore.zig");
 pub const QualType = TypeStore.QualType;
