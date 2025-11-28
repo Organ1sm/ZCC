@@ -428,12 +428,12 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!TokenWithExpans
                         if (try pp.expr(&lexer)) {
                             ifContext.set(.untilEndIf);
                             if (pp.verbose)
-                                pp.verboseLog(tokenFromRaw(directive), "entering then branch of #if", .{});
+                                pp.verboseLog(directive, "entering then branch of #if", .{});
                         } else {
                             ifContext.set(.untilElse);
                             try pp.skip(&lexer, .untilElse);
                             if (pp.verbose)
-                                pp.verboseLog(tokenFromRaw(directive), "entering else branch of #if", .{});
+                                pp.verboseLog(directive, "entering else branch of #if", .{});
                         }
                     },
 
@@ -448,12 +448,12 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!TokenWithExpans
                         if (pp.defines.get(macroName) != null) {
                             ifContext.set(.untilEndIf);
                             if (pp.verbose)
-                                pp.verboseLog(tokenFromRaw(directive), "entering then branch of #ifdef", .{});
+                                pp.verboseLog(directive, "entering then branch of #ifdef", .{});
                         } else {
                             ifContext.set(.untilElse);
                             try pp.skip(&lexer, .untilElse);
                             if (pp.verbose)
-                                pp.verboseLog(tokenFromRaw(directive), "entering else branch of #ifdef", .{});
+                                pp.verboseLog(directive, "entering else branch of #ifdef", .{});
                         }
                     },
 
@@ -493,11 +493,11 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!TokenWithExpans
                             .untilElse => if (try pp.expr(&lexer)) {
                                 ifContext.set(.untilEndIf);
                                 if (pp.verbose)
-                                    pp.verboseLog(tokenFromRaw(directive), "entering then branch of #elif", .{});
+                                    pp.verboseLog(directive, "entering then branch of #elif", .{});
                             } else {
                                 try pp.skip(&lexer, .untilElse);
                                 if (pp.verbose)
-                                    pp.verboseLog(tokenFromRaw(directive), "entering else branch of #elif", .{});
+                                    pp.verboseLog(directive, "entering else branch of #elif", .{});
                             },
 
                             .untilEndIf => try pp.skip(&lexer, .untilEndIf),
@@ -524,18 +524,18 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!TokenWithExpans
                                     ifContext.set(.untilElse);
                                     try pp.skip(&lexer, .untilElse);
                                     if (pp.verbose)
-                                        pp.verboseLog(tokenFromRaw(directive), "entering then branch of #elifdef", .{});
+                                        pp.verboseLog(directive, "entering then branch of #elifdef", .{});
                                 } else {
                                     try pp.expectNewLine(&lexer);
                                     if (pp.defines.get(macroName.?) != null) {
                                         ifContext.set(.untilEndIf);
                                         if (pp.verbose)
-                                            pp.verboseLog(tokenFromRaw(directive), "entering else branch of #elifdef", .{});
+                                            pp.verboseLog(directive, "entering else branch of #elifdef", .{});
                                     } else {
                                         ifContext.set(.untilElse);
                                         try pp.skip(&lexer, .untilElse);
                                         if (pp.verbose)
-                                            pp.verboseLog(tokenFromRaw(directive), "entering then branch of #elifdef", .{});
+                                            pp.verboseLog(directive, "entering then branch of #elifdef", .{});
                                     }
                                 }
                             },
@@ -564,18 +564,18 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!TokenWithExpans
                                     ifContext.set(.untilElse);
                                     try pp.skip(&lexer, .untilElse);
                                     if (pp.verbose)
-                                        pp.verboseLog(tokenFromRaw(directive), "entering then branch of #elifndef", .{});
+                                        pp.verboseLog(directive, "entering then branch of #elifndef", .{});
                                 } else {
                                     try pp.expectNewLine(&lexer);
                                     if (pp.defines.get(macroName.?) == null) {
                                         ifContext.set(.untilEndIf);
                                         if (pp.verbose)
-                                            pp.verboseLog(tokenFromRaw(directive), "entering else branch of #elifndef", .{});
+                                            pp.verboseLog(directive, "entering else branch of #elifndef", .{});
                                     } else {
                                         ifContext.set(.untilElse);
                                         try pp.skip(&lexer, .untilElse);
                                         if (pp.verbose)
-                                            pp.verboseLog(tokenFromRaw(directive), "entering then branch of #elifndef", .{});
+                                            pp.verboseLog(directive, "entering then branch of #elifndef", .{});
                                     }
                                 }
                             },
@@ -601,7 +601,7 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!TokenWithExpans
                             .untilElse => {
                                 ifContext.set(.untilEndIfSeenElse);
                                 if (pp.verbose)
-                                    pp.verboseLog(tokenFromRaw(directive), "#else branch here", .{});
+                                    pp.verboseLog(directive, "#else branch here", .{});
                             },
                             .untilEndIf => try pp.skip(&lexer, .untilEndIfSeenElse),
                             .untilEndIfSeenElse => {
@@ -862,10 +862,10 @@ fn fatalNotFound(pp: *Preprocessor, tok: TokenWithExpansionLocs, filename: []con
     unreachable; // should've returned FatalError
 }
 
-fn verboseLog(pp: *Preprocessor, tok: TokenWithExpansionLocs, comptime fmt: []const u8, args: anytype) void {
+fn verboseLog(pp: *Preprocessor, raw: RawToken, comptime fmt: []const u8, args: anytype) void {
     @branchHint(.cold);
-    const source = pp.comp.getSource(tok.loc.id);
-    const lineCol = source.getLineCol(tok.loc);
+    const source = pp.comp.getSource(raw.source);
+    const lineCol = source.getLineCol(.{ .byteOffset = raw.start, .line = raw.line, .id = raw.source });
 
     var stderrBuffer: [4096]u8 = undefined;
     var stderr = std.fs.File.stderr().writer(&stderrBuffer);
@@ -2830,8 +2830,16 @@ fn defineMacro(pp: *Preprocessor, defineToken: RawToken, nameToken: TokenWithExp
         }
     }
 
-    if (pp.verbose)
-        pp.verboseLog(nameToken, "macro {s} defined", .{name});
+    if (pp.verbose) {
+        const raw: RawToken = .{
+            .id = nameToken.id,
+            .source = nameToken.loc.id,
+            .start = nameToken.loc.byteOffset,
+            .end = nameToken.loc.byteOffset,
+            .line = nameToken.loc.line,
+        };
+        pp.verboseLog(raw, "macro {s} defined", .{name});
+    }
 
     if (pp.storeMacroTokens)
         try pp.addToken(tokenFromRaw(defineToken));
@@ -3373,7 +3381,7 @@ fn include(pp: *Preprocessor, lexer: *Lexer, which: Compilation.WhichInclude) Ma
     }
 
     if (pp.verbose)
-        pp.verboseLog(tokenFromRaw(first), "include file {s}", .{newSource.path});
+        pp.verboseLog(first, "include file {s}", .{newSource.path});
 
     const tokenState = pp.getTokenState();
     try pp.addIncludeStart(newSource);
