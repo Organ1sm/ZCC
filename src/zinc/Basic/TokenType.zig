@@ -346,6 +346,9 @@ pub const TokenType = enum(u8) {
     Comment,
 
     /// Incomplete universal character name
+    /// This happens if the source text contains `\u` or `\U` followed by an insufficient number of hex digits.
+    /// This token id represents just the backslash, the subsequent `u` or `U` will be treated as the
+    /// leading character of the following identifier token.
     IncompleteUcn,
 
     /// This function checks if the provided `id` matches any of the predefined macro-related token types,
