@@ -743,6 +743,7 @@ const attributes = struct {
     pub const vectorcall = struct {};
     pub const cdecl = struct {};
     pub const thiscall = struct {};
+    pub const sysv_abi = struct {};
 };
 
 /// The Attributes enum tag
