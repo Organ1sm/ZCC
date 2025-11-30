@@ -293,7 +293,12 @@ pub fn adjustTypes(lhs: *Result, token: TokenIndex, rhs: *Result, p: *Parser, ki
                     const rhsElem = rhs.qt.childType(p.comp);
                     if (!lhsElem.eql(rhsElem, p.comp)) {
                         try p.err(.comparison_distinct_ptr, token, .{ lhs.qt, rhs.qt });
+                        try rhs.castToPointer(p, lhs.qt, token);
                     }
+                } else if (lhsSK == .VoidPointer) {
+                    try rhs.castToPointer(p, lhs.qt, token);
+                } else if (rhsSK == .VoidPointer) {
+                    try lhs.castToPointer(p, rhs.qt, token);
                 }
             } else if (lhsSK.isPointer()) {
                 try rhs.castToPointer(p, lhs.qt, token);
@@ -654,6 +659,9 @@ pub fn castToPointer(res: *Result, p: *Parser, ptrQt: QualType, token: TokenInde
         _ = try res.value.intCast(ptrQt, p.comp);
         res.qt = ptrQt;
         try res.implicitCast(p, .IntToPointer, token);
+    } else if (srcSK.isPointer() and !res.qt.eql(ptrQt, p.comp)) {
+        res.qt = ptrQt;
+        try res.implicitCast(p, .Bitcast, token);
     }
 }
 
@@ -1167,9 +1175,9 @@ fn coerceExtra(
             try res.castToPointer(p, destUnqual, tok);
             return;
         } else if (srcSK == .VoidPointer or destUnqual.eql(res.qt, p.comp)) {
-            return; // ok
+            return res.castToPointer(p, destUnqual, tok);
         } else if (destSK == .VoidPointer and srcSK.isPointer() or (srcSK.isInt() and srcSK.isReal())) {
-            return; // ok
+            return res.castToPointer(p, destUnqual, tok);
         } else if (srcSK.isPointer()) {
             const srcChild = res.qt.childType(p.comp);
             const destChild = destUnqual.childType(p.comp);

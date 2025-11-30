@@ -628,14 +628,15 @@ fn nodeIs(p: *Parser, node: Node.Index, comptime tag: std.meta.Tag(AST.Node)) bo
 }
 
 pub fn getDecayedStringLiteral(p: *Parser, node: Node.Index) ?Value {
-    const cast = p.getNode(node, .cast) orelse return null;
-    if (cast.kind != .ArrayToPointer) return null;
-
-    var cur = cast.operand;
+    var cur = node;
     while (true) {
         switch (cur.get(&p.tree)) {
             .parenExpr => |un| cur = un.operand,
             .stringLiteralExpr => return p.tree.valueMap.get(cur),
+            .cast => |cast| switch (cast.kind) {
+                .Bitcast, .ArrayToPointer => cur = cast.operand,
+                else => return null,
+            },
             else => return null,
         }
     }

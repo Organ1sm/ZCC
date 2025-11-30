@@ -243,5 +243,28 @@ fnDef: 'fn () void'
           declRefExpr: 'float' lvalue
            name: f
 
+    variable: '*void'
+     name: vp
+
+    assignExpr: '*void'
+     lhs:
+      declRefExpr: '*void' lvalue
+       name: vp
+     rhs:
+      implicit cast: (Bitcast) '*void'
+        implicit cast: (LValToRVal) '*int'
+          declRefExpr: '*int' lvalue
+           name: p
+
+    assignExpr: '*int'
+     lhs:
+      declRefExpr: '*int' lvalue
+       name: p
+     rhs:
+      implicit cast: (Bitcast) '*int'
+        implicit cast: (LValToRVal) '*void'
+          declRefExpr: '*void' lvalue
+           name: vp
+
     implicit returnStmt: 'void'
 
