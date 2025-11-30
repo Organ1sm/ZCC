@@ -744,6 +744,7 @@ const attributes = struct {
     pub const cdecl = struct {};
     pub const thiscall = struct {};
     pub const sysv_abi = struct {};
+    pub const ms_abi = struct {};
 };
 
 /// The Attributes enum tag
@@ -977,6 +978,8 @@ pub fn applyTypeAttributes(p: *Parser, qt: QualType, attrBufferStart: usize, dia
 
 pub fn applyFunctionAttributes(p: *Parser, qt: QualType, attrBufferStart: usize) !QualType {
     const gpa = p.comp.gpa;
+    const target = p.comp.target;
+
     const attrs = p.attrBuffer.items(.attr)[attrBufferStart..];
     const toks = p.attrBuffer.items(.tok)[attrBufferStart..];
     p.attrApplicationBuffer.items.len = 0;
@@ -1028,7 +1031,7 @@ pub fn applyFunctionAttributes(p: *Parser, qt: QualType, attrBufferStart: usize)
 
         .calling_convention => try applyCallingConvention(attr, p, tok, baseQt),
 
-        .fastcall => if (p.comp.target.cpu.arch == .x86) {
+        .fastcall => if (target.cpu.arch == .x86) {
             try p.attrApplicationBuffer.append(gpa, .{
                 .tag = .calling_convention,
                 .args = .{ .calling_convention = .{ .cc = .fastcall } },
@@ -1037,7 +1040,7 @@ pub fn applyFunctionAttributes(p: *Parser, qt: QualType, attrBufferStart: usize)
         } else {
             try p.err(.callconv_not_supported, tok, .{"fastcall"});
         },
-        .stdcall => if (p.comp.target.cpu.arch == .x86) {
+        .stdcall => if (target.cpu.arch == .x86) {
             try p.attrApplicationBuffer.append(gpa, .{
                 .tag = .calling_convention,
                 .args = .{ .calling_convention = .{ .cc = .stdcall } },
@@ -1046,7 +1049,7 @@ pub fn applyFunctionAttributes(p: *Parser, qt: QualType, attrBufferStart: usize)
         } else {
             try p.err(.callconv_not_supported, tok, .{"stdcall"});
         },
-        .thiscall => if (p.comp.target.cpu.arch == .x86) {
+        .thiscall => if (target.cpu.arch == .x86) {
             try p.attrApplicationBuffer.append(gpa, .{
                 .tag = .calling_convention,
                 .args = .{ .calling_convention = .{ .cc = .thiscall } },
@@ -1055,7 +1058,7 @@ pub fn applyFunctionAttributes(p: *Parser, qt: QualType, attrBufferStart: usize)
         } else {
             try p.err(.callconv_not_supported, tok, .{"thiscall"});
         },
-        .vectorcall => if (p.comp.target.cpu.arch == .x86 or p.comp.target.cpu.arch.isAARCH64()) {
+        .vectorcall => if (target.cpu.arch == .x86 or target.cpu.arch.isAARCH64()) {
             try p.attrApplicationBuffer.append(gpa, .{
                 .tag = .calling_convention,
                 .args = .{ .calling_convention = .{ .cc = .vectorcall } },
@@ -1066,7 +1069,7 @@ pub fn applyFunctionAttributes(p: *Parser, qt: QualType, attrBufferStart: usize)
         },
         .cdecl => {},
 
-        .pcs => if (p.comp.target.cpu.arch.isArm()) {
+        .pcs => if (target.cpu.arch.isArm()) {
             try p.attrApplicationBuffer.append(gpa, .{
                 .tag = .calling_convention,
                 .args = .{
@@ -1083,7 +1086,7 @@ pub fn applyFunctionAttributes(p: *Parser, qt: QualType, attrBufferStart: usize)
             try p.err(.callconv_not_supported, tok, .{"pcs"});
         },
 
-        .riscv_vector_cc => if (p.comp.target.cpu.arch.isRISCV()) {
+        .riscv_vector_cc => if (target.cpu.arch.isRISCV()) {
             try p.attrApplicationBuffer.append(gpa, .{
                 .tag = .calling_convention,
                 .args = .{ .calling_convention = .{ .cc = .riscv_vector } },
@@ -1093,7 +1096,7 @@ pub fn applyFunctionAttributes(p: *Parser, qt: QualType, attrBufferStart: usize)
             try p.err(.callconv_not_supported, tok, .{"riscv_vector_cc"});
         },
 
-        .aarch64_sve_pcs => if (p.comp.target.cpu.arch.isAARCH64()) {
+        .aarch64_sve_pcs => if (target.cpu.arch.isAARCH64()) {
             try p.attrApplicationBuffer.append(gpa, .{
                 .tag = .calling_convention,
                 .args = .{ .calling_convention = .{ .cc = .aarch64_sve_pcs } },
@@ -1103,7 +1106,7 @@ pub fn applyFunctionAttributes(p: *Parser, qt: QualType, attrBufferStart: usize)
             try p.err(.callconv_not_supported, tok, .{"pcs"});
         },
 
-        .aarch64_vector_pcs => if (p.comp.target.cpu.arch.isAARCH64()) {
+        .aarch64_vector_pcs => if (target.cpu.arch.isAARCH64()) {
             try p.attrApplicationBuffer.append(gpa, .{
                 .tag = .calling_convention,
                 .args = .{ .calling_convention = .{ .cc = .aarch64_vector_pcs } },
@@ -1111,6 +1114,30 @@ pub fn applyFunctionAttributes(p: *Parser, qt: QualType, attrBufferStart: usize)
             });
         } else {
             try p.err(.callconv_not_supported, tok, .{"pcs"});
+        },
+
+        .sysv_abi => if (target.cpu.arch == .x86_64 and target.os.tag == .windows) {
+            try p.attrApplicationBuffer.append(gpa, .{
+                .tag = .calling_convention,
+                .args = .{ .calling_convention = .{ .cc = .x86_64_sysv } },
+                .syntax = attr.syntax,
+            });
+        },
+        .ms_abi => if (target.cpu.arch == .x86_64 and target.os.tag != .windows) {
+            try p.attrApplicationBuffer.append(gpa, .{
+                .tag = .calling_convention,
+                .args = .{ .calling_convention = .{ .cc = .x86_64_win } },
+                .syntax = attr.syntax,
+            });
+        },
+
+        .malloc => {
+            const funcTy = baseQt.get(p.comp, .func).?;
+            if (funcTy.returnType.isPointer(p.comp)) {
+                try p.attrApplicationBuffer.append(gpa, attr);
+            } else {
+                try ignoredAttrErr(p, tok, attr.tag, "functions that do not return pointers");
+            }
         },
 
         .alloc_align => {
@@ -1144,7 +1171,6 @@ pub fn applyFunctionAttributes(p: *Parser, qt: QualType, attrBufferStart: usize)
         .ifunc,
         .interrupt,
         .interrupt_handler,
-        .malloc,
         .no_address_safety_analysis,
         .no_icf,
         .no_instrument_function,
@@ -1327,6 +1353,8 @@ fn applyCallingConvention(attr: Attribute, p: *Parser, token: TokenIndex, qt: Qu
         .aarch64_vector_pcs,
         .arm_aapcs,
         .arm_aapcs_vfp,
+        .x86_64_sysv,
+        .x86_64_win,
         => unreachable, // These can't come from keyword syntax
     }
 }

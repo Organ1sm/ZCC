@@ -16,6 +16,8 @@ pub const CallingConvention = enum {
     aarch64_vector_pcs,
     arm_aapcs,
     arm_aapcs_vfp,
+    x86_64_sysv,
+    x86_64_win,
 };
 
 pub const VersionStr = @import("build-options").version_str;
