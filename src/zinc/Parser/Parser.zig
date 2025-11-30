@@ -8178,7 +8178,7 @@ fn parsePrimaryExpr(p: *Parser) Error!?Result {
                     .declRefExpr = .{
                         .nameToken = p.tokenIdx,
                         .qt = qt,
-                        .decl = undefined, //TODO
+                        .decl = p.func.prettyIdent.?.node,
                     },
                 }),
             };
