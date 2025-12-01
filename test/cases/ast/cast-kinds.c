@@ -266,5 +266,51 @@ fnDef: 'fn () void'
           declRefExpr: '*void' lvalue
            name: vp
 
+    variable: '*const int'
+     name: const_p
+
+    assignExpr: '*const int'
+     lhs:
+      declRefExpr: '*const int' lvalue
+       name: const_p
+     rhs:
+      implicit cast: (NoOP) '*const int'
+        implicit cast: (LValToRVal) '*int'
+          declRefExpr: '*int' lvalue
+           name: p
+
+    assignExpr: '*int'
+     lhs:
+      declRefExpr: '*int' lvalue
+       name: p
+     rhs:
+      implicit cast: (Bitcast) '*int'
+        implicit cast: (LValToRVal) '*const int'
+          declRefExpr: '*const int' lvalue
+           name: const_p
+
+    variable: '*volatile int'
+     name: volatile_p
+
+    assignExpr: '*volatile int'
+     lhs:
+      declRefExpr: '*volatile int' lvalue
+       name: volatile_p
+     rhs:
+      implicit cast: (NoOP) '*volatile int'
+        implicit cast: (LValToRVal) '*int'
+          declRefExpr: '*int' lvalue
+           name: p
+
+    assignExpr: '*int'
+     lhs:
+      declRefExpr: '*int' lvalue
+       name: p
+     rhs:
+      implicit cast: (Bitcast) '*int'
+        implicit cast: (LValToRVal) '*volatile int'
+          declRefExpr: '*volatile int' lvalue
+           name: volatile_p
+
     implicit returnStmt: 'void'
 

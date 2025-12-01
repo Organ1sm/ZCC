@@ -634,7 +634,7 @@ pub fn getDecayedStringLiteral(p: *Parser, node: Node.Index) ?Value {
             .parenExpr => |un| cur = un.operand,
             .stringLiteralExpr => return p.tree.valueMap.get(cur),
             .cast => |cast| switch (cast.kind) {
-                .Bitcast, .ArrayToPointer => cur = cast.operand,
+                .NoOP, .Bitcast, .ArrayToPointer => cur = cast.operand,
                 else => return null,
             },
             else => return null,

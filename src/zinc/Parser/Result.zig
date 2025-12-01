@@ -651,17 +651,35 @@ pub fn castToFloat(res: *Result, p: *Parser, floatQt: QualType, token: TokenInde
 
 /// converts a bool or integer to a pointer
 pub fn castToPointer(res: *Result, p: *Parser, ptrQt: QualType, token: TokenIndex) Error!void {
-    const srcSK = res.qt.scalarKind(p.comp);
+    const comp = p.comp;
+    const srcSK = res.qt.scalarKind(comp);
     if (srcSK == .Bool) {
         res.qt = ptrQt;
         try res.implicitCast(p, .BoolToPointer, token);
     } else if (srcSK.isInt()) {
-        _ = try res.value.intCast(ptrQt, p.comp);
+        _ = try res.value.intCast(ptrQt, comp);
         res.qt = ptrQt;
         try res.implicitCast(p, .IntToPointer, token);
-    } else if (srcSK.isPointer() and !res.qt.eql(ptrQt, p.comp)) {
+    } else if (srcSK == .NullptrTy) {
+        try res.nullToPointer(p, ptrQt, token);
+    } else if (srcSK.isPointer() and !res.qt.eql(ptrQt, comp)) {
+        if (ptrQt.is(p.comp, .nullptrTy)) {
+            res.qt = .invalid;
+            return;
+        }
+
+        const srcElem = res.qt.childType(comp);
+        const destElem = ptrQt.childType(comp);
+
         res.qt = ptrQt;
-        try res.implicitCast(p, .Bitcast, token);
+        if (destElem.eql(srcElem, comp) and
+            (destElem.@"const" or destElem.@"const" == srcElem.@"const") and
+            (destElem.@"volatile" or destElem.@"volatile" == srcElem.@"volatile"))
+        {
+            try res.implicitCast(p, .NoOP, token);
+        } else {
+            try res.implicitCast(p, .Bitcast, token);
+        }
     }
 }
 
