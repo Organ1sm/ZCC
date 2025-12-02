@@ -6413,8 +6413,11 @@ fn parseCastExpr(p: *Parser) Error!?Result {
 
         if (p.currToken() == .LBrace) {
             // compound literal handled in unexpr.
-            p.tokenIdx = lp;
-            break :castExpr;
+            var lhs = (try p.parseCompoundLiteral(ty, lp)).?;
+            while (try p.parseSuffixExpr(lhs)) |suffix| {
+                lhs = suffix;
+            }
+            return lhs;
         }
 
         const operandToken = p.tokenIdx;
@@ -7153,9 +7156,8 @@ fn parseUnaryExpr(p: *Parser) Error!?Result {
         },
 
         else => {
-            var lhs = (try p.parseCompoundLiteral()) orelse
-                (try p.parsePrimaryExpr()) orelse
-                return null;
+            var lhs = (try p.parseCompoundLiteral(null, null)) orelse
+                (try p.parsePrimaryExpr()) orelse return null;
 
             while (try p.parseSuffixExpr(lhs)) |suffix| {
                 lhs = suffix;
@@ -7168,34 +7170,38 @@ fn parseUnaryExpr(p: *Parser) Error!?Result {
 /// compoundLiteral
 ///  : '(' storage-class-spec* type-name ')' '{' initializer-list '}'
 ///  | '(' storage-class-spec* type-name ')' '{' initializer-list ',' '}'
-fn parseCompoundLiteral(p: *Parser) Error!?Result {
-    const lparen = p.eat(.LParen) orelse return null;
+fn parseCompoundLiteral(p: *Parser, optQt: ?QualType, optLparen: ?TokenIndex) Error!?Result {
+    const lparen, const d = if (optQt) |some| .{ optLparen.?, DeclSpec{ .qt = some } } else blk: {
+        const lparen = p.eat(.LParen) orelse return null;
 
-    var d: DeclSpec = .{ .qt = .invalid };
-    const any = if (p.comp.langOpts.standard.atLeast(.c23))
-        try p.parseStorageClassSpec(&d)
-    else
-        false;
+        var d: DeclSpec = .{ .qt = .invalid };
+        const any = if (p.comp.langOpts.standard.atLeast(.c23))
+            try p.parseStorageClassSpec(&d)
+        else
+            false;
 
-    switch (d.storageClass) {
-        .auto, .@"extern", .typedef => |tok| {
-            try p.err(.invalid_compound_literal_storage_class, tok, .{@tagName(d.storageClass)});
-            d.storageClass = .none;
-        },
-        .register => if (p.func.qt == null) try p.err(.illegal_storage_on_global, p.tokenIdx, .{}),
-        else => {},
-    }
-
-    var qt = (try p.parseTypeName()) orelse {
-        p.tokenIdx = lparen;
-        if (any) {
-            try p.err(.expected_type, p.tokenIdx, .{});
-            return error.ParsingFailed;
+        switch (d.storageClass) {
+            .auto, .@"extern", .typedef => |tok| {
+                try p.err(.invalid_compound_literal_storage_class, tok, .{@tagName(d.storageClass)});
+                d.storageClass = .none;
+            },
+            .register => if (p.func.qt == null) try p.err(.illegal_storage_on_global, p.tokenIdx, .{}),
+            else => {},
         }
-        return null;
-    };
-    try p.expectClosing(lparen, .RParen);
 
+        d.qt = (try p.parseTypeName()) orelse {
+            p.tokenIdx = lparen;
+            if (any) {
+                try p.err(.expected_type, p.tokenIdx, .{});
+                return error.ParsingFailed;
+            }
+            return null;
+        };
+        try p.expectClosing(lparen, .RParen);
+        break :blk .{ lparen, d };
+    };
+
+    var qt = d.qt;
     switch (qt.base(p.comp).type) {
         .func => try p.err(.func_init, p.tokenIdx, .{}),
         .array => |arrayTy| if (arrayTy.len == .variable) try p.err(.vla_init, p.tokenIdx, .{}),
