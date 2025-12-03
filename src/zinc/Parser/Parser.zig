@@ -1311,7 +1311,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
         } else {
             try declSpec.validateDecl(p);
             var nodeQt = initDeclarator.d.qt;
-            if (p.func.qt == null) {
+            if (p.func.qt == null and declSpec.storageClass != .@"extern") {
                 if (nodeQt.get(p.comp, .array)) |arrayTy| {
                     if (arrayTy.len == .incomplete) {
                         // Create tentative array node with fixed type.
