@@ -3922,16 +3922,13 @@ fn parseTypeName(p: *Parser) Error!?QualType {
     return try Attribute.applyTypeAttributes(p, ty, attrBufferTop, .align_ignored);
 }
 
-fn complexInitializer(p: *Parser, initQt: QualType) Error!Result {
-    assert(p.currToken() == .LBrace);
+fn complexInitializer(p: *Parser, initQt: QualType, lbrace: TokenIndex) Error!Result {
     assert(initQt.is(p.comp, .complex));
 
     const realTy = initQt.toReal(p.comp);
     if (realTy.isInt(p.comp))
         return p.todo("Complex integer initializer");
 
-    const lbrace = p.tokenIdx;
-    p.tokenIdx += 1;
     try p.err(.complex_component_init, lbrace, .{});
 
     const firstToken = p.tokenIdx;
@@ -3990,8 +3987,8 @@ fn complexInitializer(p: *Parser, initQt: QualType) Error!Result {
 ///
 /// braced-initializer : '{' initializerItems '}'
 pub fn initializer(p: *Parser, initQt: QualType) Error!Result {
-    // fast path for non-braced initializers
-    if (p.currToken() != .LBrace) {
+    const lbrace = p.eat(.LBrace) orelse {
+        // fast path for non-braced initializers
         const token = p.tokenIdx;
         var res = try p.expect(parseAssignExpr);
         if (try p.coerceArrayInit(res, token, initQt))
@@ -3999,25 +3996,26 @@ pub fn initializer(p: *Parser, initQt: QualType) Error!Result {
 
         try p.coerceInit(&res, token, initQt);
         return res;
-    }
+    };
+
     // We want to parse the initializer even if the target is
     // invalidly inferred.
     var finalInitQt = initQt;
     if (initQt.isAutoType()) {
-        try p.err(.auto_type_with_init_list, p.tokenIdx, .{});
+        try p.err(.auto_type_with_init_list, lbrace, .{});
         finalInitQt = .invalid;
     } else if (initQt.isC23Auto()) {
-        try p.err(.c23_auto_with_init_list, p.tokenIdx, .{});
+        try p.err(.c23_auto_with_init_list, lbrace, .{});
         finalInitQt = .invalid;
     }
 
     if (finalInitQt.is(p.comp, .complex))
-        return p.complexInitializer(finalInitQt);
+        return p.complexInitializer(finalInitQt, lbrace);
 
     var il: InitList = .{};
     defer il.deinit(p.comp.gpa);
 
-    _ = try p.initializerItem(&il, finalInitQt);
+    try p.initializerItem(&il, finalInitQt, lbrace);
 
     const res = try p.convertInitList(il, finalInitQt);
     return .{ .qt = res.qt(&p.tree).withQualifiers(finalInitQt), .node = res };
@@ -4043,6 +4041,18 @@ fn setInitializer(
     il.tok = token;
 }
 
+fn setInitializerIfEqual(
+    p: *Parser,
+    il: *InitList,
+    initQt: QualType,
+    tok: TokenIndex,
+    res: Result,
+) !bool {
+    if (!res.qt.eql(initQt, p.comp)) return false;
+    try p.setInitializer(il, initQt, tok, res);
+    return true;
+}
+
 const IndexList = std.ArrayListUnmanaged(u64);
 
 /// initializerItems : designation? initializer (',' designation? initializer)* ','?
@@ -4050,15 +4060,12 @@ const IndexList = std.ArrayListUnmanaged(u64);
 /// designator-list: designator designator-list designator
 /// designator : '[' integer-constant-expression ']'
 ///            | '.' identifier
-pub fn initializerItem(p: *Parser, il: *InitList, initQt: QualType) Error!bool {
-    const lb = p.eat(.LBrace) orelse {
-        const token = p.tokenIdx;
-        const res = (try p.parseAssignExpr()) orelse return false;
-
-        try p.setInitializer(il, initQt, token, res);
-        return true;
-    };
-
+pub fn initializerItem(
+    p: *Parser,
+    il: *InitList,
+    initQt: QualType,
+    lbrace: TokenIndex,
+) Error!void {
     const comp = p.comp;
     const gpa = comp.gpa;
 
@@ -4068,18 +4075,17 @@ pub fn initializerItem(p: *Parser, il: *InitList, initQt: QualType) Error!bool {
         break :blk .{ scalarKind != .None, !scalarKind.isReal() };
     };
 
-    const scalarInitsNeeds: usize = if (isComplex) 2 else 1;
     if (p.eat(.RBrace)) |_| {
         if (isScalar)
-            try p.err(.empty_scalar_init, lb, .{});
+            try p.err(.empty_scalar_init, lbrace, .{});
 
         if (il.tok != 0 and !initQt.isInvalid()) {
-            try p.err(.initializer_overrides, lb, .{});
+            try p.err(.initializer_overrides, lbrace, .{});
             try p.err(.previous_initializer, il.tok, .{});
         }
         il.node = .null;
-        il.tok = lb;
-        return true;
+        il.tok = lbrace;
+        return;
     }
 
     var indexList: IndexList = .empty;
@@ -4087,84 +4093,59 @@ pub fn initializerItem(p: *Parser, il: *InitList, initQt: QualType) Error!bool {
 
     var count: u64 = 0;
     var warnedExcess = initQt.isInvalid();
-    var isStrInit = false;
     while (true) {
         errdefer p.skipTo(.RBrace);
 
-        var firstToken = p.tokenIdx;
         const designated = try p.designation(il, initQt, &indexList);
         if (!designated and initQt.hasAttribute(comp, .designated_init)) {
             try p.err(.designated_init_needed, p.tokenIdx, .{});
         }
 
-        var saw = false;
-        if (isStrInit and p.isStringInit(initQt)) {
-            if (!warnedExcess) try p.err(.excess_str_init, firstToken, .{});
-            warnedExcess = true;
-
-            // discard further strings
-            var tempIL: InitList = .{};
-            defer tempIL.deinit(gpa);
-
-            saw = try p.initializerItem(&tempIL, .void);
-        } else if (count == 0 and p.isStringInit(initQt)) {
-            isStrInit = true;
-            saw = try p.initializerItem(il, initQt);
-        } else if (isScalar and count >= scalarInitsNeeds) {
-            if (!warnedExcess) try p.err(.excess_scalar_init, firstToken, .{});
-            warnedExcess = true;
-
-            // discard further scalars
-            var tempIL: InitList = .{};
-            defer tempIL.deinit(gpa);
-
-            saw = try p.initializerItem(&tempIL, .void);
-        } else if (p.currToken() == .LBrace) {
-            if (try p.findAggregateInitializer(il, initQt, &indexList)) |item| {
-                saw = try p.initializerItem(item.il, item.qt);
+        const firstToken = p.tokenIdx;
+        if (p.eat(.LBrace)) |innerLBrace| {
+            if (try p.findAggregateInitializer(il, initQt, firstToken, &indexList)) |item| {
+                try p.initializerItem(item.il, item.qt, innerLBrace);
             } else {
                 // discard further values
                 var tempIL: InitList = .{};
                 defer tempIL.deinit(gpa);
-                saw = try p.initializerItem(&tempIL, .void);
+
+                try p.initializerItem(&tempIL, .void, innerLBrace);
                 if (!warnedExcess) try p.err(switch (initQt.base(comp).type) {
-                    .array => .excess_array_init,
+                    .array => if (il.node != .null and p.isStringInit(initQt, il.node.unpack().?))
+                        .excess_str_init
+                    else
+                        .excess_array_init,
                     .@"struct" => .excess_struct_init,
+                    .@"union" => .excess_union_init,
                     .vector => .excess_vector_init,
                     else => .excess_scalar_init,
                 }, firstToken, .{});
+
                 warnedExcess = true;
             }
-        } else single_item: {
-            firstToken = p.tokenIdx;
-            const res = (try p.parseAssignExpr()) orelse {
-                saw = false;
-                break :single_item;
-            };
-            saw = true;
-
-            _ = try p.findScalarInitializer(il, initQt, res, firstToken, &warnedExcess, &indexList, 0);
-        }
-
-        if (!saw) {
-            if (designated) {
-                try p.err(.expected_expr, p.tokenIdx, .{});
-                return error.ParsingFailed;
+        } else if (try p.parseAssignExpr()) |res| {
+            if (isScalar and il.node != .null) {
+                if (!warnedExcess) try p.err(.excess_scalar_init, firstToken, .{});
+                warnedExcess = true;
+            } else {
+                _ = try p.findScalarInitializer(il, initQt, res, firstToken, &warnedExcess, &indexList, 0);
             }
-            break;
-        }
+        } else if (designated) {
+            try p.err(.expected_expr, p.tokenIdx, .{});
+            return error.ParsingFailed;
+        } else break;
 
         count += 1;
         if (p.eat(.Comma) == null) break;
     }
-    try p.expectClosing(lb, .RBrace);
+    try p.expectClosing(lbrace, .RBrace);
 
     if (isScalar and isComplex and count == 2) {
         // TODO move to convertInitList
-        try p.err(.complex_component_init, lb, .{});
+        try p.err(.complex_component_init, lbrace, .{});
     }
-    if (il.tok == 0) il.tok = lb;
-    return true;
+    if (il.tok == 0) il.tok = lbrace;
 }
 
 /// designation : designator+ '='?
@@ -4258,7 +4239,7 @@ fn designation(
                 }
                 fieldIndex += 1;
             } else {
-                try p.err(.no_such_field_designator, period,.{fieldStr});
+                try p.err(.no_such_field_designator, period, .{fieldStr});
                 return error.ParsingFailed;
             }
         } else break;
@@ -4297,21 +4278,23 @@ fn findScalarInitializer(
                 return true;
             }
 
-            if (res.qt.eql(qt, comp)) {
+            if (res.qt.eql(qt, comp) and il.list.items.len == 0) {
                 try p.setInitializer(il, qt, firstToken, res);
                 return true;
             }
 
             const elemIL = try il.find(gpa, index);
-            if (try p.findScalarInitializer(
-                elemIL,
-                complexTy,
-                res,
-                firstToken,
-                warnedExcess,
-                indexList,
-                indexListTop + 1,
-            )) {
+            if (try p.setInitializerIfEqual(elemIL, complexTy, firstToken, res) or
+                try p.findScalarInitializer(
+                    elemIL,
+                    complexTy,
+                    res,
+                    firstToken,
+                    warnedExcess,
+                    indexList,
+                    indexListTop + 1,
+                ))
+            {
                 const newIndex = index + 1;
                 indexList.items[indexListTop] = newIndex;
                 indexList.items.len = indexListTop + 1;
@@ -4327,21 +4310,23 @@ fn findScalarInitializer(
                 return true;
             }
 
-            if (res.qt.eql(qt, comp)) {
+            if (res.qt.eql(qt, comp) and il.list.items.len == 0) {
                 try p.setInitializer(il, qt, firstToken, res);
                 return true;
             }
 
             const elemIL = try il.find(gpa, index);
-            if (try p.findScalarInitializer(
-                elemIL,
-                vectorTy.elem,
-                res,
-                firstToken,
-                warnedExcess,
-                indexList,
-                indexListTop + 1,
-            )) {
+            if (try p.setInitializerIfEqual(elemIL, vectorTy.elem, firstToken, res) or
+                try p.findScalarInitializer(
+                    elemIL,
+                    vectorTy.elem,
+                    res,
+                    firstToken,
+                    warnedExcess,
+                    indexList,
+                    indexListTop + 1,
+                ))
+            {
                 const newIndex = index + 1;
                 indexList.items[indexListTop] = newIndex;
                 indexList.items.len = indexListTop + 1;
@@ -4361,26 +4346,39 @@ fn findScalarInitializer(
             }
 
             if (il.node != .null or index >= maxLen) {
-                if (!warnedExcess.*) try p.err(.excess_array_init, firstToken, .{});
+                if (!warnedExcess.*) {
+                    if (il.node.unpack()) |some|
+                        if (p.isStringInit(qt, some)) {
+                            try p.err(.excess_str_init, firstToken, .{});
+                            warnedExcess.* = true;
+                            return true;
+                        };
+                    try p.err(.excess_array_init, firstToken, .{});
+                }
                 warnedExcess.* = true;
                 return true;
             }
 
-            if (try p.coerceArrayInitExtra(res, firstToken, qt, false)) {
+            if (il.list.items.len == 0 and
+                p.isStringInit(qt, res.node) and
+                try p.coerceArrayInit(res, firstToken, qt))
+            {
                 try p.setInitializer(il, qt, firstToken, res);
                 return true;
             }
 
             const elemIL = try il.find(gpa, index);
-            if (try p.findScalarInitializer(
-                elemIL,
-                arrayTy.elem,
-                res,
-                firstToken,
-                warnedExcess,
-                indexList,
-                indexListTop + 1,
-            )) {
+            if (try p.setInitializerIfEqual(elemIL, arrayTy.elem, firstToken, res) or
+                try p.findScalarInitializer(
+                    elemIL,
+                    arrayTy.elem,
+                    res,
+                    firstToken,
+                    warnedExcess,
+                    indexList,
+                    indexListTop + 1,
+                ))
+            {
                 const newIndex = index + 1;
                 indexList.items[indexListTop] = newIndex;
                 indexList.items.len = indexListTop + 1;
@@ -4401,22 +4399,20 @@ fn findScalarInitializer(
                 warnedExcess.* = true;
                 return true;
             }
-            if (res.qt.eql(qt, comp)) {
-                try p.setInitializer(il, qt, firstToken, res);
-                return true;
-            }
 
             const field = structTy.fields[@intCast(index)];
             const fieldIL = try il.find(gpa, index);
-            if (try p.findScalarInitializer(
-                fieldIL,
-                field.qt,
-                res,
-                firstToken,
-                warnedExcess,
-                indexList,
-                indexListTop + 1,
-            )) {
+            if (try p.setInitializerIfEqual(fieldIL, field.qt, firstToken, res) or
+                try p.findScalarInitializer(
+                    fieldIL,
+                    field.qt,
+                    res,
+                    firstToken,
+                    warnedExcess,
+                    indexList,
+                    indexListTop + 1,
+                ))
+            {
                 const newIndex = index + 1;
                 indexList.items[indexListTop] = newIndex;
                 indexList.items.len = indexListTop + 1;
@@ -4432,24 +4428,27 @@ fn findScalarInitializer(
                 return true;
             }
 
-            if (il.node != .null or index >= unionTy.fields.len) return true;
-
-            if (res.qt.eql(qt, comp)) {
-                try p.setInitializer(il, qt, firstToken, res);
+            if (il.node != .null or il.list.items.len > 1 or
+                (il.list.items.len == 1 and il.list.items[0].index != index))
+            {
+                if (!warnedExcess.*) try p.err(.excess_union_init, firstToken, .{});
+                warnedExcess.* = true;
                 return true;
             }
 
-            const field = unionTy.fields[index];
+            const field = unionTy.fields[@intCast(index)];
             const fieldIL = try il.find(gpa, index);
-            if (try p.findScalarInitializer(
-                fieldIL,
-                field.qt,
-                res,
-                firstToken,
-                warnedExcess,
-                indexList,
-                indexListTop,
-            )) {
+            if (try p.setInitializerIfEqual(fieldIL, field.qt, firstToken, res) or
+                try p.findScalarInitializer(
+                    fieldIL,
+                    field.qt,
+                    res,
+                    firstToken,
+                    warnedExcess,
+                    indexList,
+                    indexListTop + 1,
+                ))
+            {
                 const newIndex = index + 1;
                 indexList.items[indexListTop] = newIndex;
                 indexList.items.len = indexListTop + 1;
@@ -4471,6 +4470,7 @@ fn findAggregateInitializer(
     p: *Parser,
     il: *InitList,
     qt: QualType,
+    firstToken: TokenIndex,
     indexList: *IndexList,
 ) Error!?InitItem {
     if (qt.isInvalid()) {
@@ -4537,7 +4537,7 @@ fn findAggregateInitializer(
         },
 
         else => {
-            try p.err(.too_many_scalar_init_braces, p.tokenIdx, .{});
+            try p.err(.too_many_scalar_init_braces, firstToken, .{});
             if (il.node == .null) return .{ .il = il, .qt = qt };
         },
     }
@@ -4545,23 +4545,12 @@ fn findAggregateInitializer(
 }
 
 fn coerceArrayInit(p: *Parser, item: Result, token: TokenIndex, target: QualType) !bool {
-    return p.coerceArrayInitExtra(item, token, target, true);
-}
-
-fn coerceArrayInitExtra(
-    p: *Parser,
-    item: Result,
-    token: TokenIndex,
-    target: QualType,
-    reportError: bool,
-) !bool {
     if (target.isInvalid()) return false;
     const targetArrayTy = target.get(p.comp, .array) orelse return false;
 
     const isStrLiteral = p.nodeIs(item.node, .stringLiteralExpr);
     const maybeItemArrayTy = item.qt.get(p.comp, .array);
     if (!isStrLiteral and !p.nodeIs(item.node, .compoundLiteralExpr) or maybeItemArrayTy == null) {
-        if (!reportError) return false;
         try p.err(.array_init_str, token, .{});
         return true; // do not do further coercion
     }
@@ -4578,7 +4567,6 @@ fn coerceArrayInitExtra(
         (isStrLiteral and itemInt == .UChar and (targetInt == .UChar or targetInt == .SChar or targetInt == .Char));
 
     if (!compatible) {
-        if (!reportError) return false;
         try p.err(.incompatible_array_init, token, .{ target, item.qt });
         return true; // do not do further coercion
     }
@@ -4592,9 +4580,9 @@ fn coerceArrayInitExtra(
 
         if (isStrLiteral) {
             // the null byte of a string can be dropped
-            if (itemLen - 1 > targetLen and reportError)
+            if (itemLen - 1 > targetLen)
                 try p.err(.str_init_too_long, token, .{});
-        } else if (itemLen > targetLen and reportError) {
+        } else if (itemLen > targetLen) {
             try p.err(.arr_init_too_long, token, .{ target, item.qt });
         }
     }
@@ -4632,25 +4620,11 @@ fn coerceInit(p: *Parser, item: *Result, token: TokenIndex, target: QualType) !v
     return item.saveValue(p);
 }
 
-fn isStringInit(p: *Parser, initQt: QualType) bool {
+fn isStringInit(p: *Parser, initQt: QualType, node: Node.Index) bool {
     const initArrayTy = initQt.get(p.comp, .array) orelse return false;
     if (!initArrayTy.elem.is(p.comp, .int)) return false;
 
-    var i = p.tokenIdx;
-    while (true) : (i += 1) {
-        switch (p.tokenIds[i]) {
-            .LParen => {},
-
-            .StringLiteral,
-            .StringLiteralUTF_16,
-            .StringLiteralUTF_8,
-            .StringLiteralUTF_32,
-            .StringLiteralWide,
-            => return true,
-
-            else => return false,
-        }
-    }
+    return p.nodeIs(node, .stringLiteralExpr);
 }
 
 /// Convert InitList into an AST

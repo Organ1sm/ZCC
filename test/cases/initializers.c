@@ -120,7 +120,7 @@ int array_2d[3][2] = { 1, 2, [2] = 3, [1][1] = 1, 4};
 void quux(void) {
     struct Foo {
         int a;
-    } a;
+    } a, aa[2] = {a, a};
     struct Bar {
         struct Foo a;
     } b = {a};
@@ -155,6 +155,33 @@ void array_members(void) {
 struct {
     int sec, min, hour, day;
 } s1 = {.day = 3, .sec = 0, 1, 2};
+
+void string_initializers(void) {
+    char str1[] = {"fo", "ba"};
+    char str2[] = {"fo", 1};
+    char str3[] = {1, "fo"};
+    char str4[1] = {1, 2};
+    char str5[4] = { (char [4]){"foo"} };
+    char str6[] = {"foo", {1}, {3}};
+    int arr2[2] = { (int [2]){ 1, 2 } };
+}
+void union_excess(void) {
+    union U2 u1 = { 1, 2 };
+    union U2 u2 = { .a = 1, .a = 2 };
+}
+void struct_excess(void) {
+    struct A {
+        int a;
+        int b;
+    } a, b = { 1, a };
+}
+void vector_excess(void) {
+    typedef int vec __attribute__((vector_size(4 * 4)));
+    vec v1 = { 1, 2, 3, 4, 5 };
+    vec v2 = v1;
+    vec v3 = { v2 };
+    vec v4 = { 1, v3 };
+}
 
 #define TESTS_SKIPPED 1
 #define EXPECTED_ERRORS "initializers.c:2:17: error: variable-sized object may not be initialized" \
