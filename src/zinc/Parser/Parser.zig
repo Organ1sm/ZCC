@@ -4013,8 +4013,8 @@ pub fn initializerItem(
     const isScalar = !initQt.isInvalid() and initQt.scalarKind(comp) != .None;
 
     if (p.eat(.RBrace)) |_| {
-        if (isScalar)
-            try p.err(.empty_scalar_init, lbrace, .{});
+        try p.err(.empty_initializer, lbrace, .{});
+        if (isScalar) try p.err(.empty_scalar_init, lbrace, .{});
 
         if (il.tok != 0 and !initQt.isInvalid()) {
             try p.err(.initializer_overrides, lbrace, .{});
