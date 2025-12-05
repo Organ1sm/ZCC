@@ -3922,66 +3922,6 @@ fn parseTypeName(p: *Parser) Error!?QualType {
     return try Attribute.applyTypeAttributes(p, ty, attrBufferTop, .align_ignored);
 }
 
-fn complexInitializer(p: *Parser, initQt: QualType, lbrace: TokenIndex) Error!Result {
-    assert(initQt.is(p.comp, .complex));
-
-    const realTy = initQt.toReal(p.comp);
-    if (realTy.isInt(p.comp))
-        return p.todo("Complex integer initializer");
-
-    try p.err(.complex_component_init, lbrace, .{});
-
-    const firstToken = p.tokenIdx;
-    var first = try p.expect(parseAssignExpr);
-    try p.coerceInit(&first, firstToken, realTy);
-
-    const second = if (p.eat(.Comma)) |_| second: {
-        const secondToken = p.tokenIdx;
-        var second = (try p.parseAssignExpr()) orelse break :second null;
-        try p.coerceInit(&second, secondToken, realTy);
-        break :second second;
-    } else null;
-
-    var extraToken: ?TokenIndex = null;
-    while (p.eat(.Comma)) |_| {
-        if (p.currToken() == .RBrace) break;
-        extraToken = p.tokenIdx;
-
-        if ((try p.parseAssignExpr()) == null) {
-            try p.err(.expected_expr, p.tokenIdx, .{});
-            p.skipTo(.RBrace);
-            return error.ParsingFailed;
-        }
-    }
-
-    try p.expectClosing(lbrace, .RBrace);
-    if (extraToken) |tok|
-        try p.err(.excess_scalar_init, tok, .{});
-
-    var res: Result = .{
-        .node = try p.addNode(.{
-            .arrayInitExpr = .{
-                .containerQt = initQt,
-                .items = if (second) |some| &.{ first.node, some.node } else &.{first.node},
-                .lbraceToken = lbrace,
-            },
-        }),
-        .qt = initQt,
-    };
-
-    const firstValue = p.tree.valueMap.get(first.node) orelse return res;
-    const secondValue = if (second) |some| p.tree.valueMap.get(some.node) orelse return res else Value.zero;
-    res.value = try Value.intern(p.comp, switch (realTy.bitSizeof(p.comp)) {
-        32 => .{ .complex = .{ .cf32 = .{ firstValue.toFloat(f32, p.comp), secondValue.toFloat(f32, p.comp) } } },
-        64 => .{ .complex = .{ .cf64 = .{ firstValue.toFloat(f64, p.comp), secondValue.toFloat(f64, p.comp) } } },
-        80 => .{ .complex = .{ .cf80 = .{ firstValue.toFloat(f80, p.comp), secondValue.toFloat(f80, p.comp) } } },
-        128 => .{ .complex = .{ .cf128 = .{ firstValue.toFloat(f128, p.comp), secondValue.toFloat(f128, p.comp) } } },
-        else => unreachable,
-    });
-    try res.putValue(p);
-    return res;
-}
-
 /// initializer : assign-expression
 ///             | braced-initializer
 ///
@@ -4009,16 +3949,17 @@ pub fn initializer(p: *Parser, initQt: QualType) Error!Result {
         finalInitQt = .invalid;
     }
 
-    if (finalInitQt.is(p.comp, .complex))
-        return p.complexInitializer(finalInitQt, lbrace);
-
     var il: InitList = .{};
     defer il.deinit(p.comp.gpa);
 
     try p.initializerItem(&il, finalInitQt, lbrace);
 
-    const res = try p.convertInitList(il, finalInitQt);
-    return .{ .qt = res.qt(&p.tree).withQualifiers(finalInitQt), .node = res };
+    const listNode = try p.convertInitList(il, finalInitQt);
+    return .{
+        .qt = listNode.qt(&p.tree).withQualifiers(finalInitQt),
+        .node = listNode,
+        .value = p.tree.valueMap.get(listNode) orelse .{},
+    };
 }
 
 fn setInitializer(
@@ -4069,11 +4010,7 @@ pub fn initializerItem(
     const comp = p.comp;
     const gpa = comp.gpa;
 
-    const isScalar, const isComplex = blk: {
-        if (initQt.isInvalid()) break :blk .{ false, false };
-        const scalarKind = initQt.scalarKind(comp);
-        break :blk .{ scalarKind != .None, !scalarKind.isReal() };
-    };
+    const isScalar = !initQt.isInvalid() and initQt.scalarKind(comp) != .None;
 
     if (p.eat(.RBrace)) |_| {
         if (isScalar)
@@ -4091,9 +4028,9 @@ pub fn initializerItem(
     var indexList: IndexList = .empty;
     defer indexList.deinit(gpa);
 
-    var count: u64 = 0;
+    var seenAny = false;
     var warnedExcess = initQt.isInvalid();
-    while (true) {
+    while (true) : (seenAny = true) {
         errdefer p.skipTo(.RBrace);
 
         const designated = try p.designation(il, initQt, &indexList);
@@ -4131,20 +4068,14 @@ pub fn initializerItem(
             } else {
                 _ = try p.findScalarInitializer(il, initQt, res, firstToken, &warnedExcess, &indexList, 0);
             }
-        } else if (designated) {
+        } else if (designated or (seenAny and p.currToken() != .RBrace)) {
             try p.err(.expected_expr, p.tokenIdx, .{});
-            return error.ParsingFailed;
         } else break;
 
-        count += 1;
         if (p.eat(.Comma) == null) break;
     }
     try p.expectClosing(lbrace, .RBrace);
 
-    if (isScalar and isComplex and count == 2) {
-        // TODO move to convertInitList
-        try p.err(.complex_component_init, lbrace, .{});
-    }
     if (il.tok == 0) il.tok = lbrace;
 }
 
@@ -4641,6 +4572,48 @@ fn convertInitList(p: *Parser, il: InitList, initQt: QualType) Error!Node.Index 
     const comp = p.comp;
     const gpa = comp.gpa;
     switch (initQt.base(comp).type) {
+        .complex => |complexTy| {
+            if (il.list.items.len == 0)
+                return try p.addNode(.{ .defaultInitExpr = .{
+                    .lastToken = p.tokenIdx - 1,
+                    .qt = initQt,
+                } });
+
+            const first = try p.convertInitList(il.list.items[0].list, complexTy);
+            const second = if (il.list.items.len > 1)
+                try p.convertInitList(il.list.items[1].list, complexTy)
+            else
+                null;
+
+            if (il.list.items.len == 2) {
+                try p.err(.complex_component_init, il.tok, .{});
+            }
+
+            const node = try p.addNode(.{
+                .arrayInitExpr = .{
+                    .containerQt = initQt,
+                    .items = if (second) |some| &.{ first, some } else &.{first},
+                    .lbraceToken = il.tok,
+                },
+            });
+            if (!complexTy.isFloat(comp)) return node;
+
+            const firtstNode = il.list.items[0].list.node.unpack() orelse return node;
+            const secondNode = if (il.list.items.len > 1) il.list.items[1].list.node else .null;
+
+            const firstValue = p.tree.valueMap.get(firtstNode) orelse return node;
+            const secondValue = if (secondNode.unpack()) |some| p.tree.valueMap.get(some) orelse return node else Value.zero;
+
+            const complexValue = try Value.intern(p.comp, switch (complexTy.bitSizeof(comp)) {
+                32 => .{ .complex = .{ .cf32 = .{ firstValue.toFloat(f32, comp), secondValue.toFloat(f32, p.comp) } } },
+                64 => .{ .complex = .{ .cf64 = .{ firstValue.toFloat(f64, comp), secondValue.toFloat(f64, p.comp) } } },
+                80 => .{ .complex = .{ .cf80 = .{ firstValue.toFloat(f80, comp), secondValue.toFloat(f80, p.comp) } } },
+                128 => .{ .complex = .{ .cf128 = .{ firstValue.toFloat(f128, comp), secondValue.toFloat(f128, p.comp) } } },
+                else => unreachable,
+            });
+            try p.tree.valueMap.put(gpa, node, complexValue);
+            return node;
+        },
         .vector => |vectorTy| {
             const listBufferTop = p.listBuffer.items.len;
             defer p.listBuffer.items.len = listBufferTop;
