@@ -187,6 +187,12 @@ void vector_excess(void) {
 #pragma GCC diagnostic warning "-Wc23-extensions"
 int empty_initializer[2] = {};
 
+void braced_init_overrides(void) {
+    struct {
+        int a;
+    } aa, a[2] = {aa, aa, [0] = {2}, {3}};
+}
+
 #define TESTS_SKIPPED 1
 #define EXPECTED_ERRORS "initializers.c:2:17: error: variable-sized object may not be initialized" \
     "initializers.c:3:15: error: illegal initializer type" \
@@ -239,5 +245,8 @@ int empty_initializer[2] = {};
     "initializers.c:132:23: warning: incompatible pointer types initializing 'unsigned int *' from incompatible type 'int *' converts between pointers to integer types with different sign [-Wpointer-sign]" \
     "initializers.c:149:35: error: array designator used for non-array type 'struct S'" \
     "initializers.c:151:30: warning: implicit pointer to integer conversion from 'char [4]' to 'int' [-Wint-conversion]" \
-    "initializers.c:187:28: warning: use of an empty initializer is a C23 extension [-Wc23-extensions]"
-
+    "initializers.c:187:28: warning: use of an empty initializer is a C23 extension [-Wc23-extensions]" \
+    "initializers.c:191:33: warning: initializer overrides previous initialization [-Winitializer-overrides]" \
+    "initializers.c:191:19: note: previous initialization" \
+    "initializers.c:191:38: warning: initializer overrides previous initialization [-Winitializer-overrides]" \
+    "initializers.c:191:23: note: previous initialization" \

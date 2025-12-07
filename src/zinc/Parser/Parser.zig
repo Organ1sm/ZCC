@@ -3997,10 +3997,6 @@ fn setInitializerIfEqual(
 const IndexList = std.ArrayListUnmanaged(u64);
 
 /// initializerItems : designation? initializer (',' designation? initializer)* ','?
-/// designation : designator-list '='
-/// designator-list: designator designator-list designator
-/// designator : '[' integer-constant-expression ']'
-///            | '.' identifier
 pub fn initializerItem(
     p: *Parser,
     il: *InitList,
@@ -4039,14 +4035,20 @@ pub fn initializerItem(
 
         const firstToken = p.tokenIdx;
         if (p.eat(.LBrace)) |innerLBrace| {
-            if (try p.findAggregateInitializer(il, initQt, firstToken, &indexList)) |item| {
+            if (try p.findBracedInitiailzer(il, initQt, firstToken, &indexList)) |item| {
+                if (item.il.tok != 0 and !initQt.isInvalid()) {
+                    try p.err(.initializer_overrides, firstToken, .{});
+                    try p.err(.previous_initializer, item.il.tok, .{});
+                    item.il.deinit(gpa);
+                    item.il.* = .{};
+                }
                 try p.initializerItem(item.il, item.qt, innerLBrace);
             } else {
                 // discard further values
                 var tempIL: InitList = .{};
                 defer tempIL.deinit(gpa);
 
-                try p.initializerItem(&tempIL, .void, innerLBrace);
+                try p.initializerItem(&tempIL, .invalid, innerLBrace);
                 if (!warnedExcess) try p.err(switch (initQt.base(comp).type) {
                     .array => if (il.node != .null and p.isStringInit(initQt, il.node.unpack().?))
                         .excess_str_init
@@ -4078,10 +4080,12 @@ pub fn initializerItem(
     if (il.tok == 0) il.tok = lbrace;
 }
 
-/// designation : designator+ '='?
-/// designator
-///  : '[' integerConstExpr ']'
-///  | '.' identifier
+/// designation : designator-list '='
+/// 
+/// designator-list : designator designator-list designator
+/// 
+/// designator : '[' integer-constant-expression ']'
+///            | '.' identifier
 fn designation(
     p: *Parser,
     il: *InitList,
@@ -4200,7 +4204,6 @@ fn findScalarInitializer(
     const index = indexList.items[indexListTop];
 
     switch (qt.base(p.comp).type) {
-        .void => return true,
         .complex => |complexTy| {
             if (il.node != .null or index >= 2) {
                 if (!warnedExcess.*) try p.err(.excess_scalar_init, firstToken, .{});
@@ -4396,7 +4399,7 @@ fn findScalarInitializer(
 
 const InitItem = struct { il: *InitList, qt: QualType };
 
-fn findAggregateInitializer(
+fn findBracedInitiailzer(
     p: *Parser,
     il: *InitList,
     qt: QualType,
@@ -4520,8 +4523,7 @@ fn coerceArrayInit(p: *Parser, item: Result, token: TokenIndex, target: QualType
 }
 
 fn coerceInit(p: *Parser, item: *Result, token: TokenIndex, target: QualType) !void {
-    // Do not do type coercion on excess items
-    if (target.is(p.comp, .void)) return;
+    if (target.isInvalid()) return;
 
     const node = item.node;
     if (target.isAutoType() or target.isC23Auto()) {
