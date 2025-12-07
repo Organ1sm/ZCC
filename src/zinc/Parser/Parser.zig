@@ -4014,7 +4014,6 @@ pub fn initializerItem(
 
     if (p.eat(.RBrace)) |_| {
         try p.err(.empty_initializer, lbrace, .{});
-        if (isScalar) try p.err(.empty_scalar_init, lbrace, .{});
 
         if (il.tok != 0 and !initQt.isInvalid()) {
             try p.err(.initializer_overrides, lbrace, .{});
