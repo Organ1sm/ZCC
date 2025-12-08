@@ -149,7 +149,7 @@ pub fn enableMSExtensions(self: *LangOpts) void {
 
 pub fn disableMSExtensions(self: *LangOpts) void {
     self.declSpecAttrs = false;
-    self.msExtensions = true;
+    self.msExtensions = false;
 }
 
 pub fn hasChar8_t(self: *const LangOpts) bool {
@@ -158,7 +158,7 @@ pub fn hasChar8_t(self: *const LangOpts) bool {
 
 pub fn setEmulatedCompiler(self: *LangOpts, compiler: Compiler) void {
     self.emulate = compiler;
-    if (compiler == .msvc) self.enableMSExtensions();
+    if (compiler == .msvc) self.enableMSExtensions() else self.disableMSExtensions();
 }
 
 pub fn setCharSignedness(self: *LangOpts, signedness: std.builtin.Signedness) void {
