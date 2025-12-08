@@ -142,14 +142,9 @@ pub fn setStandard(self: *LangOpts, name: []const u8) error{InvalidStandard}!voi
     self.standard = Standard.NameMap.get(name) orelse return error.InvalidStandard;
 }
 
-pub fn enableMSExtensions(self: *LangOpts) void {
-    self.declSpecAttrs = true;
-    self.msExtensions = true;
-}
-
-pub fn disableMSExtensions(self: *LangOpts) void {
-    self.declSpecAttrs = false;
-    self.msExtensions = false;
+pub fn setMSExtensions(self: *LangOpts, enabled: bool) void {
+    self.declSpecAttrs = enabled;
+    self.msExtensions = enabled;
 }
 
 pub fn hasChar8_t(self: *const LangOpts) bool {
@@ -158,7 +153,7 @@ pub fn hasChar8_t(self: *const LangOpts) bool {
 
 pub fn setEmulatedCompiler(self: *LangOpts, compiler: Compiler) void {
     self.emulate = compiler;
-    if (compiler == .msvc) self.enableMSExtensions() else self.disableMSExtensions();
+    self.setMSExtensions(compiler == .msvc);
 }
 
 pub fn setCharSignedness(self: *LangOpts, signedness: std.builtin.Signedness) void {
