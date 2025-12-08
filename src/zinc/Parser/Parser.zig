@@ -4081,9 +4081,9 @@ pub fn initializerItem(
 }
 
 /// designation : designator-list '='
-/// 
+///
 /// designator-list : designator designator-list designator
-/// 
+///
 /// designator : '[' integer-constant-expression ']'
 ///            | '.' identifier
 fn designation(
@@ -4452,8 +4452,7 @@ fn findBracedInitiailzer(
         .@"struct" => |structTy| {
             if (il.node != .null) return null;
 
-            const fieldCount = structTy.fields.len;
-            if (index < fieldCount) {
+            if (index < structTy.fields.len) {
                 indexList.items[0] = index + 1;
                 indexList.items.len = 1;
                 const fieldQt = structTy.fields[@intCast(index)].qt;
@@ -4464,9 +4463,12 @@ fn findBracedInitiailzer(
             if (il.node != .null) return null;
             if (unionTy.fields.len == 0) return null;
 
-            indexList.items[0] = index + 1;
-            indexList.items.len = 1;
-            return .{ .il = try il.find(gpa, 0), .qt = unionTy.fields[0].qt };
+            if (index < unionTy.fields.len) {
+                indexList.items[0] = index + 1;
+                indexList.items.len = 1;
+                const fieldQt = unionTy.fields[@intCast(index)].qt;
+                return .{ .il = try il.find(gpa, 0), .qt = fieldQt };
+            }
         },
 
         else => {
