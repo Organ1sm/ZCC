@@ -108,7 +108,7 @@ attrApplicationBuffer: std.ArrayList(Attribute) = .empty,
 /// Items are removed if the type is subsequently completed with a definition.
 /// We only store the first tentative definition that uses a given type because this map is only used
 /// for issuing an error message, and correcting the first error for a type will fix all of them for that type.
-tentativeDefs: std.AutoHashMapUnmanaged(StringId, TokenIndex) = .{},
+tentativeDefs: std.AutoHashMapUnmanaged(StringId, TokenIndex) = .empty,
 
 // configuration
 noEval: bool = false,
@@ -701,6 +701,7 @@ fn diagnoseIncompleteDefinitions(p: *Parser) !void {
 fn addImplicitTypedef(p: *Parser, name: []const u8, qt: QualType) !void {
     const gpa = p.comp.gpa;
     const start = p.comp.generatedBuffer.items.len;
+
     try p.comp.generatedBuffer.ensureUnusedCapacity(gpa, name.len + 1);
     p.comp.generatedBuffer.appendSliceAssumeCapacity(name);
     p.comp.generatedBuffer.appendAssumeCapacity('\n');
@@ -3921,508 +3922,521 @@ fn parseTypeName(p: *Parser) Error!?QualType {
     return try Attribute.applyTypeAttributes(p, ty, attrBufferTop, .align_ignored);
 }
 
-fn complexInitializer(p: *Parser, initQt: QualType) Error!Result {
-    assert(p.currToken() == .LBrace);
-    assert(initQt.is(p.comp, .complex));
-
-    const realTy = initQt.toReal(p.comp);
-    if (realTy.isInt(p.comp))
-        return p.todo("Complex integer initializer");
-
-    const lbrace = p.tokenIdx;
-    p.tokenIdx += 1;
-    try p.err(.complex_component_init, lbrace, .{});
-
-    const firstToken = p.tokenIdx;
-    var first = try p.expect(parseAssignExpr);
-    try p.coerceInit(&first, firstToken, realTy);
-
-    const second = if (p.eat(.Comma)) |_| second: {
-        const secondToken = p.tokenIdx;
-        var second = (try p.parseAssignExpr()) orelse break :second null;
-        try p.coerceInit(&second, secondToken, realTy);
-        break :second second;
-    } else null;
-
-    var extraToken: ?TokenIndex = null;
-    while (p.eat(.Comma)) |_| {
-        if (p.currToken() == .RBrace) break;
-        extraToken = p.tokenIdx;
-
-        if ((try p.parseAssignExpr()) == null) {
-            try p.err(.expected_expr, p.tokenIdx, .{});
-            p.skipTo(.RBrace);
-            return error.ParsingFailed;
-        }
-    }
-
-    try p.expectClosing(lbrace, .RBrace);
-    if (extraToken) |tok|
-        try p.err(.excess_scalar_init, tok, .{});
-
-    var res: Result = .{
-        .node = try p.addNode(.{
-            .arrayInitExpr = .{
-                .containerQt = initQt,
-                .items = if (second) |some| &.{ first.node, some.node } else &.{first.node},
-                .lbraceToken = lbrace,
-            },
-        }),
-        .qt = initQt,
-    };
-
-    const firstValue = p.tree.valueMap.get(first.node) orelse return res;
-    const secondValue = if (second) |some| p.tree.valueMap.get(some.node) orelse return res else Value.zero;
-    res.value = try Value.intern(p.comp, switch (realTy.bitSizeof(p.comp)) {
-        32 => .{ .complex = .{ .cf32 = .{ firstValue.toFloat(f32, p.comp), secondValue.toFloat(f32, p.comp) } } },
-        64 => .{ .complex = .{ .cf64 = .{ firstValue.toFloat(f64, p.comp), secondValue.toFloat(f64, p.comp) } } },
-        80 => .{ .complex = .{ .cf80 = .{ firstValue.toFloat(f80, p.comp), secondValue.toFloat(f80, p.comp) } } },
-        128 => .{ .complex = .{ .cf128 = .{ firstValue.toFloat(f128, p.comp), secondValue.toFloat(f128, p.comp) } } },
-        else => unreachable,
-    });
-    try res.putValue(p);
-    return res;
-}
-
-/// initializer
-///  : assign-expression
-///  : braced-initializer
+/// initializer : assign-expression
+///             | braced-initializer
 ///
-/// braced-initializer
-///  | '{' initializerItems '}'
+/// braced-initializer : '{' initializerItems '}'
 pub fn initializer(p: *Parser, initQt: QualType) Error!Result {
-    // fast path for non-braced initializers
-    if (p.currToken() != .LBrace) {
+    const lbrace = p.eat(.LBrace) orelse {
+        // fast path for non-braced initializers
         const token = p.tokenIdx;
         var res = try p.expect(parseAssignExpr);
-        if (try p.coerceArrayInit(&res, token, initQt))
+        if (try p.coerceArrayInit(res, token, initQt))
             return res;
 
         try p.coerceInit(&res, token, initQt);
         return res;
-    }
+    };
+
     // We want to parse the initializer even if the target is
     // invalidly inferred.
     var finalInitQt = initQt;
     if (initQt.isAutoType()) {
-        try p.err(.auto_type_with_init_list, p.tokenIdx, .{});
+        try p.err(.auto_type_with_init_list, lbrace, .{});
         finalInitQt = .invalid;
     } else if (initQt.isC23Auto()) {
-        try p.err(.c23_auto_with_init_list, p.tokenIdx, .{});
+        try p.err(.c23_auto_with_init_list, lbrace, .{});
         finalInitQt = .invalid;
     }
-
-    if (finalInitQt.is(p.comp, .complex))
-        return p.complexInitializer(finalInitQt);
 
     var il: InitList = .{};
     defer il.deinit(p.comp.gpa);
 
-    _ = try p.initializerItem(&il, finalInitQt);
+    try p.initializerItem(&il, finalInitQt, lbrace);
 
-    const res = try p.convertInitList(il, finalInitQt);
-    return .{ .qt = res.qt(&p.tree).withQualifiers(finalInitQt), .node = res };
+    const listNode = try p.convertInitList(il, finalInitQt);
+    return .{
+        .qt = listNode.qt(&p.tree).withQualifiers(finalInitQt),
+        .node = listNode,
+        .value = p.tree.valueMap.get(listNode) orelse .{},
+    };
 }
 
+fn setInitializer(
+    p: *Parser,
+    il: *InitList,
+    initQt: QualType,
+    token: TokenIndex,
+    res: Result,
+) !void {
+    var copy = res;
+
+    const arr = try p.coerceArrayInit(copy, token, initQt);
+    if (!arr) try p.coerceInit(&copy, token, initQt);
+
+    if (il.tok != 0 and !initQt.isInvalid()) {
+        try p.err(.initializer_overrides, token, .{});
+        try p.err(.previous_initializer, il.tok, .{});
+    }
+    il.node = .pack(copy.node);
+    il.tok = token;
+}
+
+fn setInitializerIfEqual(
+    p: *Parser,
+    il: *InitList,
+    initQt: QualType,
+    tok: TokenIndex,
+    res: Result,
+) !bool {
+    if (!res.qt.eql(initQt, p.comp)) return false;
+    try p.setInitializer(il, initQt, tok, res);
+    return true;
+}
+
+const IndexList = std.ArrayListUnmanaged(u64);
+
 /// initializerItems : designation? initializer (',' designation? initializer)* ','?
-/// designation : designator-list '='
-/// designator-list: designator designator-list designator
-/// designator : '[' integer-constant-expression ']'
-///            | '.' identifier
-pub fn initializerItem(p: *Parser, il: *InitList, initQt: QualType) Error!bool {
-    const gpa = p.comp.gpa;
-    const lb = p.eat(.LBrace) orelse {
-        const token = p.tokenIdx;
-        var res = (try p.parseAssignExpr()) orelse return false;
+pub fn initializerItem(
+    p: *Parser,
+    il: *InitList,
+    initQt: QualType,
+    lbrace: TokenIndex,
+) Error!void {
+    const comp = p.comp;
+    const gpa = comp.gpa;
 
-        const arr = try p.coerceArrayInit(&res, token, initQt);
-        if (!arr)
-            try p.coerceInit(&res, token, initQt);
+    const isScalar = !initQt.isInvalid() and initQt.scalarKind(comp) != .None;
 
-        if (il.tok != 0) {
-            try p.err(.initializer_overrides, token, .{});
-            try p.err(.previous_initializer, il.tok, .{});
-        }
-        il.node = .pack(res.node);
-        il.tok = token;
-        return true;
-    };
-
-    const isScalar, const isComplex = blk: {
-        if (initQt.isInvalid()) break :blk .{ false, false };
-        const scalarKind = initQt.scalarKind(p.comp);
-        break :blk .{ scalarKind != .None, !scalarKind.isReal() };
-    };
-
-    const scalarInitsNeeds: usize = if (isComplex) 2 else 1;
     if (p.eat(.RBrace)) |_| {
-        if (isScalar)
-            try p.err(.empty_scalar_init, lb, .{});
+        try p.err(.empty_initializer, lbrace, .{});
 
         if (il.tok != 0 and !initQt.isInvalid()) {
-            try p.err(.initializer_overrides, lb, .{});
+            try p.err(.initializer_overrides, lbrace, .{});
             try p.err(.previous_initializer, il.tok, .{});
         }
         il.node = .null;
-        il.tok = lb;
-        return true;
+        il.tok = lbrace;
+        return;
     }
 
-    var count: u64 = 0;
+    var indexList: IndexList = .empty;
+    defer indexList.deinit(gpa);
+
+    var seenAny = false;
     var warnedExcess = initQt.isInvalid();
-    var isStrInit = false;
-    var indexHint: ?u64 = null;
-    while (true) : (count += 1) {
+    while (true) : (seenAny = true) {
         errdefer p.skipTo(.RBrace);
 
-        var firstToken = p.tokenIdx;
-        var curQt = initQt;
-        var curIL = il;
-        var designation = false;
-        var curIndexHint: ?u64 = null;
-        while (true) {
-            if (p.eat(.LBracket)) |lbr| {
-                const arrayTy = curQt.get(p.comp, .array) orelse {
-                    try p.err(.invalid_array_designator, lbr, .{curQt});
-                    return error.ParsingFailed;
-                };
-
-                const exprToken = p.tokenIdx;
-                const indexRes = try p.parseIntegerConstExpr(.GNUFoldingExtension);
-                try p.expectClosing(lbr, .RBracket);
-
-                designation = true;
-                if (curQt.isInvalid()) continue;
-
-                if (indexRes.value.isNone()) {
-                    try p.err(.expected_integer_constant_expr, exprToken, .{});
-                    return error.ParsingFailed;
-                } else if (indexRes.value.compare(.lt, .zero, p.comp)) {
-                    try p.err(.negative_array_designator, lbr + 1, .{indexRes});
-                    return error.ParsingFailed;
-                }
-
-                const maxLen = switch (arrayTy.len) {
-                    .fixed, .static => |len| len,
-                    else => std.math.maxInt(u64),
-                };
-                const indexInt = indexRes.value.toInt(u64, p.comp) orelse std.math.maxInt(u64);
-                if (indexInt >= maxLen) {
-                    try p.err(.oob_array_designator, lbr + 1, .{indexRes});
-                    return error.ParsingFailed;
-                }
-
-                curIndexHint = curIndexHint orelse indexInt;
-                curIL = try curIL.find(gpa, indexInt);
-                curQt = arrayTy.elem;
-            } else if (p.eat(.Period)) |period| {
-                const fieldToken = try p.expectIdentifier();
-                designation = true;
-                if (curQt.isInvalid()) continue;
-
-                const fieldStr = p.getTokenText(fieldToken);
-                const targetName = try p.comp.internString(fieldStr);
-
-                const recordTy = curQt.getRecord(p.comp) orelse {
-                    try p.err(.invalid_field_designator, period, .{curQt});
-                    return error.ParsingFailed;
-                };
-                if (!recordTy.hasField(p.comp, targetName)) {
-                    try p.err(.no_such_field_designator, period, .{fieldStr});
-                    return error.ParsingFailed;
-                }
-
-                // TODO check if union already has field set
-                for (recordTy.fields, 0..) |f, fieldIndex| {
-                    if (f.nameToken == 0) {
-                        if (f.qt.getRecord(p.comp)) |rec| {
-                            // Recurse into anonymous field if it has a field by the name.
-                            if (!rec.hasField(p.comp, targetName)) continue;
-
-                            curQt = f.qt;
-                            curIL = try il.find(gpa, fieldIndex);
-                            curIndexHint = curIndexHint orelse fieldIndex;
-                            break;
-                        }
-                    }
-
-                    if (f.name == targetName) {
-                        curIL = try curIL.find(gpa, fieldIndex);
-                        curQt = f.qt;
-                        curIndexHint = curIndexHint orelse fieldIndex;
-                        break;
-                    }
-                }
-            } else break;
-        }
-
-        if (designation) indexHint = null;
-        defer indexHint = curIndexHint orelse null;
-
-        if (designation) {
-            if (p.eat(.Equal) == null)
-                try p.err(.gnu_missing_eq_designator, p.tokenIdx, .{});
-        }
-
-        if (!designation and curQt.hasAttribute(p.comp, .designated_init))
+        const designated = try p.designation(il, initQt, &indexList);
+        if (!designated and initQt.hasAttribute(comp, .designated_init)) {
             try p.err(.designated_init_needed, p.tokenIdx, .{});
+        }
 
-        var saw = false;
-        if (isStrInit and p.isStringInit(initQt)) {
-            var tempIL: InitList = .{};
-            defer tempIL.deinit(p.comp.gpa);
-            saw = try p.initializerItem(&tempIL, .void);
-        } else if (count == 0 and p.isStringInit(initQt)) {
-            isStrInit = true;
-            saw = try p.initializerItem(il, initQt);
-        } else if (isScalar and count >= scalarInitsNeeds) {
-            // discard further scalars
-            var tempIL: InitList = .{};
-            defer tempIL.deinit(gpa);
-            saw = try p.initializerItem(&tempIL, .void);
-        } else if (p.currToken() == .LBrace) {
-            if (designation) {
-                // designation overrides previous value, let existing mechanism handle it
-                saw = try p.initializerItem(curIL, curQt);
-            } else if (try p.findAggregateInitializer(&curIL, &curQt, &indexHint)) {
-                saw = try p.initializerItem(curIL, curQt);
+        const firstToken = p.tokenIdx;
+        if (p.eat(.LBrace)) |innerLBrace| {
+            if (try p.findBracedInitiailzer(il, initQt, firstToken, &indexList)) |item| {
+                if (item.il.tok != 0 and !initQt.isInvalid()) {
+                    try p.err(.initializer_overrides, firstToken, .{});
+                    try p.err(.previous_initializer, item.il.tok, .{});
+                    item.il.deinit(gpa);
+                    item.il.* = .{};
+                }
+                try p.initializerItem(item.il, item.qt, innerLBrace);
             } else {
                 // discard further values
                 var tempIL: InitList = .{};
                 defer tempIL.deinit(gpa);
 
-                saw = try p.initializerItem(curIL, curQt);
-                saw = try p.initializerItem(&tempIL, .void);
-                if (!warnedExcess)
-                    try p.err(if (initQt.is(p.comp, .array)) .excess_array_init else .excess_struct_init, firstToken, .{});
+                try p.initializerItem(&tempIL, .invalid, innerLBrace);
+                if (!warnedExcess) try p.err(switch (initQt.base(comp).type) {
+                    .array => if (il.node != .null and p.isStringInit(initQt, il.node.unpack().?))
+                        .excess_str_init
+                    else
+                        .excess_array_init,
+                    .@"struct" => .excess_struct_init,
+                    .@"union" => .excess_union_init,
+                    .vector => .excess_vector_init,
+                    else => .excess_scalar_init,
+                }, firstToken, .{});
+
                 warnedExcess = true;
             }
-        } else singleItem: {
-            firstToken = p.tokenIdx;
-            var res = (try p.parseAssignExpr()) orelse {
-                saw = false;
-                break :singleItem;
-            };
-            saw = true;
-
-            excess: {
-                if (indexHint) |*hint| {
-                    if (try p.findScalarInitializerAt(&curIL, &curQt, &res, firstToken, hint)) break :excess;
-                } else if (try p.findScalarInitializer(&curIL, &curQt, &res, firstToken)) break :excess;
-
-                if (designation) break :excess;
-                if (!warnedExcess) try p.err(if (initQt.is(p.comp, .array)) .excess_array_init else .excess_struct_init, firstToken, .{});
+        } else if (try p.parseAssignExpr()) |res| {
+            if (isScalar and il.node != .null) {
+                if (!warnedExcess) try p.err(.excess_scalar_init, firstToken, .{});
                 warnedExcess = true;
-
-                break :singleItem;
+            } else {
+                _ = try p.findScalarInitializer(il, initQt, res, firstToken, &warnedExcess, &indexList, 0);
             }
-
-            const arr = try p.coerceArrayInit(&res, firstToken, curQt);
-            if (!arr) try p.coerceInit(&res, firstToken, curQt);
-            if (curIL.tok != 0 and !initQt.isInvalid()) {
-                try p.err(.initializer_overrides, firstToken, .{});
-                try p.err(.previous_initializer, curIL.tok, .{});
-            }
-            curIL.node = .pack(res.node);
-            curIL.tok = firstToken;
-        }
-
-        if (!saw) {
-            if (designation) {
-                try p.err(.expected_expr, p.tokenIdx, .{});
-                return error.ParsingFailed;
-            }
-            break;
-        } else if (count == 1) {
-            if (isStrInit) try p.err(.excess_str_init, firstToken, .{});
-            if (isScalar and !isComplex) try p.err(.excess_scalar_init, firstToken, .{});
-        } else if (count == 2) {
-            if (isScalar and !isComplex) try p.err(.excess_scalar_init, firstToken, .{});
-        }
+        } else if (designated or (seenAny and p.currToken() != .RBrace)) {
+            try p.err(.expected_expr, p.tokenIdx, .{});
+        } else break;
 
         if (p.eat(.Comma) == null) break;
     }
-    try p.expectClosing(lb, .RBrace);
+    try p.expectClosing(lbrace, .RBrace);
 
-    if (isScalar and isComplex and count == 1) // count of 1 means we saw exactly 2 items in the initializer list
-        try p.err(.complex_component_init, lb, .{});
-
-    if (isScalar or isStrInit)
-        return true;
-
-    if (il.tok != 0 and !initQt.isInvalid()) {
-        try p.err(.initializer_overrides, lb, .{});
-        try p.err(.previous_initializer, il.tok, .{});
-    }
-    il.node = .null;
-    il.tok = lb;
-    return true;
+    if (il.tok == 0) il.tok = lbrace;
 }
 
-/// returns true if the value is unused
-fn findScalarInitializerAt(
+/// designation : designator-list '='
+/// 
+/// designator-list : designator designator-list designator
+/// 
+/// designator : '[' integer-constant-expression ']'
+///            | '.' identifier
+fn designation(
     p: *Parser,
-    il: **InitList,
-    qt: *QualType,
-    res: *Result,
-    firstToken: TokenIndex,
-    startIdx: *u64,
-) Error!bool {
-    const gpa = p.comp.gpa;
-    switch (qt.base(p.comp).type) {
-        .array => |arrayTy| {
-            if (il.*.node != .null) return false;
-            startIdx.* += 1;
+    il: *InitList,
+    initQt: QualType,
+    indexList: *IndexList,
+) !bool {
+    switch (p.currToken()) {
+        .LBracket, .Period => indexList.items.len = 0,
+        else => return false,
+    }
+
+    const comp = p.comp;
+    const gpa = comp.gpa;
+
+    var curQt = initQt;
+    var curIL = il;
+    while (true) {
+        if (p.eat(.LBracket)) |lbr| {
+            const arrayTy = curQt.get(comp, .array) orelse {
+                try p.err(.invalid_array_designator, lbr, .{curQt});
+                return error.ParsingFailed;
+            };
+
+            const exprToken = p.tokenIdx;
+            const indexRes = try p.parseIntegerConstExpr(.GNUFoldingExtension);
+            try p.expectClosing(lbr, .RBracket);
+
+            if (curQt.isInvalid()) continue;
+
+            if (indexRes.value.isNone()) {
+                try p.err(.expected_integer_constant_expr, exprToken, .{});
+                return error.ParsingFailed;
+            } else if (indexRes.value.compare(.lt, .zero, comp)) {
+                try p.err(.negative_array_designator, lbr + 1, .{indexRes});
+                return error.ParsingFailed;
+            }
 
             const maxLen = switch (arrayTy.len) {
                 .fixed, .static => |len| len,
                 else => std.math.maxInt(u64),
             };
-
-            if (maxLen == 0) {
-                try p.err(.empty_aggregate_init_braces, firstToken, .{});
+            const indexInt = indexRes.value.toInt(u64, comp) orelse std.math.maxInt(u64);
+            if (indexInt >= maxLen) {
+                try p.err(.oob_array_designator, lbr + 1, .{indexRes});
                 return error.ParsingFailed;
             }
 
-            const arrIL = il.*;
-            if (startIdx.* < maxLen) {
-                qt.* = arrayTy.elem;
-                il.* = try arrIL.find(gpa, startIdx.*);
-                _ = try p.findScalarInitializer(il, qt, res, firstToken);
-                return true;
-            }
-            return false;
-        },
+            try indexList.append(gpa, indexInt);
+            curIL = try curIL.find(gpa, indexInt);
+            curQt = arrayTy.elem;
+        } else if (p.eat(.Period)) |period| {
+            const fieldToken = try p.expectIdentifier();
+            if (curQt.isInvalid()) continue;
 
-        .@"struct" => |structTy| {
-            if (il.*.node != .null) return false;
-            startIdx.* += 1;
+            const fieldStr = p.getTokenText(fieldToken);
+            const targetName = try p.comp.internString(fieldStr);
 
-            if (structTy.fields.len == 0) {
-                try p.err(.empty_aggregate_init_braces, firstToken, .{});
+            var recordTy = curQt.getRecord(comp) orelse {
+                try p.err(.invalid_field_designator, period, .{curQt});
+                return error.ParsingFailed;
+            };
+
+            var fieldIndex: u32 = 0;
+
+            while (fieldIndex < recordTy.fields.len) {
+                const f = recordTy.fields[fieldIndex];
+                if (f.nameToken == 0) {
+                    if (f.qt.getRecord(p.comp)) |rec| {
+                        // Recurse into anonymous field if it has a field by the name.
+                        if (!rec.hasField(comp, targetName)) continue;
+
+                        try indexList.append(gpa, fieldIndex);
+                        curIL = try il.find(gpa, fieldIndex);
+                        recordTy = rec;
+                        fieldIndex = 0;
+                        continue;
+                    }
+                }
+
+                if (f.name == targetName) {
+                    curQt = f.qt;
+                    try indexList.append(gpa, fieldIndex);
+                    curIL = try curIL.find(gpa, fieldIndex);
+                    break;
+                }
+                fieldIndex += 1;
+            } else {
+                try p.err(.no_such_field_designator, period, .{fieldStr});
                 return error.ParsingFailed;
             }
-
-            const structIL = il.*;
-            if (startIdx.* < structTy.fields.len) {
-                qt.* = structTy.fields[@intCast(startIdx.*)].qt;
-                il.* = try structIL.find(gpa, startIdx.*);
-                _ = try p.findScalarInitializer(il, qt, res, firstToken);
-                return true;
-            }
-            return false;
-        },
-
-        .@"union" => return false,
-        else => return il.*.node == .null,
+        } else break;
     }
+    if (p.eat(.Equal) == null) {
+        try p.err(.gnu_missing_eq_designator, p.tokenIdx, .{});
+    }
+    return true;
 }
 
 /// Returns true if the value is unused.
 fn findScalarInitializer(
     p: *Parser,
-    il: **InitList,
-    qt: *QualType,
-    res: *Result,
+    il: *InitList,
+    qt: QualType,
+    res: Result,
     firstToken: TokenIndex,
+    warnedExcess: *bool,
+    indexList: *IndexList,
+    indexListTop: u32,
 ) Error!bool {
-    const actualQt = res.qt;
-    if (qt.isInvalid()) return il.*.node == .null;
+    if (qt.isInvalid()) return false;
 
-    const gpa = p.comp.gpa;
+    const comp = p.comp;
+    const gpa = comp.gpa;
+
+    if (indexList.items.len <= indexListTop) try indexList.append(gpa, 0);
+    const index = indexList.items[indexListTop];
 
     switch (qt.base(p.comp).type) {
+        .complex => |complexTy| {
+            if (il.node != .null or index >= 2) {
+                if (!warnedExcess.*) try p.err(.excess_scalar_init, firstToken, .{});
+                warnedExcess.* = true;
+                return true;
+            }
+
+            if (res.qt.eql(qt, comp) and il.list.items.len == 0) {
+                try p.setInitializer(il, qt, firstToken, res);
+                return true;
+            }
+
+            const elemIL = try il.find(gpa, index);
+            if (try p.setInitializerIfEqual(elemIL, complexTy, firstToken, res) or
+                try p.findScalarInitializer(
+                    elemIL,
+                    complexTy,
+                    res,
+                    firstToken,
+                    warnedExcess,
+                    indexList,
+                    indexListTop + 1,
+                ))
+            {
+                const newIndex = index + 1;
+                indexList.items[indexListTop] = newIndex;
+                indexList.items.len = indexListTop + 1;
+                return newIndex >= 2;
+            }
+
+            return false;
+        },
+        .vector => |vectorTy| {
+            if (il.node != .null or index >= vectorTy.len) {
+                if (!warnedExcess.*) try p.err(.excess_vector_init, firstToken, .{});
+                warnedExcess.* = true;
+                return true;
+            }
+
+            if (res.qt.eql(qt, comp) and il.list.items.len == 0) {
+                try p.setInitializer(il, qt, firstToken, res);
+                return true;
+            }
+
+            const elemIL = try il.find(gpa, index);
+            if (try p.setInitializerIfEqual(elemIL, vectorTy.elem, firstToken, res) or
+                try p.findScalarInitializer(
+                    elemIL,
+                    vectorTy.elem,
+                    res,
+                    firstToken,
+                    warnedExcess,
+                    indexList,
+                    indexListTop + 1,
+                ))
+            {
+                const newIndex = index + 1;
+                indexList.items[indexListTop] = newIndex;
+                indexList.items.len = indexListTop + 1;
+                return newIndex >= vectorTy.len;
+            }
+
+            return false;
+        },
         .array => |arrayTy| {
-            if (il.*.node != .null) return false;
-            if (try p.coerceArrayInitExtra(res, firstToken, qt.*, false)) return true;
-
-            const startIdx = il.*.list.items.len;
-            var index = if (startIdx != 0) il.*.list.items[startIdx - 1].index else startIdx;
-
             const maxLen = switch (arrayTy.len) {
                 .fixed, .static => |len| len,
                 else => std.math.maxInt(u64),
             };
             if (maxLen == 0) {
                 try p.err(.empty_aggregate_init_braces, firstToken, .{});
-                return error.ParsingFailed;
+                return true;
             }
 
-            const arrayIL = il.*;
-            const elemTy = arrayTy.elem;
-            while (index < maxLen) : (index += 1) {
-                qt.* = elemTy;
-                il.* = try arrayIL.find(gpa, index);
-                if (il.*.node == .null and actualQt.eql(elemTy, p.comp))
-                    return true;
-                if (try p.findScalarInitializer(il, qt, res, firstToken))
-                    return true;
+            if (il.node != .null or index >= maxLen) {
+                if (!warnedExcess.*) {
+                    if (il.node.unpack()) |some|
+                        if (p.isStringInit(qt, some)) {
+                            try p.err(.excess_str_init, firstToken, .{});
+                            warnedExcess.* = true;
+                            return true;
+                        };
+                    try p.err(.excess_array_init, firstToken, .{});
+                }
+                warnedExcess.* = true;
+                return true;
             }
+
+            if (il.list.items.len == 0 and
+                p.isStringInit(qt, res.node) and
+                try p.coerceArrayInit(res, firstToken, qt))
+            {
+                try p.setInitializer(il, qt, firstToken, res);
+                return true;
+            }
+
+            const elemIL = try il.find(gpa, index);
+            if (try p.setInitializerIfEqual(elemIL, arrayTy.elem, firstToken, res) or
+                try p.findScalarInitializer(
+                    elemIL,
+                    arrayTy.elem,
+                    res,
+                    firstToken,
+                    warnedExcess,
+                    indexList,
+                    indexListTop + 1,
+                ))
+            {
+                const newIndex = index + 1;
+                indexList.items[indexListTop] = newIndex;
+                indexList.items.len = indexListTop + 1;
+                return newIndex >= maxLen;
+            }
+
             return false;
         },
 
         .@"struct" => |structTy| {
-            if (il.*.node != .null) return false;
-            if (actualQt.eql(qt.*, p.comp)) return true;
-
-            const startIdx = il.*.list.items.len;
-            var index = if (startIdx != 0) il.*.list.items[startIdx - 1].index + 1 else startIdx;
-
             if (structTy.fields.len == 0) {
                 try p.err(.empty_aggregate_init_braces, firstToken, .{});
-                return error.ParsingFailed;
+                return true;
             }
 
-            const structIL = il.*;
-            while (index < structTy.fields.len) : (index += 1) {
-                const field = structTy.fields[@intCast(index)];
-                qt.* = field.qt;
-                il.* = try structIL.find(gpa, index);
-
-                if (il.*.node == .null and actualQt.eql(field.qt, p.comp)) return true;
-                if (il.*.node == .null and try p.coerceArrayInitExtra(res, firstToken, qt.*, false)) return true;
-                if (try p.findScalarInitializer(il, qt, res, firstToken)) return true;
+            if (il.node != .null or index >= structTy.fields.len) {
+                if (!warnedExcess.*) try p.err(.excess_struct_init, firstToken, .{});
+                warnedExcess.* = true;
+                return true;
             }
+
+            const field = structTy.fields[@intCast(index)];
+            const fieldIL = try il.find(gpa, index);
+            if (try p.setInitializerIfEqual(fieldIL, field.qt, firstToken, res) or
+                try p.findScalarInitializer(
+                    fieldIL,
+                    field.qt,
+                    res,
+                    firstToken,
+                    warnedExcess,
+                    indexList,
+                    indexListTop + 1,
+                ))
+            {
+                const newIndex = index + 1;
+                indexList.items[indexListTop] = newIndex;
+                indexList.items.len = indexListTop + 1;
+                return newIndex >= structTy.fields.len;
+            }
+
             return false;
         },
 
         .@"union" => |unionTy| {
-            if (il.*.node != .null) return false;
-            if (actualQt.eql(qt.*, p.comp)) return true;
-
             if (unionTy.fields.len == 0) {
                 try p.err(.empty_aggregate_init_braces, firstToken, .{});
-                return error.ParsingFailed;
+                return true;
             }
 
-            qt.* = unionTy.fields[0].qt;
-            il.* = try il.*.find(gpa, 0);
+            if (il.node != .null or il.list.items.len > 1 or
+                (il.list.items.len == 1 and il.list.items[0].index != index))
+            {
+                if (!warnedExcess.*) try p.err(.excess_union_init, firstToken, .{});
+                warnedExcess.* = true;
+                return true;
+            }
 
-            if (try p.coerceArrayInitExtra(res, firstToken, qt.*, false)) return true;
-            if (try p.findScalarInitializer(il, qt, res, firstToken)) return true;
-            return false;
+            const field = unionTy.fields[@intCast(index)];
+            const fieldIL = try il.find(gpa, index);
+            if (try p.setInitializerIfEqual(fieldIL, field.qt, firstToken, res) or
+                try p.findScalarInitializer(
+                    fieldIL,
+                    field.qt,
+                    res,
+                    firstToken,
+                    warnedExcess,
+                    indexList,
+                    indexListTop + 1,
+                ))
+            {
+                const newIndex = index + 1;
+                indexList.items[indexListTop] = newIndex;
+                indexList.items.len = indexListTop + 1;
+            }
+
+            return true;
         },
 
-        else => return il.*.node == .null,
+        else => {
+            try p.setInitializer(il, qt, firstToken, res);
+            return true;
+        },
     }
 }
 
-fn findAggregateInitializer(p: *Parser, il: **InitList, qt: *QualType, startIdx: *?u64) Error!bool {
-    if (qt.isInvalid()) return il.*.node == .null;
+const InitItem = struct { il: *InitList, qt: QualType };
+
+fn findBracedInitiailzer(
+    p: *Parser,
+    il: *InitList,
+    qt: QualType,
+    firstToken: TokenIndex,
+    indexList: *IndexList,
+) Error!?InitItem {
+    if (qt.isInvalid()) {
+        if (il.node != .null) return .{ .il = il, .qt = qt };
+        return null;
+    }
 
     const gpa = p.comp.gpa;
-    switch (qt.base(p.comp).type) {
-        .array => |arrayTy| {
-            if (il.*.node != .null) return false;
 
-            const listIdx = il.*.list.items.len;
-            const index = if (startIdx.*) |*some| blk: {
-                some.* += 1;
-                break :blk some.*;
-            } else if (listIdx != 0)
-                il.*.list.items[listIdx - 1].index + 1
-            else
-                listIdx;
+    if (indexList.items.len == 0) try indexList.append(gpa, 0);
+    const index = indexList.items[0];
+
+    switch (qt.base(p.comp).type) {
+        .complex => |complexTy| {
+            if (il.node != .null) return null;
+
+            if (index < 2) {
+                indexList.items[0] = index + 1;
+                indexList.items.len = 1;
+                return .{ .il = try il.find(gpa, index), .qt = complexTy };
+            }
+        },
+        .vector => |vectorTy| {
+            if (il.node != .null) return null;
+
+            if (index < vectorTy.len) {
+                indexList.items[0] = index + 1;
+                indexList.items.len = 1;
+                return .{ .il = try il.find(gpa, index), .qt = vectorTy.elem };
+            }
+        },
+        .array => |arrayTy| {
+            if (il.*.node != .null) return null;
 
             const maxLen = switch (arrayTy.len) {
                 .fixed, .static => |len| len,
@@ -4430,63 +4444,46 @@ fn findAggregateInitializer(p: *Parser, il: **InitList, qt: *QualType, startIdx:
             };
 
             if (index < maxLen) {
-                qt.* = arrayTy.elem;
-                il.* = try il.*.find(gpa, index);
-                return true;
+                indexList.items[0] = index + 1;
+                indexList.items.len = 1;
+                return .{ .il = try il.find(gpa, index), .qt = arrayTy.elem };
             }
-            return false;
         },
-
         .@"struct" => |structTy| {
-            if (il.*.node != .null) return false;
-
-            const listIdx = il.*.list.items.len;
-            const index = if (startIdx.*) |*some| blk: {
-                some.* += 1;
-                break :blk some.*;
-            } else if (listIdx != 0)
-                il.*.list.items[listIdx - 1].index + 1
-            else
-                listIdx;
+            if (il.node != .null) return null;
 
             const fieldCount = structTy.fields.len;
             if (index < fieldCount) {
-                qt.* = structTy.fields[@intCast(index)].qt;
-                il.* = try il.*.find(gpa, index);
-                return true;
+                indexList.items[0] = index + 1;
+                indexList.items.len = 1;
+                const fieldQt = structTy.fields[@intCast(index)].qt;
+                return .{ .il = try il.find(gpa, index), .qt = fieldQt };
             }
-            return false;
         },
-
         .@"union" => |unionTy| {
-            if (il.*.node != .null) return false;
-            if (startIdx.*) |_| return false; // overrides
-            if (unionTy.fields.len == 0) return false;
+            if (il.node != .null) return null;
+            if (unionTy.fields.len == 0) return null;
 
-            qt.* = unionTy.fields[0].qt;
-            il.* = try il.*.find(gpa, 0);
-            return true;
+            indexList.items[0] = index + 1;
+            indexList.items.len = 1;
+            return .{ .il = try il.find(gpa, 0), .qt = unionTy.fields[0].qt };
         },
 
         else => {
-            try p.err(.too_many_scalar_init_braces, p.tokenIdx, .{});
-            return il.*.node == .null;
+            try p.err(.too_many_scalar_init_braces, firstToken, .{});
+            if (il.node == .null) return .{ .il = il, .qt = qt };
         },
     }
+    return null;
 }
 
-fn coerceArrayInit(p: *Parser, item: *Result, token: TokenIndex, target: QualType) !bool {
-    return p.coerceArrayInitExtra(item, token, target, true);
-}
-
-fn coerceArrayInitExtra(p: *Parser, item: *Result, token: TokenIndex, target: QualType, reportError: bool) !bool {
+fn coerceArrayInit(p: *Parser, item: Result, token: TokenIndex, target: QualType) !bool {
     if (target.isInvalid()) return false;
     const targetArrayTy = target.get(p.comp, .array) orelse return false;
 
     const isStrLiteral = p.nodeIs(item.node, .stringLiteralExpr);
     const maybeItemArrayTy = item.qt.get(p.comp, .array);
     if (!isStrLiteral and !p.nodeIs(item.node, .compoundLiteralExpr) or maybeItemArrayTy == null) {
-        if (!reportError) return false;
         try p.err(.array_init_str, token, .{});
         return true; // do not do further coercion
     }
@@ -4503,7 +4500,6 @@ fn coerceArrayInitExtra(p: *Parser, item: *Result, token: TokenIndex, target: Qu
         (isStrLiteral and itemInt == .UChar and (targetInt == .UChar or targetInt == .SChar or targetInt == .Char));
 
     if (!compatible) {
-        if (!reportError) return false;
         try p.err(.incompatible_array_init, token, .{ target, item.qt });
         return true; // do not do further coercion
     }
@@ -4517,9 +4513,9 @@ fn coerceArrayInitExtra(p: *Parser, item: *Result, token: TokenIndex, target: Qu
 
         if (isStrLiteral) {
             // the null byte of a string can be dropped
-            if (itemLen - 1 > targetLen and reportError)
+            if (itemLen - 1 > targetLen)
                 try p.err(.str_init_too_long, token, .{});
-        } else if (itemLen > targetLen and reportError) {
+        } else if (itemLen > targetLen) {
             try p.err(.arr_init_too_long, token, .{ target, item.qt });
         }
     }
@@ -4527,8 +4523,7 @@ fn coerceArrayInitExtra(p: *Parser, item: *Result, token: TokenIndex, target: Qu
 }
 
 fn coerceInit(p: *Parser, item: *Result, token: TokenIndex, target: QualType) !void {
-    // Do not do type coercion on excess items
-    if (target.is(p.comp, .void)) return;
+    if (target.isInvalid()) return;
 
     const node = item.node;
     if (target.isAutoType() or target.isC23Auto()) {
@@ -4552,31 +4547,16 @@ fn coerceInit(p: *Parser, item: *Result, token: TokenIndex, target: QualType) !v
     }
 
     if (target.@"const" or p.initContext == .constexpr) {
-        var copy = item.*;
-        return copy.saveValue(p);
+        return item.putValue(p);
     }
     return item.saveValue(p);
 }
 
-fn isStringInit(p: *Parser, initQt: QualType) bool {
+fn isStringInit(p: *Parser, initQt: QualType, node: Node.Index) bool {
     const initArrayTy = initQt.get(p.comp, .array) orelse return false;
     if (!initArrayTy.elem.is(p.comp, .int)) return false;
 
-    var i = p.tokenIdx;
-    while (true) : (i += 1) {
-        switch (p.tokenIds[i]) {
-            .LParen => {},
-
-            .StringLiteral,
-            .StringLiteralUTF_16,
-            .StringLiteralUTF_8,
-            .StringLiteralUTF_32,
-            .StringLiteralWide,
-            => return true,
-
-            else => return false,
-        }
-    }
+    return p.nodeIs(node, .stringLiteralExpr);
 }
 
 /// Convert InitList into an AST
@@ -4588,26 +4568,100 @@ fn convertInitList(p: *Parser, il: InitList, initQt: QualType) Error!Node.Index 
         } });
     }
 
-    const scalarKind = initQt.scalarKind(p.comp);
-    if (scalarKind != .None and scalarKind.isReal()) {
-        return il.node.unpack() orelse
-            try p.addNode(.{
-                .defaultInitExpr = .{
-                    .lastToken = il.tok,
+    if (il.node.unpack()) |some| return some;
+
+    const comp = p.comp;
+    const gpa = comp.gpa;
+    switch (initQt.base(comp).type) {
+        .complex => |complexTy| {
+            if (il.list.items.len == 0)
+                return try p.addNode(.{ .defaultInitExpr = .{
+                    .lastToken = p.tokenIdx - 1,
                     .qt = initQt,
+                } });
+
+            const first = try p.convertInitList(il.list.items[0].list, complexTy);
+            const second = if (il.list.items.len > 1)
+                try p.convertInitList(il.list.items[1].list, complexTy)
+            else
+                null;
+
+            if (il.list.items.len == 2) {
+                try p.err(.complex_component_init, il.tok, .{});
+            }
+
+            const node = try p.addNode(.{
+                .arrayInitExpr = .{
+                    .containerQt = initQt,
+                    .items = if (second) |some| &.{ first, some } else &.{first},
+                    .lbraceToken = il.tok,
                 },
             });
-    }
+            if (!complexTy.isFloat(comp)) return node;
 
-    const gpa = p.comp.gpa;
-    switch (initQt.base(p.comp).type) {
+            const firtstNode = il.list.items[0].list.node.unpack() orelse return node;
+            const secondNode = if (il.list.items.len > 1) il.list.items[1].list.node else .null;
+
+            const firstValue = p.tree.valueMap.get(firtstNode) orelse return node;
+            const secondValue = if (secondNode.unpack()) |some| p.tree.valueMap.get(some) orelse return node else Value.zero;
+
+            const complexValue = try Value.intern(p.comp, switch (complexTy.bitSizeof(comp)) {
+                32 => .{ .complex = .{ .cf32 = .{ firstValue.toFloat(f32, comp), secondValue.toFloat(f32, p.comp) } } },
+                64 => .{ .complex = .{ .cf64 = .{ firstValue.toFloat(f64, comp), secondValue.toFloat(f64, p.comp) } } },
+                80 => .{ .complex = .{ .cf80 = .{ firstValue.toFloat(f80, comp), secondValue.toFloat(f80, p.comp) } } },
+                128 => .{ .complex = .{ .cf128 = .{ firstValue.toFloat(f128, comp), secondValue.toFloat(f128, p.comp) } } },
+                else => unreachable,
+            });
+            try p.tree.valueMap.put(gpa, node, complexValue);
+            return node;
+        },
+        .vector => |vectorTy| {
+            const listBufferTop = p.listBuffer.items.len;
+            defer p.listBuffer.items.len = listBufferTop;
+
+            const elemTy = initQt.childType(comp);
+            const maxLen = vectorTy.len;
+
+            var start: u64 = 0;
+            for (il.list.items) |*init| {
+                if (init.index > start) {
+                    const elem = try p.addNode(.{
+                        .arrayFillerExpr = .{
+                            .lastToken = p.tokenIdx - 1,
+                            .count = init.index - start,
+                            .qt = elemTy,
+                        },
+                    });
+                    try p.listBuffer.append(gpa, elem);
+                }
+                start = init.index + 1;
+
+                const elem = try p.convertInitList(init.list, elemTy);
+                try p.listBuffer.append(gpa, elem);
+            }
+
+            if (start < maxLen) {
+                const elem = try p.addNode(.{
+                    .arrayFillerExpr = .{
+                        .lastToken = p.tokenIdx - 1,
+                        .count = maxLen - start,
+                        .qt = elemTy,
+                    },
+                });
+                try p.listBuffer.append(gpa, elem);
+            }
+
+            return p.addNode(.{ .arrayInitExpr = .{
+                .lbraceToken = il.tok,
+                .containerQt = initQt,
+                .items = p.listBuffer.items[listBufferTop..],
+            } });
+        },
         .array => |arrayTy| {
-            if (il.node.unpack()) |some| return some;
-
             const listBuffTop = p.listBuffer.items.len;
             defer p.listBuffer.items.len = listBuffTop;
 
-            const elemType = initQt.childType(p.comp);
+            const elemType = initQt.childType(comp);
             const maxLen = switch (arrayTy.len) {
                 .fixed, .static => |len| len,
                 // vla invalid, reported earlier
@@ -4636,7 +4690,7 @@ fn convertInitList(p: *Parser, il: InitList, initQt: QualType) Error!Node.Index 
                 try p.listBuffer.append(gpa, elem);
             }
 
-            const maxElems = p.comp.maxArrayBytes() / (@max(1, elemType.sizeofOrNull(p.comp) orelse 1));
+            const maxElems = comp.maxArrayBytes() / (@max(1, elemType.sizeofOrNull(comp) orelse 1));
             if (start > maxElems) {
                 try p.err(.array_too_large, il.tok, .{});
                 start = maxElems;
@@ -4671,8 +4725,6 @@ fn convertInitList(p: *Parser, il: InitList, initQt: QualType) Error!Node.Index 
         .@"struct" => |structTy| {
             assert(structTy.layout != null);
 
-            if (il.node.unpack()) |some| return some;
-
             const listBuffTop = p.listBuffer.items.len;
             defer p.listBuffer.items.len = listBuffTop;
 
@@ -4698,8 +4750,6 @@ fn convertInitList(p: *Parser, il: InitList, initQt: QualType) Error!Node.Index 
         },
 
         .@"union" => |unionTy| {
-            if (il.node.unpack()) |some| return some;
-
             const initNode, const index = if (unionTy.fields.len == 0)
                 // do nothing for empty unions
                 .{ null, 0 }
