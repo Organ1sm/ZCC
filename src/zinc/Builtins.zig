@@ -71,7 +71,7 @@ fn createType(
             .W => requireNativeInt64 = true,
             .N => {
                 std.debug.assert(desc.spec == .i);
-                if (!TargetUtil.isLP64(comp.target)) {
+                if (!TargetUtil.isLP64(&comp.target)) {
                     builder.combine(.Long, 0) catch unreachable;
                 }
             },

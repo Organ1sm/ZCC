@@ -623,7 +623,7 @@ pub fn parseArgs(
             return d.fatal("unable to resolve target: {s}", .{errorDescription(e)});
         };
         d.comp.target = target;
-        d.comp.langOpts.setEmulatedCompiler(Target.systemCompiler(d.comp.target));
+        d.comp.langOpts.setEmulatedCompiler(Target.systemCompiler(&d.comp.target));
         switch (d.comp.langOpts.emulate) {
             .clang => try d.diagnostics.set("clang", .off),
             .gcc => try d.diagnostics.set("gnu", .off),
@@ -685,7 +685,7 @@ pub fn warn(d: *Driver, fmt: []const u8, args: anytype) Compilation.Error!void {
     try d.diagnostics.add(.{ .kind = .warning, .text = allocating.written(), .location = null });
 }
 
-pub fn unsupportedOptionForTarget(d: *Driver, target: std.Target, opt: []const u8) Compilation.Error!void {
+pub fn unsupportedOptionForTarget(d: *Driver, target: *const std.Target, opt: []const u8) Compilation.Error!void {
     try d.err(
         "unsupported option '{s}' for target '{s}-{s}-{s}'",
         .{ opt, @tagName(target.cpu.arch), @tagName(target.os.tag), @tagName(target.abi) },
@@ -1173,7 +1173,7 @@ fn exitWithCleanup(d: *Driver, code: u8) noreturn {
 pub fn getPICMode(d: *Driver, lastpic: []const u8) Compilation.Error!struct { backend.CodeGenOptions.PicLevel, bool } {
     const eqlIgnoreCase = std.ascii.eqlIgnoreCase;
 
-    const target = d.comp.target;
+    const target = &d.comp.target;
     const linker = d.useLinker orelse @import("system-defaults").linker;
     const isBfdLinker = eqlIgnoreCase(linker, "bfd");
 
@@ -1243,8 +1243,7 @@ pub fn getPICMode(d: *Driver, lastpic: []const u8) Compilation.Error!struct { ba
     // other argument is used. If the last argument is any flavor of the
     // '-fno-...' arguments, both PIC and PIE are disabled. Any PIE
     // option implicitly enables PIC at the same level.
-    if (target.os.tag == .windows and
-        !Target.isCygwinMinGW(target) and
+    if (target.os.tag == .windows and !Target.isMinGW(target) and
         (eqlIgnoreCase(lastpic, "-fpic") or eqlIgnoreCase(lastpic, "-fpie"))) // -fpic/-fPIC, -fpie/-fPIE
     {
         try d.unsupportedOptionForTarget(target, lastpic);

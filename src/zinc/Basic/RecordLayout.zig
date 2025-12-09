@@ -281,17 +281,17 @@ const SysVContext = struct {
             //// Some targets ignore the alignment of the underlying type when laying out
             //// non-zero-sized bit-fields. See test case 0072. On such targets, bit-fields never
             //// cross a storage boundary. See test case 0081.
-            if (Target.ignoreNonZeroSizedBitfieldTypeAlignment(self.comp.target))
+            if (Target.ignoreNonZeroSizedBitfieldTypeAlignment(&self.comp.target))
                 tyFieldAlignBits = 1;
         } else {
             // Some targets ignore the alignment of the underlying type when laying out
             // zero-sized bit-fields. See test case 0073.
-            if (Target.ignoreZeroSizedBitfieldTypeAlignment(self.comp.target))
+            if (Target.ignoreZeroSizedBitfieldTypeAlignment(&self.comp.target))
                 tyFieldAlignBits = 1;
 
             // Some targets have a minimum alignment of zero-sized bit-fields. See test case
             // 0074.
-            if (Target.minZeroWidthBitfieldAlignment(self.comp.target)) |targetAlign|
+            if (Target.minZeroWidthBitfieldAlignment(&self.comp.target)) |targetAlign|
                 tyFieldAlignBits = @max(tyFieldAlignBits, targetAlign);
         }
 
@@ -347,7 +347,7 @@ const SysVContext = struct {
 
         // Unnamed fields do not contribute to the record alignment except on a few targets.
         // See test case 0079.
-        if (isNamed or Target.unnamedFieldAffectsAlignment(self.comp.target)) {
+        if (isNamed or Target.unnamedFieldAffectsAlignment(&self.comp.target)) {
             var inheritedAlignBits: u32 = undefined;
 
             if (bitWidth == 0) {

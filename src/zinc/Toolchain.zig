@@ -64,8 +64,8 @@ selectedMultilib: Multilib = .{},
 
 inner: Inner = .{ .uninitialized = {} },
 
-pub fn getTarget(tc: *const Toolchain) std.Target {
-    return tc.driver.comp.target;
+pub fn getTarget(tc: *const Toolchain) *const std.Target {
+    return &tc.driver.comp.target;
 }
 
 fn getDefaultLinker(tc: *const Toolchain) []const u8 {
@@ -459,7 +459,7 @@ fn addUnwindLibrary(tc: *const Toolchain, argv: *std.ArrayList([]const u8)) !voi
         return;
 
     const lgk = tc.getLibGCCKind();
-    const asNeeded = (lgk == .unspecified) and !isAndroid and !TargetUtil.isCygwinMinGW(target);
+    const asNeeded = (lgk == .unspecified) and !isAndroid and !TargetUtil.isMinGW(target);
 
     try argv.ensureUnusedCapacity(tc.driver.comp.gpa, 3);
     if (asNeeded)
@@ -471,7 +471,7 @@ fn addUnwindLibrary(tc: *const Toolchain, argv: *std.ArrayList([]const u8)) !voi
         .compiler_rt => if (lgk == .static) {
             argv.appendAssumeCapacity("-l:libunwind.a");
         } else if (lgk == .shared) {
-            if (TargetUtil.isCygwinMinGW(target))
+            if (TargetUtil.isMinGW(target))
                 argv.appendAssumeCapacity("-l:libunwind.dll.a")
             else
                 argv.appendAssumeCapacity("-l:libunwind.so");

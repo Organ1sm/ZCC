@@ -179,7 +179,7 @@ pub fn initDefault(gpa: Allocator, arena: Allocator, io: Io, diags: *Diagnostics
     errdefer comp.deinit();
 
     try comp.addDefaultPragmaHandlers();
-    comp.langOpts.setEmulatedCompiler(Target.systemCompiler(comp.target));
+    comp.langOpts.setEmulatedCompiler(Target.systemCompiler(&comp.target));
 
     return comp;
 }
@@ -237,7 +237,8 @@ pub fn generateSystemDefines(comp: *Compilation, w: *Io.Writer) !void {
             , .{ name, name });
         }
     }.defineStd;
-    const ptrWidth = comp.target.ptrBitWidth();
+    const target = &comp.target;
+    const ptrWidth = target.ptrBitWidth();
     const isGnu = comp.langOpts.standard.isGNU();
 
     if (comp.langOpts.gnucVersion > 0) {
@@ -246,14 +247,14 @@ pub fn generateSystemDefines(comp: *Compilation, w: *Io.Writer) !void {
         try w.print("#define __GNUC_PATCHLEVEL__ {d}\n", .{comp.langOpts.gnucVersion % 100});
     }
 
-    switch (comp.target.os.tag) {
+    switch (target.os.tag) {
         .linux => try defineStd(w, "linux", isGnu),
         .windows => {
             try define(w, "_WIN32");
             if (ptrWidth == 64)
                 try define(w, "_WIN64");
 
-            if (comp.target.abi.isGnu()) {
+            if (target.abi.isGnu()) {
                 try defineStd(w, "WIN32", isGnu);
                 try defineStd(w, "WINNT", isGnu);
                 if (ptrWidth == 64) {
@@ -261,16 +262,9 @@ pub fn generateSystemDefines(comp: *Compilation, w: *Io.Writer) !void {
                 }
                 try define(w, "__MSVCRT__");
                 try define(w, "__MINGW32__");
-            } else if (comp.target.abi == .cygnus) {
-                try define(w, "__CYGWIN__");
-                if (ptrWidth == 64) {
-                    try define(w, "__CYGWIN64__");
-                } else {
-                    try define(w, "__CYGWIN32__");
-                }
             }
 
-            if (comp.target.abi.isGnu() or comp.target.abi == .cygnus) {
+            if (target.abi.isGnu()) {
                 // MinGW and Cygwin define __declspec(a) to __attribute((a)).
                 // Like Clang we make the define no op if -fdeclspec is enabled.
                 if (comp.langOpts.declSpecAttrs) {
@@ -292,7 +286,7 @@ pub fn generateSystemDefines(comp: *Compilation, w: *Io.Writer) !void {
             }
         },
         .uefi => try define(w, "__UEFI__"),
-        .freebsd => try w.print("#define __FreeBSD__ {d}\n", .{comp.target.os.version_range.semver.min.major}),
+        .freebsd => try w.print("#define __FreeBSD__ {d}\n", .{target.os.version_range.semver.min.major}),
         .netbsd => try define(w, "__NetBSD__"),
         .openbsd => try define(w, "__OpenBSD__"),
         .dragonfly => try define(w, "__DragonFly__"),
@@ -301,6 +295,7 @@ pub fn generateSystemDefines(comp: *Compilation, w: *Io.Writer) !void {
             try define(w, "__illumos__");
         },
 
+        .maccatalyst,
         .macos,
         .tvos,
         .ios,
@@ -317,7 +312,7 @@ pub fn generateSystemDefines(comp: *Compilation, w: *Io.Writer) !void {
     }
 
     // unix and other additional os macros
-    switch (comp.target.os.tag) {
+    switch (target.os.tag) {
         .freebsd,
         .netbsd,
         .openbsd,
@@ -329,24 +324,24 @@ pub fn generateSystemDefines(comp: *Compilation, w: *Io.Writer) !void {
         .emscripten,
         => try defineStd(w, "unix", isGnu),
 
-        .windows => if (comp.target.abi.isGnu() or comp.target.abi == .cygnus) {
+        .windows => if (target.abi.isGnu()) {
             try defineStd(w, "unix", isGnu);
         },
         else => {},
     }
 
-    if (comp.target.abi.isAndroid()) {
+    if (target.abi.isAndroid()) {
         try w.writeAll("#define __ANDROID__ 1\n");
     }
 
-    switch (comp.target.cpu.arch) {
+    switch (target.cpu.arch) {
         .x86_64 => {
             try define(w, "__amd64__");
             try define(w, "__amd64");
             try define(w, "__x86_64__");
             try define(w, "__x86_64");
 
-            if (comp.target.os.tag == .windows and comp.target.abi == .msvc) {
+            if (target.os.tag == .windows and target.abi == .msvc) {
                 try w.writeAll(
                     \\#define _M_X64 100
                     \\#define _M_AMD64 100
@@ -358,11 +353,11 @@ pub fn generateSystemDefines(comp: *Compilation, w: *Io.Writer) !void {
         .x86 => {
             try defineStd(w, "i3286", isGnu);
 
-            if (comp.target.os.tag == .windows and comp.target.abi == .msvc) {
+            if (target.os.tag == .windows and target.abi == .msvc) {
                 try w.print("#define _M_IX86 {d}\n", .{blk: {
-                    if (comp.target.cpu.model == &std.Target.x86.cpu.i386) break :blk 300;
-                    if (comp.target.cpu.model == &std.Target.x86.cpu.i486) break :blk 400;
-                    if (comp.target.cpu.model == &std.Target.x86.cpu.i586) break :blk 500;
+                    if (target.cpu.model == &std.Target.x86.cpu.i386) break :blk 300;
+                    if (target.cpu.model == &std.Target.x86.cpu.i486) break :blk 400;
+                    if (target.cpu.model == &std.Target.x86.cpu.i586) break :blk 500;
                     break :blk @as(u32, 600);
                 }});
             }
@@ -406,7 +401,7 @@ pub fn generateSystemDefines(comp: *Compilation, w: *Io.Writer) !void {
             try defineStd(w, "sparc", isGnu);
             try define(w, "__sparc_v9__");
             try define(w, "__arch64__");
-            if (comp.target.os.tag != .illumos) {
+            if (target.os.tag != .illumos) {
                 try define(w, "__sparc64__");
                 try define(w, "__sparc_v9__");
                 try define(w, "__sparcv9__");
@@ -415,7 +410,7 @@ pub fn generateSystemDefines(comp: *Compilation, w: *Io.Writer) !void {
 
         .sparc => {
             try defineStd(w, "sparc", isGnu);
-            if (comp.target.os.tag == .illumos) {
+            if (target.os.tag == .illumos) {
                 try define(w, "__sparcv8");
             }
         },
@@ -423,13 +418,13 @@ pub fn generateSystemDefines(comp: *Compilation, w: *Io.Writer) !void {
         .arm, .armeb, .thumb, .thumbeb => {
             try define(w, "__arm__");
             try define(w, "__arm");
-            if (comp.target.cpu.arch.isThumb()) {
+            if (target.cpu.arch.isThumb()) {
                 try define(w, "__thumb__");
             }
         },
         .aarch64, .aarch64_be => {
             try define(w, "__aarch64__");
-            if (comp.target.os.tag == .macos) {
+            if (target.os.tag.isDarwin()) {
                 try define(w, "__AARCH64_SIMD__");
                 if (ptrWidth == 32) {
                     try define(w, "__ARM64_ARCH_8_32__");
@@ -440,7 +435,7 @@ pub fn generateSystemDefines(comp: *Compilation, w: *Io.Writer) !void {
                 try define(w, "__arm64");
                 try define(w, "__arm64__");
             }
-            if (comp.target.os.tag == .windows and comp.target.abi == .msvc) {
+            if (target.os.tag == .windows and target.abi == .msvc) {
                 try w.writeAll("#define _M_ARM64 100\n");
             }
         },
@@ -452,12 +447,10 @@ pub fn generateSystemDefines(comp: *Compilation, w: *Io.Writer) !void {
         else => {},
     }
 
-    if (ptrWidth == 64 and comp.target.cTypeBitSize(.long) == 32) {
+    if (ptrWidth == 64 and target.cTypeBitSize(.long) == 32) {
         try define(w, "_LP64");
         try define(w, "__LP64__");
-    } else if (ptrWidth == 32 and comp.target.cTypeBitSize(.long) == 32 and
-        comp.target.cTypeBitSize(.int) == 32)
-    {
+    } else if (ptrWidth == 32 and target.cTypeBitSize(.long) == 32 and target.cTypeBitSize(.int) == 32) {
         try define(w, "_ILP32");
         try define(w, "__ILP32__");
     }
@@ -469,7 +462,7 @@ pub fn generateSystemDefines(comp: *Compilation, w: *Io.Writer) !void {
         \\
     );
 
-    if (comp.target.cpu.arch.endian() == .little)
+    if (target.cpu.arch.endian() == .little)
         try w.writeAll(
             \\#define __BYTE_ORDER__ __ORDER_LITTLE_ENDIAN__
             \\#define __LITTLE_ENDIAN__ 1
@@ -482,13 +475,13 @@ pub fn generateSystemDefines(comp: *Compilation, w: *Io.Writer) !void {
             \\
         );
 
-    switch (comp.target.ofmt) {
+    switch (target.ofmt) {
         .elf => try define(w, "__ELF__"),
         .macho => try define(w, "__MACH__"),
         else => {},
     }
 
-    if (comp.target.os.tag.isDarwin()) {
+    if (target.os.tag.isDarwin()) {
         try w.writeAll(
             \\#define __nonnull _Nonnull
             \\#define __null_unspecified _Null_unspecified
@@ -564,7 +557,7 @@ pub fn generateSystemDefines(comp: *Compilation, w: *Io.Writer) !void {
     try comp.generateSizeofType(w, "__SIZEOF_WCHAR_T__", comp.typeStore.wchar);
     // try comp.generateSizeofType(w, "__SIZEOF_WINT_T__", .voidPointer);
 
-    if (Target.hasInt128(comp.target)) {
+    if (Target.hasInt128(target)) {
         try comp.generateSizeofType(w, "__SIZEOF_INT128__", .int128);
     }
 
@@ -587,16 +580,16 @@ pub fn generateSystemDefines(comp: *Compilation, w: *Io.Writer) !void {
     try comp.generateExactWidthTypes(w);
     try comp.generateFastAndLeastWidthTypes(w);
 
-    if (Target.FPSemantics.halfPrecisionType(comp.target)) |half| {
+    if (Target.FPSemantics.halfPrecisionType(target)) |half| {
         try generateFloatMacros(w, "FLT16", half, "F16");
     }
-    try generateFloatMacros(w, "FLT", Target.FPSemantics.forType(.float, comp.target), "F");
-    try generateFloatMacros(w, "DBL", Target.FPSemantics.forType(.double, comp.target), "");
-    try generateFloatMacros(w, "LDBL", Target.FPSemantics.forType(.longdouble, comp.target), "L");
+    try generateFloatMacros(w, "FLT", Target.FPSemantics.forType(.float, target), "F");
+    try generateFloatMacros(w, "DBL", Target.FPSemantics.forType(.double, target), "");
+    try generateFloatMacros(w, "LDBL", Target.FPSemantics.forType(.longdouble, target), "L");
 
     // TODO: clang treats __FLT_EVAL_METHOD__ as a special-cased macro because evaluating it within a scope
     // where `#pragma clang fp eval_method(X)` has been called produces an error diagnostic.
-    const fltEvalMethod = comp.langOpts.fpEvalMethod orelse Target.defaultFpEvalMethod(comp.target);
+    const fltEvalMethod = comp.langOpts.fpEvalMethod orelse Target.defaultFpEvalMethod(target);
     try w.print("#define __FLT_EVAL_METHOD__ {d}\n", .{@intFromEnum(fltEvalMethod)});
 
     try w.writeAll(
@@ -761,16 +754,16 @@ fn generateTypeMacro(comp: *const Compilation, w: *Io.Writer, name: []const u8, 
 }
 
 pub fn hasHalfPrecisionFloatABI(comp: *const Compilation) bool {
-    return comp.langOpts.allowHalfArgsAndReturns or Target.hasHalfPrecisionFloatABI(comp.target);
+    return comp.langOpts.allowHalfArgsAndReturns or Target.hasHalfPrecisionFloatABI(&comp.target);
 }
 
 pub fn hasFloat128(comp: *const Compilation) bool {
-    return Target.hasFloat128(comp.target);
+    return Target.hasFloat128(&comp.target);
 }
 
 pub fn float80Type(comp: *const Compilation) ?QualType {
     if (comp.langOpts.emulate != .gcc) return null;
-    return Target.float80Type(comp.target);
+    return Target.float80Type(&comp.target);
 }
 
 fn generateFastOrLeastType(
@@ -1591,7 +1584,7 @@ pub fn hasBuiltin(comp: *const Compilation, name: []const u8) bool {
 }
 
 pub fn hasBuiltinFunction(comp: *const Compilation, builtin: Builtin) bool {
-    if (!Target.builtinEnabled(comp.target, builtin.properties.target_set)) return false;
+    if (!Target.builtinEnabled(&comp.target, builtin.properties.target_set)) return false;
 
     switch (builtin.properties.language) {
         .all_languages => return true,

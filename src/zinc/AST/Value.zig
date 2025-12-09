@@ -46,7 +46,7 @@ pub fn isZero(v: Value, comp: *const Compilation) bool {
     switch (v.ref()) {
         .zero => return true,
         .one => return false,
-        .null => return TargetUtil.nullRepr(comp.target) == 0,
+        .null => return TargetUtil.nullRepr(&comp.target) == 0,
         else => {},
     }
 

@@ -59,7 +59,7 @@ fn serializeFloat(comptime T: type, value: T, w: *std.Io.Writer) !void {
         else => {
             const size = @bitSizeOf(T);
             const storageUnit = std.meta.intToEnum(StorageUnit, size) catch unreachable;
-            const IntTy = @Type(.{ .int = .{ .signedness = .unsigned, .bits = size } });
+            const IntTy = @Int(.unsigned, size);
             const intValue: IntTy = @bitCast(value);
             return serializeInt(intValue, storageUnit, w);
         },
