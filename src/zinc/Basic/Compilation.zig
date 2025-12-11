@@ -141,7 +141,7 @@ sources: std.StringArrayHashMapUnmanaged(Source) = .empty,
 includeDirs: std.ArrayList([]const u8) = .empty,
 /// Allocated into `gpa`, but keys are externally managed.
 systemIncludeDirs: std.ArrayList([]const u8) = .empty,
-target: std.Target = @import("builtin").target,
+target: Target = .default,
 pragmaHandlers: std.StringArrayHashMapUnmanaged(*Pragma) = .empty,
 langOpts: LangOpts = .{},
 generatedBuffer: std.ArrayList(u8) = .empty,
@@ -179,7 +179,7 @@ pub fn initDefault(gpa: Allocator, arena: Allocator, io: Io, diags: *Diagnostics
     errdefer comp.deinit();
 
     try comp.addDefaultPragmaHandlers();
-    comp.langOpts.setEmulatedCompiler(Target.systemCompiler(&comp.target));
+    comp.langOpts.setEmulatedCompiler(comp.target.systemCompiler());
 
     return comp;
 }

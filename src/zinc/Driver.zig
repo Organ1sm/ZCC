@@ -622,7 +622,7 @@ pub fn parseArgs(
         const target = std.zig.system.resolveTargetQuery(d.comp.io, query) catch |e| {
             return d.fatal("unable to resolve target: {s}", .{errorDescription(e)});
         };
-        d.comp.target = target;
+        d.comp.target = .fromZigTarget(target);
         d.comp.langOpts.setEmulatedCompiler(Target.systemCompiler(&d.comp.target));
         switch (d.comp.langOpts.emulate) {
             .clang => try d.diagnostics.set("clang", .off),
@@ -685,7 +685,7 @@ pub fn warn(d: *Driver, fmt: []const u8, args: anytype) Compilation.Error!void {
     try d.diagnostics.add(.{ .kind = .warning, .text = allocating.written(), .location = null });
 }
 
-pub fn unsupportedOptionForTarget(d: *Driver, target: *const std.Target, opt: []const u8) Compilation.Error!void {
+pub fn unsupportedOptionForTarget(d: *Driver, target: *const Target, opt: []const u8) Compilation.Error!void {
     try d.err(
         "unsupported option '{s}' for target '{s}-{s}-{s}'",
         .{ opt, @tagName(target.cpu.arch), @tagName(target.os.tag), @tagName(target.abi) },
@@ -1025,7 +1025,7 @@ fn processSource(
         const asmFn = asmGenFn orelse
             return d.fatal("Assembly codegen not supported", .{});
 
-        const assembly = try asmFn(d.comp.target, &tree);
+        const assembly = try asmFn(d.comp.target.toZigTarget(), &tree);
         defer assembly.deinit(d.comp.gpa);
 
         if (d.onlyPreprocessAndCompile) {
@@ -1070,7 +1070,7 @@ fn processSource(
             renderErrorList.deinit(d.comp.gpa);
         }
 
-        var obj = ir.render(d.comp.gpa, d.comp.target, &renderErrorList) catch |e| switch (e) {
+        var obj = ir.render(d.comp.gpa, d.comp.target.toZigTarget(), &renderErrorList) catch |e| switch (e) {
             error.OutOfMemory => return error.OutOfMemory,
             error.LowerFail => {
                 return d.fatal(
@@ -1177,7 +1177,7 @@ pub fn getPICMode(d: *Driver, lastpic: []const u8) Compilation.Error!struct { ba
     const linker = d.useLinker orelse @import("system-defaults").linker;
     const isBfdLinker = eqlIgnoreCase(linker, "bfd");
 
-    const isPieDefault = switch (Target.isPIEDefault(target)) {
+    const isPieDefault = switch (target.isPIEDefault()) {
         .Yes => true,
         .No => false,
         .DependsOnLinker => if (isBfdLinker)
@@ -1185,7 +1185,7 @@ pub fn getPICMode(d: *Driver, lastpic: []const u8) Compilation.Error!struct { ba
         else
             false, //MSVC
     };
-    const isPicDefault = switch (Target.isPICdefault(target)) {
+    const isPicDefault = switch (target.isPICdefault()) {
         .Yes => true,
         .No => false,
         .DependsOnLinker => if (isBfdLinker)
@@ -1243,7 +1243,7 @@ pub fn getPICMode(d: *Driver, lastpic: []const u8) Compilation.Error!struct { ba
     // other argument is used. If the last argument is any flavor of the
     // '-fno-...' arguments, both PIC and PIE are disabled. Any PIE
     // option implicitly enables PIC at the same level.
-    if (target.os.tag == .windows and !Target.isMinGW(target) and
+    if (target.os.tag == .windows and !target.isMinGW() and
         (eqlIgnoreCase(lastpic, "-fpic") or eqlIgnoreCase(lastpic, "-fpie"))) // -fpic/-fPIC, -fpie/-fPIE
     {
         try d.unsupportedOptionForTarget(target, lastpic);
@@ -1254,7 +1254,7 @@ pub fn getPICMode(d: *Driver, lastpic: []const u8) Compilation.Error!struct { ba
 
     // Check whether the tool chain trumps the PIC-ness decision. If the PIC-ness
     // is forced, then neither PIC nor PIE flags will have no effect.
-    const forced = switch (Target.isPICDefaultForced(target)) {
+    const forced = switch (target.isPICDefaultForced()) {
         .Yes => true,
         .No => false,
         .DependsOnLinker => if (isBfdLinker) target.cpu.arch == .x86_64 else target.cpu.arch == .aarch64 or target.cpu.arch == .x86_64,
@@ -1267,7 +1267,7 @@ pub fn getPICMode(d: *Driver, lastpic: []const u8) Compilation.Error!struct { ba
             isPicLevelTwo = mem.eql(u8, lastpic, "-fPIE") or mem.eql(u8, lastpic, "-fPIC");
         } else {
             pic, pie = .{ false, false };
-            if (Target.isPS(target)) {
+            if (target.isPS()) {
                 if (d.cmodel != .kernel) {
                     pic = true;
                     try d.warn(
@@ -1279,7 +1279,7 @@ pub fn getPICMode(d: *Driver, lastpic: []const u8) Compilation.Error!struct { ba
         }
     }
 
-    if (pic and (target.os.tag.isDarwin() or Target.isPS(target))) {
+    if (pic and (target.os.tag.isDarwin() or target.isPS())) {
         isPicLevelTwo = isPicLevelTwo or isPicDefault;
     }
 

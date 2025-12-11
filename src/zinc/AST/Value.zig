@@ -131,7 +131,7 @@ test "minUnsignedBits" {
     defer comp.deinit();
 
     const targetQuery = try std.Target.Query.parse(.{ .arch_os_abi = "x86_64-linux-gnu" });
-    comp.target = try std.zig.system.resolveTargetQuery(io, targetQuery);
+    comp.target = .fromZigTarget(try std.zig.system.resolveTargetQuery(io, targetQuery));
 
     try Test.checkIntBits(&comp, 0, 0);
     try Test.checkIntBits(&comp, 1, 1);
@@ -174,7 +174,7 @@ test "minSignedBits" {
     defer comp.deinit();
 
     const targetQuery = try std.Target.Query.parse(.{ .arch_os_abi = "x86_64-linux-gnu" });
-    comp.target = try std.zig.system.resolveTargetQuery(io, targetQuery);
+    comp.target = .fromZigTarget(try std.zig.system.resolveTargetQuery(io, targetQuery));
 
     try Test.checkIntBits(&comp, -1, 1);
     try Test.checkIntBits(&comp, -2, 2);

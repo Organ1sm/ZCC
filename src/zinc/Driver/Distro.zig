@@ -2,6 +2,8 @@
 
 const std = @import("std");
 const mem = std.mem;
+
+const Target = @import("../Basic/Target.zig");
 const Toolchain = @import("../Toolchain.zig");
 
 const MAX_BYTES = 1024; // TODO: Can we assume 1024 bytes enough for the info we need?
@@ -275,7 +277,7 @@ fn detectDebian(tc: *const Toolchain) ?Tag {
     return scanForDebian(data);
 }
 
-pub fn detect(target: *const std.Target, tc: *const Toolchain) Tag {
+pub fn detect(target: *const Target, tc: *const Toolchain) Tag {
     if (target.os.tag != .linux) return .unknown;
 
     if (detectOsRelease(tc)) |tag| return tag;
