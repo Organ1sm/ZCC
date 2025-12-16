@@ -7326,6 +7326,11 @@ fn parseSuffixExpr(p: *Parser, lhs: Result) Error!?Result {
                 else
                     try p.err(.invalid_index, lb, .{});
                 std.mem.swap(Result, &ptr, &index);
+            } else if (ptr.qt.get(p.comp, .vector)) |vectorTy| {
+                ptr = arrayBeforeConversion;
+                ptr.qt = vectorTy.elem;
+                if (!index.qt.isInt(p.comp))
+                    try p.err(.invalid_index, lb, .{});
             } else {
                 try p.err(.invalid_subscript, lb, .{});
             }
