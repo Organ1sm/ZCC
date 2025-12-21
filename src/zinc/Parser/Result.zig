@@ -206,12 +206,24 @@ pub fn adjustTypes(lhs: *Result, token: TokenIndex, rhs: *Result, p: *Parser, ki
     if (lhsIsVec and rhsIsVec) {
         if (lhs.qt.eql(rhs.qt, p.comp))
             return lhs.shouldEval(rhs, p);
-        return lhs.invalidBinTy(token, rhs, p);
+
+        if (lhs.qt.sizeCompare(rhs.qt, p.comp) == .eq) {
+            rhs.qt = lhs.qt;
+            try rhs.implicitCast(p, .Bitcast, token);
+            return lhs.shouldEval(rhs, p);
+        }
+
+        try p.err(.incompatible_vec_types, token, .{ lhs.qt, rhs.qt });
+        lhs.value = .{};
+        rhs.value = .{};
+        lhs.qt = .invalid;
+        return false;
     } else if (lhsIsVec or rhsIsVec) {
         const vecOperand = if (lhsIsVec) lhs else rhs;
         const scalarOperand = if (lhsIsVec) rhs else lhs;
         if (scalarOperand.coerceExtra(p, vecOperand.qt.childType(p.comp), token, .testCoerce)) {
             try scalarOperand.saveValue(p);
+            scalarOperand.qt = vecOperand.qt;
             try scalarOperand.implicitCast(p, .VectorSplat, token);
             return lhs.shouldEval(rhs, p);
         } else |err| switch (err) {
