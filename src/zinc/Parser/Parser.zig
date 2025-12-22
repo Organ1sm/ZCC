@@ -444,7 +444,20 @@ fn formatTokenType(w: *std.Io.Writer, fmt: []const u8, tokenTy: TokenType) !usiz
 
 fn formatQualType(p: *Parser, w: *std.Io.Writer, fmt: []const u8, qt: QualType) !usize {
     const i = Diagnostics.templateIndex(w, fmt, "{qt}");
+    try w.writeByte('\'');
     try qt.print(p.comp, w);
+    try w.writeByte('\'');
+
+    if (qt.isC23Auto()) return i;
+    if (qt.get(p.comp, .vector)) |vectorTy| {
+        try w.print(" (vector of {d} '", .{vectorTy.len});
+        try vectorTy.elem.printDesugared(p.comp, w);
+        try w.writeAll("' values)");
+    } else if (qt.shouldDesugar(p.comp)) {
+        try w.writeAll(" (aka '");
+        try qt.printDesugared(p.comp, w);
+        try w.writeAll("')");
+    }
     return i;
 }
 
