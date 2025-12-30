@@ -8032,6 +8032,10 @@ fn parsePrimaryExpr(p: *Parser) Error!?Result {
             }
 
             if (p.symStack.findSymbol(internedName)) |sym| {
+                if (sym.kind == .typedef) {
+                    try p.err(.unexpected_type_name, nameToken, .{name});
+                    return error.ParsingFailed;
+                }
                 try p.checkDeprecatedUnavailable(sym.qt, nameToken, sym.token);
                 if (sym.kind == .constexpr) {
                     return .{
