@@ -150,3 +150,31 @@ fnDef: 'fn (a: f2v: vector(2, float), b: i2v: vector(2, int), c: i3v: vector(3, 
 
     implicit returnStmt: 'void'
 
+fnDef: 'fn (a: f2v: vector(2, float), b: i2v: vector(2, int), c: i3v: vector(3, int)) void'
+ name: explicit_casts
+ body:
+  compoundStmt
+    cast: (Bitcast) 'f2v: vector(2, float)'
+      implicit cast: (LValToRVal) 'i2v: vector(2, int)'
+        declRefExpr: 'i2v: vector(2, int)' lvalue
+         name: b
+
+    cast: (NoOP) 'i2v: vector(2, int)'
+      implicit cast: (LValToRVal) 'i2v: vector(2, int)'
+        declRefExpr: 'i2v: vector(2, int)' lvalue
+         name: b
+
+    cast: (Bitcast) 'long'
+      implicit cast: (LValToRVal) 'i2v: vector(2, int)'
+        declRefExpr: 'i2v: vector(2, int)' lvalue
+         name: b
+
+    structDecl: 'struct S'
+      recordField: 'long'
+       name: a
+
+    cast: (Bitcast) 'f2v: vector(2, float)'
+      intLiteral: 'long' (value: 1)
+
+    implicit returnStmt: 'void'
+

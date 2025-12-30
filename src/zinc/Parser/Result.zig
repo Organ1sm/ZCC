@@ -862,18 +862,50 @@ pub fn castType(res: *Result, p: *Parser, destQt: QualType, operandToken: TokenI
         return;
     }
 
+    const comp = p.comp;
+
     var explicitCK: Node.Cast.Kind = undefined;
 
-    const destSK = destQt.scalarKind(p.comp);
-    const srcSK = res.qt.scalarKind(p.comp);
+    const destSK = destQt.scalarKind(comp);
+    const srcSK = res.qt.scalarKind(comp);
 
-    if (destQt.is(p.comp, .void)) {
+    const destVec = destQt.is(comp, .vector);
+    const srcVec = res.qt.is(comp, .vector);
+
+    if (destQt.is(comp, .void)) {
         // everything can cast to void
         explicitCK = .ToVoid;
         res.value = .{};
-    } else if (res.qt.is(p.comp, .void)) {
+    } else if (res.qt.is(comp, .void)) {
         try p.err(.invalid_cast_operand_type, operandToken, .{res.qt});
         return error.ParsingFailed;
+    } else if (destVec and srcVec) {
+        if (destQt.eql(res.qt, comp)) {
+            explicitCK = .NoOP;
+        } else if (destQt.sizeCompare(res.qt, comp) == .eq) {
+            explicitCK = .Bitcast;
+        } else {
+            try p.err(.invalid_vec_conversion, lparen, .{ destQt, res.qt });
+            return error.ParsingFailed;
+        }
+    } else if (destVec or srcVec) {
+        const nonVecSk = if (destVec) srcSK else destSK;
+        const vecQt = if (destVec) destQt else res.qt;
+        const nonVecQt = if (destVec) res.qt else destQt;
+        const nonVecToken = if (destVec) operandToken else lparen;
+
+        if (nonVecSk == .None) {
+            try p.err(.invalid_cast_operand_type, nonVecToken, .{nonVecQt});
+            return error.ParsingFailed;
+        } else if (!nonVecSk.isInt()) {
+            try p.err(.invalid_vec_conversion_scalar, nonVecToken, .{ vecQt, nonVecQt });
+            return error.ParsingFailed;
+        } else if (destQt.sizeCompare(res.qt, comp) != .eq) {
+            try p.err(.invalid_vec_conversion_int, nonVecToken, .{ vecQt, nonVecQt });
+            return error.ParsingFailed;
+        } else {
+            explicitCK = .Bitcast;
+        }
     } else if (destSK == .NullptrTy) {
         res.value = .{};
         if (srcSK == .NullptrTy) {
@@ -885,7 +917,7 @@ pub fn castType(res: *Result, p: *Parser, destQt: QualType, operandToken: TokenI
     } else if (srcSK == .NullptrTy) {
         if (destSK == .Bool) {
             try res.nullToPointer(p, res.qt, lparen);
-            res.value.boolCast(p.comp);
+            res.value.boolCast(comp);
             res.qt = .bool;
             try res.implicitCast(p, .PointerToBool, lparen);
             try res.saveValue(p);
@@ -896,7 +928,7 @@ pub fn castType(res: *Result, p: *Parser, destQt: QualType, operandToken: TokenI
             return error.ParsingFailed;
         }
         explicitCK = .NoOP;
-    } else if (res.value.isZero(p.comp) and destSK.isPointer()) {
+    } else if (res.value.isZero(comp) and destSK.isPointer()) {
         explicitCK = .NullToPointer;
     } else if (destSK != .None) cast: {
         if (destSK.isFloat() and srcSK.isPointer()) {
@@ -907,7 +939,7 @@ pub fn castType(res: *Result, p: *Parser, destQt: QualType, operandToken: TokenI
             return error.ParsingFailed;
         }
 
-        if (destQt.eql(res.qt, p.comp)) {
+        if (destQt.eql(res.qt, comp)) {
             explicitCK = .NoOP;
         }
         // dest type is bool
@@ -916,13 +948,13 @@ pub fn castType(res: *Result, p: *Parser, destQt: QualType, operandToken: TokenI
                 explicitCK = .PointerToBool;
             } else if (srcSK.isInt()) {
                 if (!srcSK.isReal()) {
-                    res.qt = res.qt.toReal(p.comp);
+                    res.qt = res.qt.toReal(comp);
                     try res.implicitCast(p, .ComplexIntToReal, lparen);
                 }
                 explicitCK = .IntToBool;
             } else if (srcSK.isFloat()) {
                 if (!srcSK.isReal()) {
-                    res.qt = res.qt.toReal(p.comp);
+                    res.qt = res.qt.toReal(comp);
                     try res.implicitCast(p, .ComplexFloatToReal, lparen);
                 }
                 explicitCK = .FloatToBool;
@@ -932,7 +964,7 @@ pub fn castType(res: *Result, p: *Parser, destQt: QualType, operandToken: TokenI
         else if (destSK.isInt()) {
             if (srcSK == .Bool) {
                 if (!destSK.isReal()) {
-                    res.qt = destQt.toReal(p.comp);
+                    res.qt = destQt.toReal(comp);
                     try res.implicitCast(p, .BoolToInt, lparen);
                     explicitCK = .RealToComplexInt;
                 } else {
@@ -942,11 +974,11 @@ pub fn castType(res: *Result, p: *Parser, destQt: QualType, operandToken: TokenI
                 if (srcSK.isReal() and destSK.isReal()) {
                     explicitCK = .IntCast;
                 } else if (srcSK.isReal()) {
-                    res.qt = destQt.toReal(p.comp);
+                    res.qt = destQt.toReal(comp);
                     try res.implicitCast(p, .IntCast, lparen);
                     explicitCK = .RealToComplexInt;
                 } else if (destSK.isReal()) {
-                    res.qt = res.qt.toReal(p.comp);
+                    res.qt = res.qt.toReal(comp);
                     try res.implicitCast(p, .ComplexIntToReal, lparen);
                     explicitCK = .IntCast;
                 } else {
@@ -955,7 +987,7 @@ pub fn castType(res: *Result, p: *Parser, destQt: QualType, operandToken: TokenI
             } else if (srcSK.isPointer()) {
                 res.value = .{};
                 if (!destSK.isReal()) {
-                    res.qt = destQt.toReal(p.comp);
+                    res.qt = destQt.toReal(comp);
                     try res.implicitCast(p, .PointerToInt, lparen);
                     explicitCK = .RealToComplexInt;
                 } else {
@@ -964,11 +996,11 @@ pub fn castType(res: *Result, p: *Parser, destQt: QualType, operandToken: TokenI
             } else if (srcSK.isReal() and destSK.isReal()) {
                 explicitCK = .FloatToInt;
             } else if (srcSK.isReal()) {
-                res.qt = destQt.toReal(p.comp);
+                res.qt = destQt.toReal(comp);
                 try res.implicitCast(p, .FloatToInt, lparen);
                 explicitCK = .RealToComplexInt;
             } else if (destSK.isReal()) {
-                res.qt = res.qt.toReal(p.comp);
+                res.qt = res.qt.toReal(comp);
                 try res.implicitCast(p, .ComplexFloatToReal, lparen);
                 explicitCK = .FloatToInt;
             } else {
@@ -979,15 +1011,15 @@ pub fn castType(res: *Result, p: *Parser, destQt: QualType, operandToken: TokenI
                 explicitCK = .Bitcast;
             } else if (srcSK.isInt()) {
                 if (!srcSK.isReal()) {
-                    res.qt = res.qt.toReal(p.comp);
+                    res.qt = res.qt.toReal(comp);
                     try res.implicitCast(p, .ComplexIntToReal, lparen);
                 }
                 explicitCK = .IntToPointer;
             } else if (srcSK == .Bool) {
                 explicitCK = .BoolToPointer;
-            } else if (res.qt.is(p.comp, .array)) {
+            } else if (res.qt.is(comp, .array)) {
                 explicitCK = .ArrayToPointer;
-            } else if (res.qt.is(p.comp, .func)) {
+            } else if (res.qt.is(comp, .func)) {
                 explicitCK = .FunctionToPointer;
             } else {
                 try p.err(.invalid_cast_operand_type, operandToken, .{res.qt});
@@ -1006,11 +1038,11 @@ pub fn castType(res: *Result, p: *Parser, destQt: QualType, operandToken: TokenI
                 if (srcSK.isReal() and destSK.isReal()) {
                     explicitCK = .IntToFloat;
                 } else if (srcSK.isReal()) {
-                    res.qt = destQt.toReal(p.comp);
+                    res.qt = destQt.toReal(comp);
                     try res.implicitCast(p, .IntToFloat, lparen);
                     explicitCK = .RealToComplexFloat;
                 } else if (destSK.isReal()) {
-                    res.qt = res.qt.toReal(p.comp);
+                    res.qt = res.qt.toReal(comp);
                     try res.implicitCast(p, .ComplexIntToReal, lparen);
                     explicitCK = .IntToFloat;
                 } else {
@@ -1019,11 +1051,11 @@ pub fn castType(res: *Result, p: *Parser, destQt: QualType, operandToken: TokenI
             } else if (srcSK.isReal() and destSK.isReal()) {
                 explicitCK = .FloatCast;
             } else if (srcSK.isReal()) {
-                res.qt = destQt.toReal(p.comp);
+                res.qt = destQt.toReal(comp);
                 try res.implicitCast(p, .FloatCast, lparen);
                 explicitCK = .RealToComplexFloat;
             } else if (destSK.isReal()) {
-                res.qt = res.qt.toReal(p.comp);
+                res.qt = res.qt.toReal(comp);
                 try res.implicitCast(p, .ComplexFloatToReal, lparen);
                 explicitCK = .FloatCast;
             } else {
@@ -1036,24 +1068,24 @@ pub fn castType(res: *Result, p: *Parser, destQt: QualType, operandToken: TokenI
         const srcIsInt = srcSK.isInt() or srcSK.isPointer();
         const destIsInt = destSK.isInt() or destSK.isPointer();
         if (destSK == .Bool) {
-            res.value.boolCast(p.comp);
+            res.value.boolCast(comp);
         } else if (srcSK.isFloat() and destIsInt) {
-            if (destQt.hasIncompleteSize(p.comp)) {
+            if (destQt.hasIncompleteSize(comp)) {
                 try p.err(.cast_to_incomplete_type, lparen, .{destQt});
                 return error.ParsingFailed;
             }
             // Explicit cast, no conversion warning
-            _ = try res.value.floatToInt(destQt, p.comp);
+            _ = try res.value.floatToInt(destQt, comp);
         } else if (destSK.isFloat() and srcIsInt) {
-            try res.value.intToFloat(destQt, p.comp);
+            try res.value.intToFloat(destQt, comp);
         } else if (destSK.isFloat() and srcSK.isFloat()) {
-            try res.value.floatCast(destQt, p.comp);
+            try res.value.floatCast(destQt, comp);
         } else if (srcIsInt and destIsInt) {
-            if (destQt.hasIncompleteSize(p.comp)) {
+            if (destQt.hasIncompleteSize(comp)) {
                 try p.err(.cast_to_incomplete_type, lparen, .{destQt});
                 return error.ParsingFailed;
             }
-            _ = try res.value.intCast(destQt, p.comp);
+            _ = try res.value.intCast(destQt, comp);
         }
     } else if (destQt.get(p.comp, .@"union")) |unionTy| {
         if (unionTy.layout == null) {
@@ -1062,7 +1094,7 @@ pub fn castType(res: *Result, p: *Parser, destQt: QualType, operandToken: TokenI
         }
 
         for (unionTy.fields) |field| {
-            if (field.qt.eql(res.qt, p.comp)) {
+            if (field.qt.eql(res.qt, comp)) {
                 explicitCK = .UnionCast;
                 try p.err(.gnu_union_cast, lparen, .{});
                 break;
@@ -1079,7 +1111,7 @@ pub fn castType(res: *Result, p: *Parser, destQt: QualType, operandToken: TokenI
     if (destQt.isQualified())
         try p.err(.qual_cast, lparen, .{destQt});
 
-    if (destSK.isInt() and srcSK.isPointer() and destQt.sizeCompare(res.qt, p.comp) == .lt)
+    if (destSK.isInt() and srcSK.isPointer() and destQt.sizeCompare(res.qt, comp) == .lt)
         try p.err(.cast_to_smaller_int, lparen, .{ destQt, res.qt });
 
     res.qt = destQt.unqualified();
