@@ -6441,10 +6441,6 @@ fn parseMulExpr(p: *Parser) Error!?Result {
 ///  : '(' compoundStmt ')'
 ///  | '(' typeName ')' cast-expression
 ///  | '(' typeName ')' '{' initializerItems '}'
-///  | __builtin_choose_expr '(' intger-const-expression ',' assign-expression ',' assign-expression ')'
-///  | __builtin_va_arg '(' assign-expression ',' typeName ')'
-///  | __builtin_offsetof '(' type-name ',' offsetofMemberDesignator ')'
-///  | __builtin_bitoffsetof '(' type-name ',' offsetofMemberDesignator ')'
 ///  | unary-expression
 fn parseCastExpr(p: *Parser) Error!?Result {
     if (p.eat(.LParen)) |lp| castExpr: {
@@ -6493,22 +6489,55 @@ fn parseCastExpr(p: *Parser) Error!?Result {
         return operand;
     }
 
-    switch (p.currToken()) {
-        .BuiltinChooseExpr => return try p.parseBuiltinChooseExpr(),
-        .BuiltinVaArg => return try p.builtinVaArg(),
-        .BuiltinOffsetof => return try p.builtinOffsetof(.Bytes),
-        .BuiltinBitOffsetof => return try p.builtinOffsetof(.Bits),
-        .BuiltinTypesCompatibleP => return try p.typesCompatible(),
-        // TODO: other special-cased builtins
-        else => {},
-    }
-
     return p.parseUnaryExpr();
 }
 
-fn typesCompatible(p: *Parser) Error!Result {
-    const builtinToken = p.tokenIdx;
-    p.tokenIdx += 1;
+/// convertvector : __builtin_convertvector '(' assignExpr ',' typeName ')'
+fn convertVector(p: *Parser, builtinToken: TokenIndex) Error!Result {
+    const lparen = try p.expectToken(.LParen);
+    const operand = try p.expect(parseAssignExpr);
+    _ = try p.expectToken(.Comma);
+
+    var destQt = (try p.parseTypeName()) orelse {
+        try p.err(.expected_type, p.tokenIdx, .{});
+        p.skipTo(.RParen);
+        return error.ParsingFailed;
+    };
+
+    try p.expectClosing(lparen, .RParen);
+    if (operand.qt.isInvalid() or operand.qt.isInvalid()) {
+        destQt = .invalid;
+    } else check: {
+        const operandVec = operand.qt.get(p.comp, .vector) orelse {
+            try p.err(.convertvector_arg, builtinToken, .{"first"});
+            destQt = .invalid;
+            break :check;
+        };
+        const destVec = destQt.get(p.comp, .vector) orelse {
+            try p.err(.convertvector_arg, builtinToken, .{"second"});
+            destQt = .invalid;
+            break :check;
+        };
+        if (operandVec.len != destVec.len or operandVec.elem.sizeCompare(destVec.elem, p.comp) != .eq) {
+            try p.err(.convertvector_size, builtinToken, .{});
+            destQt = .invalid;
+        }
+    }
+
+    return .{
+        .qt = destQt,
+        .node = try p.addNode(.{
+            .builtinConvertVector = .{
+                .builtinToken = builtinToken,
+                .destQt = destQt,
+                .operand = operand.node,
+            },
+        }),
+    };
+}
+
+/// typesCompatible : __builtin_types_compatible_p '(' typeName ',' typeName ')'
+fn typesCompatible(p: *Parser, builtinToken: TokenIndex) Error!Result {
     const lp = try p.expectToken(.LParen);
 
     const lhs = (try p.parseTypeName()) orelse {
@@ -6543,8 +6572,8 @@ fn typesCompatible(p: *Parser) Error!Result {
     return res;
 }
 
-fn parseBuiltinChooseExpr(p: *Parser) Error!Result {
-    p.tokenIdx += 1;
+/// chooseExpr : __builtin_choose_expr '(' integerConstExpr ',' assignExpr ',' assignExpr ')'
+fn builtinChooseExpr(p: *Parser) Error!Result {
     const lp = try p.expectToken(.LParen);
     const condToken = p.tokenIdx;
     var cond = try p.parseIntegerConstExpr(.NoConstDeclFolding);
@@ -6589,10 +6618,8 @@ fn parseBuiltinChooseExpr(p: *Parser) Error!Result {
     return cond;
 }
 
-fn builtinVaArg(p: *Parser) Error!Result {
-    const builtinToken = p.tokenIdx;
-    p.tokenIdx += 1;
-
+/// vaStart : __builtin_va_arg '(' assignExpr ',' typeName ')'
+fn builtinVaArg(p: *Parser, builtinToken: TokenIndex) Error!Result {
     const lp = try p.expectToken(.LParen);
     const vaListToken = p.tokenIdx;
     var vaList = try p.expect(parseAssignExpr);
@@ -6626,10 +6653,10 @@ fn builtinVaArg(p: *Parser) Error!Result {
 
 const OffsetKind = enum { Bits, Bytes };
 
-fn builtinOffsetof(p: *Parser, offsetKind: OffsetKind) Error!Result {
-    const builtinToken = p.tokenIdx;
-    p.tokenIdx += 1;
-
+/// offsetof
+///  : __builtin_offsetof '(' type-name ',' offsetof-member-designator ')'
+///  | __builtin_bitoffsetof '(' type-name ',' offsetof-member-designator ')'
+fn builtinOffsetof(p: *Parser, builtinToken: TokenIndex, offsetKind: OffsetKind) Error!Result {
     const lparen = try p.expectToken(.LParen);
     const tyToken = p.tokenIdx;
 
@@ -8010,7 +8037,12 @@ fn checkArrayBounds(p: *Parser, index: Result, array: Result, token: TokenIndex)
 ///  | char-literal
 ///  | string-literal
 ///  | '(' expression ')'
-///  | generic-selectioncatch unreachable
+///  | generic-selectioncatch
+///  | convertvector
+///  | typesCompatible
+///  | chooseExpr
+///  | vaStart
+///  | offsetof
 fn parsePrimaryExpr(p: *Parser) Error!?Result {
     if (p.eat(.LParen)) |lp| {
         var groupedExpr = try p.expect(parseExpr);
@@ -8095,6 +8127,16 @@ fn parsePrimaryExpr(p: *Parser) Error!?Result {
                         @tagName(some.builtin.properties.header),
                         Builtin.nameFromTag(some.builtin.tag).span(),
                     });
+                }
+
+                switch (some.builtin.tag) {
+                    .__builtin_choose_expr => return try p.builtinChooseExpr(),
+                    .__builtin_va_arg => return try p.builtinVaArg(nameToken),
+                    .__builtin_offsetof => return try p.builtinOffsetof(nameToken, .Bytes),
+                    .__builtin_bitoffsetof => return try p.builtinOffsetof(nameToken, .Bits),
+                    .__builtin_types_compatible_p => return try p.typesCompatible(nameToken),
+                    .__builtin_convertvector => return try p.convertVector(nameToken),
+                    else => {},
                 }
 
                 return .{
