@@ -6492,6 +6492,75 @@ fn parseCastExpr(p: *Parser) Error!?Result {
     return p.parseUnaryExpr();
 }
 
+/// shufflevector : __builtin_shufflevector '(' assignExpr ',' assignExpr (',' integerConstExpr)* ')'
+fn shuffleVector(p: *Parser, builtinToken: TokenIndex) Error!Result {
+    const lparen = try p.expectToken(.LParen);
+
+    const firstToken = p.tokenIdx;
+    const lhs = try p.expect(parseAssignExpr);
+    _ = try p.expectToken(.Comma);
+    const secondToken = p.tokenIdx;
+    const rhs = try p.expect(parseAssignExpr);
+
+    const comp = p.comp;
+    const gpa = comp.gpa;
+    const maxIndex: ?Value = blk: {
+        if (lhs.qt.isInvalid() or rhs.qt.isInvalid()) break :blk null;
+        const lhsVec = lhs.qt.get(comp, .vector) orelse break :blk null;
+        const rhsVec = rhs.qt.get(comp, .vector) orelse break :blk null;
+
+        break :blk try Value.int(lhsVec.len + rhsVec.len, comp);
+    };
+    const negativeOne = try Value.intern(comp, .{ .int = .{ .i64 = -1 } });
+
+    const listBufferTop = p.listBuffer.items.len;
+    defer p.listBuffer.items.len = listBufferTop;
+
+    while (p.eat(.Comma)) |_| {
+        const indexToken = p.tokenIdx;
+        const index = try p.parseIntegerConstExpr(.GNUFoldingExtension);
+        try p.listBuffer.append(gpa, index.node);
+        if (index.value.compare(.lt, negativeOne, comp)) {
+            try p.err(.shufflevector_negative_index, indexToken, .{});
+        } else if (maxIndex != null and index.value.compare(.gte, maxIndex.?, comp)) {
+            try p.err(.shufflevector_index_too_big, indexToken, .{});
+        }
+    }
+
+    try p.expectClosing(lparen, .RParen);
+
+    var resQt: QualType = .invalid;
+    if (!lhs.qt.isInvalid() and !lhs.qt.is(comp, .vector)) {
+        try p.err(.shufflevector_arg, firstToken, .{"first"});
+    } else if (!rhs.qt.isInvalid() and !rhs.qt.is(comp, .vector)) {
+        try p.err(.shufflevector_arg, secondToken, .{"second"});
+    } else if (!lhs.qt.eql(rhs.qt, comp)) {
+        try p.err(.shufflevector_same_type, builtinToken, .{});
+    } else if (p.listBuffer.items.len == listBufferTop) {
+        resQt = lhs.qt;
+    } else {
+        resQt = try comp.typeStore.put(gpa, .{
+            .vector = .{
+                .elem = lhs.qt.childType(comp),
+                .len = @intCast(p.listBuffer.items.len - listBufferTop),
+            },
+        });
+    }
+
+    return .{
+        .qt = resQt,
+        .node = try p.addNode(.{
+            .builtinShuffleVector = .{
+                .builtinToken = builtinToken,
+                .qt = resQt,
+                .lhs = lhs.node,
+                .rhs = rhs.node,
+                .indexes = p.listBuffer.items[listBufferTop..],
+            },
+        }),
+    };
+}
+
 /// convertvector : __builtin_convertvector '(' assignExpr ',' typeName ')'
 fn convertVector(p: *Parser, builtinToken: TokenIndex) Error!Result {
     const lparen = try p.expectToken(.LParen);
@@ -8038,6 +8107,7 @@ fn checkArrayBounds(p: *Parser, index: Result, array: Result, token: TokenIndex)
 ///  | string-literal
 ///  | '(' expression ')'
 ///  | generic-selectioncatch
+///  | shufflevector
 ///  | convertvector
 ///  | typesCompatible
 ///  | chooseExpr
@@ -8136,6 +8206,7 @@ fn parsePrimaryExpr(p: *Parser) Error!?Result {
                     .__builtin_bitoffsetof => return try p.builtinOffsetof(nameToken, .Bits),
                     .__builtin_types_compatible_p => return try p.typesCompatible(nameToken),
                     .__builtin_convertvector => return try p.convertVector(nameToken),
+                    .__builtin_shufflevector => return try p.shuffleVector(nameToken),
                     else => {},
                 }
 
