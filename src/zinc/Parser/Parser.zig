@@ -6587,7 +6587,7 @@ fn convertVector(p: *Parser, builtinToken: TokenIndex) Error!Result {
             destQt = .invalid;
             break :check;
         };
-        if (operandVec.len != destVec.len or operandVec.elem.sizeCompare(destVec.elem, p.comp) != .eq) {
+        if (operandVec.len != destVec.len) {
             try p.err(.convertvector_size, builtinToken, .{});
             destQt = .invalid;
         }
