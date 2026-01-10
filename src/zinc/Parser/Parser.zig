@@ -7976,7 +7976,7 @@ fn parseCallExpr(p: *Parser, lhs: Result) Error!Result {
         if (callExpr.shouldPerformLvalConversion(argCount))
             try arg.lvalConversion(p, paramToken);
 
-        if (arg.qt.hasIncompleteSize(p.comp) and !arg.qt.is(p.comp, .void))
+        if ((arg.qt.hasIncompleteSize(p.comp) and !arg.qt.is(p.comp, .void) or arg.qt.isInvalid()))
             return error.ParsingFailed;
 
         if (argCount >= paramsLen) {
