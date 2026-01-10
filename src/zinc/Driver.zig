@@ -990,8 +990,8 @@ fn processSource(
     defer tree.deinit();
 
     if (d.dumpAst) {
-        for (tree.nodes.items(.tag), 0..) |nodeTag, i|
-            std.debug.print("{d}: {s}\n", .{ i, @tagName(nodeTag) });
+        // for (tree.nodes.items(.tag), 0..) |nodeTag, i|
+        //     std.debug.print("{d}: {s}\n", .{ i, @tagName(nodeTag) });
 
         var stdoutBuffer: [4096]u8 = undefined;
         var stdout = std.fs.File.stdout().writer(&stdoutBuffer);

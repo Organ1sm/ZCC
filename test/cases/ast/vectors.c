@@ -178,3 +178,71 @@ fnDef: 'fn (a: f2v: vector(2, float), b: i2v: vector(2, int), c: i3v: vector(3, 
 
     implicit returnStmt: 'void'
 
+typedef: 'vector(8, char)'
+ name: vec_a
+
+typedef: 'vector(2, float)'
+ name: vec_b
+
+fnDef: 'fn (a: vec_a: vector(8, char)) vec_b: vector(2, float)'
+ name: bitcast_vector
+ body:
+  compoundStmt
+    returnStmt: 'vec_b: vector(2, float)'
+     expr:
+      implicit cast: (Bitcast) 'vec_b: vector(2, float)'
+        implicit cast: (LValToRVal) 'vec_a: vector(8, char)'
+          declRefExpr: 'vec_a: vector(8, char)' lvalue
+           name: a
+
+fnDef: 'fn () int'
+ name: main
+ body:
+  compoundStmt
+    variable: 'vec_b: vector(2, float)'
+     name: b
+     init:
+      arrayInitExpr: 'vec_b: vector(2, float)'
+        floatLiteral: 'float' (value: 1.4)
+
+        floatLiteral: 'float' (value: 2.4)
+
+    variable: 'vec_a: vector(8, char)'
+     name: a
+     init:
+      implicit cast: (Bitcast) 'vec_a: vector(8, char)'
+        implicit cast: (LValToRVal) 'vec_b: vector(2, float)'
+          declRefExpr: 'vec_b: vector(2, float)' lvalue
+           name: b
+
+    variable: 'vec_a: vector(8, char)'
+     name: a2
+     init:
+      implicit cast: (Bitcast) 'vec_a: vector(8, char)'
+        implicit cast: (LValToRVal) 'vec_b: vector(2, float)'
+          declRefExpr: 'vec_b: vector(2, float)' lvalue
+           name: b
+
+    assignExpr: 'vec_a: vector(8, char)'
+     lhs:
+      declRefExpr: 'vec_a: vector(8, char)' lvalue
+       name: a
+     rhs:
+      implicit cast: (Bitcast) 'vec_a: vector(8, char)'
+        implicit cast: (LValToRVal) 'vec_b: vector(2, float)'
+          declRefExpr: 'vec_b: vector(2, float)' lvalue
+           name: b
+
+    callExpr: 'vec_b: vector(2, float)'
+     callee:
+      implicit cast: (FunctionToPointer) '*fn (a: vec_a: vector(8, char)) vec_b: vector(2, float)'
+        declRefExpr: 'fn (a: vec_a: vector(8, char)) vec_b: vector(2, float)' lvalue
+         name: bitcast_vector
+     args:
+      implicit cast: (Bitcast) 'vec_a: vector(8, char)'
+        implicit cast: (LValToRVal) 'vec_b: vector(2, float)'
+          declRefExpr: 'vec_b: vector(2, float)' lvalue
+           name: b
+
+    implicit returnStmt: 'int' (value: 0)
+

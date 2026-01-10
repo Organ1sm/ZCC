@@ -4256,7 +4256,9 @@ fn findScalarInitializer(
                 return true;
             }
 
-            if (res.qt.eql(qt, comp) and il.list.items.len == 0) {
+            if (il.list.items.len == 0 and
+                (res.qt.eql(qt, p.comp) or (res.qt.is(p.comp, .vector) and res.qt.sizeCompare(qt, p.comp) == .eq)))
+            {
                 try p.setInitializer(il, qt, firstToken, res);
                 return true;
             }
