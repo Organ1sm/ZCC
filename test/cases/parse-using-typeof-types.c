@@ -83,5 +83,5 @@ void bool_init(void) {
     "parse-using-typeof-types.c:55:15: error: parameter cannot have void type" \
     "parse-using-typeof-types.c:60:31: warning: excess elements in array initializer [-Wexcess-initializers]" \
     "parse-using-typeof-types.c:61:29: warning: excess elements in array initializer [-Wexcess-initializers]" \
-    "parse-using-typeof-types.c:67:23: error: initializing 'typeof(_Bool)' from incompatible type 'struct S'" \
-    "parse-using-typeof-types.c:68:20: error: initializing 'typeof(typeof(_Bool))' from incompatible type 'struct S'" \
+    "parse-using-typeof-types.c:67:23: error: initializing 'typeof(_Bool)' (aka '_Bool') from incompatible type 'struct S'" \
+    "parse-using-typeof-types.c:68:20: error: initializing 'typeof(typeof(_Bool))' (aka '_Bool') from incompatible type 'struct S'" \

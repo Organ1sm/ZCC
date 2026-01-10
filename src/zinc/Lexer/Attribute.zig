@@ -1293,7 +1293,7 @@ fn applyTransparentUnion(attr: Attribute, p: *Parser, token: TokenIndex, qt: Qua
 fn applyVectorSize(attr: Attribute, p: *Parser, tok: TokenIndex, qt: *QualType) !void {
     if (qt.isInvalid()) return;
     const scalarKind = qt.scalarKind(p.comp);
-    if (!scalarKind.isArithmetic() or !scalarKind.isReal() or scalarKind == .Enum) {
+    if (scalarKind != .Int and scalarKind != .Float) {
         if (qt.get(p.comp, .@"enum")) |enumTy| {
             if (p.comp.langOpts.emulate == .clang and enumTy.incomplete) {
                 return; // Clang silently ignores vector_size on incomplete enums.
@@ -1301,6 +1301,16 @@ fn applyVectorSize(attr: Attribute, p: *Parser, tok: TokenIndex, qt: *QualType) 
         }
         try p.err(.invalid_vec_elem_ty, tok, .{qt.*});
         return error.ParsingFailed;
+    }
+
+    if (qt.get(p.comp, .bitInt)) |bitInt| {
+        if (bitInt.bits < 8) {
+            try p.err(.bit_int_vec_too_small, tok, .{});
+            return error.ParsingFailed;
+        } else if (!std.math.isPowerOfTwo(bitInt.bits)) {
+            try p.err(.bit_int_vec_not_pow2, tok, .{});
+            return error.ParsingFailed;
+        }
     }
 
     const vecBytes = attr.args.vector_size.bytes;

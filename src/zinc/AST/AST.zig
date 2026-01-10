@@ -272,6 +272,8 @@ pub const Node = union(enum) {
     builtinRef: BuiltinRef,
     builtinChooseExpr: Conditional,
     builtinTypesCompatibleP: TypesCompatible,
+    builtinConvertVector: ConvertVector,
+    builtinShuffleVector: ShuffleVector,
 
     /// C23 bool literal `true` / `false`
     boolLiteral: Literal,
@@ -617,6 +619,20 @@ pub const Node = union(enum) {
         builtinToken: TokenIndex,
         lhs: QualType,
         rhs: QualType,
+    };
+
+    pub const ConvertVector = struct {
+        builtinToken: TokenIndex,
+        destQt: QualType,
+        operand: Node.Index,
+    };
+
+    pub const ShuffleVector = struct {
+        builtinToken: TokenIndex,
+        qt: QualType,
+        lhs: Node.Index,
+        rhs: Node.Index,
+        indexes: []const Node.Index,
     };
 
     pub const Literal = struct {
@@ -1575,6 +1591,22 @@ pub const Node = union(enum) {
                         .rhs = @bitCast(nodeData[1]),
                     },
                 },
+                .BuiltinConvertVector => .{
+                    .builtinConvertVector = .{
+                        .builtinToken = nodeToken,
+                        .destQt = @bitCast(nodeData[0]),
+                        .operand = @enumFromInt(nodeData[1]),
+                    },
+                },
+                .BuiltinShuffleVector => .{
+                    .builtinShuffleVector = .{
+                        .builtinToken = nodeToken,
+                        .qt = @bitCast(nodeData[0]),
+                        .lhs = @enumFromInt(tree.extra.items[nodeData[1]]),
+                        .rhs = @enumFromInt(tree.extra.items[nodeData[1] + 1]),
+                        .indexes = @ptrCast(tree.extra.items[nodeData[1] + 2 ..][0..nodeData[2]]),
+                    },
+                },
                 .ArrayInitExprTwo => .{
                     .arrayInitExpr = .{
                         .lbraceToken = nodeToken,
@@ -1841,6 +1873,8 @@ pub const Node = union(enum) {
             CondExpr,
             BuiltinChooseExpr,
             BuiltinTypesCompatibleP,
+            BuiltinConvertVector,
+            BuiltinShuffleVector,
             ArrayInitExpr,
             ArrayInitExprTwo,
             StructInitExpr,
@@ -2618,6 +2652,24 @@ pub fn setNode(tree: *Tree, index: usize, node: Node) !void {
             repr.data[1] = @bitCast(builtin.rhs);
             repr.tok = builtin.builtinToken;
         },
+        .builtinConvertVector => |builtin| {
+            repr.tag = .BuiltinConvertVector;
+            repr.data[0] = @bitCast(builtin.destQt);
+            repr.data[1] = @intFromEnum(builtin.operand);
+            repr.tok = builtin.builtinToken;
+        },
+        .builtinShuffleVector => |builtin| {
+            repr.tag = .BuiltinShuffleVector;
+            repr.data[0] = @bitCast(builtin.qt);
+            repr.data[1] = @intCast(tree.extra.items.len);
+            repr.data[2] = @intCast(builtin.indexes.len);
+            repr.tok = builtin.builtinToken;
+
+            try tree.extra.ensureUnusedCapacity(tree.comp.gpa, builtin.indexes.len + 2);
+            tree.extra.appendAssumeCapacity(@intFromEnum(builtin.lhs));
+            tree.extra.appendAssumeCapacity(@intFromEnum(builtin.rhs));
+            tree.extra.appendSliceAssumeCapacity(@ptrCast(builtin.indexes));
+        },
         .arrayInitExpr => |init| {
             repr.data[0] = @bitCast(init.containerQt);
             if (init.items.len > 2) {
@@ -3239,6 +3291,30 @@ fn dumpNode(
             try call.rhs.dump(tree.comp, w);
             try w.writeByte('\n');
             try config.setColor(w, .reset);
+        },
+
+        .builtinConvertVector => |convert| {
+            try w.splatByteAll(' ', level + half);
+            try w.writeAll("oprand:\n");
+            try tree.dumpNode(convert.operand, level + delta, config, w);
+        },
+
+        .builtinShuffleVector => |shuffle| {
+            try w.splatByteAll(' ', level + half);
+            try w.writeAll("lhs:\n");
+            try tree.dumpNode(shuffle.lhs, level + delta, config, w);
+
+            try w.splatByteAll(' ', level + half);
+            try w.writeAll("rhs:\n");
+            try tree.dumpNode(shuffle.rhs, level + delta, config, w);
+
+            if (shuffle.indexes.len > 0) {
+                try w.splatByteAll(' ', level + half);
+                try w.writeAll("indexes:\n");
+                for (shuffle.indexes) |index| {
+                    try tree.dumpNode(index, level + delta, config, w);
+                }
+            }
         },
 
         .ifStmt => |@"if"| {

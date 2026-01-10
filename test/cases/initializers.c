@@ -1,4 +1,3 @@
-//zinc-args --std=c23
 void foo(void) {
     int a, b[a] = {};
     (int(int)){};
@@ -239,7 +238,7 @@ union { int x; char c[4]; }
     /* "initializers.c:79:31: warning: variable 's2' is uninitialized when used within its own initialization" */ \
     /* "initializers.c:80:38: warning: variable 's3' is uninitialized when used within its own initialization" */ \
     "initializers.c:104:32: warning: excess elements in array initializer [-Wexcess-initializers]" \
-    "initializers.c:115:12: warning: excess elements in scalar initializer [-Wexcess-initializers]" \
+    "initializers.c:115:12: warning: excess elements in union initializer [-Wexcess-initializers]" \
     "initializers.c:117:22: error: array initializer must be an initializer list or wide string literal" \
     "initializers.c:118:51: warning: initializer overrides previous initialization [-Winitializer-overrides]" \
     "initializers.c:118:36: note: previous initialization" \
@@ -247,9 +246,22 @@ union { int x; char c[4]; }
     "initializers.c:129:17: error: initializing 'void *' from incompatible type 'struct Foo'" \
     "initializers.c:131:15: warning: incompatible pointer types initializing 'long *' from incompatible type 'int *' [-Wincompatible-pointer-types]" \
     "initializers.c:132:23: warning: incompatible pointer types initializing 'unsigned int *' from incompatible type 'int *' converts between pointers to integer types with different sign [-Wpointer-sign]" \
-    "initializers.c:149:35: error: array designator used for non-array type 'struct S'" \
-    "initializers.c:151:30: warning: implicit pointer to integer conversion from 'char [4]' to 'int' [-Wint-conversion]" \
-    "initializers.c:187:28: warning: use of an empty initializer is a C23 extension [-Wc23-extensions]" \
+    "initializers.c:148:35: error: array designator used for non-array type 'struct S'" \
+    "initializers.c:150:30: warning: implicit pointer to integer conversion from 'char [4]' to 'int' [-Wint-conversion]" \
+    "initializers.c:159:26: warning: excess elements in string initializer [-Wexcess-initializers]" \
+    "initializers.c:160:26: warning: excess elements in string initializer [-Wexcess-initializers]" \
+    "initializers.c:161:23: warning: implicit pointer to integer conversion from 'char [3]' to 'char' [-Wint-conversion]" \
+    "initializers.c:162:24: warning: excess elements in array initializer [-Wexcess-initializers]" \
+    "initializers.c:163:22: warning: implicit pointer to integer conversion from 'char [4]' to 'char' [-Wint-conversion]" \
+    "initializers.c:164:27: warning: excess elements in string initializer [-Wexcess-initializers]" \
+    "initializers.c:165:21: warning: implicit pointer to integer conversion from 'int [2]' to 'int' [-Wint-conversion]" \
+    "initializers.c:168:24: warning: excess elements in union initializer [-Wexcess-initializers]" \
+    "initializers.c:169:34: warning: initializer overrides previous initialization [-Winitializer-overrides]" \
+    "initializers.c:169:26: note: previous initialization" \
+    "initializers.c:175:19: error: initializing 'int' from incompatible type 'struct A'" \
+    "initializers.c:179:28: warning: excess elements in vector initializer [-Wexcess-initializers]" \
+    "initializers.c:182:19: error: initializing 'int' from incompatible type 'vec' (vector of 4 'int' values)" \
+    "initializers.c:186:28: warning: use of an empty initializer is a C23 extension [-Wc23-extensions]" \
     "initializers.c:191:33: warning: initializer overrides previous initialization [-Winitializer-overrides]" \
     "initializers.c:191:19: note: previous initialization" \
     "initializers.c:191:38: warning: initializer overrides previous initialization [-Winitializer-overrides]" \

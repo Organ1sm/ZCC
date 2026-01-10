@@ -51,9 +51,198 @@ fnDef: 'fn () void'
         implicit cast: (LValToRVal) 'f2v: vector(2, float)'
           implicit compoundAssignDummyExpr: 'f2v: vector(2, float)' lvalue
        rhs:
-        implicit cast: (VectorSplat) 'float'
+        implicit cast: (VectorSplat) 'f2v: vector(2, float)'
           implicit cast: (IntToFloat) 'float' (value: 2)
             intLiteral: 'int' (value: 2)
 
     implicit returnStmt: 'void'
+
+fnDef: 'fn (vec: f2v: vector(2, float), index: int) float'
+ name: subscript
+ body:
+  compoundStmt
+    assignExpr: 'float'
+     lhs:
+      arrayAccessExpr: 'float' lvalue
+       lhs:
+        declRefExpr: 'f2v: vector(2, float)' lvalue
+         name: vec
+       index:
+        implicit cast: (LValToRVal) 'int'
+          declRefExpr: 'int' lvalue
+           name: index
+     rhs:
+      implicit cast: (IntToFloat) 'float'
+        intLiteral: 'int' (value: 1)
+
+    returnStmt: 'float'
+     expr:
+      implicit cast: (LValToRVal) 'float'
+        arrayAccessExpr: 'float' lvalue
+         lhs:
+          declRefExpr: 'f2v: vector(2, float)' lvalue
+           name: vec
+         index:
+          implicit cast: (LValToRVal) 'int'
+            declRefExpr: 'int' lvalue
+             name: index
+
+typedef: 'vector(2, int)'
+ name: i2v
+
+typedef: 'vector(3, int)'
+ name: i3v
+
+fnDef: 'fn (a: f2v: vector(2, float), b: i2v: vector(2, int), c: i3v: vector(3, int)) void'
+ name: vector_conversions
+ body:
+  compoundStmt
+    addExpr: 'f2v: vector(2, float)'
+     lhs:
+      implicit cast: (LValToRVal) 'f2v: vector(2, float)'
+        declRefExpr: 'f2v: vector(2, float)' lvalue
+         name: a
+     rhs:
+      implicit cast: (Bitcast) 'f2v: vector(2, float)'
+        implicit cast: (LValToRVal) 'i2v: vector(2, int)'
+          declRefExpr: 'i2v: vector(2, int)' lvalue
+           name: b
+
+    addExpr: 'i2v: vector(2, int)'
+     lhs:
+      implicit cast: (LValToRVal) 'i2v: vector(2, int)'
+        declRefExpr: 'i2v: vector(2, int)' lvalue
+         name: b
+     rhs:
+      implicit cast: (Bitcast) 'i2v: vector(2, int)'
+        implicit cast: (LValToRVal) 'f2v: vector(2, float)'
+          declRefExpr: 'f2v: vector(2, float)' lvalue
+           name: a
+
+    addExpr: 'f2v: vector(2, float)'
+     lhs:
+      implicit cast: (LValToRVal) 'f2v: vector(2, float)'
+        declRefExpr: 'f2v: vector(2, float)' lvalue
+         name: a
+     rhs:
+      implicit cast: (VectorSplat) 'f2v: vector(2, float)'
+        implicit cast: (IntToFloat) 'float' (value: 1)
+          intLiteral: 'int' (value: 1)
+
+    addExpr: 'i2v: vector(2, int)'
+     lhs:
+      implicit cast: (LValToRVal) 'i2v: vector(2, int)'
+        declRefExpr: 'i2v: vector(2, int)' lvalue
+         name: b
+     rhs:
+      implicit cast: (VectorSplat) 'i2v: vector(2, int)'
+        intLiteral: 'int' (value: 1)
+
+    addExpr: 'invalid'
+     lhs:
+      implicit cast: (LValToRVal) 'f2v: vector(2, float)'
+        declRefExpr: 'f2v: vector(2, float)' lvalue
+         name: a
+     rhs:
+      implicit cast: (LValToRVal) 'i3v: vector(3, int)'
+        declRefExpr: 'i3v: vector(3, int)' lvalue
+         name: c
+
+    implicit returnStmt: 'void'
+
+fnDef: 'fn (a: f2v: vector(2, float), b: i2v: vector(2, int), c: i3v: vector(3, int)) void'
+ name: explicit_casts
+ body:
+  compoundStmt
+    cast: (Bitcast) 'f2v: vector(2, float)'
+      implicit cast: (LValToRVal) 'i2v: vector(2, int)'
+        declRefExpr: 'i2v: vector(2, int)' lvalue
+         name: b
+
+    cast: (NoOP) 'i2v: vector(2, int)'
+      implicit cast: (LValToRVal) 'i2v: vector(2, int)'
+        declRefExpr: 'i2v: vector(2, int)' lvalue
+         name: b
+
+    cast: (Bitcast) 'long'
+      implicit cast: (LValToRVal) 'i2v: vector(2, int)'
+        declRefExpr: 'i2v: vector(2, int)' lvalue
+         name: b
+
+    structDecl: 'struct S'
+      recordField: 'long'
+       name: a
+
+    cast: (Bitcast) 'f2v: vector(2, float)'
+      intLiteral: 'long' (value: 1)
+
+    implicit returnStmt: 'void'
+
+typedef: 'vector(8, char)'
+ name: vec_a
+
+typedef: 'vector(2, float)'
+ name: vec_b
+
+fnDef: 'fn (a: vec_a: vector(8, char)) vec_b: vector(2, float)'
+ name: bitcast_vector
+ body:
+  compoundStmt
+    returnStmt: 'vec_b: vector(2, float)'
+     expr:
+      implicit cast: (Bitcast) 'vec_b: vector(2, float)'
+        implicit cast: (LValToRVal) 'vec_a: vector(8, char)'
+          declRefExpr: 'vec_a: vector(8, char)' lvalue
+           name: a
+
+fnDef: 'fn () int'
+ name: main
+ body:
+  compoundStmt
+    variable: 'vec_b: vector(2, float)'
+     name: b
+     init:
+      arrayInitExpr: 'vec_b: vector(2, float)'
+        floatLiteral: 'float' (value: 1.4)
+
+        floatLiteral: 'float' (value: 2.4)
+
+    variable: 'vec_a: vector(8, char)'
+     name: a
+     init:
+      implicit cast: (Bitcast) 'vec_a: vector(8, char)'
+        implicit cast: (LValToRVal) 'vec_b: vector(2, float)'
+          declRefExpr: 'vec_b: vector(2, float)' lvalue
+           name: b
+
+    variable: 'vec_a: vector(8, char)'
+     name: a2
+     init:
+      implicit cast: (Bitcast) 'vec_a: vector(8, char)'
+        implicit cast: (LValToRVal) 'vec_b: vector(2, float)'
+          declRefExpr: 'vec_b: vector(2, float)' lvalue
+           name: b
+
+    assignExpr: 'vec_a: vector(8, char)'
+     lhs:
+      declRefExpr: 'vec_a: vector(8, char)' lvalue
+       name: a
+     rhs:
+      implicit cast: (Bitcast) 'vec_a: vector(8, char)'
+        implicit cast: (LValToRVal) 'vec_b: vector(2, float)'
+          declRefExpr: 'vec_b: vector(2, float)' lvalue
+           name: b
+
+    callExpr: 'vec_b: vector(2, float)'
+     callee:
+      implicit cast: (FunctionToPointer) '*fn (a: vec_a: vector(8, char)) vec_b: vector(2, float)'
+        declRefExpr: 'fn (a: vec_a: vector(8, char)) vec_b: vector(2, float)' lvalue
+         name: bitcast_vector
+     args:
+      implicit cast: (Bitcast) 'vec_a: vector(8, char)'
+        implicit cast: (LValToRVal) 'vec_b: vector(2, float)'
+          declRefExpr: 'vec_b: vector(2, float)' lvalue
+           name: b
+
+    implicit returnStmt: 'int' (value: 0)
 

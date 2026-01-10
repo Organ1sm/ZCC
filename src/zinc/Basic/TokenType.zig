@@ -262,13 +262,6 @@ pub const TokenType = enum(u8) {
     // clang keywords
     KeywordFp16,
 
-    // gcc builtins
-    BuiltinChooseExpr,
-    BuiltinVaArg,
-    BuiltinOffsetof,
-    BuiltinBitOffsetof,
-    BuiltinTypesCompatibleP,
-
     // MS extension
     KeywordDeclSpec,
     KeywordMSInt64_,
@@ -450,11 +443,6 @@ pub const TokenType = enum(u8) {
             .KeywordGccAlignof1,
             .KeywordGccAlignof2,
             .KeywordGccExtension,
-            .BuiltinChooseExpr,
-            .BuiltinVaArg,
-            .BuiltinOffsetof,
-            .BuiltinBitOffsetof,
-            .BuiltinTypesCompatibleP,
             .KeywordAttribute1,
             .KeywordAttribute2,
             .Identifier,
@@ -812,11 +800,6 @@ pub const TokenType = enum(u8) {
             .KeywordVarOpt => "__VA_OPT__",
             .KeywordTypeof1 => "__typeof",
             .KeywordTypeof2 => "__typeof__",
-            .BuiltinChooseExpr => "__builtin_choose_expr",
-            .BuiltinVaArg => "__builtin_va_arg",
-            .BuiltinOffsetof => "__builtin_offsetof",
-            .BuiltinBitOffsetof => "__builtin_bitoffsetof",
-            .BuiltinTypesCompatibleP => "__builtin_types_compatible_p",
             .KeywordAttribute1 => "__attribute",
             .KeywordAttribute2 => "__attribute__",
             .KeywordNonnull => "_Nonnull",
@@ -835,11 +818,6 @@ pub const TokenType = enum(u8) {
             .MacroFunc,
             .MacroFunction,
             .MacroPrettyFunc,
-            .BuiltinChooseExpr,
-            .BuiltinVaArg,
-            .BuiltinOffsetof,
-            .BuiltinBitOffsetof,
-            .BuiltinTypesCompatibleP,
             => "an identifier",
 
             .StringLiteral,
@@ -861,7 +839,7 @@ pub const TokenType = enum(u8) {
 
             .PPNumber, .EmbedByte => "a number",
 
-            else => id.lexeme().?, // handled in getTokenText();
+            else => id.lexeme().?,
         };
     }
 

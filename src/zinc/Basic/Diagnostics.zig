@@ -333,8 +333,8 @@ pub fn set(d: *Diagnostics, name: []const u8, to: Message.Kind) Compilation.Erro
             for (@field(Option, group.name)) |option| {
                 d.state.options.put(option, to);
             }
+            return;
         }
-        return;
     }
 
     var buf: [256]u8 = undefined;
