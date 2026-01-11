@@ -5447,18 +5447,27 @@ fn parseSwitchStmt(p: *Parser, kwSwitch: TokenIndex) Error!Node.Index {
 
 /// case-statement : `case` integer-constant-expression ':'
 fn parseCaseStmt(p: *Parser, caseToken: u32) Error!?Node.Index {
-    const firstItem = try p.parseIntegerConstExpr(.GNUFoldingExtension);
+    var firstItem = try p.parseIntegerConstExpr(.GNUFoldingExtension);
     const ellipsis = p.tokenIdx; // `...`
-    const secondItem = if (p.eat(.Ellipsis) != null) blk: {
+    var secondItem = if (p.eat(.Ellipsis) != null) blk: {
         try p.err(.gnu_switch_range, ellipsis, .{});
         break :blk try p.parseIntegerConstExpr(.GNUFoldingExtension);
     } else null;
 
     _ = try p.expectToken(.Colon);
 
-    if (p.@"switch") |some| check: {
-        if (some.qt.hasIncompleteSize(p.comp)) // error already reported for incomplete size
+    if (p.@"switch") |@"switch"| check: {
+        if (@"switch".qt.hasIncompleteSize(p.comp)) // error already reported for incomplete size
             break :check;
+
+        //   Coerce to switch condition type
+        try firstItem.coerce(p, @"switch".qt, caseToken + 1, .assign);
+        try firstItem.putValue(p);
+
+        if (secondItem) |*item| {
+            try item.coerce(p, @"switch".qt, ellipsis + 1, .assign);
+            try item.putValue(p);
+        }
 
         const first = firstItem.value;
         const last = if (secondItem) |second| second.value else first;
@@ -5474,7 +5483,7 @@ fn parseCaseStmt(p: *Parser, caseToken: u32) Error!?Node.Index {
         }
 
         // TODO cast to target type
-        const prev = (try some.add(first, last, caseToken + 1)) orelse break :check;
+        const prev = (try @"switch".add(first, last, caseToken + 1)) orelse break :check;
 
         try p.err(.duplicate_switch_case, caseToken + 1, .{firstItem});
         try p.err(.previous_case, prev.token, .{});
@@ -6062,9 +6071,7 @@ fn constExpr(p: *Parser, declFolding: ConstDeclFoldingMode) Error!Result {
     if (res.qt.isInvalid() or res.value.isNone())
         return res;
 
-    // saveValue sets val to unavailable
-    var copy = res;
-    try copy.saveValue(p);
+    try res.putValue(p);
     return res;
 }
 

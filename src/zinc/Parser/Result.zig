@@ -837,12 +837,7 @@ fn shouldEval(lhs: *Result, rhs: *Result, p: *Parser) Error!bool {
 /// Saves value and replaces it with `.unavailable`.
 pub fn saveValue(res: *Result, p: *Parser) !void {
     assert(!p.inMacro);
-    if (res.value.isNone() or res.value.isNull())
-        return;
-
-    if (!p.inMacro)
-        try p.tree.valueMap.put(p.comp.gpa, res.node, res.value);
-
+    try res.putValue(p);
     res.value = .{};
 }
 
