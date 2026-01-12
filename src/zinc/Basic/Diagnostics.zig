@@ -189,6 +189,7 @@ pub const Option = enum {
     @"nullability-extension",
     nullability,
     @"microsoft-flexible-array",
+    @"out-of-scope-function",
 
     /// GNU extensions
     pub const gnu = [_]Option{

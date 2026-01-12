@@ -605,6 +605,51 @@ fn errExpectedToken(p: *Parser, expected: TokenType, actual: TokenType) Error {
     return error.ParsingFailed;
 }
 
+/// Recursively sets the definition field of `tentative declaration` to `definition`.
+pub fn setTentativeDeclDefinition(p: *Parser, tentativeDecl: Node.Index, definition: Node.Index) void {
+    const nodeData = &p.tree.nodes.items(.data)[@intFromEnum(tentativeDecl)];
+    switch (p.tree.nodes.items(.tag)[@intFromEnum(tentativeDecl)]) {
+        .FnProto => {},
+        .Variable => {},
+        else => return,
+    }
+
+    const prev: Node.OptIndex = @enumFromInt(nodeData[2]);
+
+    nodeData[2] = @intFromEnum(definition);
+    if (prev.unpack()) |some| {
+        p.setTentativeDeclDefinition(some, definition);
+    }
+}
+
+/// Clears the defintion field of declarations that were not defined so that
+/// the field always contains a _def if present.
+fn clearNonTentativeDefinitions(p: *Parser) void {
+    const tags = p.tree.nodes.items(.tag);
+    const data = p.tree.nodes.items(.data);
+    for (p.tree.rootDecls.items) |rootDecl| {
+        switch (tags[@intFromEnum(rootDecl)]) {
+            .FnProto => {
+                const nodeData = &data[@intFromEnum(rootDecl)];
+                if (nodeData[2] != @intFromEnum(Node.OptIndex.null)) {
+                    if (tags[nodeData[2]] != .FnDef) {
+                        nodeData[2] = @intFromEnum(Node.OptIndex.null);
+                    }
+                }
+            },
+            .Variable => {
+                const nodeData = &data[@intFromEnum(rootDecl)];
+                if (nodeData[2] != @intFromEnum(Node.OptIndex.null)) {
+                    if (tags[nodeData[2]] != .VariableDef) {
+                        nodeData[2] = @intFromEnum(Node.OptIndex.null);
+                    }
+                }
+            },
+            else => {},
+        }
+    }
+}
+
 pub fn getTokenText(p: *Parser, index: TokenIndex) []const u8 {
     if (p.tokenIds[index].lexeme()) |some|
         return some;
@@ -885,6 +930,8 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!AST {
         try p.err(.empty_translation_unit, p.tokenIdx - 1, .{});
 
     pp.comp.pragmaEvent(.AfterParse);
+
+    p.clearNonTentativeDefinitions();
 
     return p.tree;
 }
@@ -1350,6 +1397,7 @@ fn parseDeclaration(p: *Parser) Error!bool {
                     .threadLocal = declSpec.threadLocal != null,
                     .implicit = false,
                     .initializer = if (initDeclarator.initializer) |some| some.node else null,
+                    .definition = null,
                 },
             });
         }
@@ -1378,6 +1426,8 @@ fn parseDeclaration(p: *Parser) Error!bool {
                 if (initDeclarator.d.qt.@"const" or declSpec.constexpr != null) init.value else .{},
                 declSpec.constexpr != null,
             );
+        } else if (initDeclarator.d.qt.is(p.comp, .func)) {
+            try p.symStack.declareSymbol(internedName, initDeclarator.d.qt, initDeclarator.d.name, declNode);
         } else if (p.func.qt != null and declSpec.storageClass != .@"extern") {
             try p.symStack.defineSymbol(internedName, initDeclarator.d.qt, initDeclarator.d.name, declNode, .{}, false);
         } else {
@@ -8147,6 +8197,12 @@ fn parsePrimaryExpr(p: *Parser) Error!?Result {
                     try p.err(.unexpected_type_name, nameToken, .{name});
                     return error.ParsingFailed;
                 }
+
+                if (sym.outOfScope) {
+                    try p.err(.out_of_scope_use, nameToken, .{name});
+                    try p.err(.previous_definition, sym.token, .{});
+                }
+
                 try p.checkDeprecatedUnavailable(sym.qt, nameToken, sym.token);
                 if (sym.kind == .constexpr) {
                     return .{
@@ -8497,6 +8553,7 @@ fn makePredefinedIdentifier(p: *Parser, slice: []const u8) !Result {
                 .threadLocal = false,
                 .implicit = true,
                 .initializer = strLit,
+                .definition = null,
             },
         }),
     };

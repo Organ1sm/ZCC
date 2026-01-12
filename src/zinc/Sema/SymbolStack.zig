@@ -24,6 +24,7 @@ pub const Symbol = struct {
     token: TokenIndex,
     /// The node index in the AST (Abstract Syntax Tree) that represents this symbol.
     node: Node.OptIndex = .null,
+    outOfScope: bool = false,
     /// The kind of the symbol, which categorizes it into various types like typedef, enum, etc.
     kind: Kind,
     /// The value of the symbol, if it has one.
@@ -264,6 +265,8 @@ pub fn defineSymbol(
                     if (qt.isInvalid()) return;
                     try self.p.err(.redefinition_incompatible, token, .{self.p.getTokenText(token)});
                     try self.p.err(.previous_definition, prev.token, .{});
+                } else {
+                    if (prev.node.unpack()) |some| self.p.setTentativeDeclDefinition(some, node);
                 }
             },
             .definition, .constexpr => if (!prev.qt.isInvalid()) {
@@ -305,6 +308,7 @@ pub fn declareSymbol(
     token: TokenIndex,
     node: Node.Index,
 ) !void {
+    const comp = self.p.comp;
     if (self.get(name, .vars)) |prev| {
         switch (prev.kind) {
             .enumeration => {
@@ -313,18 +317,21 @@ pub fn declareSymbol(
                 try self.p.err(.previous_definition, prev.token, .{});
             },
             .declaration => {
-                if (!prev.qt.isInvalid() and !qt.eqlQualified(prev.qt, self.p.comp)) {
-                    if (qt.isInvalid()) return;
-                    try self.p.err(.redefinition_incompatible, token, .{self.p.getTokenText(token)});
-                    try self.p.err(.previous_definition, prev.token, .{});
-                }
-            },
-            .definition, .constexpr => {
-                if (!prev.qt.isInvalid() and !qt.eqlQualified(prev.qt, self.p.comp)) {
+                if (!prev.qt.isInvalid() and !qt.eqlQualified(prev.qt, comp)) {
                     if (qt.isInvalid()) return;
                     try self.p.err(.redefinition_incompatible, token, .{self.p.getTokenText(token)});
                     try self.p.err(.previous_definition, prev.token, .{});
                 } else {
+                    if (prev.node.unpack()) |some| self.p.setTentativeDeclDefinition(node, some);
+                }
+            },
+            .definition, .constexpr => {
+                if (!prev.qt.isInvalid() and !qt.eqlQualified(prev.qt, comp)) {
+                    if (qt.isInvalid()) return;
+                    try self.p.err(.redefinition_incompatible, token, .{self.p.getTokenText(token)});
+                    try self.p.err(.previous_definition, prev.token, .{});
+                } else {
+                    if (prev.node.unpack()) |some| self.p.setTentativeDeclDefinition(node, some);
                     return;
                 }
             },
@@ -344,6 +351,19 @@ pub fn declareSymbol(
         .node = .pack(node),
         .value = .{},
     });
+
+    // Declare out of scope symbol for functions declared in functions.
+    if (self.activeLen > 1 and !comp.langOpts.standard.atLeast(.c23) and qt.is(comp, .func)) {
+        try self.scopes.items[0].vars.put(comp.gpa, name, .{
+            .kind = .declaration,
+            .name = name,
+            .token = token,
+            .qt = qt,
+            .node = .pack(node),
+            .value = .{},
+            .outOfScope = true,
+        });
+    }
 }
 
 pub fn defineParam(
