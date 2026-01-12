@@ -19,10 +19,10 @@ implicit typedef: 'struct __NSConstantString_tag'
 implicit typedef: 'long double'
  name: __float80
 
-fnProto: 'invalid'
+function: 'invalid'
  name: a
 
-fnDef: 'fn () void'
+function: 'fn () void'
  name: bad
  body:
   compoundStmt
@@ -61,7 +61,7 @@ fnDef: 'fn () void'
 
     implicit returnStmt: 'void'
 
-fnDef: 'fn () void'
+function: 'fn () void'
  name: good
  body:
   compoundStmt

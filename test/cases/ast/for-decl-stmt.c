@@ -16,7 +16,7 @@ implicit typedef: 'struct __NSConstantString_tag'
 implicit typedef: 'long double'
  name: __float80
 
-fnDef: 'fn () int'
+function: 'fn () int'
  name: main
  body:
   compoundStmt

@@ -27,7 +27,7 @@ structDecl: 'struct S'
    bits:
     intLiteral: 'int' (value: 5)
 
-fnDef: 'fn () void'
+function: 'fn () void'
  name: foo
  body:
   compoundStmt

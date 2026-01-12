@@ -102,13 +102,13 @@ pub fn generateIR(tree: *const Tree) Compilation.Error!IR {
             .enumForwardDecl,
             => {},
 
-            .fnProto => {},
-
-            .fnDef => |def| c.genFn(def) catch |err| switch (err) {
-                error.FatalError => return error.FatalError,
-                error.OutOfMemory => return error.OutOfMemory,
+            .function => |func| {
+                if (func.body == null) continue;
+                c.genFn(func) catch |err| switch (err) {
+                    error.FatalError => return error.FatalError,
+                    error.OutOfMemory => return error.OutOfMemory,
+                };
             },
-
             .variable => |variable| c.genVar(variable) catch |err| switch (err) {
                 error.FatalError => return error.FatalError,
                 error.OutOfMemory => return error.OutOfMemory,
@@ -182,9 +182,9 @@ fn genType(c: *CodeGen, qt: QualType) !Interner.Ref {
     return c.builder.interner.put(c.builder.gpa, key);
 }
 
-fn genFn(c: *CodeGen, def: Node.FnDef) Error!void {
-    const name = c.tree.tokenSlice(def.nameToken);
-    const funcTy = def.qt.base(c.comp).type.func;
+fn genFn(c: *CodeGen, func: Node.Function) Error!void {
+    const name = c.tree.tokenSlice(func.nameToken);
+    const funcTy = func.qt.base(c.comp).type.func;
     c.retNodes.items.len = 0;
 
     try c.builder.startFn();
@@ -204,7 +204,7 @@ fn genFn(c: *CodeGen, def: Node.FnDef) Error!void {
 
     // Generate body
     c.returnLabel = try c.builder.makeLabel("return");
-    try c.genStmt(def.body);
+    try c.genStmt(func.body.?);
 
     // Relocate returns
     if (c.retNodes.items.len != 1)
@@ -269,10 +269,8 @@ fn genExpr(c: *CodeGen, nodeIdx: Node.Index) Error!IR.Ref {
         .stringLiteralExpr,
         => unreachable, // These should have an entry in value_map.
 
-        .fnDef => unreachable,
-
         .staticAssert,
-        .fnProto,
+        .function,
         .typedef,
         .structDecl,
         .unionDecl,

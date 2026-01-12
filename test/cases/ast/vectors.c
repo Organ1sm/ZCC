@@ -22,7 +22,7 @@ typedef: 'float'
 typedef: 'vector(2, float)'
  name: f2v
 
-fnDef: 'fn () void'
+function: 'fn () void'
  name: foo
  body:
   compoundStmt
@@ -57,7 +57,7 @@ fnDef: 'fn () void'
 
     implicit returnStmt: 'void'
 
-fnDef: 'fn (vec: f2v: vector(2, float), index: int) float'
+function: 'fn (vec: f2v: vector(2, float), index: int) float'
  name: subscript
  body:
   compoundStmt
@@ -93,7 +93,7 @@ typedef: 'vector(2, int)'
 typedef: 'vector(3, int)'
  name: i3v
 
-fnDef: 'fn (a: f2v: vector(2, float), b: i2v: vector(2, int), c: i3v: vector(3, int)) void'
+function: 'fn (a: f2v: vector(2, float), b: i2v: vector(2, int), c: i3v: vector(3, int)) void'
  name: vector_conversions
  body:
   compoundStmt
@@ -150,7 +150,7 @@ fnDef: 'fn (a: f2v: vector(2, float), b: i2v: vector(2, int), c: i3v: vector(3, 
 
     implicit returnStmt: 'void'
 
-fnDef: 'fn (a: f2v: vector(2, float), b: i2v: vector(2, int), c: i3v: vector(3, int)) void'
+function: 'fn (a: f2v: vector(2, float), b: i2v: vector(2, int), c: i3v: vector(3, int)) void'
  name: explicit_casts
  body:
   compoundStmt
@@ -184,7 +184,7 @@ typedef: 'vector(8, char)'
 typedef: 'vector(2, float)'
  name: vec_b
 
-fnDef: 'fn (a: vec_a: vector(8, char)) vec_b: vector(2, float)'
+function: 'fn (a: vec_a: vector(8, char)) vec_b: vector(2, float)'
  name: bitcast_vector
  body:
   compoundStmt
@@ -195,7 +195,7 @@ fnDef: 'fn (a: vec_a: vector(8, char)) vec_b: vector(2, float)'
           declRefExpr: 'vec_a: vector(8, char)' lvalue
            name: a
 
-fnDef: 'fn () int'
+function: 'fn () int'
  name: main
  body:
   compoundStmt

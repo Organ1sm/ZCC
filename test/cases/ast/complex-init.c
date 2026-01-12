@@ -13,7 +13,7 @@ implicit typedef: '[1]struct __va_list_tag'
 implicit typedef: 'struct __NSConstantString_tag'
  name: __NSConstantString
 
-fnDef: 'fn () void'
+function: 'fn () void'
  name: foo
  body:
   compoundStmt

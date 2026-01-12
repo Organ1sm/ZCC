@@ -28,16 +28,16 @@ variable: 'const volatile int'
 variable: 'const volatile int'
  name: d
 
-fnProto: 'fn (a: restrict *int, b: restrict *int, c: restrict *int) int'
+function: 'fn (a: restrict *int, b: restrict *int, c: restrict *int) int'
  name: foo
 
-fnProto: 'fn (n: int, bar: decayed *[<expr>]int) int'
+function: 'fn (n: int, bar: decayed *[<expr>]int) int'
  name: bar
 
 typedef: 'void'
  name: baz
 
-fnProto: 'attributed(fn () void)'
+function: 'attributed(fn () void)'
  attr: noreturn
  name: abort
 
@@ -56,7 +56,7 @@ typedef: 'C: A: int'
 typedef: '[2]int'
  name: I
 
-fnDef: 'fn (a: decayed *const I: [2]int, b: decayed *const I: [2]int) void'
+function: 'fn (a: decayed *const I: [2]int, b: decayed *const I: [2]int) void'
  name: qux
  body:
   compoundStmt

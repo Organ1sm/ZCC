@@ -172,8 +172,7 @@ pub const TokenWithExpansionLocs = struct {
 pub const Node = union(enum) {
     emptyDecl: EmptyDecl,
     staticAssert: StaticAssert,
-    fnProto: FnProto,
-    fnDef: FnDef,
+    function: Function,
     param: Param,
     variable: Variable,
     typedef: Typedef,
@@ -320,21 +319,14 @@ pub const Node = union(enum) {
         message: ?Node.Index,
     };
 
-    pub const FnProto = struct {
+    pub const Function = struct {
         nameToken: TokenIndex,
         qt: QualType,
         static: bool,
         @"inline": bool,
-        /// The definition for this prototype if one exists.
+        /// The definition for this prototype if one exists (for tentative declarations).
         definition: ?Node.Index,
-    };
-
-    pub const FnDef = struct {
-        nameToken: TokenIndex,
-        qt: QualType,
-        static: bool,
-        @"inline": bool,
-        body: Node.Index,
+        body: ?Node.Index,
     };
 
     pub const Param = struct {
@@ -740,24 +732,26 @@ pub const Node = union(enum) {
                 .FnProto => {
                     const attr: Node.Repr.DeclAttr = @bitCast(nodeData[1]);
                     return .{
-                        .fnProto = .{
+                        .function = .{
                             .nameToken = nodeToken,
                             .qt = @bitCast(nodeData[0]),
                             .static = attr.static,
                             .@"inline" = attr.@"inline",
                             .definition = unpackOptIndex(nodeData[2]),
+                            .body = null,
                         },
                     };
                 },
                 .FnDef => {
                     const attr: Node.Repr.DeclAttr = @bitCast(nodeData[1]);
                     return .{
-                        .fnDef = .{
+                        .function = .{
                             .nameToken = nodeToken,
                             .qt = @bitCast(nodeData[0]),
                             .static = attr.static,
                             .@"inline" = attr.@"inline",
                             .body = @enumFromInt(nodeData[2]),
+                            .definition = null,
                         },
                     };
                 },
@@ -1941,25 +1935,19 @@ pub fn setNode(tree: *Tree, index: usize, node: Node) !void {
             repr.data[1] = packOptIndex(assert.message);
             repr.tok = assert.assertToken;
         },
-        .fnProto => |proto| {
-            repr.tag = .FnProto;
-            repr.data[0] = @bitCast(proto.qt);
+        .function => |func| {
+            repr.tag = if (func.body != null) .FnDef else .FnProto;
+            repr.data[0] = @bitCast(func.qt);
             repr.data[1] = @bitCast(Node.Repr.DeclAttr{
-                .static = proto.static,
-                .@"inline" = proto.@"inline",
+                .static = func.static,
+                .@"inline" = func.@"inline",
             });
-            repr.data[2] = packOptIndex(proto.definition);
-            repr.tok = proto.nameToken;
-        },
-        .fnDef => |def| {
-            repr.tag = .FnDef;
-            repr.data[0] = @bitCast(def.qt);
-            repr.data[1] = @bitCast(Node.Repr.DeclAttr{
-                .static = def.static,
-                .@"inline" = def.@"inline",
-            });
-            repr.data[2] = @intFromEnum(def.body);
-            repr.tok = def.nameToken;
+            if (func.body) |some| {
+                repr.data[2] = @intFromEnum(some);
+            } else {
+                repr.data[2] = packOptIndex(func.definition);
+            }
+            repr.tok = func.nameToken;
         },
         .param => |param| {
             repr.tag = .Param;
@@ -3082,45 +3070,33 @@ fn dumpNode(
             }
         },
 
-        .fnProto => |proto| {
+        .function => |func| {
             try w.splatByteAll(' ', level + half);
 
             try config.setColor(w, ATTRIBUTE);
-            if (proto.static) try w.writeAll("static ");
-            if (proto.@"inline") try w.writeAll("inline ");
+            if (func.static) try w.writeAll("static ");
+            if (func.@"inline") try w.writeAll("inline ");
 
             try config.setColor(w, .reset);
             try w.writeAll("name: ");
 
             try config.setColor(w, NAME);
-            try w.print("{s}\n", .{tree.tokenSlice(proto.nameToken)});
+            try w.print("{s}\n", .{tree.tokenSlice(func.nameToken)});
             try config.setColor(w, .reset);
 
-            if (proto.definition) |definition| {
+            if (func.body) |body| {
+                try w.splatByteAll(' ', level + half);
+                try w.writeAll("body:\n");
+                try tree.dumpNode(body, level + delta, config, w);
+            }
+
+            if (func.definition) |definition| {
                 try w.splatByteAll(' ', level + half);
                 try w.writeAll("definition: ");
                 try config.setColor(w, NAME);
                 try w.print("0x{X}\n", .{@intFromEnum(definition)});
                 try config.setColor(w, .reset);
             }
-        },
-
-        .fnDef => |def| {
-            try w.splatByteAll(' ', level + half);
-            try config.setColor(w, ATTRIBUTE);
-            if (def.static) try w.writeAll("static ");
-            if (def.@"inline") try w.writeAll("inline ");
-
-            try config.setColor(w, .reset);
-            try w.writeAll("name: ");
-
-            try config.setColor(w, NAME);
-            try w.print("{s}\n", .{tree.tokenSlice(def.nameToken)});
-
-            try config.setColor(w, .reset);
-            try w.splatByteAll(' ', level + half);
-            try w.writeAll("body:\n");
-            try tree.dumpNode(def.body, level + delta, config, w);
         },
 
         .typedef => |typedef| {

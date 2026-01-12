@@ -20,17 +20,17 @@ variable: 'attributed(int)'
  attr: unaligned
  name: b
 
-fnProto: 'attributed(kr (...) int)'
+function: 'attributed(kr (...) int)'
  attr: calling_convention cc: c
  name: foo
 
-fnProto: 'attributed(kr (...) *int)'
+function: 'attributed(kr (...) *int)'
  attr: calling_convention cc: stdcall
  name: bar
 
-fnProto: 'fn (decayed *[]attributed(int), decayed *attributed([]int)) int'
+function: 'fn (decayed *[]attributed(int), decayed *attributed([]int)) int'
  name: baz
 
-fnProto: 'fn (fn_ptr: *fn () void) void'
+function: 'fn (fn_ptr: *fn () void) void'
  name: quux
 

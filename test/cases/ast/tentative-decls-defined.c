@@ -16,19 +16,19 @@ implicit typedef: 'struct __NSConstantString_tag'
 implicit typedef: 'long double'
  name: __float80
 
-fnProto: 'fn (int) int'
+function: 'fn (int) int'
  name: foo
  definition: 0x9
 
-fnProto: 'fn (int) int'
+function: 'fn (int) int'
  name: foo
  definition: 0x9
 
-fnProto: 'fn (int) int'
+function: 'fn (int) int'
  name: foo
  definition: 0x9
 
-fnDef: 'fn (a: int) int'
+function: 'fn (a: int) int'
  name: foo
  body:
   compoundStmt
@@ -38,15 +38,15 @@ fnDef: 'fn (a: int) int'
         declRefExpr: 'int' lvalue
          name: a
 
-fnProto: 'fn (int) int'
+function: 'fn (int) int'
  name: foo
  definition: 0x9
 
-fnProto: 'fn (int) int'
+function: 'fn (int) int'
  name: foo
  definition: 0x9
 
-fnProto: 'fn (int) int'
+function: 'fn (int) int'
  name: foo
  definition: 0x9
 
@@ -71,14 +71,14 @@ variable: 'int'
  name: a
  definition: 0x14
 
-fnDef: 'fn () int'
+function: 'fn () int'
  name: bar
  body:
   compoundStmt
-    fnProto: 'fn () int'
+    function: 'fn () int'
      name: baz
 
-    fnProto: 'fn () int'
+    function: 'fn () int'
      name: baz
      definition: 0x19
 

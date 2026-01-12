@@ -28,7 +28,7 @@ variable: '*int'
      attr: aligned alignment: null
      name: arr
 
-fnDef: 'fn () void'
+function: 'fn () void'
  name: foo
  body:
   compoundStmt

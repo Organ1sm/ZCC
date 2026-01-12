@@ -180,8 +180,10 @@ fn genDecls(c: *AsmCodeGen) !void {
             .enumDecl,
             => {},
 
-            .fnProto => {},
-            .fnDef => |def| try c.genFn(def),
+            .function => |func| {
+                if (func.body == null) continue;
+                try c.genFn(func);
+            },
 
             .variable => |variable| try c.genVar(variable),
 
@@ -191,8 +193,8 @@ fn genDecls(c: *AsmCodeGen) !void {
     try c.text.writeAll("  .section  .note.GNU-stack,\"\",@progbits\n");
 }
 
-fn genFn(c: *AsmCodeGen, def: Node.FnDef) !void {
-    return c.todo("Codegen functions", def.nameToken);
+fn genFn(c: *AsmCodeGen, func: Node.Function) !void {
+    return c.todo("Codegen functions", func.nameToken);
 }
 
 fn genVar(c: *AsmCodeGen, variable: Node.Variable) !void {

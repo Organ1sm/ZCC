@@ -23,7 +23,7 @@ unionDecl: 'union U'
   recordField: 'float'
    name: y
 
-fnDef: 'fn () int'
+function: 'fn () int'
  name: bar
  body:
   compoundStmt
@@ -31,7 +31,7 @@ fnDef: 'fn () int'
      expr:
       intLiteral: 'int' (value: 42)
 
-fnDef: 'fn () void'
+function: 'fn () void'
  name: foo
  body:
   compoundStmt
