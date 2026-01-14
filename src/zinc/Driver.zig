@@ -487,7 +487,7 @@ pub fn parseArgs(
             } else if (mem.eql(u8, arg, "-pedantic-errors")) {
                 d.diagnostics.state.extensions = .@"error";
             } else if (mem.eql(u8, arg, "-w")) {
-                d.diagnostics.state.ignore_warnings = true;
+                d.diagnostics.state.ignoreWarnings = true;
             } else if (option(arg, "--rtlib=")) |rtlib| {
                 if (mem.eql(u8, rtlib, "compiler-rt") or mem.eql(u8, rtlib, "libgcc") or mem.eql(u8, rtlib, "platform")) {
                     d.rtlib = rtlib;
@@ -499,9 +499,9 @@ pub fn parseArgs(
             } else if (mem.eql(u8, arg, "-Wfatal-errors")) {
                 d.diagnostics.state.fatalErrors = true;
             } else if (mem.eql(u8, arg, "-Wno-everything")) {
-                d.diagnostics.state.enable_all_warnings = false;
+                d.diagnostics.state.enableAllWarnings = false;
             } else if (mem.eql(u8, arg, "-Weverything")) {
-                d.diagnostics.state.enable_all_warnings = true;
+                d.diagnostics.state.enableAllWarnings = true;
             } else if (mem.eql(u8, arg, "-Werror")) {
                 d.diagnostics.state.errorWarnings = true;
             } else if (mem.eql(u8, arg, "-Wno-error")) {

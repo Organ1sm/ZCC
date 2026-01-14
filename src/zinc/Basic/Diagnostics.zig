@@ -267,9 +267,9 @@ pub const State = struct {
     // Treat all warnings as errors, set by -Werror
     errorWarnings: bool = false,
     /// Enable all warnings, set by -Weverything
-    enable_all_warnings: bool = false,
+    enableAllWarnings: bool = false,
     /// Ignore all warnings, set by -w
-    ignore_warnings: bool = false,
+    ignoreWarnings: bool = false,
     /// How to treat extension diagnostics, set by -Wpedantic
     extensions: Message.Kind = .off,
     /// How to treat individual options, set by -W<name>
@@ -298,6 +298,9 @@ warnings: u32 = 0,
 // Total amount of diagnostics messages sent to `output`.
 total: u32 = 0,
 macroBacktraceLimit: u32 = 6,
+/// If `effectiveKind` causes us to skip a diagnostic, this is temporarily set to
+/// `true` to signal that associated notes should also be skipped.
+hideNotes: bool = false,
 
 pub fn deinit(d: *Diagnostics) void {
     switch (d.output) {
@@ -350,33 +353,40 @@ pub fn set(d: *Diagnostics, name: []const u8, to: Message.Kind) Compilation.Erro
 }
 
 pub fn effectiveKind(d: *Diagnostics, message: anytype) Message.Kind {
-    var kind = message.kind;
+    if (d.hideNotes and message.kind == .note) return .off;
 
     // -w disregards explicit kind set with -W<name>
-    if (d.state.ignore_warnings and kind == .warning) return .off;
+    if (d.state.ignoreWarnings and message.kind == .warning) {
+        d.hideNotes = true;
+        return .off;
+    }
+
+    var kind = message.kind;
 
     // Get explicit kind set by -W<name>=
-    var set_explicit = false;
+    var setExplicit = false;
     if (message.opt) |option| {
         if (d.state.options.get(option)) |explicit| {
             kind = explicit;
-            set_explicit = true;
+            setExplicit = true;
         }
     }
 
     // Use extension diagnostic behavior if not set explicitly.
-    if (message.extension and !set_explicit) {
+    if (message.extension and !setExplicit) {
         kind = @enumFromInt(@max(@intFromEnum(kind), @intFromEnum(d.state.extensions)));
     }
 
     // Make diagnostic a warning if -Weverything is set.
-    if (kind == .off and d.state.enable_all_warnings) kind = .warning;
+    if (kind == .off and d.state.enableAllWarnings) kind = .warning;
 
     // Upgrade warnigns to errors if -Werror is set
     if (kind == .warning and d.state.errorWarnings) kind = .@"error";
 
     // Upgrade errors to fatal errors if -Wfatal-errors is set
     if (kind == .@"error" and d.state.fatalErrors) kind = .@"fatal error";
+
+    if (kind == .off) d.hideNotes = true;
 
     return kind;
 }
@@ -502,6 +512,7 @@ fn addMessage(d: *Diagnostics, msg: Message) Compilation.Error!void {
         .note => {},
     }
     d.total += 1;
+    d.hideNotes = false;
 
     switch (d.output) {
         .ignore => {},
