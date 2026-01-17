@@ -221,7 +221,7 @@ pub fn main() !void {
     try initialComp.includeDirs.append(gpa, caseNextIncludeDir);
 
     try initialComp.addDefaultPragmaHandlers();
-    try initialComp.addBuiltinIncludeDir(testDir);
+    try initialComp.addBuiltinIncludeDir(testDir, null);
 
     // apparently we can't use setAstCwd without libc on windows yet
     const win = @import("builtin").os.tag == .windows;

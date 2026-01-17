@@ -1007,10 +1007,15 @@ pub fn getCharSignedness(comp: *const Compilation) std.builtin.Signedness {
 }
 
 /// Add built-in zinc headers directory to system include paths
-pub fn addBuiltinIncludeDir(comp: *Compilation, zincDir: []const u8) !void {
+pub fn addBuiltinIncludeDir(comp: *Compilation, zincDir: []const u8, overrideResDir: ?[]const u8) !void {
     const gpa = comp.gpa;
     const arena = comp.arena;
     try comp.systemIncludeDirs.ensureUnusedCapacity(gpa, 1);
+
+    if (overrideResDir) |resDir| {
+        comp.systemIncludeDirs.appendAssumeCapacity(try std.fs.path.join(arena, &.{ resDir, "include" }));
+        return;
+    }
 
     var searchPath = zincDir;
     while (std.fs.path.dirname(searchPath)) |dirname| : (searchPath = dirname) {

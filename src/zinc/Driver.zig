@@ -51,6 +51,7 @@ inputs: std.ArrayList(Source) = .empty,
 linkObjects: std.ArrayList([]const u8) = .empty,
 outputName: ?[]const u8 = null,
 sysroot: ?[]const u8 = null,
+resourceDir: ?[]const u8 = null,
 systemDefines: Compilation.SystemDefinesMode = .IncludeSystemDefines,
 tempFileCount: u32 = 0,
 /// If false, do not emit line directives in -E mode
@@ -210,6 +211,7 @@ const usage =
     \\  -P, --no-line-commands  Disable linemarker output in -E mode
     \\  -pedantic               Warn on language extensions
     \\  -pedantic-errors        Error on language extensions
+    \\  -resource-dir=<dir>     Set directory for compiler resource files
     \\  --rtlib=<arg>           Compiler runtime library to use (libgcc or compiler-rt)
     \\  -std=<standard>         Specify language standard
     \\  -S, --assemble          Only run preprocess and compilation step
@@ -482,7 +484,14 @@ pub fn parseArgs(
                 d.outputName = filename;
             } else if (option(arg, "--sysroot=")) |sysroot| {
                 d.sysroot = sysroot;
-            } else if (std.mem.eql(u8, arg, "-pedantic")) {
+            } else if (mem.eql(u8, arg, "-resource-dir")) {
+                i += 1;
+                if (i >= args.len) {
+                    try d.err("expected argument after -resource-dir", .{});
+                    continue;
+                }
+                d.resourceDir = args[i];
+            } else if (mem.eql(u8, arg, "-pedantic")) {
                 d.diagnostics.state.extensions = .warning;
             } else if (mem.eql(u8, arg, "-pedantic-errors")) {
                 d.diagnostics.state.extensions = .@"error";

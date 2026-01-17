@@ -362,7 +362,7 @@ pub fn defineSystemIncludes(self: *const Linux, tc: *const Toolchain) !void {
     // musl prefers /usr/include before builtin includes, so musl targets will add builtins
     // at the end of this function (unless disabled with nostdlibinc)
     if (!tc.driver.nobuiltininc and (!target.abi.isMusl() or tc.driver.nostdlibinc)) {
-        try comp.addBuiltinIncludeDir(tc.driver.zincName);
+        try comp.addBuiltinIncludeDir(tc.driver.zincName, tc.driver.resourceDir);
     }
 
     if (tc.driver.nostdlibinc) return;
@@ -398,7 +398,7 @@ pub fn defineSystemIncludes(self: *const Linux, tc: *const Toolchain) !void {
 
     std.debug.assert(!tc.driver.nostdlibinc);
     if (!tc.driver.nobuiltininc and target.abi.isMusl()) {
-        try comp.addBuiltinIncludeDir(tc.driver.zincName);
+        try comp.addBuiltinIncludeDir(tc.driver.zincName, tc.driver.resourceDir);
     }
 }
 
