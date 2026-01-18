@@ -141,6 +141,7 @@ sources: std.StringArrayHashMapUnmanaged(Source) = .empty,
 includeDirs: std.ArrayList([]const u8) = .empty,
 /// Allocated into `gpa`, but keys are externally managed.
 systemIncludeDirs: std.ArrayList([]const u8) = .empty,
+embedDirs: std.ArrayListUnmanaged([]const u8) = .empty,
 target: Target = .default,
 pragmaHandlers: std.StringArrayHashMapUnmanaged(*Pragma) = .empty,
 langOpts: LangOpts = .{},
@@ -196,6 +197,7 @@ pub fn deinit(comp: *Compilation) void {
 
     comp.sources.deinit(comp.gpa);
     comp.includeDirs.deinit(comp.gpa);
+    comp.embedDirs.deinit(comp.gpa);
     comp.systemIncludeDirs.deinit(comp.gpa);
     comp.pragmaHandlers.deinit(comp.gpa);
     comp.generatedBuffer.deinit(comp.gpa);
@@ -1372,8 +1374,8 @@ pub fn hasInclude(
     }
 
     const cwdSourceID = getCwdSourceID(includerTokenSource, includeType, which);
-    var it = IncludeDirIterator{ .comp = comp, .cwdSourceID = cwdSourceID };
 
+    var it: IncludeDirIterator = .{ .comp = comp, .cwdSourceID = cwdSourceID };
     if (which == .Next)
         it.skipUntilDirMatch(includerTokenSource);
 
@@ -1433,6 +1435,22 @@ fn getFileContents(comp: *Compilation, file: std.fs.File, limit: std.Io.Limit) !
     return allocating.toOwnedSlice();
 }
 
+fn tryFindPath(comp: *Compilation, dir: []const u8, filename: []const u8, sfAllocator: Allocator, limit: Io.Limit) !?[]u8 {
+    const path = try std.fs.path.join(sfAllocator, &.{ dir, filename });
+    defer sfAllocator.free(path);
+
+    if (comp.langOpts.msExtensions)
+        std.mem.replaceScalar(u8, path, '\\', '/');
+
+    if (comp.getPathContents(path, limit)) |some| {
+        errdefer comp.gpa.free(some);
+        return some;
+    } else |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return null,
+    }
+}
+
 pub fn findEmbed(
     comp: *Compilation,
     filename: []const u8,
@@ -1451,25 +1469,18 @@ pub fn findEmbed(
         }
     }
 
-    const cwdSourceId = switch (includeType) {
-        .Quotes => includerTokenSource,
-        .AngleBrackets => null,
-    };
-    var it = IncludeDirIterator{ .comp = comp, .cwdSourceID = cwdSourceId };
-
     var stackFallback = std.heap.stackFallback(PathBufferStackLimit, comp.gpa);
     const sfAllocator = stackFallback.get();
 
-    while (try it.nextWithFile(filename, sfAllocator)) |found| {
-        defer sfAllocator.free(found.path);
-        if (comp.getPathContents(found.path, limit)) |some| {
-            errdefer comp.gpa.free(some);
-            return some;
-        } else |err| switch (err) {
-            error.OutOfMemory => return error.OutOfMemory,
-            else => {},
-        }
+    if (includeType == .Quotes) {
+        const dir = std.fs.path.dirname(comp.getSource(includerTokenSource).path) orelse ".";
+        if (try comp.tryFindPath(dir, filename, sfAllocator, limit)) |some| return some;
     }
+
+    for (comp.embedDirs.items) |embedDir| {
+        if (try comp.tryFindPath(embedDir, filename, sfAllocator, limit)) |some| return some;
+    }
+
     return null;
 }
 
@@ -1491,7 +1502,7 @@ pub fn findInclude(
     }
 
     const cwdSourceID = getCwdSourceID(includeToken.source, includeType, which);
-    var it = IncludeDirIterator{ .comp = comp, .cwdSourceID = cwdSourceID };
+    var it: IncludeDirIterator = .{ .comp = comp, .cwdSourceID = cwdSourceID };
 
     if (which == .Next)
         it.skipUntilDirMatch(includeToken.source);

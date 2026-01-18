@@ -196,7 +196,8 @@ const usage =
     \\  -fropi                  Generate read-only position independent code (ARM only)
     \\  -fno-ropi               Disable generate read-only position independent code (ARM only). 
     \\  -I <dir>                Add directory to include search path
-    \\  -isystem                Add directory to system include search path
+    \\  -isystem  <dir>         Add directory to system include search path
+    \\  --embed-dir=<dir>       Set directory for embedded files
     \\  --emulate=[clang|gcc|msvc]
     \\                          Select which C compiler to emulate (default clang)
     \\  -mabicalls              Enable SVR4-style position-independent code (Mips only)
@@ -484,6 +485,8 @@ pub fn parseArgs(
                 d.outputName = filename;
             } else if (option(arg, "--sysroot=")) |sysroot| {
                 d.sysroot = sysroot;
+            } else if (option(arg, "--embed-dir=")) |embDir| {
+                try d.comp.embedDirs.append(d.comp.gpa, embDir);
             } else if (mem.eql(u8, arg, "-resource-dir")) {
                 i += 1;
                 if (i >= args.len) {

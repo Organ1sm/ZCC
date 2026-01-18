@@ -220,6 +220,9 @@ pub fn main() !void {
     try initialComp.includeDirs.append(gpa, casesIncludeDir);
     try initialComp.includeDirs.append(gpa, caseNextIncludeDir);
 
+    try initialComp.embedDirs.append(gpa, casesIncludeDir);
+    try initialComp.embedDirs.append(gpa, caseNextIncludeDir);
+
     try initialComp.addDefaultPragmaHandlers();
     try initialComp.addBuiltinIncludeDir(testDir, null);
 
@@ -246,6 +249,7 @@ pub fn main() !void {
         defer {
             comp.includeDirs = .{};
             comp.systemIncludeDirs = .{};
+            comp.embedDirs = .{};
             comp.pragmaHandlers = .{};
             comp.environment = .{};
 
