@@ -6817,7 +6817,7 @@ fn builtinOffsetof(p: *Parser, builtinToken: TokenIndex, offsetKind: OffsetKind)
 
     try p.expectClosing(lparen, .RParen);
 
-    return .{
+    const res: Result = .{
         .qt = p.comp.typeStore.size,
         .value = offsetofExpr.value,
         .node = try p.addNode(.{
@@ -6828,6 +6828,8 @@ fn builtinOffsetof(p: *Parser, builtinToken: TokenIndex, offsetKind: OffsetKind)
             },
         }),
     };
+    try res.putValue(p);
+    return res;
 }
 
 /// offsetofMemberDesignator: Identifier ('.' Identifier | '[' expr ']' )*
@@ -6861,7 +6863,8 @@ fn offsetofMemberDesignator(
         &curOffset,
     );
 
-    var totalOffset = curOffset;
+    var totalOffset: i64 = @bitCast(curOffset);
+    var runtimeOffset = false;
     while (true) switch (p.currToken()) {
         .Period => {
             p.tokenIdx += 1;
@@ -6882,7 +6885,7 @@ fn offsetofMemberDesignator(
                 accessToken,
                 &curOffset,
             );
-            totalOffset += curOffset;
+            totalOffset += @intCast(curOffset);
         },
         .LBracket => {
             const lbracket = p.tokenIdx;
@@ -6890,10 +6893,10 @@ fn offsetofMemberDesignator(
             var index = try p.expect(parseExpr);
             _ = try p.expectClosing(lbracket, .RBracket);
 
-            if (!lhs.qt.is(p.comp, .array)) {
+            const arrayTy = lhs.qt.get(p.comp, .array) orelse {
                 try p.err(.offsetof_array, lbracket, .{lhs.qt});
                 return error.ParsingFailed;
-            }
+            };
 
             var ptr = lhs;
             try ptr.lvalConversion(p, lbracket);
@@ -6904,15 +6907,34 @@ fn offsetofMemberDesignator(
             else
                 try p.err(.invalid_index, lbracket, .{});
 
+            if (index.value.toInt(i64, p.comp)) |indexInt| {
+                totalOffset += @as(i64, @intCast(arrayTy.elem.bitSizeof(p.comp))) * indexInt;
+            } else {
+                runtimeOffset = true;
+            }
+
             try index.saveValue(p);
-            try ptr.bin(p, .arrayAccessExpr, index, lbracket);
+            ptr.node = try p.addNode(.{
+                .arrayAccessExpr = .{
+                    .lbracketToken = lbracket,
+                    .base = ptr.node,
+                    .index = index.node,
+                    .qt = ptr.qt,
+                },
+            });
             lhs = ptr;
         },
         else => break,
     };
 
-    const val = try Value.int(if (offsetKind == .Bits) totalOffset else totalOffset / 8, p.comp);
-    return .{ .qt = baseQt, .value = val, .node = lhs.node };
+    return .{
+        .qt = baseQt,
+        .value = if (runtimeOffset)
+            .{}
+        else
+            try Value.int(if (offsetKind == .Bits) totalOffset else @divExact(totalOffset, 8), p.comp),
+        .node = lhs.node,
+    };
 }
 
 fn computeOffsetExtra(p: *Parser, node: Node.Index, offsetSoFar: *Value) !Value {
