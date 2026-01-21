@@ -1140,6 +1140,7 @@ pub fn applyFunctionAttributes(p: *Parser, qt: QualType, attrBufferStart: usize)
                 } else {
                     const argQt = funcTy.params[attr.args.alloc_align.position - 1].qt;
                     if (argQt.isInvalid()) continue;
+
                     const argSk = argQt.scalarKind(p.comp);
                     if (!argSk.isInt() or !argSk.isReal()) {
                         try p.err(.alloc_align_required_int_param, tok, .{});

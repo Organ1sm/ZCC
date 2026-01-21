@@ -929,7 +929,7 @@ pub fn castType(res: *Result, p: *Parser, destQt: QualType, operandToken: TokenI
         if (destSK.isFloat() and srcSK.isPointer()) {
             try p.err(.invalid_cast_to_float, lparen, .{destQt});
             return error.ParsingFailed;
-        } else if (srcSK.isFloat() and destSK.isPointer()) {
+        } else if ((srcSK.isFloat() or !srcSK.isReal()) and destSK.isPointer()) {
             try p.err(.invalid_cast_to_pointer, lparen, .{res.qt});
             return error.ParsingFailed;
         }

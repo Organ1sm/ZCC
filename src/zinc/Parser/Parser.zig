@@ -2683,7 +2683,8 @@ fn parseRecordDecl(p: *Parser) Error!bool {
         if (p.eat(.Colon)) |_| bits: {
             const bitsToken = p.tokenIdx;
             const res = try p.parseIntegerConstExpr(.GNUFoldingExtension);
-            if (!qt.isInt(p.comp)) {
+
+            if (!qt.isInvalid() and !qt.isRealInt(p.comp)) {
                 try p.err(.non_int_bitfield, firstToken, .{qt});
                 break :bits;
             }
@@ -2888,7 +2889,7 @@ fn parseEnumSpec(p: *Parser) Error!QualType {
         };
 
         const fixedSK = fixed.scalarKind(p.comp);
-        if (fixedSK == .Enum or !fixedSK.isInt()) {
+        if (fixedSK == .Enum or !fixedSK.isInt() or !fixedSK.isReal()) {
             try p.err(.invalid_type_underlying_enum, tyStart, .{fixed});
             break :fixed null;
         }
@@ -3733,7 +3734,7 @@ fn directDeclarator(
         // array type from here
         baseDeclarator.declaratorType = .array;
 
-        if (optSize != null and !optSize.?.qt.isInt(p.comp)) {
+        if (optSize != null and !optSize.?.qt.isInvalid() and !optSize.?.qt.isRealInt(p.comp)) {
             try p.err(.array_size_non_int, sizeToken, .{optSize.?.qt});
             return error.ParsingFailed;
         }
@@ -5430,14 +5431,13 @@ fn parseGotoStmt(p: *Parser, gotoToken: TokenIndex) Error!Node.Index {
         try gotoExpr.lvalConversion(p, exprToken);
         p.computedGotoTok = p.computedGotoTok orelse gotoToken;
 
-        const scalarKind = gotoExpr.qt.scalarKind(p.comp);
-        if (!gotoExpr.qt.isInvalid() and !scalarKind.isPointer()) {
+        if (!gotoExpr.qt.isInvalid() and !gotoExpr.qt.isPointer(p.comp)) {
             const resultQt = try p.comp.typeStore.put(gpa, .{ .pointer = .{
                 .child = .{ .@"const" = true, ._index = .Void },
                 .decayed = null,
             } });
 
-            if (!scalarKind.isInt()) {
+            if (!gotoExpr.qt.isRealInt(p.comp)) {
                 try p.err(.incompatible_arg, exprToken, .{ gotoExpr.qt, resultQt });
                 return error.ParsingFailed;
             }
@@ -5471,7 +5471,7 @@ fn parseSwitchStmt(p: *Parser, kwSwitch: TokenIndex) Error!Node.Index {
     try cond.lvalConversion(p, condToken);
     try cond.usualUnaryConversion(p, condToken);
 
-    if (!cond.qt.isInvalid() and !cond.qt.isInt(p.comp))
+    if (!cond.qt.isInvalid() and !cond.qt.isRealInt(p.comp))
         try p.err(.statement_int, lp + 1, .{cond.qt});
 
     try cond.saveValue(p);
@@ -6107,7 +6107,8 @@ fn parseAssignExpr(p: *Parser) Error!?Result {
 fn parseIntegerConstExpr(p: *Parser, declFolding: ConstDeclFoldingMode) Error!Result {
     const start = p.tokenIdx;
     const res = try p.constExpr(declFolding);
-    if (!res.qt.isInt(p.comp) and !res.qt.isInvalid()) {
+
+    if (!res.qt.isRealInt(p.comp) and !res.qt.isInvalid()) {
         try p.err(.expected_integer_constant_expr, start, .{});
         return error.ParsingFailed;
     }
@@ -6902,10 +6903,12 @@ fn offsetofMemberDesignator(
             try ptr.lvalConversion(p, lbracket);
             try index.lvalConversion(p, lbracket);
 
-            if (index.qt.isInt(p.comp))
-                try p.checkArrayBounds(index, lhs, lbracket)
-            else
-                try p.err(.invalid_index, lbracket, .{});
+            if (!index.qt.isInvalid()) {
+                if (index.qt.isRealInt(p.comp))
+                    try p.checkArrayBounds(index, lhs, lbracket)
+                else
+                    try p.err(.invalid_index, lbracket, .{});
+            }
 
             if (index.value.toInt(i64, p.comp)) |indexInt| {
                 totalOffset += @as(i64, @intCast(arrayTy.elem.bitSizeof(p.comp))) * indexInt;
@@ -7180,14 +7183,14 @@ fn parseUnaryExpr(p: *Parser) Error!?Result {
             try operand.usualUnaryConversion(p, token);
 
             const sk = operand.qt.scalarKind(p.comp);
-            if (sk.isInt()) {
-                if (operand.value.is(.int, p.comp)) {
-                    operand.value = try operand.value.bitNot(operand.qt, p.comp);
-                }
-            } else if (!sk.isReal()) {
+            if (!sk.isReal()) {
                 try p.err(.complex_conj, token, .{operand.qt});
                 if (operand.value.is(.complex, p.comp))
                     operand.value = try operand.value.complexConj(operand.qt, p.comp);
+            } else if (sk.isInt()) {
+                if (operand.value.is(.int, p.comp)) {
+                    operand.value = try operand.value.bitNot(operand.qt, p.comp);
+                }
             } else {
                 try p.err(.invalid_argument_un, token, .{operand.qt});
                 operand.value = .{};
@@ -7510,13 +7513,13 @@ fn parseSuffixExpr(p: *Parser, lhs: Result) Error!?Result {
 
             if (ptr.qt.get(p.comp, .pointer)) |ptrTy| {
                 ptr.qt = ptrTy.child;
-                if (index.qt.isInt(p.comp))
+                if (index.qt.isRealInt(p.comp))
                     try p.checkArrayBounds(indexBeforeConversion, arrayBeforeConversion, lb)
                 else
                     try p.err(.invalid_index, lb, .{});
             } else if (index.qt.get(p.comp, .pointer)) |ptrTy| {
                 index.qt = ptrTy.child;
-                if (ptr.qt.isInt(p.comp))
+                if (ptr.qt.isRealInt(p.comp))
                     try p.checkArrayBounds(arrayBeforeConversion, indexBeforeConversion, lb)
                 else
                     try p.err(.invalid_index, lb, .{});
@@ -7524,9 +7527,9 @@ fn parseSuffixExpr(p: *Parser, lhs: Result) Error!?Result {
             } else if (ptr.qt.get(p.comp, .vector)) |vectorTy| {
                 ptr = arrayBeforeConversion;
                 ptr.qt = vectorTy.elem;
-                if (!index.qt.isInt(p.comp))
+                if (!index.qt.isRealInt(p.comp))
                     try p.err(.invalid_index, lb, .{});
-            } else {
+            } else if (!index.qt.isInvalid() and !ptr.qt.isInvalid()) {
                 try p.err(.invalid_subscript, lb, .{});
             }
 
@@ -7759,12 +7762,12 @@ fn checkArithOverflowArg(p: *Parser, builtinToken: TokenIndex, firstAfter: Token
     _ = builtinToken;
     _ = firstAfter;
     if (idx <= 1) {
-        const argSk = arg.qt.scalarKind(p.comp);
-        if (!argSk.isInt() or !argSk.isReal()) {
+        if (!arg.qt.isRealInt(p.comp))
             return p.err(.overflow_builtin_requires_int, paramToken, .{arg.qt});
-        }
     } else if (idx == 2) {
-        if (!arg.qt.isPointer(p.comp)) return p.err(.overflow_result_requires_ptr, paramToken, .{arg.qt});
+        if (!arg.qt.isPointer(p.comp))
+            return p.err(.overflow_result_requires_ptr, paramToken, .{arg.qt});
+
         const child = arg.qt.childType(p.comp);
         if (child.scalarKind(p.comp) != .Int or child.@"const") return p.err(.overflow_result_requires_ptr, paramToken, .{arg.qt});
     }
