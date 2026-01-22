@@ -288,7 +288,22 @@ pub fn generateSystemDefines(comp: *Compilation, w: *Io.Writer) !void {
             }
         },
         .uefi => try define(w, "__UEFI__"),
-        .freebsd => try w.print("#define __FreeBSD__ {d}\n", .{target.os.version_range.semver.min.major}),
+        .freebsd => {
+            const release = comp.target.os.version_range.semver.min.major;
+            const ccVersiom = release * 10_000 + 1;
+            try w.print(
+                \\#define __FreeBSD__ {d}
+                \\#define __FreeBSD_cc_version {d}
+                \\
+            , .{ release, ccVersiom });
+        },
+        .ps4, .ps5 => {
+            try w.writeAll(
+                \\#define __FreeBSD__ 9
+                \\#define __FreeBSD_cc_version 900001
+                \\
+            );
+        },
         .netbsd => try define(w, "__NetBSD__"),
         .openbsd => try define(w, "__OpenBSD__"),
         .dragonfly => try define(w, "__DragonFly__"),
@@ -324,6 +339,8 @@ pub fn generateSystemDefines(comp: *Compilation, w: *Io.Writer) !void {
         .hurd,
         .illumos,
         .emscripten,
+        .ps4,
+        .ps5,
         => try defineStd(w, "unix", isGnu),
 
         .windows => if (target.abi.isGnu()) {
@@ -455,6 +472,10 @@ pub fn generateSystemDefines(comp: *Compilation, w: *Io.Writer) !void {
     } else if (ptrWidth == 32 and target.cTypeBitSize(.long) == 32 and target.cTypeBitSize(.int) == 32) {
         try define(w, "_ILP32");
         try define(w, "__ILP32__");
+    }
+
+    if (comp.hasFloat128()) {
+        try define(w, "__FLOAT128__");
     }
 
     try w.writeAll(
@@ -647,14 +668,11 @@ fn writeBuiltinMacros(comp: *Compilation, systemDefinesMode: SystemDefinesMode, 
         );
     }
 
-    try w.writeAll("#define __STDC__ 1\n");
+    if (comp.langOpts.emulate != .msvc) try w.writeAll("#define __STDC__ 1\n");
     try w.print("#define __STDC_HOSTED__ {d}\n", .{@intFromBool(comp.target.os.tag != .freestanding)});
 
     // Standard macros
     try w.writeAll(
-        \\#define __STDC_NO_COMPLEX__ 1
-        \\#define __STDC_NO_THREADS__ 1
-        \\#define __STDC_NO_VLA__ 1
         \\#define __STDC_UTF_16__ 1
         \\#define __STDC_UTF_32__ 1
         \\#define __STDC_EMBED_NOT_FOUND__ 0
@@ -662,6 +680,20 @@ fn writeBuiltinMacros(comp: *Compilation, systemDefinesMode: SystemDefinesMode, 
         \\#define __STDC_EMBED_EMPTY__ 2
         \\
     );
+
+    if (comp.langOpts.standard.atLeast(.c11)) switch (comp.target.os.tag) {
+        .openbsd, .driverkit, .ios, .macos, .tvos, .visionos, .watchos => {
+            try w.writeAll("#define __STDC_NO_THREADS__ 1\n");
+        },
+        .ps4, .ps5 => {
+            try w.writeAll(
+                \\#define __STDC_NO_THREADS__ 1
+                \\#define __STDC_NO_COMPLEX__ 1
+                \\
+            );
+        },
+        else => {},
+    };
 
     if (comp.langOpts.standard.StdCVersionMacro()) |stdcVersion| {
         try w.writeAll("#define __STDC_VERSION__ ");

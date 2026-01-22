@@ -139,8 +139,8 @@ const usage =
     \\Usage {s}: [options] file..
     \\
     \\General Options:
-    \\  -h, --help      Print this message.
-    \\  -v, --version   Print Zinc version.
+    \\  --help      Print this message
+    \\  --version   Print Zinc version
     \\ 
     \\Compile Options:
     \\  -c, --compile           Only run preprocess, compile, and assemble steps
@@ -278,11 +278,11 @@ pub fn parseArgs(
     while (i < args.len) : (i += 1) {
         const arg = args[i];
         if (std.mem.startsWith(u8, arg, "-") and arg.len > 1) {
-            if (std.mem.eql(u8, arg, "-h") or std.mem.eql(u8, arg, "--help")) {
+            if (std.mem.eql(u8, arg, "--help")) {
                 try stdOut.print(usage, .{args[0]});
                 try stdOut.flush();
                 return true;
-            } else if (std.mem.eql(u8, arg, "-v") or std.mem.eql(u8, arg, "--version")) {
+            } else if (std.mem.eql(u8, arg, "--version")) {
                 try stdOut.writeAll(@import("backend").VersionStr ++ "\n");
                 try stdOut.flush();
                 return true;

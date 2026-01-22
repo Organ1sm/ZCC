@@ -3866,6 +3866,7 @@ fn debugTokenBuf(pp: *Preprocessor, buf: []const Token) !void {
 fn fmtEscapes(bytes: []const u8) FmtEscapes {
     return .{ .bytes = bytes };
 }
+
 const FmtEscapes = struct {
     bytes: []const u8,
     pub fn format(ctx: FmtEscapes, w: *std.Io.Writer) !void {
