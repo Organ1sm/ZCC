@@ -101,8 +101,10 @@ debugDumpLetters: packed struct(u3) {
 /// name of the zinc executable
 zincName: []const u8 = "",
 
-/// Value of --triple= passed via CLI
+/// Value of -target passed via CLI
 rawTargetTriple: ?[]const u8 = null,
+/// Value of -mcpu passed via CLI
+rawCpu: ?[]const u8 = null,
 /// Non-optimizing assembly backend is currently selected by passing `-O0`
 useAssemblyBackend: bool = false,
 
@@ -203,6 +205,7 @@ const usage =
     \\  -mabicalls              Enable SVR4-style position-independent code (Mips only)
     \\  -mno-abicalls           Disable SVR4-style position-independent code (Mips only)
     \\  -mcmodel=<code-model>   Generate code for the given code model
+    \\  -mcpu [cpu]             Specify target CPU and feature set
     \\  -mkernel                Enable kernel development mode
     \\  -nobuiltininc           Do not search the compiler's builtin directory for include files
     \\  -nostdinc, --no-standard-includes
@@ -353,6 +356,15 @@ pub fn parseArgs(
                 d.mabicalls = true;
             } else if (mem.eql(u8, arg, "-mno-abicalls")) {
                 d.mabicalls = false;
+            } else if (mem.eql(u8, arg, "-mcpu")) {
+                i += 1;
+                if (i >= args.len) {
+                    try d.err("expected argument after -mcpu", .{});
+                    continue;
+                }
+                d.rawCpu = args[i];
+            } else if (option(arg, "--mcpu=")) |cpu| {
+                d.rawCpu = cpu;
             } else if (mem.eql(u8, arg, "-fchar8_t")) {
                 d.comp.langOpts.hasChar8tOverride = true;
             } else if (mem.eql(u8, arg, "-fno-char8_t")) {
@@ -639,11 +651,27 @@ pub fn parseArgs(
         }
     }
 
-    if (d.rawTargetTriple) |triple| triple: {
-        const query = std.Target.Query.parse(.{ .arch_os_abi = triple }) catch {
-            try d.err("invalid target '{s}'", .{triple});
-            d.rawTargetTriple = null;
-            break :triple;
+    {
+        var diags: std.Target.Query.ParseOptions.Diagnostics = .{};
+        const opts = std.Target.Query.ParseOptions{
+            .arch_os_abi = d.rawTargetTriple orelse "native",
+            .cpu_features = d.rawCpu,
+            .diagnostics = &diags,
+        };
+
+        const query = std.Target.Query.parse(opts) catch |er| switch (er) {
+            error.UnknownCpuModel => {
+                return d.fatal("unknown CPU: '{s}'", .{diags.cpu_name.?});
+            },
+            error.UnknownCpuFeature => {
+                return d.fatal("unknown CPU feature: '{s}'", .{diags.unknown_feature_name.?});
+            },
+            error.UnknownArchitecture => {
+                return d.fatal("unknown architecture: '{s}'", .{diags.unknown_architecture_name.?});
+            },
+            else => |e| return d.fatal("unable to parse target query '{s}': {s}", .{
+                opts.arch_os_abi, @errorName(e),
+            }),
         };
         const target = std.zig.system.resolveTargetQuery(d.comp.io, query) catch |e| {
             return d.fatal("unable to resolve target: {s}", .{errorDescription(e)});

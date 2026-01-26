@@ -239,6 +239,7 @@ pub fn generateSystemDefines(comp: *Compilation, w: *Io.Writer) !void {
             , .{ name, name });
         }
     }.defineStd;
+
     const target = &comp.target;
     const ptrWidth = target.ptrBitWidth();
     const isGnu = comp.langOpts.standard.isGNU();
@@ -354,6 +355,33 @@ pub fn generateSystemDefines(comp: *Compilation, w: *Io.Writer) !void {
     }
 
     switch (target.cpu.arch) {
+        .aarch64, .aarch64_be => {
+            try define(w, "__aarch64__");
+            if (target.os.tag.isDarwin()) {
+                try define(w, "__AARCH64_SIMD__");
+                if (ptrWidth == 32) {
+                    try define(w, "__ARM64_ARCH_8_32__");
+                } else {
+                    try define(w, "__ARM64_ARCH_8__");
+                }
+                try define(w, "__ARM_NEON__");
+                try define(w, "__arm64");
+                try define(w, "__arm64__");
+            }
+            if (target.os.tag == .windows and target.abi == .msvc) {
+                try w.writeAll("#define _M_ARM64 100\n");
+            }
+        },
+        .arc => {
+            try define(w, "__arc__");
+        },
+        .arm, .armeb, .thumb, .thumbeb => {
+            try define(w, "__arm__");
+            try define(w, "__arm");
+            if (target.cpu.arch.isThumb()) {
+                try define(w, "__thumb__");
+            }
+        },
         .x86_64 => {
             try define(w, "__amd64__");
             try define(w, "__amd64");
@@ -389,6 +417,11 @@ pub fn generateSystemDefines(comp: *Compilation, w: *Io.Writer) !void {
         => {
             try define(w, "__mips__");
             try define(w, "_mips");
+        },
+
+        .msp430 => {
+            try define(w, "MSP430");
+            try define(w, "__MSP430__");
         },
 
         .powerpc,
@@ -434,34 +467,21 @@ pub fn generateSystemDefines(comp: *Compilation, w: *Io.Writer) !void {
             }
         },
 
-        .arm, .armeb, .thumb, .thumbeb => {
-            try define(w, "__arm__");
-            try define(w, "__arm");
-            if (target.cpu.arch.isThumb()) {
-                try define(w, "__thumb__");
+        .wasm32, .wasm64 => {
+            try define(w, "__wasm");
+            try define(w, "__wasm__");
+            if (comp.target.cpu.arch == .wasm32) {
+                try define(w, "__wasm32");
+                try define(w, "__wasm32__");
+            } else {
+                try define(w, "__wasm64");
+                try define(w, "__wasm64__");
             }
-        },
-        .aarch64, .aarch64_be => {
-            try define(w, "__aarch64__");
-            if (target.os.tag.isDarwin()) {
-                try define(w, "__AARCH64_SIMD__");
-                if (ptrWidth == 32) {
-                    try define(w, "__ARM64_ARCH_8_32__");
-                } else {
-                    try define(w, "__ARM64_ARCH_8__");
-                }
-                try define(w, "__ARM_NEON__");
-                try define(w, "__arm64");
-                try define(w, "__arm64__");
-            }
-            if (target.os.tag == .windows and target.abi == .msvc) {
-                try w.writeAll("#define _M_ARM64 100\n");
-            }
-        },
 
-        .msp430 => {
-            try define(w, "MSP430");
-            try define(w, "__MSP430__");
+            for (comp.target.cpu.arch.allFeaturesList()) |feature| {
+                if (!comp.target.cpu.features.isEnabled(feature.index)) continue;
+                try w.print("#define __wasm_{s}__ 1\n", .{feature.name});
+            }
         },
         else => {},
     }
