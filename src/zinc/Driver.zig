@@ -82,7 +82,6 @@ mabicalls: ?bool = null,
 dynamicNopic: ?bool = null,
 ropi: bool = false,
 rwpi: bool = false,
-cmodel: std.builtin.CodeModel = .default,
 debugDumpLetters: packed struct(u3) {
     d: bool = false,
     m: bool = false,
@@ -276,6 +275,7 @@ pub fn parseArgs(
     var picArg: []const u8 = "";
     var declspecAttrs: ?bool = null;
     var msExtensions: ?bool = null;
+    var emulate: ?LangOpts.Compiler = null;
 
     var i: usize = 1;
     while (i < args.len) : (i += 1) {
@@ -346,7 +346,7 @@ pub fn parseArgs(
             } else if (mem.eql(u8, arg, "-fapple-kext")) {
                 d.appleKext = true;
             } else if (option(arg, "-mcmodel=")) |cmodel| {
-                d.cmodel = std.meta.stringToEnum(std.builtin.CodeModel, cmodel) orelse
+                d.comp.cmodel = std.meta.stringToEnum(std.builtin.CodeModel, cmodel) orelse
                     return d.fatal("unsupported machine code model: '{s}'", .{arg});
             } else if (mem.eql(u8, arg, "-mkernel")) {
                 d.mkernel = true;
@@ -471,12 +471,7 @@ pub fn parseArgs(
                     try d.err("invalid compiler '{s}'", .{arg});
                     continue;
                 };
-                d.comp.langOpts.setEmulatedCompiler(compiler);
-                switch (d.comp.langOpts.emulate) {
-                    .clang => try d.diagnostics.set("clang", .off),
-                    .gcc => try d.diagnostics.set("gnu", .off),
-                    .msvc => try d.diagnostics.set("microsoft", .off),
-                }
+                emulate = compiler;
             } else if (option(arg, "-ffp-eval-method=")) |fpMethodStr| {
                 const fpEvalMethod = std.meta.stringToEnum(LangOpts.FPEvalMethod, fpMethodStr) orelse .indeterminate;
                 if (fpEvalMethod == .indeterminate) {
@@ -553,8 +548,10 @@ pub fn parseArgs(
                     continue;
                 }
                 d.rawTargetTriple = args[i];
+                emulate = null;
             } else if (option(arg, "--target=")) |triple| {
                 d.rawTargetTriple = triple;
+                emulate = null;
             } else if (std.mem.eql(u8, arg, "-dump-pp")) {
                 d.dumpPP = true;
             } else if (std.mem.eql(u8, arg, "-dump-ast")) {
@@ -652,32 +649,11 @@ pub fn parseArgs(
     }
 
     {
-        var diags: std.Target.Query.ParseOptions.Diagnostics = .{};
-        const opts = std.Target.Query.ParseOptions{
-            .arch_os_abi = d.rawTargetTriple orelse "native",
-            .cpu_features = d.rawCpu,
-            .diagnostics = &diags,
-        };
+        d.comp.target = try d.parseTarget(d.rawTargetTriple orelse "native", d.rawCpu);
+    }
 
-        const query = std.Target.Query.parse(opts) catch |er| switch (er) {
-            error.UnknownCpuModel => {
-                return d.fatal("unknown CPU: '{s}'", .{diags.cpu_name.?});
-            },
-            error.UnknownCpuFeature => {
-                return d.fatal("unknown CPU feature: '{s}'", .{diags.unknown_feature_name.?});
-            },
-            error.UnknownArchitecture => {
-                return d.fatal("unknown architecture: '{s}'", .{diags.unknown_architecture_name.?});
-            },
-            else => |e| return d.fatal("unable to parse target query '{s}': {s}", .{
-                opts.arch_os_abi, @errorName(e),
-            }),
-        };
-        const target = std.zig.system.resolveTargetQuery(d.comp.io, query) catch |e| {
-            return d.fatal("unable to resolve target: {s}", .{errorDescription(e)});
-        };
-        d.comp.target = .fromZigTarget(target);
-        d.comp.langOpts.setEmulatedCompiler(Target.systemCompiler(&d.comp.target));
+    if (emulate != null or d.rawTargetTriple != null) {
+        d.comp.langOpts.setEmulatedCompiler(emulate orelse d.comp.target.systemCompiler());
         switch (d.comp.langOpts.emulate) {
             .clang => try d.diagnostics.set("clang", .off),
             .gcc => try d.diagnostics.set("gnu", .off),
@@ -810,6 +786,42 @@ pub fn errorDescription(e: anyerror) []const u8 {
         error.FatalError => "a fatal error occurred",
         error.Unexpected => "an unexpected error occurred",
         else => @errorName(e),
+    };
+}
+
+fn parseTarget(d: *Driver, archOsAbi: []const u8, cpuFeatures: ?[]const u8) Compilation.Error!Target {
+    var diags: std.Target.Query.ParseOptions.Diagnostics = .{};
+    const opts: std.Target.Query.ParseOptions = .{
+        .arch_os_abi = archOsAbi,
+        .cpu_features = cpuFeatures,
+        .diagnostics = &diags,
+    };
+
+    const query = std.Target.Query.parse(opts) catch |er| switch (er) {
+        error.UnknownCpuModel => {
+            return d.fatal("unknown CPU: '{s}'", .{diags.cpu_name.?});
+        },
+        error.UnknownCpuFeature => {
+            return d.fatal("unknown CPU feature: '{s}'", .{diags.unknown_feature_name.?});
+        },
+        error.UnknownArchitecture => {
+            return d.fatal("unknown architecture: '{s}'", .{diags.unknown_architecture_name.?});
+        },
+        else => |e| return d.fatal("unable to parse target query '{s}': {s}", .{
+            opts.arch_os_abi, @errorName(e),
+        }),
+    };
+
+    const zigTarget = std.zig.system.resolveTargetQuery(d.comp.io, query) catch |e| {
+        return d.fatal("unable to resolve target: {s}", .{errorDescription(e)});
+    };
+
+    return .{
+        .cpu = zigTarget.cpu,
+        .os = zigTarget.os,
+        .abi = zigTarget.abi,
+        .ofmt = zigTarget.ofmt,
+        .dynamicLinker = zigTarget.dynamic_linker,
     };
 }
 
@@ -1322,7 +1334,7 @@ pub fn getPICMode(d: *Driver, lastpic: []const u8) Compilation.Error!struct { ba
         } else {
             pic, pie = .{ false, false };
             if (target.isPS()) {
-                if (d.cmodel != .kernel) {
+                if (d.comp.cmodel != .kernel) {
                     pic = true;
                     try d.warn(
                         "option '{s}' was ignored by the {s} toolchain, using '-fPIC'",
