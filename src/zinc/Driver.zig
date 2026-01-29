@@ -276,6 +276,8 @@ pub fn parseArgs(
     var declspecAttrs: ?bool = null;
     var msExtensions: ?bool = null;
     var emulate: ?LangOpts.Compiler = null;
+    var strip = true;
+    var debug: ?backend.CodeGenOptions.DebugFormat = null;
 
     var i: usize = 1;
     while (i < args.len) : (i += 1) {
@@ -412,9 +414,31 @@ pub fn parseArgs(
             } else if (std.mem.eql(u8, arg, "-fno-dollars-in-identifiers")) {
                 d.comp.langOpts.dollarsInIdentifiers = false;
             } else if (mem.eql(u8, arg, "-g")) {
-                d.comp.codegenOptions.debug = true;
+                strip = false;
             } else if (mem.eql(u8, arg, "-g0")) {
-                d.comp.codegenOptions.debug = false;
+                strip = true;
+            } else if (mem.eql(u8, arg, "-gcodeview")) {
+                debug = .codeView;
+            } else if (mem.eql(u8, arg, "-gdwarf32")) {
+                debug = .{ .dwarf = .@"32" };
+            } else if (mem.eql(u8, arg, "-gdwarf64")) {
+                debug = .{ .dwarf = .@"64" };
+            } else if (mem.eql(u8, arg, "-gdwarf") or
+                mem.eql(u8, arg, "-gdwarf-2") or
+                mem.eql(u8, arg, "-gdwarf-3") or
+                mem.eql(u8, arg, "-gdwarf-4") or
+                mem.eql(u8, arg, "-gdwarf-5"))
+            {
+                d.comp.codegenOptions.dwarfVersion = switch (arg[arg.len - 1]) {
+                    '2' => .@"2",
+                    '3' => .@"3",
+                    '4' => .@"4",
+                    '5' => .@"5",
+                    else => .@"0",
+                };
+                if (debug == null or debug.? != .dwarf) {
+                    debug = .{ .dwarf = .@"32" };
+                }
             } else if (option(arg, "-fmacro-backtrace-limit=")) |limitStr| {
                 var limit = std.fmt.parseInt(u32, limitStr, 10) catch {
                     try d.err("-fmacro-backtrace-limit takes a number argument", .{});
@@ -698,6 +722,21 @@ pub fn parseArgs(
     const picLevel, const isPie = try d.getPICMode(picArg);
     d.comp.codegenOptions.picLevel = picLevel;
     d.comp.codegenOptions.isPie = isPie;
+
+    d.comp.codegenOptions.debug = debug: {
+        if (strip) break :debug .strip;
+        if (debug) |explicit| break :debug explicit;
+
+        break :debug switch (d.comp.target.ofmt) {
+            .elf, .macho, .wasm => .{ .dwarf = .@"32" },
+            .coff => .codeView,
+            .c => switch (d.comp.target.os.tag) {
+                .windows, .uefi => .codeView,
+                else => .{ .dwarf = .@"32" },
+            },
+            .spirv, .hex, .raw, .plan9 => .strip,
+        };
+    };
 
     if (declspecAttrs) |some| d.comp.langOpts.declSpecAttrs = some;
     if (msExtensions) |some| d.comp.langOpts.setMSExtensions(some);
