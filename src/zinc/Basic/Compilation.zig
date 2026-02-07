@@ -10,12 +10,13 @@ const CodeGenOptions = backend.CodeGenOptions;
 
 const Builtins = @import("../Builtins.zig");
 const Builtin = Builtins.Builtin;
-const Diagnostics = @import("../Basic/Diagnostics.zig");
+const Diagnostics = @import("Diagnostics.zig");
+const DepFile = @import("DepFile.zig");
 const LangOpts = @import("LangOpts.zig");
 const Lexer = @import("../Lexer/Lexer.zig");
 const Pragma = @import("../Lexer/Pragma.zig");
 const Source = @import("Source.zig");
-const StringInterner = @import("../Basic/StringInterner.zig");
+const StringInterner = @import("StringInterner.zig");
 const RecordLayout = @import("RecordLayout.zig");
 const Target = @import("Target.zig");
 const Token = @import("../Lexer/Lexer.zig").Token;
@@ -1795,10 +1796,12 @@ pub fn findEmbed(
     /// angle bracket vs quotes
     includeType: IncludeType,
     limit: Io.Limit,
+    optDepFile: ?*DepFile,
 ) !?[]u8 {
     if (std.fs.path.isAbsolute(filename)) {
         if (comp.getPathContents(filename, limit)) |some| {
             errdefer comp.gpa.free(some);
+            if (optDepFile) |depFile| try depFile.addDependencyDupe(comp.gpa, comp.arena, filename);
             return some;
         } else |err| switch (err) {
             error.OutOfMemory => |e| return e,
