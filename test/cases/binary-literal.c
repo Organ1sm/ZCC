@@ -1,4 +1,4 @@
-//zinc-args -Wpedantic
+//zinc-args -Wpedantic -std=c17
 void foo() {
   0b11;
 }

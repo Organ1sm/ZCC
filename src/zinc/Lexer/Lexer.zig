@@ -1015,7 +1015,10 @@ pub fn next(self: *Lexer) Token {
         }
     } else if (self.index == self.buffer.len) {
         switch (state) {
-            .start, .line_comment => {},
+            .start => {},
+            .line_comment => {
+                if (self.langOpts.preserveComments) id = .Comment;
+            },
             .u, .u8, .U, .L, .identifier => id = Token.getTokenId(self.langOpts, self.buffer[start..self.index]),
             .extended_identifier => id = TokenType.ExtendedIdentifier,
 
@@ -1099,7 +1102,7 @@ fn expectTokens(contents: []const u8, expectedTokens: []const TokenType) !void {
     return expectTokensExtra(contents, expectedTokens, null);
 }
 
-fn expectTokensExtra(contents: []const u8, expected: []const TokenType, standard: ?LangOpts.Standard) !void {
+fn expectTokensExtra(contents: []const u8, expected: []const TokenType, langOpts: ?LangOpts) !void {
     const allocator = std.testing.allocator;
     const io = std.testing.io;
 
@@ -1109,8 +1112,8 @@ fn expectTokensExtra(contents: []const u8, expected: []const TokenType, standard
     var comp = Compilation.init(allocator, arena.allocator(), io, undefined, std.fs.cwd());
     defer comp.deinit();
 
-    if (standard) |provided|
-        comp.langOpts.standard = provided;
+    if (langOpts) |provided|
+        comp.langOpts = provided;
 
     const source = try comp.addSourceFromBuffer("path", contents);
     var lexer = Lexer{
@@ -1429,10 +1432,29 @@ test "comments" {
         .Hash,
         .Identifier,
     });
+    try expectTokensExtra(
+        \\//foo
+        \\void
+        \\//bar
+    , &.{
+        .Comment,     .NewLine,
+        .KeywordVoid, .NewLine,
+        .Comment,
+    }, .{ .preserveComments = true });
 }
 
 test "C23 keywords" {
-    try expectTokensExtra("true false alignas alignof bool static_assert thread_local nullptr typeof_unqual", &.{ .KeywordTrue, .KeywordFalse, .KeywordC23Alignas, .KeywordC23Alignof, .KeywordC23Bool, .KeywordC23StaticAssert, .KeywordC23ThreadLocal, .KeywordNullptr, .KeywordTypeofUnqual }, .c23);
+    try expectTokensExtra("true false alignas alignof bool static_assert thread_local nullptr typeof_unqual", &.{
+        .KeywordTrue,
+        .KeywordFalse,
+        .KeywordC23Alignas,
+        .KeywordC23Alignof,
+        .KeywordC23Bool,
+        .KeywordC23StaticAssert,
+        .KeywordC23ThreadLocal,
+        .KeywordNullptr,
+        .KeywordTypeofUnqual,
+    }, .{ .standard = .c23 },);
 }
 
 test "Universal character names" {

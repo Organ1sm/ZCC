@@ -7,6 +7,7 @@ const Compilation = @import("../Basic/Compilation.zig");
 const Error = Compilation.Error;
 const SourceEpoch = Compilation.Environment.SourceEpoch;
 const Diagnostics = @import("../Basic/Diagnostics.zig");
+const DepFile = @import("../Basic/DepFile.zig");
 const Features = @import("Features.zig");
 const HideSet = @import("HideSet.zig");
 const Lexer = @import("Lexer.zig");
@@ -159,6 +160,9 @@ hideSet: HideSet,
 /// Epoch used for __DATE__, __TIME__, and possibly __TIMESTAMP__
 sourceEpoch: SourceEpoch,
 mtimes: std.AutoHashMapUnmanaged(Source.ID, u64) = .empty,
+
+/// The dependency file tracking all includes and embeds.
+depFile: ?*DepFile = null,
 
 pub const parse = Parser.parse;
 
@@ -1717,13 +1721,13 @@ fn handleBuiltinMacro(
                 else => unreachable,
             };
             const filename = includeStr[1 .. includeStr.len - 1];
-
             if (builtin == .MacroParamHasInclude or pp.includeDepth == 0) {
-                if (builtin == .MacroParamHasIncludeNext)
+                if (builtin == .MacroParamHasIncludeNext) {
                     try pp.err(srcLoc, .include_next_outside_header, .{});
-                return pp.comp.hasInclude(filename, srcLoc.id, includeType, .First);
+                }
+                return try pp.comp.hasInclude(filename, srcLoc.id, includeType, .First);
             }
-            return pp.comp.hasInclude(filename, srcLoc.id, includeType, .Next);
+            return try pp.comp.hasInclude(filename, srcLoc.id, includeType, .Next);
         },
 
         else => unreachable,
@@ -2059,7 +2063,13 @@ fn expandFuncMacro(
                         else => unreachable,
                     };
                     const filename = includeStr[1 .. includeStr.len - 1];
-                    const contents = (try pp.comp.findEmbed(filename, arg[0].loc.id, includeType, .limited(1))) orelse
+                    const contents = (try pp.comp.findEmbed(
+                        filename,
+                        arg[0].loc.id,
+                        includeType,
+                        .limited(1),
+                        pp.depFile,
+                    )) orelse
                         break :res notFound;
 
                     defer gpa.free(contents);
@@ -2726,7 +2736,7 @@ pub fn expandedSliceExtra(
         if (!(token.is(.MacroWS) and macroWSHandling == .PreserveMacroWS))
             return some;
 
-    var lexer = Lexer{
+    var lexer: Lexer = .{
         .buffer = pp.comp.getSource(token.loc.id).buffer,
         .langOpts = pp.comp.langOpts,
         .index = token.loc.byteOffset,
@@ -3106,7 +3116,13 @@ fn embed(pp: *Preprocessor, lexer: *Lexer) MacroError!void {
         }
     }
 
-    const embedBytes = (try pp.comp.findEmbed(filename, first.source, includeType, limit orelse .unlimited)) orelse
+    const embedBytes = (try pp.comp.findEmbed(
+        filename,
+        first.source,
+        includeType,
+        limit orelse .unlimited,
+        pp.depFile,
+    )) orelse
         return pp.fatalNotFound(fileNameToken, filename);
     defer gpa.free(embedBytes);
 
@@ -3380,6 +3396,7 @@ fn include(pp: *Preprocessor, lexer: *Lexer, which: Compilation.WhichInclude) Ma
             return;
     }
 
+    if (pp.depFile) |dep| try dep.addDependency(pp.comp.gpa, newSource.path);
     if (pp.verbose)
         pp.verboseLog(first, "include file {s}", .{newSource.path});
 
@@ -3866,6 +3883,7 @@ fn debugTokenBuf(pp: *Preprocessor, buf: []const Token) !void {
 fn fmtEscapes(bytes: []const u8) FmtEscapes {
     return .{ .bytes = bytes };
 }
+
 const FmtEscapes = struct {
     bytes: []const u8,
     pub fn format(ctx: FmtEscapes, w: *std.Io.Writer) !void {

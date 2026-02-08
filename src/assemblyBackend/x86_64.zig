@@ -164,7 +164,7 @@ pub fn genAsm(tree: *const Tree) Error!Assembly {
 }
 
 fn genDecls(c: *AsmCodeGen) !void {
-    if (c.tree.comp.codegenOptions.debug) {
+    if (c.tree.comp.codegenOptions.debug != .strip) {
         const sources = c.tree.comp.sources.values();
         for (sources) |source| {
             try c.data.print("  .file {d} \"{s}\"\n", .{ @intFromEnum(source.id) - 1, source.path });

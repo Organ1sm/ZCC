@@ -10,12 +10,13 @@ const CodeGenOptions = backend.CodeGenOptions;
 
 const Builtins = @import("../Builtins.zig");
 const Builtin = Builtins.Builtin;
-const Diagnostics = @import("../Basic/Diagnostics.zig");
+const Diagnostics = @import("Diagnostics.zig");
+const DepFile = @import("DepFile.zig");
 const LangOpts = @import("LangOpts.zig");
 const Lexer = @import("../Lexer/Lexer.zig");
 const Pragma = @import("../Lexer/Pragma.zig");
 const Source = @import("Source.zig");
-const StringInterner = @import("../Basic/StringInterner.zig");
+const StringInterner = @import("StringInterner.zig");
 const RecordLayout = @import("RecordLayout.zig");
 const Target = @import("Target.zig");
 const Token = @import("../Lexer/Lexer.zig").Token;
@@ -143,6 +144,7 @@ includeDirs: std.ArrayList([]const u8) = .empty,
 systemIncludeDirs: std.ArrayList([]const u8) = .empty,
 embedDirs: std.ArrayListUnmanaged([]const u8) = .empty,
 target: Target = .default,
+cmodel: std.builtin.CodeModel = .default,
 pragmaHandlers: std.StringArrayHashMapUnmanaged(*Pragma) = .empty,
 langOpts: LangOpts = .{},
 generatedBuffer: std.ArrayList(u8) = .empty,
@@ -239,6 +241,7 @@ pub fn generateSystemDefines(comp: *Compilation, w: *Io.Writer) !void {
             , .{ name, name });
         }
     }.defineStd;
+
     const target = &comp.target;
     const ptrWidth = target.ptrBitWidth();
     const isGnu = comp.langOpts.standard.isGNU();
@@ -288,7 +291,22 @@ pub fn generateSystemDefines(comp: *Compilation, w: *Io.Writer) !void {
             }
         },
         .uefi => try define(w, "__UEFI__"),
-        .freebsd => try w.print("#define __FreeBSD__ {d}\n", .{target.os.version_range.semver.min.major}),
+        .freebsd => {
+            const release = comp.target.os.version_range.semver.min.major;
+            const ccVersiom = release * 10_000 + 1;
+            try w.print(
+                \\#define __FreeBSD__ {d}
+                \\#define __FreeBSD_cc_version {d}
+                \\
+            , .{ release, ccVersiom });
+        },
+        .ps4, .ps5 => {
+            try w.writeAll(
+                \\#define __FreeBSD__ 9
+                \\#define __FreeBSD_cc_version 900001
+                \\
+            );
+        },
         .netbsd => try define(w, "__NetBSD__"),
         .openbsd => try define(w, "__OpenBSD__"),
         .dragonfly => try define(w, "__DragonFly__"),
@@ -324,6 +342,8 @@ pub fn generateSystemDefines(comp: *Compilation, w: *Io.Writer) !void {
         .hurd,
         .illumos,
         .emscripten,
+        .ps4,
+        .ps5,
         => try defineStd(w, "unix", isGnu),
 
         .windows => if (target.abi.isGnu()) {
@@ -337,32 +357,343 @@ pub fn generateSystemDefines(comp: *Compilation, w: *Io.Writer) !void {
     }
 
     switch (target.cpu.arch) {
-        .x86_64 => {
-            try define(w, "__amd64__");
-            try define(w, "__amd64");
-            try define(w, "__x86_64__");
-            try define(w, "__x86_64");
+        .aarch64, .aarch64_be => {
+            try define(w, "__aarch64__");
+            if (target.os.tag.isDarwin()) {
+                try define(w, "__AARCH64_SIMD__");
+                if (ptrWidth == 32) {
+                    try define(w, "__ARM64_ARCH_8_32__");
+                } else {
+                    try define(w, "__ARM64_ARCH_8__");
+                }
+                try define(w, "__ARM_NEON__");
+                try define(w, "__arm64");
+                try define(w, "__arm64__");
+            }
 
-            if (target.os.tag == .windows and target.abi == .msvc) {
-                try w.writeAll(
-                    \\#define _M_X64 100
-                    \\#define _M_AMD64 100
-                    \\
-                );
+            if (target.os.tag == .windows and target.abi == .msvc)
+                try w.writeAll("#define _M_ARM64 1\n");
+
+            {
+                const cmodel = switch (comp.cmodel) {
+                    .default => "small",
+                    else => @tagName(comp.cmodel),
+                };
+                try w.writeAll("#define __AARCH64_CMODEL_");
+                for (cmodel) |c| {
+                    try w.writeByte(std.ascii.toUpper(c));
+                }
+                try w.writeAll("__ 1\n");
+            }
+
+            if (target.cpu.has(.aarch64, .fp_armv8))
+                try w.writeAll("#define __ARM_FP 0xE\n");
+
+            if (target.cpu.has(.aarch64, .neon)) {
+                try define(w, "__ARM_NEON");
+                try w.writeAll("#define __ARM_NEON_FP 0xE\n");
+            }
+
+            if (target.cpu.has(.aarch64, .bf16)) {
+                try define(w, "__ARM_FEATURE_BF16");
+                try define(w, "__ARM_FEATURE_BF16_VECTOR_ARITHMETIC");
+                try define(w, "__ARM_BF16_FORMAT_ALTERNATIVE");
+                try define(w, "__ARM_FEATURE_BF16_SCALAR_ARITHMETIC");
+                if (target.cpu.has(.aarch64, .sve)) {
+                    try define(w, "__ARM_FEATURE_SVE_BF16");
+                }
+            }
+
+            if (target.cpu.hasAll(.aarch64, &.{ .sve2, .sve_aes }))
+                try define(w, "__ARM_FEATURE_SVE2_AES");
+
+            if (target.cpu.hasAll(.aarch64, &.{ .sve2, .sve_bitperm }))
+                try define(w, "__ARM_FEATURE_SVE2_BITPERM");
+
+            if (target.cpu.has(.aarch64, .sme)) {
+                try define(w, "__ARM_FEATURE_SME");
+                try define(w, "__ARM_FEATURE_LOCALLY_STREAMING");
+            }
+
+            if (target.cpu.has(.aarch64, .fmv))
+                try define(w, "__HAVE_FUNCTION_MULTI_VERSIONING");
+
+            if (target.cpu.has(.aarch64, .sha3)) {
+                try define(w, "__ARM_FEATURE_SHA3");
+                try define(w, "__ARM_FEATURE_SHA512");
+            }
+
+            if (target.cpu.has(.aarch64, .sm4)) {
+                try define(w, "__ARM_FEATURE_SM3");
+                try define(w, "__ARM_FEATURE_SM4");
+            }
+
+            if (!target.cpu.has(.aarch64, .strict_align))
+                try define(w, "__ARM_FEATURE_UNALIGNED");
+
+            if (target.cpu.hasAll(.aarch64, &.{ .neon, .fullfp16 }))
+                try define(w, "__ARM_FEATURE_FP16_VECTOR_ARITHMETIC");
+
+            if (target.cpu.has(.aarch64, .rcpc3)) {
+                try w.writeAll("#define __ARM_FEATURE_RCPC 3\n");
+            } else if (target.cpu.has(.aarch64, .rcpc)) {
+                try define(w, "__ARM_FEATURE_RCPC");
+            }
+
+            const features = target.cpu.features;
+            for ([_]struct { std.Target.aarch64.Feature, []const u8 }{
+                .{ .sve, "SVE" },
+                .{ .sve2, "SVE2" },
+                .{ .sve2p1, "SVE2p1" },
+                .{ .sve2_sha3, "SVE2_SHA3" },
+                .{ .sve2_sm4, "SVE2_SM4" },
+                .{ .sve_b16b16, "SVE_B16B16" },
+                .{ .sme2, "SME2" },
+                .{ .sme2p1, "SME2p1" },
+                .{ .sme_f16f16, "SME_F16F16" },
+                .{ .sme_b16b16, "SME_B16B16" },
+                .{ .crc, "CRC32" },
+                .{ .aes, "AES" },
+                .{ .sha2, "SHA2" },
+                .{ .pauth, "PAUTH" },
+                .{ .pauth_lr, "PAUTH_LR" },
+                .{ .bti, "BTI" },
+                .{ .fullfp16, "FP16_SCALAR_ARITHMETIC" },
+                .{ .dotprod, "DOTPROD" },
+                .{ .mte, "MEMORY_TAGGING" },
+                .{ .tme, "TME" },
+                .{ .i8mm, "MATMUL_INT8" },
+                .{ .lse, "ATOMICS" },
+                .{ .f64mm, "SVE_MATMUL_FP64" },
+                .{ .f32mm, "SVE_MATMUL_FP32" },
+                .{ .i8mm, "SVE_MATMUL_INT8" },
+                .{ .fp16fml, "FP16_FML" },
+                .{ .ls64, "LS64" },
+                .{ .rand, "RNG" },
+                .{ .mops, "MOPS" },
+                .{ .d128, "SYSREG128" },
+                .{ .gcs, "GCS" },
+            }) |fs| {
+                if (features.isEnabled(@intFromEnum(fs[0]))) {
+                    try w.print("#define __ARM_FEATURE_{s} 1\n", .{fs[1]});
+                }
+            }
+        },
+        .arc => {
+            try define(w, "__arc__");
+        },
+        .arm, .armeb, .thumb, .thumbeb => {
+            try define(w, "__arm__");
+            try define(w, "__arm");
+            if (target.cpu.arch.isThumb()) {
+                try define(w, "__thumb__");
             }
         },
 
-        .x86 => {
-            try defineStd(w, "i3286", isGnu);
+        .x86_64, .x86 => {
+            try w.print("#define __code_model_{s}__ 1\n", .{switch (comp.cmodel) {
+                .default => "small",
+                else => @tagName(comp.cmodel),
+            }});
 
-            if (target.os.tag == .windows and target.abi == .msvc) {
-                try w.print("#define _M_IX86 {d}\n", .{blk: {
-                    if (target.cpu.model == &std.Target.x86.cpu.i386) break :blk 300;
-                    if (target.cpu.model == &std.Target.x86.cpu.i486) break :blk 400;
-                    if (target.cpu.model == &std.Target.x86.cpu.i586) break :blk 500;
-                    break :blk @as(u32, 600);
-                }});
+            if (target.cpu.arch == .x86_64) {
+                try define(w, "__amd64__");
+                try define(w, "__amd64");
+                try define(w, "__x86_64__");
+                try define(w, "__x86_64");
+
+                if (target.os.tag == .windows and target.abi == .msvc) {
+                    try w.writeAll(
+                        \\#define _M_X64 100
+                        \\#define _M_AMD64 100
+                        \\
+                    );
+                }
+            } else {
+                try defineStd(w, "i3286", isGnu);
+
+                if (target.os.tag == .windows and target.abi == .msvc) {
+                    try w.print("#define _M_IX86 {d}\n", .{blk: {
+                        if (target.cpu.model == &std.Target.x86.cpu.i386) break :blk 300;
+                        if (target.cpu.model == &std.Target.x86.cpu.i486) break :blk 400;
+                        if (target.cpu.model == &std.Target.x86.cpu.i586) break :blk 500;
+                        break :blk @as(u32, 600);
+                    }});
+                }
             }
+
+            try define(w, "__SEG_GS");
+            try define(w, "__SEG_FS");
+            try w.writeAll(
+                \\#define __seg_gs __attribute__((address_space(256)))
+                \\#define __seg_fs __attribute__((address_space(257)))
+                \\
+            );
+
+            if (target.cpu.has(.x86, .sahf) or (comp.langOpts.emulate == .clang and target.cpu.arch == .x86)) {
+                try define(w, "__LAHF_SAHF__");
+            }
+
+            const features = target.cpu.features;
+            for ([_]struct { std.Target.x86.Feature, []const u8 }{
+                .{ .aes, "__AES__" },
+                .{ .vaes, "__VAES__" },
+                .{ .pclmul, "__PCLMUL__" },
+                .{ .vpclmulqdq, "__VPCLMULQDQ__" },
+                .{ .lzcnt, "__LZCNT__" },
+                .{ .rdrnd, "__RDRND__" },
+                .{ .fsgsbase, "__FSGSBASE__" },
+                .{ .bmi, "__BMI__" },
+                .{ .bmi2, "__BMI2__" },
+                .{ .popcnt, "__POPCNT__" },
+                .{ .rtm, "__RTM__" },
+                .{ .prfchw, "__PRFCHW__" },
+                .{ .rdseed, "__RDSEED__" },
+                .{ .adx, "__ADX__" },
+                .{ .tbm, "__TBM__" },
+                .{ .lwp, "__LWP__" },
+                .{ .mwaitx, "__MWAITX__" },
+                .{ .movbe, "__MOVBE__" },
+
+                .{ .xop, "__XOP__" },
+                .{ .fma4, "__FMA4__" },
+                .{ .sse4a, "__SSE4A__" },
+
+                .{ .fma, "__FMA__" },
+                .{ .f16c, "__F16C__" },
+                .{ .gfni, "__GFNI__" },
+                .{ .evex512, "__EVEX512__" },
+
+                .{ .avx10_1, "__AVX10_1__" },
+                .{ .avx10_1, "__AVX10_1_512__" },
+
+                .{ .avx10_2, "__AVX10_2__" },
+                .{ .avx10_2, "__AVX10_2_512__" },
+
+                .{ .avx512cd, "__AVX512CD__" },
+                .{ .avx512vpopcntdq, "__AVX512VPOPCNTDQ__" },
+                .{ .avx512vnni, "__AVX512VNNI__" },
+                .{ .avx512bf16, "__AVX512BF16__" },
+                .{ .avx512fp16, "__AVX512FP16__" },
+                .{ .avx512dq, "__AVX512DQ__" },
+                .{ .avx512bitalg, "__AVX512BITALG__" },
+                .{ .avx512bw, "__AVX512BW__" },
+
+                .{ .avx512vl, "__AVX512VL__" },
+                .{ .avx512vl, "__EVEX256__" },
+
+                .{ .avx512vbmi, "__AVX512VBMI__" },
+                .{ .avx512vbmi2, "__AVX512VBMI2__" },
+                .{ .avx512ifma, "__AVX512IFMA__" },
+                .{ .avx512vp2intersect, "__AVX512VP2INTERSECT__" },
+                .{ .sha, "__SHA__" },
+                .{ .sha512, "__SHA512__" },
+                .{ .fxsr, "__FXSR__" },
+                .{ .xsave, "__XSAVE__" },
+                .{ .xsaveopt, "__XSAVEOPT__" },
+                .{ .xsavec, "__XSAVEC__" },
+                .{ .xsaves, "__XSAVES__" },
+                .{ .pku, "__PKU__" },
+                .{ .clflushopt, "__CLFLUSHOPT__" },
+                .{ .clwb, "__CLWB__" },
+                .{ .wbnoinvd, "__WBNOINVD__" },
+                .{ .shstk, "__SHSTK__" },
+                .{ .sgx, "__SGX__" },
+                .{ .sm3, "__SM3__" },
+                .{ .sm4, "__SM4__" },
+                .{ .prefetchi, "__PREFETCHI__" },
+                .{ .clzero, "__CLZERO__" },
+                .{ .kl, "__KL__" },
+                .{ .widekl, "__WIDEKL__" },
+                .{ .rdpid, "__RDPID__" },
+                .{ .rdpru, "__RDPRU__" },
+                .{ .cldemote, "__CLDEMOTE__" },
+                .{ .waitpkg, "__WAITPKG__" },
+                .{ .movdiri, "__MOVDIRI__" },
+                .{ .movdir64b, "__MOVDIR64B__" },
+                .{ .movrs, "__MOVRS__" },
+                .{ .pconfig, "__PCONFIG__" },
+                .{ .ptwrite, "__PTWRITE__" },
+                .{ .invpcid, "__INVPCID__" },
+                .{ .enqcmd, "__ENQCMD__" },
+                .{ .hreset, "__HRESET__" },
+                .{ .amx_tile, "__AMX_TILE__" },
+                .{ .amx_int8, "__AMX_INT8__" },
+                .{ .amx_bf16, "__AMX_BF16__" },
+                .{ .amx_fp16, "__AMX_FP16__" },
+                .{ .amx_complex, "__AMX_COMPLEX__" },
+                .{ .amx_fp8, "__AMX_FP8__" },
+                .{ .amx_movrs, "__AMX_MOVRS__" },
+                .{ .amx_transpose, "__AMX_TRANSPOSE__" },
+                .{ .amx_avx512, "__AMX_AVX512__" },
+                .{ .amx_tf32, "__AMX_TF32__" },
+                .{ .cmpccxadd, "__CMPCCXADD__" },
+                .{ .raoint, "__RAOINT__" },
+                .{ .avxifma, "__AVXIFMA__" },
+                .{ .avxneconvert, "__AVXNECONVERT__" },
+                .{ .avxvnni, "__AVXVNNI__" },
+                .{ .avxvnniint16, "__AVXVNNIINT16__" },
+                .{ .avxvnniint8, "__AVXVNNIINT8__" },
+                .{ .serialize, "__SERIALIZE__" },
+                .{ .tsxldtrk, "__TSXLDTRK__" },
+                .{ .uintr, "__UINTR__" },
+                .{ .usermsr, "__USERMSR__" },
+                .{ .crc32, "__CRC32__" },
+                .{ .egpr, "__EGPR__" },
+                .{ .push2pop2, "__PUSH2POP2__" },
+                .{ .ppx, "__PPX__" },
+                .{ .ndd, "__NDD__" },
+                .{ .ccmp, "__CCMP__" },
+                .{ .nf, "__NF__" },
+                .{ .cf, "__CF__" },
+                .{ .zu, "__ZU__" },
+
+                .{ .avx512f, "__AVX512F__" },
+                .{ .avx2, "__AVX2__" },
+                .{ .avx, "__AVX__" },
+                .{ .sse4_2, "__SSE4_2__" },
+                .{ .sse4_1, "__SSE4_1__" },
+                .{ .ssse3, "__SSSE3__" },
+                .{ .sse3, "__SSE3__" },
+                .{ .sse2, "__SSE2__" },
+                .{ .sse, "__SSE__" },
+                .{ .sse, "__SSE_MATH__" },
+
+                .{ .mmx, "__MMX__" },
+            }) |fs| {
+                if (features.isEnabled(@intFromEnum(fs[0]))) {
+                    try define(w, fs[1]);
+                }
+            }
+
+            if (comp.langOpts.msExtensions and target.cpu.arch == .x86) {
+                const level = if (target.cpu.has(.x86, .sse2))
+                    "2"
+                else if (target.cpu.has(.x86, .sse))
+                    "1"
+                else
+                    "0";
+
+                try w.print("#define _M_IX86_FP {s}\n", .{level});
+            }
+
+            if (target.cpu.hasAll(.x86, &.{ .egpr, .push2pop2, .ppx, .ndd, .ccmp, .nf, .cf, .zu })) {
+                try define(w, "__APX_F__");
+            }
+
+            if (target.cpu.hasAll(.x86, &.{ .egpr, .inline_asm_use_gpr32 })) {
+                try define(w, "__APX_INLINE_ASM_USE_GPR32__");
+            }
+
+            if (target.cpu.has(.x86, .cx8)) {
+                try define(w, "__GCC_HAVE_SYNC_COMPARE_AND_SWAP_8");
+            }
+            if (target.cpu.has(.x86, .cx16) and target.cpu.arch == .x86_64) {
+                try define(w, "__GCC_HAVE_SYNC_COMPARE_AND_SWAP_8");
+            }
+
+            if (comp.hasFloat128())
+                try w.writeAll("#define __SIZEOF_FLOAT128__ 16\n");
         },
 
         .mips,
@@ -372,6 +703,11 @@ pub fn generateSystemDefines(comp: *Compilation, w: *Io.Writer) !void {
         => {
             try define(w, "__mips__");
             try define(w, "_mips");
+        },
+
+        .msp430 => {
+            try define(w, "MSP430");
+            try define(w, "__MSP430__");
         },
 
         .powerpc,
@@ -417,34 +753,21 @@ pub fn generateSystemDefines(comp: *Compilation, w: *Io.Writer) !void {
             }
         },
 
-        .arm, .armeb, .thumb, .thumbeb => {
-            try define(w, "__arm__");
-            try define(w, "__arm");
-            if (target.cpu.arch.isThumb()) {
-                try define(w, "__thumb__");
+        .wasm32, .wasm64 => {
+            try define(w, "__wasm");
+            try define(w, "__wasm__");
+            if (comp.target.cpu.arch == .wasm32) {
+                try define(w, "__wasm32");
+                try define(w, "__wasm32__");
+            } else {
+                try define(w, "__wasm64");
+                try define(w, "__wasm64__");
             }
-        },
-        .aarch64, .aarch64_be => {
-            try define(w, "__aarch64__");
-            if (target.os.tag.isDarwin()) {
-                try define(w, "__AARCH64_SIMD__");
-                if (ptrWidth == 32) {
-                    try define(w, "__ARM64_ARCH_8_32__");
-                } else {
-                    try define(w, "__ARM64_ARCH_8__");
-                }
-                try define(w, "__ARM_NEON__");
-                try define(w, "__arm64");
-                try define(w, "__arm64__");
-            }
-            if (target.os.tag == .windows and target.abi == .msvc) {
-                try w.writeAll("#define _M_ARM64 100\n");
-            }
-        },
 
-        .msp430 => {
-            try define(w, "MSP430");
-            try define(w, "__MSP430__");
+            for (comp.target.cpu.arch.allFeaturesList()) |feature| {
+                if (!comp.target.cpu.features.isEnabled(feature.index)) continue;
+                try w.print("#define __wasm_{s}__ 1\n", .{feature.name});
+            }
         },
         else => {},
     }
@@ -455,6 +778,10 @@ pub fn generateSystemDefines(comp: *Compilation, w: *Io.Writer) !void {
     } else if (ptrWidth == 32 and target.cTypeBitSize(.long) == 32 and target.cTypeBitSize(.int) == 32) {
         try define(w, "_ILP32");
         try define(w, "__ILP32__");
+    }
+
+    if (comp.hasFloat128()) {
+        try define(w, "__FLOAT128__");
     }
 
     try w.writeAll(
@@ -647,14 +974,11 @@ fn writeBuiltinMacros(comp: *Compilation, systemDefinesMode: SystemDefinesMode, 
         );
     }
 
-    try w.writeAll("#define __STDC__ 1\n");
+    if (comp.langOpts.emulate != .msvc) try w.writeAll("#define __STDC__ 1\n");
     try w.print("#define __STDC_HOSTED__ {d}\n", .{@intFromBool(comp.target.os.tag != .freestanding)});
 
     // Standard macros
     try w.writeAll(
-        \\#define __STDC_NO_COMPLEX__ 1
-        \\#define __STDC_NO_THREADS__ 1
-        \\#define __STDC_NO_VLA__ 1
         \\#define __STDC_UTF_16__ 1
         \\#define __STDC_UTF_32__ 1
         \\#define __STDC_EMBED_NOT_FOUND__ 0
@@ -662,6 +986,20 @@ fn writeBuiltinMacros(comp: *Compilation, systemDefinesMode: SystemDefinesMode, 
         \\#define __STDC_EMBED_EMPTY__ 2
         \\
     );
+
+    if (comp.langOpts.standard.atLeast(.c11)) switch (comp.target.os.tag) {
+        .openbsd, .driverkit, .ios, .macos, .tvos, .visionos, .watchos => {
+            try w.writeAll("#define __STDC_NO_THREADS__ 1\n");
+        },
+        .ps4, .ps5 => {
+            try w.writeAll(
+                \\#define __STDC_NO_THREADS__ 1
+                \\#define __STDC_NO_COMPLEX__ 1
+                \\
+            );
+        },
+        else => {},
+    };
 
     if (comp.langOpts.standard.StdCVersionMacro()) |stdcVersion| {
         try w.writeAll("#define __STDC_VERSION__ ");
@@ -1458,10 +1796,12 @@ pub fn findEmbed(
     /// angle bracket vs quotes
     includeType: IncludeType,
     limit: Io.Limit,
+    optDepFile: ?*DepFile,
 ) !?[]u8 {
     if (std.fs.path.isAbsolute(filename)) {
         if (comp.getPathContents(filename, limit)) |some| {
             errdefer comp.gpa.free(some);
+            if (optDepFile) |depFile| try depFile.addDependencyDupe(comp.gpa, comp.arena, filename);
             return some;
         } else |err| switch (err) {
             error.OutOfMemory => |e| return e,

@@ -12,7 +12,22 @@ isPie: bool,
 optimizationLevel: OptimizationLevel,
 
 /// Generate debug information
-debug: bool,
+debug: DebugFormat,
+dwarfVersion: DwarfVersion,
+
+pub const DebugFormat = union(enum) {
+    strip,
+    dwarf: std.dwarf.Format,
+    codeView,
+};
+
+pub const DwarfVersion = enum(u3) {
+    @"0" = 0,
+    @"2" = 2,
+    @"3" = 3,
+    @"4" = 4,
+    @"5" = 5,
+};
 
 pub const OptimizationLevel = enum {
     @"0",
@@ -61,5 +76,6 @@ pub const default: @This() = .{
     .picLevel = .none,
     .isPie = false,
     .optimizationLevel = .@"0",
-    .debug = false,
+    .debug = .strip,
+    .dwarfVersion = .@"0",
 };
