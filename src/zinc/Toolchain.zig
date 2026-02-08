@@ -512,17 +512,47 @@ pub fn defineSystemIncludes(tc: *Toolchain) !void {
         .linux => |*linux| linux.defineSystemIncludes(tc),
         .unknown => {
             if (tc.driver.nostdinc) return;
-
-            const comp = tc.driver.comp;
-            if (!tc.driver.nobuiltininc) {
-                try comp.addBuiltinIncludeDir(tc.driver.zincName, tc.driver.resourceDir);
-            }
-
-            if (!tc.driver.nostdlibinc) {
-                try comp.addSystemIncludeDir("/usr/include");
-            }
+            if (!tc.driver.nobuiltininc) try tc.addBuiltinIncludeDir();
+            if (!tc.driver.nostdlibinc) try tc.addSystemIncludeDir("/usr/include");
         },
     };
+}
+
+pub fn addSystemIncludeDir(tc: *const Toolchain, path: []const u8) !void {
+    const d = tc.driver;
+    const comp = d.comp;
+    _ = try d.includes.append(comp.gpa, .{ .kind = .System, .path = try comp.arena.dupe(u8, path) });
+}
+
+/// Add built-in aro headers directory to system include paths
+pub fn addBuiltinIncludeDir(tc: *const Toolchain) !void {
+    const d = tc.driver;
+    const comp = d.comp;
+    const gpa = comp.gpa;
+    const arena = comp.arena;
+
+    try d.includes.ensureUnusedCapacity(gpa, 1);
+    if (d.resourceDir) |resDir| {
+        const path = try std.fs.path.join(arena, &.{ resDir, "include" });
+        comp.cwd.access(path, .{}) catch {
+            return d.fatal("Aro builtin headers not found in provided -resource-dir", .{});
+        };
+        d.includes.appendAssumeCapacity(.{ .kind = .System, .path = path });
+        return;
+    }
+
+    var searchPath = d.zincName;
+    while (std.fs.path.dirname(searchPath)) |dirname| : (searchPath = dirname) {
+        var baseDir = d.comp.cwd.openDir(dirname, .{}) catch continue;
+        defer baseDir.close();
+
+        baseDir.access("include/stddef.h", .{}) catch continue;
+
+        const path = try std.fs.path.join(arena, &.{ dirname, "include" });
+        d.includes.appendAssumeCapacity(.{ .kind = .System, .path = path });
+
+        break;
+    } else return d.fatal("unable to find Aro builtin headers", .{});
 }
 
 /// Read the file at `path` into `buf`.

@@ -49,6 +49,7 @@ comp: *Compilation,
 diagnostics: *Diagnostics,
 
 inputs: std.ArrayList(Source) = .empty,
+includes: std.ArrayList(Compilation.Include) = .empty,
 linkObjects: std.ArrayList([]const u8) = .empty,
 outputName: ?[]const u8 = null,
 sysroot: ?[]const u8 = null,
@@ -71,6 +72,7 @@ dumpIR: bool = false,
 dumpTokens: bool = false,
 dumpRawTokens: bool = false,
 dumpLinkerArgs: bool = false,
+dumpSearchPaths: bool = false,
 nobuiltininc: bool = false,
 nostdinc: bool = false,
 nostdlibinc: bool = false,
@@ -139,6 +141,7 @@ pub fn deinit(d: *Driver) void {
         d.comp.gpa.free(obj);
     }
     d.inputs.deinit(d.comp.gpa);
+    d.includes.deinit(d.comp.gpa);
     d.linkObjects.deinit(d.comp.gpa);
     d.* = undefined;
 }
@@ -294,6 +297,7 @@ pub fn parseArgs(
     var strip = true;
     var debug: ?backend.CodeGenOptions.DebugFormat = null;
 
+    const gpa = d.comp.gpa;
     var i: usize = 1;
     while (i < args.len) : (i += 1) {
         const arg = args[i];
@@ -322,7 +326,7 @@ pub fn parseArgs(
                     value = macro[some + 1 ..];
                     macro = macro[0..some];
                 }
-                try macroBuffer.print(d.comp.gpa, "#define {s} {s}\n", .{ macro, value });
+                try macroBuffer.print(gpa, "#define {s} {s}\n", .{ macro, value });
             } else if (mem.startsWith(u8, arg, "-U")) {
                 var macro = arg["-U".len..];
                 if (macro.len == 0) {
@@ -333,7 +337,7 @@ pub fn parseArgs(
                     }
                     macro = args[i];
                 }
-                try macroBuffer.print(d.comp.gpa, "#undef {s} \n", .{macro});
+                try macroBuffer.print(gpa, "#undef {s} \n", .{macro});
             } else if (mem.eql(u8, arg, "-O")) {
                 d.comp.codegenOptions.optimizationLevel = .@"0";
             } else if (mem.startsWith(u8, arg, "-O")) {
@@ -448,6 +452,14 @@ pub fn parseArgs(
             } else if (mem.eql(u8, arg, "-fno-ms-extensions")) {
                 msExtensions = false;
                 try d.diagnostics.set("microsoft", .warning);
+            } else if (mem.eql(u8, arg, "-fsyntax-only")) {
+                d.onlySyntax = true;
+            } else if (mem.eql(u8, arg, "-fno-syntax-only")) {
+                d.onlySyntax = false;
+            } else if (mem.eql(u8, arg, "-fgnuc-version=")) {
+                gnucVersion = "0";
+            } else if (option(arg, "-fgnuc-version=")) |version| {
+                gnucVersion = version;
             } else if (mem.eql(u8, arg, "-fdollars-in-identifiers")) {
                 d.comp.langOpts.dollarsInIdentifiers = true;
             } else if (mem.eql(u8, arg, "-fno-dollars-in-identifiers")) {
@@ -509,15 +521,18 @@ pub fn parseArgs(
                     }
                     path = args[i];
                 }
-                try d.comp.includeDirs.append(d.comp.gpa, path);
-            } else if (mem.eql(u8, arg, "-fsyntax-only")) {
-                d.onlySyntax = true;
-            } else if (mem.eql(u8, arg, "-fno-syntax-only")) {
-                d.onlySyntax = false;
-            } else if (mem.eql(u8, arg, "-fgnuc-version=")) {
-                gnucVersion = "0";
-            } else if (option(arg, "-fgnuc-version=")) |version| {
-                gnucVersion = version;
+                try d.includes.append(gpa, .{ .kind = .Normal, .path = path });
+            } else if (mem.startsWith(u8, arg, "-idirafter")) {
+                var path = arg["-idirafter".len..];
+                if (path.len == 0) {
+                    i += 1;
+                    if (i >= args.len) {
+                        try d.err("expected argument after -idirafter", .{});
+                        continue;
+                    }
+                    path = args[i];
+                }
+                try d.includes.append(gpa, .{ .kind = .After, .path = path });
             } else if (mem.startsWith(u8, arg, "-isystem")) {
                 var path = arg["-isystem".len..];
                 if (path.len == 0) {
@@ -528,7 +543,7 @@ pub fn parseArgs(
                     }
                     path = args[i];
                 }
-                try d.comp.systemIncludeDirs.append(d.comp.gpa, path);
+                try d.includes.append(gpa, .{ .kind = .System, .path = path });
             } else if (option(arg, "--emulate=")) |compilerStr| {
                 const compiler = std.meta.stringToEnum(LangOpts.Compiler, compilerStr) orelse {
                     try d.err("invalid compiler '{s}'", .{arg});
@@ -555,8 +570,10 @@ pub fn parseArgs(
                 d.outputName = filename;
             } else if (option(arg, "--sysroot=")) |sysroot| {
                 d.sysroot = sysroot;
+            } else if (mem.eql(u8, arg, "-Wp,-v")) {
+                d.dumpSearchPaths = true;
             } else if (option(arg, "--embed-dir=")) |embDir| {
-                try d.comp.embedDirs.append(d.comp.gpa, embDir);
+                try d.comp.embedDirs.append(gpa, embDir);
             } else if (mem.eql(u8, arg, "-resource-dir")) {
                 i += 1;
                 if (i >= args.len) {
@@ -717,12 +734,12 @@ pub fn parseArgs(
                 try d.warn("unknown argument '{s}'", .{arg});
             }
         } else if (mem.endsWith(u8, arg, ".o") or mem.endsWith(u8, arg, ".obj")) {
-            try d.linkObjects.append(d.comp.gpa, arg);
+            try d.linkObjects.append(gpa, arg);
         } else {
             const file = d.addSource(arg) catch |er| {
                 return d.fatal("unable to add source file '{s}': {s}", .{ arg, errorDescription(er) });
             };
-            try d.inputs.append(d.comp.gpa, file);
+            try d.inputs.append(gpa, file);
         }
     }
 
@@ -970,8 +987,10 @@ pub fn main(
 
     tc.defineSystemIncludes() catch |er| switch (er) {
         error.OutOfMemory => return error.OutOfMemory,
-        error.ZincIncludeNotFound => return d.fatal("unable to find Zinc builtin headers", .{}),
+        error.FatalError => return error.FatalError,
     };
+
+    try d.comp.initSearchPath(d.includes.items, d.dumpSearchPaths);
 
     const builtinMacros = d.comp.generateBuiltinMacros(d.systemDefines) catch |er| switch (er) {
         error.FileTooBig => return d.fatal("builtin macro source exceeded max size", .{}),
@@ -1109,20 +1128,23 @@ fn processSource(
     comptime fastExit: bool,
     asmGenFn: ?AsmCodeGenFn,
 ) !void {
-    d.comp.generatedBuffer.items.len = 0;
-    const prevErrors = d.comp.diagnostics.errors;
+    const comp = d.comp;
+    const gpa = comp.gpa;
 
-    var pp = try Preprocessor.initDefault(d.comp);
+    comp.generatedBuffer.items.len = 0;
+    const prevErrors = comp.diagnostics.errors;
+
+    var pp = try Preprocessor.initDefault(comp);
     defer pp.deinit();
 
     var nameBuffer: [std.fs.max_name_bytes]u8 = undefined;
     var optDepFile = try d.initDepFile(source, &nameBuffer);
-    defer if (optDepFile) |*depFile| depFile.deinit(pp.comp.gpa);
+    defer if (optDepFile) |*depFile| depFile.deinit(gpa);
 
     if (optDepFile) |*depFile| pp.depFile = depFile;
 
-    if (d.comp.langOpts.msExtensions)
-        d.comp.msCwdSourceId = source.id;
+    if (comp.langOpts.msExtensions)
+        comp.msCwdSourceId = source.id;
 
     const dumpNode = d.debugDumpLetters.getPreprocessorDumpMode();
 
@@ -1148,7 +1170,7 @@ fn processSource(
         const depFileName = try d.getDepFileName(source, writerBuffer[0..std.fs.max_name_bytes]);
 
         const file = if (depFileName) |path|
-            d.comp.cwd.createFile(path, .{}) catch |er|
+            comp.cwd.createFile(path, .{}) catch |er|
                 return d.fatal("unable to create dependency file '{s}': {s}", .{ path, errorDescription(er) })
         else
             std.fs.File.stdout();
@@ -1192,8 +1214,8 @@ fn processSource(
     if (d.dumpTokens or d.dumpRawTokens) {
         const locs = pp.tokens.items(.loc);
         var lexer = Lexer{
-            .buffer = d.comp.getSource(locs[0].id).buffer,
-            .langOpts = d.comp.langOpts,
+            .buffer = comp.getSource(locs[0].id).buffer,
+            .langOpts = comp.langOpts,
             .index = locs[0].byteOffset,
             .source = .generated,
         };
@@ -1238,10 +1260,10 @@ fn processSource(
         return;
     }
 
-    if (d.comp.target.ofmt != .elf or d.comp.target.cpu.arch != .x86_64) {
+    if (comp.target.ofmt != .elf or comp.target.cpu.arch != .x86_64) {
         return d.fatal(
             "unsupported target {s}-{s}-{s}, currently only x86-64 elf is supported",
-            .{ @tagName(d.comp.target.cpu.arch), @tagName(d.comp.target.os.tag), @tagName(d.comp.target.abi) },
+            .{ @tagName(comp.target.cpu.arch), @tagName(comp.target.os.tag), @tagName(comp.target.abi) },
         );
     }
 
@@ -1251,11 +1273,11 @@ fn processSource(
         const asmFn = asmGenFn orelse
             return d.fatal("Assembly codegen not supported", .{});
 
-        const assembly = try asmFn(d.comp.target.toZigTarget(), &tree);
-        defer assembly.deinit(d.comp.gpa);
+        const assembly = try asmFn(comp.target.toZigTarget(), &tree);
+        defer assembly.deinit(gpa);
 
         if (d.onlyPreprocessAndCompile) {
-            const outFile = d.comp.cwd.createFile(outFileName, .{}) catch |er|
+            const outFile = comp.cwd.createFile(outFileName, .{}) catch |er|
                 return d.fatal("unable to create output file '{s}': {s}", .{ outFileName, errorDescription(er) });
             defer outFile.close();
 
@@ -1269,7 +1291,7 @@ fn processSource(
         // then assemble to outfile name
         var assemblyNameBuffer: [std.fs.max_name_bytes]u8 = undefined;
         const assemblyOutfileName = try d.getRandomFilename(&assemblyNameBuffer, ".s");
-        const outFile = d.comp.cwd.createFile(assemblyOutfileName, .{}) catch |er|
+        const outFile = comp.cwd.createFile(assemblyOutfileName, .{}) catch |er|
             return d.fatal("unable to create output file '{s}': {s}", .{ assemblyOutfileName, errorDescription(er) });
         defer outFile.close();
 
@@ -1282,20 +1304,20 @@ fn processSource(
         }
     } else {
         var ir = try tree.genIR();
-        defer ir.deinit(d.comp.gpa);
+        defer ir.deinit(gpa);
 
         if (d.dumpIR) {
             var stdout = std.fs.File.stdout().writer(&writerBuffer);
-            ir.dump(d.comp.gpa, d.detectConfig(stdout.file), &stdout.interface) catch {};
+            ir.dump(gpa, d.detectConfig(stdout.file), &stdout.interface) catch {};
         }
 
         var renderErrorList: IR.Renderer.ErrorList = .{};
         defer {
-            for (renderErrorList.values()) |msg| d.comp.gpa.free(msg);
-            renderErrorList.deinit(d.comp.gpa);
+            for (renderErrorList.values()) |msg| gpa.free(msg);
+            renderErrorList.deinit(gpa);
         }
 
-        var obj = ir.render(d.comp.gpa, d.comp.target.toZigTarget(), &renderErrorList) catch |e| switch (e) {
+        var obj = ir.render(gpa, comp.target.toZigTarget(), &renderErrorList) catch |e| switch (e) {
             error.OutOfMemory => return error.OutOfMemory,
             error.LowerFail => {
                 return d.fatal(
@@ -1322,8 +1344,8 @@ fn processSource(
         return;
     }
 
-    try d.linkObjects.ensureUnusedCapacity(d.comp.gpa, 1);
-    d.linkObjects.appendAssumeCapacity(try d.comp.gpa.dupe(u8, outFileName));
+    try d.linkObjects.ensureUnusedCapacity(gpa, 1);
+    d.linkObjects.appendAssumeCapacity(try gpa.dupe(u8, outFileName));
     d.tempFileCount += 1;
 
     if (fastExit)

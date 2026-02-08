@@ -362,7 +362,7 @@ pub fn defineSystemIncludes(self: *const Linux, tc: *const Toolchain) !void {
     // musl prefers /usr/include before builtin includes, so musl targets will add builtins
     // at the end of this function (unless disabled with nostdlibinc)
     if (!tc.driver.nobuiltininc and (!target.abi.isMusl() or tc.driver.nostdlibinc)) {
-        try comp.addBuiltinIncludeDir(tc.driver.zincName, tc.driver.resourceDir);
+        try tc.addBuiltinIncludeDir();
     }
 
     if (tc.driver.nostdlibinc) return;
@@ -370,7 +370,7 @@ pub fn defineSystemIncludes(self: *const Linux, tc: *const Toolchain) !void {
     const sysroot = tc.getSysroot();
     const localInclude = try std.fs.path.join(comp.gpa, &.{ sysroot, "/usr/local/include" });
     defer comp.gpa.free(localInclude);
-    try comp.addSystemIncludeDir(localInclude);
+    try tc.addSystemIncludeDir(localInclude);
 
     if (self.gccDetector.isValid) {
         const gccIncludePath = try std.fs.path.join(comp.gpa, &.{
@@ -380,25 +380,25 @@ pub fn defineSystemIncludes(self: *const Linux, tc: *const Toolchain) !void {
             "include",
         });
         defer comp.gpa.free(gccIncludePath);
-        try comp.addSystemIncludeDir(gccIncludePath);
+
+        try tc.addSystemIncludeDir(gccIncludePath);
     }
 
     if (getMultiarchTriple(target)) |triple| {
         const joined = try std.fs.path.join(comp.gpa, &.{ sysroot, "/usr/include", triple });
         defer comp.gpa.free(joined);
-        if (tc.exists(joined)) {
-            try comp.addSystemIncludeDir(joined);
-        }
+
+        if (tc.exists(joined)) try tc.addSystemIncludeDir(joined);
     }
 
     if (target.os.tag == .rtems) return;
 
-    try comp.addSystemIncludeDir("/include");
-    try comp.addSystemIncludeDir("/usr/include");
+    try tc.addSystemIncludeDir("/include");
+    try tc.addSystemIncludeDir("/usr/include");
 
     std.debug.assert(!tc.driver.nostdlibinc);
     if (!tc.driver.nobuiltininc and target.abi.isMusl()) {
-        try comp.addBuiltinIncludeDir(tc.driver.zincName, tc.driver.resourceDir);
+        try tc.addBuiltinIncludeDir();
     }
 }
 

@@ -23,6 +23,7 @@ const AddCommandLineArgsResult = struct {
     zinc.Preprocessor.LineMarkers,
     zinc.Compilation.SystemDefinesMode,
     zinc.Preprocessor.DumpMode,
+    std.ArrayList(zinc.Compilation.Include),
 };
 
 /// Returns onlyPreprocess and lineMarkers settings if saw -E
@@ -35,6 +36,7 @@ fn addCommandLineArgs(
     var lineMarkers: zinc.Preprocessor.LineMarkers = .None;
     var systemDefines: zinc.Compilation.SystemDefinesMode = .IncludeSystemDefines;
     var dumpMode: zinc.Preprocessor.DumpMode = .ResultOnly;
+    var includes: std.ArrayList(zinc.Compilation.Include) = .empty;
 
     comp.langOpts.gnucVersion = 40201;
 
@@ -61,6 +63,7 @@ fn addCommandLineArgs(
             if (driver.lineCommands)
                 lineMarkers = if (driver.useLineDirectives) .LineDirectives else .NumericDirectives;
         }
+        includes = .fromOwnedSlice(try driver.includes.toOwnedSlice(comp.gpa));
     }
 
     if (std.mem.indexOf(u8, file.buffer, "//zinc-env")) |idx| {
@@ -81,7 +84,7 @@ fn addCommandLineArgs(
         }
     }
 
-    return .{ onlyPreprocess, lineMarkers, systemDefines, dumpMode };
+    return .{ onlyPreprocess, lineMarkers, systemDefines, dumpMode, includes };
 }
 
 fn testOne(gpa: std.mem.Allocator, path: []const u8, testDir: []const u8) !void {
@@ -98,7 +101,7 @@ fn testOne(gpa: std.mem.Allocator, path: []const u8, testDir: []const u8) !void 
     var macroBuffer = std.ArrayList(u8).init(comp.gpa);
     defer macroBuffer.deinit();
 
-    _, _, const systemDefines = try addCommandLineArgs(&comp, file, macroBuffer.writer());
+    _, _, const systemDefines, _ = try addCommandLineArgs(&comp, file, macroBuffer.writer());
     const userMacros = try comp.addSourceFromBuffer("<command line>", macroBuffer.items);
 
     const bulitinMacros = try comp.generateBuiltinMacros(systemDefines);
@@ -210,21 +213,23 @@ pub fn main() !void {
     var initialComp = zinc.Compilation.init(gpa, arena, std.testing.io, &diagnostics, std.fs.cwd());
     defer initialComp.deinit();
 
-    const casesIncludeDir = try std.fs.path.join(gpa, &.{ args[1], "include" });
-    const caseNextIncludeDir = try std.fs.path.join(gpa, &.{ args[1], "include", "next" });
-    defer {
-        gpa.free(casesIncludeDir);
-        gpa.free(caseNextIncludeDir);
-    }
+    const baseIncludes = [_]zinc.Compilation.Include{
+        // Aro builtin includes
+        .{ .kind = .System, .path = "include" },
 
-    try initialComp.includeDirs.append(gpa, casesIncludeDir);
-    try initialComp.includeDirs.append(gpa, caseNextIncludeDir);
+        // Intentional reduntant and mixed-separator path for Windows-specific tests
+        .{ .kind = .Normal, .path = try std.fs.path.join(arena, &.{ args[1], "include//mixed" }) },
+        .{ .kind = .Normal, .path = try std.fs.path.join(arena, &.{ args[1], "include" }) },
+        .{ .kind = .Normal, .path = try std.fs.path.join(arena, &.{ args[1], "include", "next" }) },
+        .{ .kind = .System, .path = try std.fs.path.join(arena, &.{ args[1], "include_system" }) },
+        .{ .kind = .System, .path = try std.fs.path.join(arena, &.{ args[1], "include_system", "next" }) },
+        .{ .kind = .Framework, .path = try std.fs.path.join(arena, &.{ args[1], "frameworks" }) },
+        .{ .kind = .Quote, .path = try std.fs.path.join(arena, &.{ args[1], "include", "iquote" }) },
+        .{ .kind = .System, .path = try std.fs.path.resolve(initialComp.arena, &.{ testDir, "../../include" }) },
+    };
 
-    try initialComp.embedDirs.append(gpa, casesIncludeDir);
-    try initialComp.embedDirs.append(gpa, caseNextIncludeDir);
-
+    try initialComp.embedDirs.append(gpa, try std.fs.path.join(arena, &.{ args[1], "embed" }));
     try initialComp.addDefaultPragmaHandlers();
-    try initialComp.addBuiltinIncludeDir(testDir, null);
 
     // apparently we can't use setAstCwd without libc on windows yet
     const win = @import("builtin").os.tag == .windows;
@@ -247,8 +252,6 @@ pub fn main() !void {
 
         var comp = initialComp;
         defer {
-            comp.includeDirs = .{};
-            comp.systemIncludeDirs = .{};
             comp.embedDirs = .{};
             comp.pragmaHandlers = .{};
             comp.environment = .{};
@@ -270,7 +273,15 @@ pub fn main() !void {
         var macroBuffer: std.ArrayListUnmanaged(u8) = .empty;
         defer macroBuffer.deinit(comp.gpa);
 
-        const onlyPreprocess, const lineMarkers, const systemDefines, const dumpNode = try addCommandLineArgs(&comp, file, &macroBuffer);
+        const onlyPreprocess, const lineMarkers, const systemDefines, const dumpNode, var includes = try addCommandLineArgs(&comp, file, &macroBuffer);
+        defer includes.deinit(comp.gpa);
+
+        if (includes.items.len != 0) {
+            try includes.appendSlice(comp.gpa, &baseIncludes);
+            try comp.initSearchPath(includes.items, false);
+        } else {
+            try comp.initSearchPath(&baseIncludes, false);
+        }
 
         const userMacros = try comp.addSourceFromBuffer("<command line>", macroBuffer.items);
         const builtinMacros = try comp.generateBuiltinMacros(systemDefines);

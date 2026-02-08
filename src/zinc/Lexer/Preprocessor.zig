@@ -1725,9 +1725,9 @@ fn handleBuiltinMacro(
                 if (builtin == .MacroParamHasIncludeNext) {
                     try pp.err(srcLoc, .include_next_outside_header, .{});
                 }
-                return try pp.comp.hasInclude(filename, srcLoc.id, includeType, .First);
+                return try pp.comp.hasInclude(filename, srcLoc.id, includeType, .First, pp.depFile);
             }
-            return try pp.comp.hasInclude(filename, srcLoc.id, includeType, .Next);
+            return try pp.comp.hasInclude(filename, srcLoc.id, includeType, .Next, pp.depFile);
         },
 
         else => unreachable,
