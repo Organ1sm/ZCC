@@ -216,7 +216,10 @@ const usage =
     \\  -fropi                  Generate read-only position independent code (ARM only)
     \\  -fno-ropi               Disable generate read-only position independent code (ARM only). 
     \\  -I <dir>                Add directory to include search path
+    \\  -idirafter <dir>        Add directory to AFTER include search path
     \\  -isystem  <dir>         Add directory to system include search path
+    \\  -F <dir>                Add directory to macOS framework search path
+    \\  -iframework <dir>       Add directory to SYSTEM macOS framework search path
     \\  --embed-dir=<dir>       Set directory for embedded files
     \\  --emulate=[clang|gcc|msvc]
     \\                          Select which C compiler to emulate (default clang)
@@ -544,6 +547,28 @@ pub fn parseArgs(
                     path = args[i];
                 }
                 try d.includes.append(gpa, .{ .kind = .System, .path = path });
+            } else if (mem.startsWith(u8, arg, "-F")) {
+                var path = arg["-F".len..];
+                if (path.len == 0) {
+                    i += 1;
+                    if (i >= args.len) {
+                        try d.err("expected argument after -F", .{});
+                        continue;
+                    }
+                    path = args[i];
+                }
+                try d.includes.append(gpa, .{ .kind = .Framework, .path = path });
+            } else if (mem.startsWith(u8, arg, "-iframework")) {
+                var path = arg["-iframework".len..];
+                if (path.len == 0) {
+                    i += 1;
+                    if (i >= args.len) {
+                        try d.err("expected argument after -iframework", .{});
+                        continue;
+                    }
+                    path = args[i];
+                }
+                try d.includes.append(gpa, .{ .kind = .SystemFramework, .path = path });
             } else if (option(arg, "--emulate=")) |compilerStr| {
                 const compiler = std.meta.stringToEnum(LangOpts.Compiler, compilerStr) orelse {
                     try d.err("invalid compiler '{s}'", .{arg});
