@@ -1098,6 +1098,9 @@ pub fn castType(res: *Result, p: *Parser, destQt: QualType, operandToken: TokenI
             try p.err(.invalid_union_cast, lparen, .{res.qt});
             return error.ParsingFailed;
         }
+    } else if (destQt.eql(res.qt, p.comp)) {
+        try p.err(.cast_to_same_type, lparen, .{destQt});
+        explicitCK = .NoOP;
     } else {
         try p.err(.invalid_cast_type, lparen, .{destQt});
         return error.ParsingFailed;
